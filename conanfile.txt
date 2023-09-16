@@ -1,5 +1,4 @@
 [requires]
-libpqxx/7.8.1
 
 [layout]
 cmake_layout

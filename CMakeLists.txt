@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27)
 
 ## Need to set top level include for conan, must be before project
-set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
+#set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
 
 ## project definition
 project(Springtail
@@ -18,6 +18,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 ## Cmake modules in ./cmake (for finding libraries)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
+
+find_package(Psql)
 
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
