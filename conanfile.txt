@@ -1,5 +1,4 @@
 [requires]
-libpqxx/7.8.1
 taocpp-json/1.0.0-beta.14
 
 [layout]
