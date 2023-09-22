@@ -1,17 +1,16 @@
-#include <boost/program_options.hpp>
+// external includes
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <thread>
 
+#include <boost/program_options.hpp>
 #include <fmt/core.h>
-
 #include <nlohmann/json.hpp>
-
-// MinIO client
 #include <miniocpp/client.h>
 
-#include <springtail/common/timer.hh>
+// springtail includes
+#include <common/timer.hh>
 
 /**
  * Writer thread.
@@ -32,7 +31,7 @@ writer(const std::string &url,
     // create the objects
     std::vector<char> buf(file_size);
 
-    Timer timer;
+    springtail::common::Timer timer;
     for (int i = 0; i < file_count; i++) {
         std::string object_name = fmt::format("{:08d}", file_name_start + i);
 

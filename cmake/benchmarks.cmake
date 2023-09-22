@@ -51,9 +51,12 @@ set(FILE_SOURCES src/benchmarks/file_bench.cc)
 
 # benchmarks
 add_executable(minio_bench ${MINIO_SOURCES})
+target_include_directories(minio_bench PRIVATE include)
 target_link_libraries(minio_bench PRIVATE fmt::fmt ${minio_requiredlibs})
 
 add_executable(file_bench ${FILE_SOURCES})
+target_include_directories(file_bench PRIVATE include)
+target_link_libraries(file_bench PRIVATE fmt::fmt Boost::program_options)
 
 # # include dirs
 # target_include_directories(libcdc
