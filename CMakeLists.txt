@@ -21,8 +21,13 @@ include(SetSystem)
 
 find_package(Psql)
 
+# find_package(Boost REQUIRED boost-program-options)
+
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
+
+## Benchmarks
+include(benchmarks)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
