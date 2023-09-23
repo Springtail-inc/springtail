@@ -1,4 +1,5 @@
 [requires]
+libpq/15.4
 
 [layout]
 cmake_layout

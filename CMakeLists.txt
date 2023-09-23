@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27)
 
 ## Need to set top level include for conan, must be before project
-#set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
+set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
 
 ## project definition
 project(Springtail
@@ -19,7 +19,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
 
-find_package(Psql)
+# find_package(Psql)
 
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
@@ -31,5 +31,5 @@ message(STATUS "Compiler flags: " ${CMAKE_CXX_COMPILE_FLAGS})
 message(STATUS "Compiler cxx debug flags: " ${CMAKE_CXX_FLAGS_DEBUG})
 message(STATUS "Compiler cxx release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 message(STATUS "Compiler cxx flags:" ${CMAKE_CXX_FLAGS})
-
+message(STATUS "Byte order for target: " ${CMAKE_CXX_BYTE_ORDER})
 
