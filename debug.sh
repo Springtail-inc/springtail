@@ -6,7 +6,7 @@
 # setup the debug build
 if [ ! -d debug ]; then
     mkdir -p debug
-    cmake -B debug -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE=external/vcpkg/scripts/buildsystems/vcpkg.cmake
+    cmake -B debug -S . -DCMAKE_BUILD_TYPE=Debug
 fi
 
 # build the code

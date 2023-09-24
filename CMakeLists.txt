@@ -19,6 +19,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
 
+## include the vcpkg.cmake configuration to support find_package from vcpkg
+include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
+
 find_package(Psql)
 
 # find_package(Boost REQUIRED boost-program-options)
