@@ -1,7 +1,6 @@
 // external includes
 #include <fcntl.h>
 
-#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -133,16 +132,45 @@ int main(int argc, char* argv[]) {
     //   pick a file name
     //   write the file (timed)
     std::vector<std::thread> writers;
+    int files_per_thread = file_count / writer_count;
+    int blocks_per_thread = block_count / writer_count;
+    springtail::common::Timer timer;
+
+    timer.start();
     for (int i = 0; i < writer_count; i++) {
-        writers.push_back(std::thread());
+        writers.push_back(std::thread(writer,
+                                      directory,
+                                      i * files_per_thread,
+                                      files_per_thread,
+                                      blocks_per_thread,
+                                      block_size));
     }
+    for (auto &&w : writers) {
+        w.join();
+    }
+    timer.stop();
+    std::cout << "total writer time: " << fmt::format("{:f}", timer.elapsed_ms().count()) << std::endl;
 
     std::cout << "about to start readers" << std::endl;
 
     // start M reader threads, each reading Z random files
     //   pick a random file
     //   read the file (timed)
+    timer.reset();
+    timer.start();
     std::vector<std::thread> readers;
+    for (int i = 0; i < writer_count; i++) {
+        readers.push_back(std::thread(reader,
+                                      directory,
+                                      file_count,
+                                      block_count,
+                                      block_size));
+    }
+    for (auto &&r : readers) {
+        r.join();
+    }
+    timer.stop();
+    std::cout << "total reader time: " << fmt::format("{:f}", timer.elapsed_ms().count()) << std::endl;
 
     return 0;
 }
