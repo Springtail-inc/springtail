@@ -25,11 +25,15 @@ writer(const std::filesystem::path &directory,
     // create the files for this writer thread
     std::vector<int> handles;
     for (int i = 0; i < file_count; i++) {
-        std::string file_name = fmt::format("{:03d}", file_name_start + i);
+        try {
+            std::string file_name = fmt::format("{:03d}", file_name_start + i);
 
-        // open a file handle
-        int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR);
-        handles.push_back(handle);
+            // open a file handle
+            int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR);
+            handles.push_back(handle);
+        } catch (std::exception &e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+        }
     }
 
     // create a block of data
@@ -46,7 +50,7 @@ writer(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    std::cout << fmt::format("{:f}", timer.elapsed_ms().count() / block_count) << std::endl;
+    std::cout << fmt::format("{:f}", (float)timer.elapsed_ms().count() / block_count) << std::endl;
 }
 
 /**
@@ -64,7 +68,7 @@ reader(const std::filesystem::path &directory,
         std::string file_name = fmt::format("{:03d}", i);
 
         // check the size of the file
-        int file_size = std::filesystem::file_size(file_name);
+        int file_size = std::filesystem::file_size(directory / file_name);
         sizes.push_back(file_size);
 
         // open a file handle
@@ -80,8 +84,8 @@ reader(const std::filesystem::path &directory,
     springtail::common::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
-        int file = random(); // XXX
-        int pos = random(); // XXX
+        int file = rand() % file_count;
+        int pos = rand() % (sizes[file] / block_count);
 
         int handle = handles[file];
         ::lseek(handle, pos, SEEK_SET);
@@ -89,7 +93,7 @@ reader(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    std::cout << fmt::format("{:f}", timer.elapsed_ms().count() / block_count) << std::endl;
+    std::cout << fmt::format("{:f}", (float)timer.elapsed_ms().count() / block_count) << std::endl;
 }
 
 
@@ -110,7 +114,7 @@ int main(int argc, char* argv[]) {
         ("files,f", boost::program_options::value<int>(&file_count)->default_value(16), "Number of files to distribute the blocks over")
         ("writers,w", boost::program_options::value<int>(&writer_count)->default_value(4), "Number of writer threads")
         ("readers,r", boost::program_options::value<int>(&reader_count)->default_value(4), "Number of reader threads")
-        ("dir,d", boost::program_options::value<std::filesystem::path>(&directory), "Directory to store files in");
+        ("dir,d", boost::program_options::value<std::filesystem::path>(&directory)->default_value("benchmark"), "Directory to store files in");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -124,6 +128,7 @@ int main(int argc, char* argv[]) {
 
 
     // create a directory for the benchmark
+    std::filesystem::create_directories(directory);
 
     std::cout << "about to start writers" << std::endl;
 
@@ -149,7 +154,7 @@ int main(int argc, char* argv[]) {
         w.join();
     }
     timer.stop();
-    std::cout << "total writer time: " << fmt::format("{:f}", timer.elapsed_ms().count()) << std::endl;
+    std::cout << "total writer time: " << fmt::format("{:f}", (float)timer.elapsed_ms().count()) << std::endl;
 
     std::cout << "about to start readers" << std::endl;
 
@@ -170,7 +175,12 @@ int main(int argc, char* argv[]) {
         r.join();
     }
     timer.stop();
-    std::cout << "total reader time: " << fmt::format("{:f}", timer.elapsed_ms().count()) << std::endl;
+    std::cout << "total reader time: " << fmt::format("{:f}", (float)timer.elapsed_ms().count()) << std::endl;
+
+    // cleanup
+    std::cout << "Start cleanup" << std::endl;
+    std::filesystem::remove_all(directory);
+    std::cout << "Benchmark complete" << std::endl;
 
     return 0;
 }
