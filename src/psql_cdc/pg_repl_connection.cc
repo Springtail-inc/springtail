@@ -4,8 +4,8 @@
 #include <sys/time.h>
 #include <sys/select.h>
 
-#include "PgTypes.hh"
-#include "ReplConnection.hh"
+#include <psql_cdc/pg_types.hh>
+#include <psql_cdc/pg_repl_connection.hh>
 
 /** SQL command to set serach path */
 const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
@@ -25,7 +25,7 @@ const char *CURRENT_LSN_SQL =
  * @param db_pass server password
  * @param slot_name replication slot name
  */
-ReplConnection::ReplConnection(const int db_port,
+PgReplConnection::PgReplConnection(const int db_port,
                                const std::string& db_host,
                                const std::string& db_name,
                                const std::string& db_user,
@@ -43,7 +43,7 @@ ReplConnection::ReplConnection(const int db_port,
 /**
  * @brief Destructor
  */
-ReplConnection::~ReplConnection()
+PgReplConnection::~PgReplConnection()
 {
     close();
 }
@@ -55,7 +55,7 @@ ReplConnection::~ReplConnection()
  *
  * @return 0 on success; -1 otherwise
  */
-int ReplConnection::pgExec(const std::string cmd)
+int PgReplConnection::pgExec(const std::string cmd)
 {
     std::cout << "Executing query: " << cmd;
     PGresult *res = PQexec(_connection, cmd.c_str());
@@ -72,7 +72,7 @@ int ReplConnection::pgExec(const std::string cmd)
  * @brief Connect to server using params from constructor
  * @return 0 success; <0 failure
  */
-int ReplConnection::connect()
+int PgReplConnection::connect()
 {
     // create key value list for: host, port, dbname, user, password, options
     std::stringstream s;
@@ -117,7 +117,7 @@ int ReplConnection::connect()
 /**
  * @brief Close connection; stop streaming
  */
-void ReplConnection::close()
+void PgReplConnection::close()
 {
     if (_started_streaming) {
         endStreaming();
@@ -138,7 +138,7 @@ void ReplConnection::close()
  * @param LSN LSN to start streaming from; INVALID_LSN (0) specifies server current LSN
  * @return 0 success, <0 failure
  */
-int ReplConnection::startStreaming(LSN_t LSN)
+int PgReplConnection::startStreaming(LSN_t LSN)
 {
     // get protocol version
     _server_version = PQserverVersion(_connection);
@@ -184,7 +184,7 @@ int ReplConnection::startStreaming(LSN_t LSN)
  * @brief End streaming
  * @return 0 on success, -1 on failure
  */
-int ReplConnection::endStreaming()
+int PgReplConnection::endStreaming()
 {
     if (!_started_streaming) {
         return 0;
@@ -245,7 +245,7 @@ int ReplConnection::endStreaming()
  * @param timeout_secs timeout in seconds; 0 return immediately
  * @return 0 if no data (would block); -1 on error; 1 if data
  */
-int ReplConnection::checkDataStream(int timeout_secs)
+int PgReplConnection::checkDataStream(int timeout_secs)
 {
     fd_set fds;
     FD_ZERO(&fds);
@@ -266,7 +266,7 @@ int ReplConnection::checkDataStream(int timeout_secs)
  *                 next call to readData
  * @return 0 success; -1 end of stream; -2 some other error
  */
-int ReplConnection::readData(CopyData &dataOut)
+int PgReplConnection::readData(PgCopyData &dataOut)
 {
     // calling readData implicitly ack's the last received LSN
     setLastFlushedLSN(_last_received_lsn);
@@ -354,7 +354,7 @@ int ReplConnection::readData(CopyData &dataOut)
  * @brief Decode keep alive
  * @return number of bytes consumed
  */
-int ReplConnection::processKeepAlive(const char *buffer, int length)
+int PgReplConnection::processKeepAlive(const char *buffer, int length)
 {
     // handle keep alive
     if (length < (1 + 8 + 8)) {
@@ -395,7 +395,7 @@ int ReplConnection::processKeepAlive(const char *buffer, int length)
  * @brief Decode xlog data header
  * @return number of bytes consumed
  */
-int ReplConnection::processXlogHeader(const char *buffer, int length)
+int PgReplConnection::processXlogHeader(const char *buffer, int length)
 {
     // handle log data
     if (length < (1 + 8 + 8 + 8)) {
@@ -424,7 +424,7 @@ int ReplConnection::processXlogHeader(const char *buffer, int length)
 /**
  * @brief Fast forward the data stream to current LSN (ack to server)
  */
-void ReplConnection::fastForwardStream()
+void PgReplConnection::fastForwardStream()
 {
     // execute query: SELECT pg_current_wal_lsn()
     const char *cmd = CURRENT_LSN_SQL;
@@ -469,10 +469,10 @@ void ReplConnection::fastForwardStream()
  * @param send_time time for this send (pg msecs)
  * @return size of buffer returned
  */
-int ReplConnection::encodeStandbyStatusMsg(LSN_t last_received_lsn,
-                                           LSN_t last_flushed_lsn,
-                                           int64_t send_time,
-                                           char replybuf[34])
+int PgReplConnection::encodeStandbyStatusMsg(LSN_t last_received_lsn,
+                                             LSN_t last_flushed_lsn,
+                                             int64_t send_time,
+                                             char replybuf[34])
 {
     int pos = 0;
 
@@ -505,7 +505,7 @@ int ReplConnection::encodeStandbyStatusMsg(LSN_t last_received_lsn,
  *
  * @return true if exists, false otherwise
  */
-bool ReplConnection::checkSlotExists()
+bool PgReplConnection::checkSlotExists()
 {
     char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
@@ -543,7 +543,7 @@ bool ReplConnection::checkSlotExists()
  *
  * @return 0 on success, -1 otherwise
  */
-int ReplConnection::dropReplicationSlot()
+int PgReplConnection::dropReplicationSlot()
 {
     std::stringstream s;
 
@@ -579,9 +579,9 @@ int ReplConnection::dropReplicationSlot()
  * @param temporary is replication slot temporary
  * @return 0 success, -1 failure
  */
-int ReplConnection::createReplicationSlot(OutputPlugin output_plugin,
-                                          bool export_snapshot,
-                                          bool temporary)
+int PgReplConnection::createReplicationSlot(OutputPlugin output_plugin,
+                                            bool export_snapshot,
+                                            bool temporary)
 {
     std::stringstream s;
 
@@ -648,7 +648,7 @@ int ReplConnection::createReplicationSlot(OutputPlugin output_plugin,
  * @brief Send standby status feedback message to server
  * @return 0 on success, -1 on failure
  */
-int ReplConnection::sendStandbyStatusMsg()
+int PgReplConnection::sendStandbyStatusMsg()
 {
     char replybuf[1 + 8 + 8 + 8 + 8 + 1];
     int64_t now = getPgTimeInMillis();
@@ -673,7 +673,7 @@ int ReplConnection::sendStandbyStatusMsg()
  *
  * @param lsn LSN indicating safe point to truncate log up to
  */
-void ReplConnection::setLastFlushedLSN(LSN_t lsn)
+void PgReplConnection::setLastFlushedLSN(LSN_t lsn)
 {
     if (lsn == INVALID_LSN || lsn <= _last_flushed_lsn) {
         return;

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "PgTypes.hh"
+#include <psql_cdc/pg_types.hh>
 
 /* Postgres message types, see decode functions in
- * ReplMsg.cc for formats */
+ * PgReplMsg.cc for formats */
 struct MsgTupleDataColumn {
     char type;  // 'n' NULL, 'u' unchanged TOAST, 't' text formatted, 'b' binary
     int32_t data_len;
@@ -100,9 +100,9 @@ struct MsgRelation {
     std::vector<MsgRelColumn> columns;
 };
 
-union ReplMsgDecodedUnion {
-    ReplMsgDecodedUnion() {}
-    ~ReplMsgDecodedUnion() {}
+union PgReplMsgDecodedUnion {
+    PgReplMsgDecodedUnion() {}
+    ~PgReplMsgDecodedUnion() {}
 
     MsgKeepAlive keep_alive;
     MsgBegin begin;
@@ -118,19 +118,19 @@ union ReplMsgDecodedUnion {
     MsgRelation relation;
 };
 
-enum ReplMsgType {
+enum PgReplMsgType {
     INVALID, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
     ORIGIN, MESSAGE, TYPE,
     // version 2
     STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT
 };
 
-struct ReplMsgDecoded {
-    ReplMsgDecodedUnion msg;
-    ReplMsgType msg_type;    // type defining union member
+struct PgReplMsgDecoded {
+    PgReplMsgDecodedUnion msg;
+    PgReplMsgType msg_type;    // type defining union member
 };
 
-class ReplMsg
+class PgReplMsg
 {
 
 private:
@@ -159,38 +159,38 @@ private:
     int _buffer_length = 0;
 
     /** Message struct used for returning decoded message */
-    ReplMsgDecoded _decoded_msg;
+    PgReplMsgDecoded _decoded_msg;
 
     /**
      * @brief Initialize message to empty/invalid message
      */
     inline void initMsg() {
-        _decoded_msg.msg_type = ReplMsgType::INVALID;
+        _decoded_msg.msg_type = PgReplMsgType::INVALID;
     }
 
-    static int decodeKeepAlive(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeBegin(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeCommit(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeRelation(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeInsert(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeUpdate(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeDelete(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeTruncate(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeOrigin(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeMessage(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeCopyData(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeXlogHeader(const char *buffer, int length, ReplMsgDecoded &msg);
-    static int decodeType(const char *buffer, int length, ReplMsgDecoded &msg);
+    static int decodeKeepAlive(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeBegin(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeCommit(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeRelation(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeInsert(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeUpdate(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeDelete(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeTruncate(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeOrigin(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeMessage(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeCopyData(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeXlogHeader(const char *buffer, int length, PgReplMsgDecoded &msg);
+    static int decodeType(const char *buffer, int length, PgReplMsgDecoded &msg);
 
 public:
 
-    ReplMsg(int proto_version);
+    PgReplMsg(int proto_version);
 
     void setBuffer(const char *buffer, int length);
 
     bool hasNextMsg();
 
-    const ReplMsgDecoded &decodeNextMsg();
+    const PgReplMsgDecoded &decodeNextMsg();
 };
 
 

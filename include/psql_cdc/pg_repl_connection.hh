@@ -1,16 +1,14 @@
-#pragma once
-
 #include <string>
 #include <libpq-fe.h>
 
-#include "PgTypes.hh"
+#include <psql_cdc/pg_types.hh>
 
-struct CopyData {
+struct PgCopyData {
     const char *buffer;
     int length;
 };
 
-class ReplConnection
+class PgReplConnection
 {
 private:
     // timeout between keep alive messages
@@ -92,13 +90,13 @@ public:
 
     enum OutputPlugin{ WAL2JSON, PGOUTPUT };
 
-    ReplConnection(int db_port,
+    PgReplConnection(int db_port,
                    const std::string& db_host,
                    const std::string& db_name,
                    const std::string& db_user,
                    const std::string& db_pass,
                    const std::string& slot_name);
-    ~ReplConnection();
+    ~PgReplConnection();
 
     int connect();
     void close();
@@ -112,7 +110,7 @@ public:
                               bool temporary);
     int dropReplicationSlot();
 
-    int readData(CopyData &dataOut);
+    int readData(PgCopyData &dataOut);
 
     void setLastFlushedLSN(LSN_t lsn);
 };

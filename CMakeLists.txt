@@ -9,6 +9,8 @@ project(Springtail
     DESCRIPTION "Springtail source code"
     LANGUAGES CXX)
 
+## include the vcpkg.cmake configuration to support find_package from vcpkg
+include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
 ## CXX options
 set(CMAKE_CXX_STANDARD 17)
@@ -19,10 +21,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
 
-# find_package(Psql)
-
-## Source modules in ./modules
-add_subdirectory(modules/cdc)
+# include modules
+add_subdirectory(src/benchmarks)
+add_subdirectory(src/psql_cdc)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})

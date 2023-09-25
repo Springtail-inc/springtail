@@ -1,14 +1,14 @@
-#include "ReplMsg.hh"
+#include <psql_cdc/pg_repl_msg.hh>
 
 
-ReplMsg::ReplMsg(int proto_version)
+PgReplMsg::PgReplMsg(int proto_version)
   : _proto_version(proto_version) {}
 
 
 /**
  * @brief Initialize message to empty/invalid message
  */
-void ReplMsg::setBuffer(const char *buffer, int length)
+void PgReplMsg::setBuffer(const char *buffer, int length)
 {
     _buffer = buffer;
     _buffer_length = length;
@@ -21,7 +21,7 @@ void ReplMsg::setBuffer(const char *buffer, int length)
  *
  * @return true if more data exists, false otherwise
  */
-bool ReplMsg::hasNextMsg()
+bool PgReplMsg::hasNextMsg()
 {
     return (_buffer_length > 0);
 }
@@ -31,7 +31,7 @@ bool ReplMsg::hasNextMsg()
  * @brief Decode message in buffer, after xlog header
  * @return number of bytes consumed
  */
-const ReplMsgDecoded &ReplMsg::decodeNextMsg()
+const PgReplMsgDecoded &PgReplMsg::decodeNextMsg()
 {
     // first byte is opcode
     // then int32 length (usually)
@@ -157,8 +157,8 @@ int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
  * @param msg [description]
  * @return [description]
  */
-int ReplMsg::decodeMessage(const char *buffer, int length,
-                           ReplMsgDecoded &msg)
+int PgReplMsg::decodeMessage(const char *buffer, int length,
+                             PgReplMsgDecoded &msg)
 {
     /*
         Byte1('M') Identifies the message as a logical decoding message.
@@ -193,7 +193,7 @@ int ReplMsg::decodeMessage(const char *buffer, int length,
     const char *data = &buffer[pos];
     pos += data_len;
 
-    msg.msg_type = ReplMsgType::MESSAGE;
+    msg.msg_type = PgReplMsgType::MESSAGE;
     msg.msg.message.flags = flags;
     msg.msg.message.lsn = lsn;
     msg.msg.message.prefix_str = prefix_str;
@@ -204,8 +204,8 @@ int ReplMsg::decodeMessage(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeOrigin(const char *buffer, int length,
-                          ReplMsgDecoded &msg)
+int PgReplMsg::decodeOrigin(const char *buffer, int length,
+                          PgReplMsgDecoded &msg)
 {
     /*
         Byte1('O') Identifies the message as an origin message.
@@ -219,7 +219,7 @@ int ReplMsg::decodeOrigin(const char *buffer, int length,
     LSN_t lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    msg.msg_type = ReplMsgType::ORIGIN;
+    msg.msg_type = PgReplMsgType::ORIGIN;
     msg.msg.origin.commit_lsn = lsn;
     msg.msg.origin.name = &buffer[pos];
 
@@ -227,8 +227,8 @@ int ReplMsg::decodeOrigin(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeBegin(const char *buffer, int length,
-                         ReplMsgDecoded &msg)
+int PgReplMsg::decodeBegin(const char *buffer, int length,
+                           PgReplMsgDecoded &msg)
 {
     /*
         Byte1('B') Identifies the message as a begin message.
@@ -247,7 +247,7 @@ int ReplMsg::decodeBegin(const char *buffer, int length,
     int32_t xid = recvint32(&buffer[pos]);
     pos += 4;
 
-    msg.msg_type = ReplMsgType::BEGIN;
+    msg.msg_type = PgReplMsgType::BEGIN;
     msg.msg.begin.xid = xid;
     msg.msg.begin.xact_lsn = lsn;
     msg.msg.begin.commit_ts = ts;
@@ -256,8 +256,8 @@ int ReplMsg::decodeBegin(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeCommit(const char *buffer, int length,
-                          ReplMsgDecoded &msg)
+int PgReplMsg::decodeCommit(const char *buffer, int length,
+                            PgReplMsgDecoded &msg)
 {
     /*
         Byte1('C') Identifies the message as a commit message.
@@ -279,7 +279,7 @@ int ReplMsg::decodeCommit(const char *buffer, int length,
     int64_t ts = recvint64(&buffer[pos]);
     pos += 8;
 
-    msg.msg_type = ReplMsgType::COMMIT;
+    msg.msg_type = PgReplMsgType::COMMIT;
     msg.msg.commit.commit_lsn = commit_lsn;
     msg.msg.commit.xact_lsn = xact_lsn;
     msg.msg.commit.commit_ts = ts;
@@ -288,8 +288,8 @@ int ReplMsg::decodeCommit(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeRelation(const char *buffer, int length,
-                            ReplMsgDecoded &msg)
+int PgReplMsg::decodeRelation(const char *buffer, int length,
+                              PgReplMsgDecoded &msg)
 {
     /*
         Byte1('R')  Identifies the message as a relation message.
@@ -351,7 +351,7 @@ int ReplMsg::decodeRelation(const char *buffer, int length,
         msg.msg.relation.columns.push_back(column);
     }
 
-    msg.msg_type = ReplMsgType::RELATION;
+    msg.msg_type = PgReplMsgType::RELATION;
     msg.msg.relation.rel_id = rel_id;
     msg.msg.relation.namespace_str = namespace_str;
     msg.msg.relation.rel_name_str = rel_name;
@@ -362,8 +362,8 @@ int ReplMsg::decodeRelation(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeInsert(const char *buffer, int length,
-                          ReplMsgDecoded &msg)
+int PgReplMsg::decodeInsert(const char *buffer, int length,
+                            PgReplMsgDecoded &msg)
 {
     /*
         Byte1('I')  Identifies the message as an insert message.
@@ -393,7 +393,7 @@ int ReplMsg::decodeInsert(const char *buffer, int length,
 
     pos += decodeTuple(&buffer[pos], length - pos, msg.msg.insert.new_tuple);
 
-    msg.msg_type = ReplMsgType::INSERT;
+    msg.msg_type = PgReplMsgType::INSERT;
     msg.msg.insert.rel_id = rel_id;
     msg.msg.insert.new_type = new_type;
 
@@ -401,8 +401,8 @@ int ReplMsg::decodeInsert(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeUpdate(const char *buffer, int length,
-                          ReplMsgDecoded &msg)
+int PgReplMsg::decodeUpdate(const char *buffer, int length,
+                            PgReplMsgDecoded &msg)
 {
     /*
         Byte1('U')      Identifies the message as an update message.
@@ -460,7 +460,7 @@ int ReplMsg::decodeUpdate(const char *buffer, int length,
     }
     pos += r;
 
-    msg.msg_type = ReplMsgType::UPDATE;
+    msg.msg_type = PgReplMsgType::UPDATE;
     msg.msg.update.rel_id = rel_id;
     msg.msg.update.old_type = old_type;
     msg.msg.update.new_type = new_type;
@@ -469,8 +469,8 @@ int ReplMsg::decodeUpdate(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeDelete(const char *buffer, int length,
-                                 ReplMsgDecoded &msg)
+int PgReplMsg::decodeDelete(const char *buffer, int length,
+                            PgReplMsgDecoded &msg)
 {
     /*
         Byte1('D')      Identifies the message as a delete message.
@@ -513,7 +513,7 @@ int ReplMsg::decodeDelete(const char *buffer, int length,
     }
     pos += r;
 
-    msg.msg_type = ReplMsgType::DELETE;
+    msg.msg_type = PgReplMsgType::DELETE;
     msg.msg.delete_msg.rel_id = rel_id;
     msg.msg.delete_msg.type = type;
 
@@ -521,8 +521,8 @@ int ReplMsg::decodeDelete(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeTruncate(const char *buffer, int length,
-                            ReplMsgDecoded &msg)
+int PgReplMsg::decodeTruncate(const char *buffer, int length,
+                              PgReplMsgDecoded &msg)
 {
     /*
         Byte1('T')      Identifies the message as a truncate message.
@@ -552,7 +552,7 @@ int ReplMsg::decodeTruncate(const char *buffer, int length,
         pos += 4;
     }
 
-    msg.msg_type = ReplMsgType::TRUNCATE;
+    msg.msg_type = PgReplMsgType::TRUNCATE;
     msg.msg.truncate.num_rels = num_rels;
     msg.msg.truncate.options = options;
 
@@ -560,8 +560,8 @@ int ReplMsg::decodeTruncate(const char *buffer, int length,
 }
 
 
-int ReplMsg::decodeType(const char *buffer, int length,
-                        ReplMsgDecoded &msg)
+int PgReplMsg::decodeType(const char *buffer, int length,
+                          PgReplMsgDecoded &msg)
 {
     /*
         Byte1('Y') Identifies the message as a type message.
@@ -588,7 +588,7 @@ int ReplMsg::decodeType(const char *buffer, int length,
     const char *data_type =  &buffer[pos];
     pos += std::strlen(&buffer[pos]);
 
-    msg.msg_type = ReplMsgType::TYPE;
+    msg.msg_type = PgReplMsgType::TYPE;
     msg.msg.type.oid = oid;
     msg.msg.type.namespace_str = namespace_str;
     msg.msg.type.data_type_str = data_type;
