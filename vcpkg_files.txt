@@ -1,0 +1,5 @@
+# list of files to include for VCPKG
+minio-cpp
+libpq
+boost-program-options
+fmt
