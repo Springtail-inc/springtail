@@ -1,0 +1,8 @@
+{
+    "dependencies": [
+        "minio-cpp",
+        "libpq",
+        "boost-program-options",
+        "fmt"
+    ]
+}

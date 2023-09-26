@@ -11,11 +11,3 @@ then
 else
    cd "$DIR"
 fi
-
-# install packages
-configfile="../../vcpkg_files.txt"
-while read -r line; do
-   [[ "$line" =~ ^#.*$ ]] && continue
-   ./vcpkg install $line
-done <$configfile
-
