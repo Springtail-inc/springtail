@@ -3,20 +3,29 @@
 
 #include <psql_cdc/pg_types.hh>
 
+/**
+ * @brief Output data structure used by read data call
+ *        must be allocated and passed in
+ */
 struct PgCopyData {
     const char *buffer;
     int length;
 };
 
+/**
+ * @brief Postgres connection class
+ * @details Provides interfaces for setting up replication
+ *          connection and for streaming replication data
+ */
 class PgReplConnection
 {
 private:
     // timeout between keep alive messages
-    const int64_t STANDBY_MSG_INTERVAL_MSEC = 30000L;
+    static const int64_t STANDBY_MSG_INTERVAL_MSEC = 30000L;
     // timeout for an idle slot -- no lsn received; fast forward stream
-    const int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
+    static const int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
     // read timeout for copy data
-    const int     READ_TIMEOUT_SEC = 10;
+    static const int     READ_TIMEOUT_SEC = 10;
 
     // Message constants
     static const char MSG_STANDBY_STATUS = 'r';
@@ -88,29 +97,92 @@ private:
 
 public:
 
+    /** Output plugin, only PGOUTPUT supported by decoder */
     enum OutputPlugin{ WAL2JSON, PGOUTPUT };
 
+    /**
+     * @brief Constructor -- does not connect to db
+     *
+     * @param db_port DB port
+     * @param db_host DB hostname
+     * @param db_name DB name
+     * @param db_user DB user name
+     * @param db_pass DB user password
+     * @param slot_name Replication slot name
+     */
     PgReplConnection(int db_port,
-                   const std::string& db_host,
-                   const std::string& db_name,
-                   const std::string& db_user,
-                   const std::string& db_pass,
-                   const std::string& slot_name);
+                     const std::string& db_host,
+                     const std::string& db_name,
+                     const std::string& db_user,
+                     const std::string& db_pass,
+                     const std::string& slot_name);
+
+    /**
+     * @brief Destructor -- closed connection if open
+     */
     ~PgReplConnection();
 
+    /**
+     * @brief Connect to db
+     * @return 0 on success
+     */
     int connect();
+
+    /**
+     * @brief Close db connection
+     */
     void close();
 
+    /**
+     * @brief Start streaming
+     *
+     * @param LSN start at specified LSN, or latest if 0 (INVALID_LST)
+     * @return 0 on success
+     */
     int startStreaming(LSN_t LSN);
+
+    /**
+     * @brief Stop streaming
+     * @return 0 on success
+     */
     int endStreaming();
 
+    /**
+     * @brief Check if the slot exists on server
+     * @return true if exists; false otherwise
+     */
     bool checkSlotExists();
+
+    /**
+     * @brief Create the replication slot
+     *
+     * @param plugin Output plugin -- only PGOUTPUT supported
+     * @param export_snapshot export the snapshot
+     * @param temporary temporary slot; per session
+     * @return 0 on success
+     */
     int createReplicationSlot(OutputPlugin plugin,
                               bool export_snapshot,
                               bool temporary);
+
+    /**
+     * @brief Drop the replication slot from the server
+     * @return 0 on success
+     */
     int dropReplicationSlot();
 
+    /**
+     * @brief Read WAL data from server; blocks
+     *
+     * @param dataOut Output data, must be preallocated
+     * @return number of bytes read; 0 on EOF, <0 on error
+     */
     int readData(PgCopyData &dataOut);
 
+    /**
+     * @brief Sets the flushed LSN for ack to server (not required)
+     *
+     * @param lsn LSN to set as latest flushed
+     */
     void setLastFlushedLSN(LSN_t lsn);
 };

@@ -4,17 +4,16 @@
 #include <cstdint>
 #include <sys/time.h>
 
+/** Defined by CMake pass in with -D */
 #if !defined(CXX_BYTE_ORDER)
 #error Error CXX_BYTE_ORDER not defined
 #endif
-
-#define __CXX_BYTE_ORDER CXX_BYTE_ORDER
 
 #ifndef UINT64CONST
 #define UINT64CONST(c) UINT64_C(c)
 #endif
 
-#if __CXX_BYTE_ORDER == BIG_ENDIAN
+#if CXX_BYTE_ORDER == BIG_ENDIAN
   
 #define pg_hton16(x)        (x)
 #define pg_hton32(x)        (x)
@@ -67,7 +66,7 @@ pg_bswap64(uint64_t x)
 #define pg_ntoh32(x)        pg_bswap32(x)
 #define pg_ntoh64(x)        pg_bswap64(x)
   
-#endif  /* __CXX_BYTE_ORDER == BIG_ENDIAN */
+#endif  /* CXX_BYTE_ORDER == BIG_ENDIAN */
 
 /** Log sequence number */
 typedef uint64_t LSN_t;
@@ -85,6 +84,18 @@ static inline void sendint64(int64_t i, char *buffer)
 {
      int64_t n64 = pg_hton64(i);
      std::memcpy(buffer, &n64, 8);
+}
+
+/**
+ * @brief Copy 64bit int into buffer in network format
+ *
+ * @param i value to copy into buffer
+ * @param buffer pointer to preallocated buffer
+ */
+static inline void sendint32(int32_t i, char *buffer)
+{
+     int32_t n32 = pg_hton32(i);
+     std::memcpy(buffer, &n32, 4);
 }
 
 /**

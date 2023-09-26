@@ -34,7 +34,7 @@ struct MsgCommit {
 
 struct MsgOrigin {
     LSN_t commit_lsn;
-    const char *name;
+    const char *name_str;
 };
 
 struct MsgCopy {
@@ -100,6 +100,7 @@ struct MsgRelation {
     std::vector<MsgRelColumn> columns;
 };
 
+/** Union of all messages */
 union PgReplMsgDecodedUnion {
     PgReplMsgDecodedUnion() {}
     ~PgReplMsgDecodedUnion() {}
@@ -118,6 +119,7 @@ union PgReplMsgDecodedUnion {
     MsgRelation relation;
 };
 
+/** Message types */
 enum PgReplMsgType {
     INVALID, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
     ORIGIN, MESSAGE, TYPE,
@@ -125,11 +127,19 @@ enum PgReplMsgType {
     STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT
 };
 
+/**
+ * @brief Decoded replication message
+ * @details Contains union of messages with the type
+ *          specified by the msg_type
+ */
 struct PgReplMsgDecoded {
     PgReplMsgDecodedUnion msg;
     PgReplMsgType msg_type;    // type defining union member
 };
 
+/**
+ * @brief Class for decoding postgres replication messages
+ */
 class PgReplMsg
 {
 
@@ -183,13 +193,32 @@ private:
     static int decodeType(const char *buffer, int length, PgReplMsgDecoded &msg);
 
 public:
-
+    /**
+     * @brief Constructor
+     *
+     * @param proto_version Postgres replication protocol version
+     */
     PgReplMsg(int proto_version);
 
+    /**
+     * @brief Set the internal buffer based on buffer passed in
+     *
+     * @param buffer pointer to buffer containing undecoded msg data
+     * @param length length of buffer
+     */
     void setBuffer(const char *buffer, int length);
 
+    /**
+     * @brief Is there additional data that can be decoded
+     *        within internal buffer
+     * @return true if additional data exists; false otherwise
+     */
     bool hasNextMsg();
 
+    /**
+     * @brief Retrieve next message from internal buffer
+     * @return reference to internal decoded message
+     */
     const PgReplMsgDecoded &decodeNextMsg();
 };
 

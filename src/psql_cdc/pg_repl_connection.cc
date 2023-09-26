@@ -26,11 +26,11 @@ const char *CURRENT_LSN_SQL =
  * @param slot_name replication slot name
  */
 PgReplConnection::PgReplConnection(const int db_port,
-                               const std::string& db_host,
-                               const std::string& db_name,
-                               const std::string& db_user,
-                               const std::string& db_pass,
-                               const std::string& slot_name)
+                                   const std::string& db_host,
+                                   const std::string& db_name,
+                                   const std::string& db_user,
+                                   const std::string& db_pass,
+                                   const std::string& slot_name)
 {
     _db_host = db_host;
     _db_port = db_port;
@@ -432,8 +432,9 @@ void PgReplConnection::fastForwardStream()
     // execute query
     PGresult *res = PQexec(_connection, cmd);
 
-    // process results
-    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) <= 0) {
+    // process results; sanity checks first
+    if (PQresultStatus(res) != PGRES_TUPLES_OK ||
+        PQntuples(res) <= 0 || PQgetlength(res, 0, 0) != 4) {
         // error
         return;
     }
@@ -524,7 +525,7 @@ bool PgReplConnection::checkSlotExists()
     // process results
     if (PQresultStatus(res) == PGRES_COMMAND_OK ||
         PQresultStatus(res) == PGRES_TUPLES_OK) {
-        if (PQntuples(res) > 0) {
+        if (PQntuples(res) > 0 && PQgetlength(res, 0, 0) > 0) {
             int res_int = (int)std::atoi(PQgetvalue(res, 0, 0));
             if (res_int == 1) {
                 PQclear(res);

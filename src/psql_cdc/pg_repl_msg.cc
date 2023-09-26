@@ -183,7 +183,7 @@ int PgReplMsg::decodeMessage(const char *buffer, int length,
     LSN_t lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    int string_len = std::strlen(&buffer[pos]);
+    int string_len = strnlen(&buffer[pos], length-pos);
     const char *prefix_str = &buffer[pos];
     pos += string_len;
 
@@ -205,7 +205,7 @@ int PgReplMsg::decodeMessage(const char *buffer, int length,
 
 
 int PgReplMsg::decodeOrigin(const char *buffer, int length,
-                          PgReplMsgDecoded &msg)
+                            PgReplMsgDecoded &msg)
 {
     /*
         Byte1('O') Identifies the message as an origin message.
@@ -221,7 +221,8 @@ int PgReplMsg::decodeOrigin(const char *buffer, int length,
 
     msg.msg_type = PgReplMsgType::ORIGIN;
     msg.msg.origin.commit_lsn = lsn;
-    msg.msg.origin.name = &buffer[pos];
+    msg.msg.origin.name_str = &buffer[pos];
+    pos += strnlen(&buffer[pos], length - pos);
 
     return pos;
 }
@@ -322,10 +323,10 @@ int PgReplMsg::decodeRelation(const char *buffer, int length,
     pos += 4;
 
     const char *namespace_str = &buffer[pos];
-    pos += std::strlen(&buffer[pos]);
+    pos += strnlen(&buffer[pos], length - pos);
 
     const char *rel_name = &buffer[pos];
-    pos += std::strlen(&buffer[pos]);
+    pos += strnlen(&buffer[pos], length - pos);
 
     int8_t identity = (int8_t)buffer[pos];
     pos += 1;
@@ -340,7 +341,7 @@ int PgReplMsg::decodeRelation(const char *buffer, int length,
         pos += 1;
 
         column.column_name = &buffer[pos];
-        pos += std::strlen(column.column_name);
+        pos += strnlen(column.column_name, length - pos);
 
         column.data_type_id = recvint32(&buffer[pos]);
         pos += 4;
@@ -583,10 +584,10 @@ int PgReplMsg::decodeType(const char *buffer, int length,
     pos += 4;
 
     const char *namespace_str = &buffer[pos];
-    pos += std::strlen(&buffer[pos]);
+    pos += strnlen(&buffer[pos], length - pos);
 
     const char *data_type =  &buffer[pos];
-    pos += std::strlen(&buffer[pos]);
+    pos += strnlen(&buffer[pos], length - pos);
 
     msg.msg_type = PgReplMsgType::TYPE;
     msg.msg.type.oid = oid;

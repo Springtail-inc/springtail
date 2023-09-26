@@ -12,7 +12,8 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 add_library(psqlcdc STATIC ${LIBSOURCES})
 
 # executables
-add_executable(pg_wal_dump ${LIBSOURCES} pg_wal_dump.cc)
+add_executable(pg_wal_dump pg_wal_dump.cc)
+add_executable(pg_wal_decode pg_wal_decode.cc)
 
 # include dirs
 target_include_directories(psqlcdc
@@ -20,8 +21,12 @@ target_include_directories(psqlcdc
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 
-# include dirs
 target_include_directories(pg_wal_dump
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+target_include_directories(pg_wal_decode
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
@@ -32,6 +37,13 @@ target_link_libraries(psqlcdc
 )
 
 target_link_libraries(pg_wal_dump
+    PRIVATE psqlcdc
+    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE Boost::program_options
+)
+
+target_link_libraries(pg_wal_decode
+    PRIVATE psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
 )

@@ -5,6 +5,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
+#include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 
 static const std::string SLOT_NAME="springtail";
@@ -50,10 +51,10 @@ int main(int argc, char* argv[])
     }
 
     // create postgres connection
-    PgReplConnection *pg_conn = new PgReplConnection(port, host, db_name, user_name, password, slot_name);
+    PgReplConnection pg_conn(port, host, db_name, user_name, password, slot_name);
 
     std::cout << "Connecting to postgres server: " << host;
-    int r = pg_conn->connect();
+    int r = pg_conn.connect();
     if (r != 0) {
         return r;
     }
@@ -61,22 +62,29 @@ int main(int argc, char* argv[])
     // create slot if need be
     if (create_slot) {
         std::cout << "Creating replication slot: " << slot_name;
-        r = pg_conn->createReplicationSlot(PgReplConnection::OutputPlugin::PGOUTPUT,
-                                           false, false);
+        r = pg_conn.createReplicationSlot(PgReplConnection::OutputPlugin::PGOUTPUT,
+                                          false, false);
         if (r != 0) {
             return r;
         }
     }
 
     // check that the slot exists
-    if (!pg_conn->checkSlotExists()) {
+    if (!pg_conn.checkSlotExists()) {
         std::cerr << "Error: replication slot not found: " << slot_name;
+        return -1;
+    }
+
+    // start steaming
+    r = pg_conn.startStreaming(INVALID_LSN);
+    if (r < 0) {
+        std::cerr << "Error: start streaming failed";
         return -1;
     }
 
     // open output file
     std::fstream out_fh;
-    out_fh.open(outfile, std::ios::out);
+    out_fh.open(outfile, std::ios::out | std::ios::binary);
     if (!out_fh) {
         std::cerr << "Error opening output file: " << outfile;
         return -1;
@@ -84,9 +92,14 @@ int main(int argc, char* argv[])
 
     // loop through reading data and writing it to disk
     PgCopyData data;
-    while ((r = pg_conn->readData(data)) != 0) {
+    while ((r = pg_conn.readData(data)) != 0) {
         std::cout << "Recevied data: " << data.length << " B";
 
+        // write out length
+        char len_buf[4];
+        sendint32(data.length, len_buf);
+
+        out_fh.write(len_buf, 4);
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
     }
