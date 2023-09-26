@@ -11,9 +11,3 @@ then
 else
    cd "$DIR"
 fi
-
-# install packages
-./vcpkg install minio-cpp
-./vcpkg install libpq
-./vcpkg install boost-program-options
-./vcpkg install fmt
