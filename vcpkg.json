@@ -3,6 +3,7 @@
         "minio-cpp",
         "libpq",
         "boost-program-options",
-        "fmt"
+        "fmt",
+        "backward-cpp"
     ]
 }

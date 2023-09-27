@@ -1,8 +1,6 @@
-#include <exception.hh>
-#include <schema/schema.hh>
+#include <storage/exception.hh>
+#include <storage/schema.hh>
 #include <storage/field.hh>
-
-#include <iostream>
 
 namespace st_storage {
 

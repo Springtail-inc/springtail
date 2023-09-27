@@ -19,4 +19,33 @@ namespace st_storage {
             return "The requested column does not exist.";
         }
     };
+
+    /** Parent of storage errors. */
+    class StorageError : public st_common::Error {
+
+    };
+
+    class OpenFileStorageError : public StorageError {
+        const char *what() {
+            return "Unable to open file.";
+        }
+    };
+
+    class CreateFileStorageError : public StorageError {
+        const char *what() {
+            return "Unable to create file.";
+        }
+    };
+
+    class ReadFileStorageError : public StorageError {
+        const char *what() {
+            return "Error to reading file.";
+        }
+    };
+
+    class ValidationStorageError : public StorageError {
+        const char *what() {
+            return "Validation error reading file."
+        }
+    };
 }

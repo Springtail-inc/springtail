@@ -24,7 +24,7 @@ include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
 
 find_package(Psql)
-
+find_package(backwards)
 # find_package(Boost REQUIRED boost-program-options)
 
 ## Source modules in ./modules
