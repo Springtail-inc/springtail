@@ -33,7 +33,7 @@ find_package(Backward CONFIG REQUIRED)
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
 
-## Benchmarks
+add_subdirectory(src/common)
 add_subdirectory(src/benchmarks)
 
 ## Messages keep at end of file
