@@ -46,8 +46,8 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 list(APPEND minio_requiredlibs Boost::program_options)
 
 # source files
-set(MINIO_SOURCES src/benchmarks/minio_bench.cc)
-set(FILE_SOURCES src/benchmarks/file_bench.cc)
+set(MINIO_SOURCES minio_bench.cc)
+set(FILE_SOURCES file_bench.cc)
 
 # benchmarks
 add_executable(minio_bench ${MINIO_SOURCES})
@@ -57,6 +57,10 @@ target_link_libraries(minio_bench PRIVATE fmt::fmt ${minio_requiredlibs})
 add_executable(file_bench ${FILE_SOURCES})
 target_include_directories(file_bench PRIVATE include)
 target_link_libraries(file_bench PRIVATE fmt::fmt Boost::program_options)
+
+add_executable(crash crash.cc)
+target_link_libraries(crash PUBLIC Backward::Backward)
+
 
 # # include dirs
 # target_include_directories(libcdc
