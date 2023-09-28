@@ -37,6 +37,7 @@ private:
     std::string _db_name;
     std::string _db_user;
     std::string _db_pass;
+    std::string _pub_name;
     std::string _slot_name;
     std::string _export_name;
 
@@ -97,9 +98,6 @@ private:
 
 public:
 
-    /** Output plugin, only PGOUTPUT supported by decoder */
-    enum OutputPlugin{ WAL2JSON, PGOUTPUT };
-
     /**
      * @brief Constructor -- does not connect to db
      *
@@ -108,14 +106,16 @@ public:
      * @param db_name DB name
      * @param db_user DB user name
      * @param db_pass DB user password
+     * @param pub_name Publication name
      * @param slot_name Replication slot name
      */
     PgReplConnection(int db_port,
-                     const std::string& db_host,
-                     const std::string& db_name,
-                     const std::string& db_user,
-                     const std::string& db_pass,
-                     const std::string& slot_name);
+                     const std::string &db_host,
+                     const std::string &db_name,
+                     const std::string &db_user,
+                     const std::string &db_pass,
+                     const std::string &pub_name,
+                     const std::string &slot_name);
 
     /**
      * @brief Destructor -- closed connection if open
@@ -156,13 +156,11 @@ public:
     /**
      * @brief Create the replication slot
      *
-     * @param plugin Output plugin -- only PGOUTPUT supported
      * @param export_snapshot export the snapshot
      * @param temporary temporary slot; per session
      * @return 0 on success
      */
-    int createReplicationSlot(OutputPlugin plugin,
-                              bool export_snapshot,
+    int createReplicationSlot(bool export_snapshot,
                               bool temporary);
 
     /**

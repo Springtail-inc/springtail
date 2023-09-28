@@ -133,13 +133,12 @@ int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
 {
     int pos = 0;
 
-    int16_t num_columns = recvint16(&buffer[pos]);
+    tuple.num_columns = recvint16(&buffer[pos]);
     pos += 2;
 
-    tuple.num_columns = num_columns;
-    tuple.tuple_data = std::make_unique<MsgTupleDataColumn[]>(num_columns);
+    tuple.tuple_data.resize(tuple.num_columns);
 
-    for (int i = 0; i < num_columns; i++) {
+    for (int i = 0; i < tuple.num_columns; i++) {
         char type = buffer[pos];
         pos += 1;
 
@@ -149,12 +148,9 @@ int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
         const char *data = &buffer[pos];
         pos += data_len;
 
-//        MsgTupleDataColumn column;
         tuple.tuple_data[i].type = type;
         tuple.tuple_data[i].data_len = data_len;
         tuple.tuple_data[i].data = data;
-
-//        tuple.tuple_data.push_back(column);
     }
 
     return pos;
@@ -190,27 +186,26 @@ int PgReplMsg::decodeMessage(const char *buffer, int length,
     int32_t xid = recvint32(&buffer[pos]);  // only version 2
     pos += 4;
 */
-    int8_t flags = (int8_t)buffer[pos];
+
+    MsgMessage message;
+
+    message.flags = (int8_t)buffer[pos];
     pos += 1;
 
-    LSN_t lsn = recvint64(&buffer[pos]);
+    message.lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    const char *prefix_str = &buffer[pos];
+    message.prefix_str = &buffer[pos];
     pos += strnlen(&buffer[pos], length-pos) + 1;
 
-    int32_t data_len = recvint32(&buffer[pos]);
+    message.data_len = recvint32(&buffer[pos]);
     pos += 4;
 
-    const char *data = &buffer[pos];
-    pos += data_len;
+    message.data = &buffer[pos];
+    pos += message.data_len;
 
     msg.msg_type = PgReplMsgType::MESSAGE;
-    msg.msg.message.flags = flags;
-    msg.msg.message.lsn = lsn;
-    msg.msg.message.prefix_str = prefix_str;
-    msg.msg.message.data_len = data_len;
-    msg.msg.message.data = data;
+    msg.msg.emplace<MsgMessage>(message);
 
     return pos;
 }
@@ -228,15 +223,16 @@ int PgReplMsg::decodeOrigin(const char *buffer, int length,
     */
     int pos = 1;
 
-    LSN_t lsn = recvint64(&buffer[pos]);
+    MsgOrigin origin;
+
+    origin.commit_lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    const char *origin_name = &buffer[pos];
+    origin.name_str = &buffer[pos];
     pos += strnlen(&buffer[pos], length - pos) + 1;
 
     msg.msg_type = PgReplMsgType::ORIGIN;
-    msg.msg.origin.commit_lsn = lsn;
-    msg.msg.origin.name_str = origin_name;
+    msg.msg.emplace<MsgOrigin>(origin);
 
     return pos;
 }
@@ -253,19 +249,19 @@ int PgReplMsg::decodeBegin(const char *buffer, int length,
     */
     int pos = 1;
 
-    LSN_t lsn = recvint64(&buffer[pos]);
+    MsgBegin begin;
+
+    begin.xact_lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    int64_t ts = recvint64(&buffer[pos]);
+    begin.commit_ts = recvint64(&buffer[pos]);
     pos += 8;
 
-    int32_t xid = recvint32(&buffer[pos]);
+    begin.xid = recvint32(&buffer[pos]);
     pos += 4;
 
     msg.msg_type = PgReplMsgType::BEGIN;
-    msg.msg.begin.xid = xid;
-    msg.msg.begin.xact_lsn = lsn;
-    msg.msg.begin.commit_ts = ts;
+    msg.msg.emplace<MsgBegin>(begin);
 
     return pos;
 }
@@ -285,19 +281,19 @@ int PgReplMsg::decodeCommit(const char *buffer, int length,
     // skip flags
     pos += 1;
 
-    LSN_t commit_lsn = recvint64(&buffer[pos]);
+    MsgCommit commit;
+
+    commit.commit_lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    LSN_t xact_lsn = recvint64(&buffer[pos]);
+    commit.xact_lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    int64_t ts = recvint64(&buffer[pos]);
+    commit.commit_ts = recvint64(&buffer[pos]);
     pos += 8;
 
     msg.msg_type = PgReplMsgType::COMMIT;
-    msg.msg.commit.commit_lsn = commit_lsn;
-    msg.msg.commit.xact_lsn = xact_lsn;
-    msg.msg.commit.commit_ts = ts;
+    msg.msg.emplace<MsgCommit>(commit);
 
     return pos;
 }
@@ -333,45 +329,41 @@ int PgReplMsg::decodeRelation(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t rel_id = recvint32(&buffer[pos]);
+    MsgRelation relation;
+
+    relation.rel_id = recvint32(&buffer[pos]);
     pos += 4;
 
-    const char *namespace_str = &buffer[pos];
+    relation.namespace_str = &buffer[pos];
     pos += strnlen(&buffer[pos], length - pos) + 1;
 
-    const char *rel_name = &buffer[pos];
+    relation.rel_name_str = &buffer[pos];
     pos += strnlen(&buffer[pos], length - pos) + 1;
 
-    int8_t identity = (int8_t)buffer[pos];
+    relation.identity = (int8_t)buffer[pos];
     pos += 1;
 
-    int16_t num_columns = recvint16(&buffer[pos]);
+    relation.num_columns = recvint16(&buffer[pos]);
     pos += 2;
 
-    msg.msg.relation.columns = std::make_unique<MsgRelColumn[]>(num_columns);
+    relation.columns.resize(relation.num_columns);
 
-    for (int i = 0; i < num_columns; i++) {
-        msg.msg.relation.columns[i].flags = (int8_t)buffer[pos]; // 0 no flags; 1 key
+    for (int i = 0; i < relation.num_columns; i++) {
+        relation.columns[i].flags = (int8_t)buffer[pos]; // 0 no flags; 1 key
         pos += 1;
 
-        msg.msg.relation.columns[i].column_name = &buffer[pos];
+        relation.columns[i].column_name = &buffer[pos];
         pos += strnlen(&buffer[pos], length - pos) + 1;
 
-        msg.msg.relation.columns[i].oid = recvint32(&buffer[pos]);
+        relation.columns[i].oid = recvint32(&buffer[pos]);
         pos += 4;
 
-        msg.msg.relation.columns[i].type_modifier = recvint32(&buffer[pos]);
+        relation.columns[i].type_modifier = recvint32(&buffer[pos]);
         pos += 4;
-
-//        msg.msg.relation.columns.push_back(column);
     }
 
     msg.msg_type = PgReplMsgType::RELATION;
-    msg.msg.relation.rel_id = rel_id;
-    msg.msg.relation.namespace_str = namespace_str;
-    msg.msg.relation.rel_name_str = rel_name;
-    msg.msg.relation.identity = identity;
-    msg.msg.relation.num_columns = num_columns;
+    msg.msg.emplace<MsgRelation>(relation);
 
     return pos;
 }
@@ -394,24 +386,25 @@ int PgReplMsg::decodeInsert(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t rel_id = recvint32(&buffer[pos]);
+    MsgInsert insert;
+
+    insert.rel_id = recvint32(&buffer[pos]);
     pos += 4;
 
-    char new_type = buffer[pos]; // should be 'N'
-    if (new_type == 'N') {
+    insert.new_type = buffer[pos]; // should be 'N'
+    if (insert.new_type == 'N') {
         pos += 1;
     } else {
         // no type present
         // XXX check if this means no tuple to decode...
-        new_type = '\0';
+        insert.new_type = '\0';
         pos += 1;
     }
 
-    pos += decodeTuple(&buffer[pos], length - pos, msg.msg.insert.new_tuple);
+    pos += decodeTuple(&buffer[pos], length - pos, insert.new_tuple);
 
     msg.msg_type = PgReplMsgType::INSERT;
-    msg.msg.insert.rel_id = rel_id;
-    msg.msg.insert.new_type = new_type;
+    msg.msg.emplace<MsgInsert>(insert);
 
     return pos;
 }
@@ -448,38 +441,34 @@ int PgReplMsg::decodeUpdate(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t rel_id = recvint32(&buffer[pos]);
+    MsgUpdate update;
+
+    update.rel_id = recvint32(&buffer[pos]);
     pos += 4;
 
-    char old_type = buffer[pos];
-    if (old_type == 'K' || old_type == 'O') {
+    update.old_type = buffer[pos];
+    if (update.old_type == 'K' || update.old_type == 'O') {
         pos += 1;
     } else {
         // no type present
-        old_type = '\0';
+        update.old_type = '\0';
     }
 
-    pos += decodeTuple(&buffer[pos], length - pos, msg.msg.update.old_tuple);
+    pos += decodeTuple(&buffer[pos], length - pos, update.old_tuple);
 
-    char new_type = buffer[pos]; // should be 'N'
-    if (new_type == 'N') {
+    update.new_type = buffer[pos]; // should be 'N'
+    if (update.new_type == 'N') {
         pos += 1;
     } else {
         // no type present
         // XXX check if this means no tuple to decode...
-        new_type = '\0';
+        update.new_type = '\0';
     }
 
-    int r = decodeTuple(&buffer[pos], length - pos, msg.msg.update.new_tuple);
-    if (r < 0) {
-        return r;
-    }
-    pos += r;
+    pos += decodeTuple(&buffer[pos], length - pos, update.new_tuple);
 
     msg.msg_type = PgReplMsgType::UPDATE;
-    msg.msg.update.rel_id = rel_id;
-    msg.msg.update.old_type = old_type;
-    msg.msg.update.new_type = new_type;
+    msg.msg.emplace<MsgUpdate>(update);
 
     return pos;
 }
@@ -512,26 +501,23 @@ int PgReplMsg::decodeDelete(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t rel_id = recvint32(&buffer[pos]);
+    MsgDelete delete_msg;
+
+    delete_msg.rel_id = recvint32(&buffer[pos]);
     pos += 4;
 
-    char type = buffer[pos];
-    if (type == 'K' || type == 'O') {
+    delete_msg.type = buffer[pos];
+    if (delete_msg.type == 'K' || delete_msg.type == 'O') {
         pos += 1;
     } else {
         // no type present
-        type = '\0';
+        delete_msg.type = '\0';
     }
 
-    int r = decodeTuple(&buffer[pos], length -pos, msg.msg.delete_msg.tuple);
-    if (r < 0) {
-        return r;
-    }
-    pos += r;
+    pos += decodeTuple(&buffer[pos], length - pos, delete_msg.tuple);
 
     msg.msg_type = PgReplMsgType::DELETE;
-    msg.msg.delete_msg.rel_id = rel_id;
-    msg.msg.delete_msg.type = type;
+    msg.msg.emplace<MsgDelete>(delete_msg);
 
     return pos;
 }
@@ -556,21 +542,22 @@ int PgReplMsg::decodeTruncate(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t num_rels = recvint32(&buffer[pos]);
+    MsgTruncate truncate;
+
+    truncate.num_rels = recvint32(&buffer[pos]);
     pos += 4;
 
-    int8_t options = (int8_t)buffer[pos];
+    truncate.options = (int8_t)buffer[pos];
     pos += 1;
 
-    for (int i = 0; i < num_rels; i++) {
-        int32_t rel_id = recvint32(&buffer[pos]);
-        msg.msg.truncate.rel_ids.push_back(rel_id);
+    truncate.rel_ids.resize(truncate.num_rels);
+    for (int i = 0; i < truncate.num_rels; i++) {
+        truncate.rel_ids[i] = recvint32(&buffer[pos]);
         pos += 4;
     }
 
     msg.msg_type = PgReplMsgType::TRUNCATE;
-    msg.msg.truncate.num_rels = num_rels;
-    msg.msg.truncate.options = options;
+    msg.msg.emplace<MsgTruncate>(truncate);
 
     return pos;
 }
@@ -595,19 +582,19 @@ int PgReplMsg::decodeType(const char *buffer, int length,
     pos += 4;
     */
 
-    int32_t oid = recvint32(&buffer[pos]);
+    MsgType type;
+
+    type.oid = recvint32(&buffer[pos]);
     pos += 4;
 
-    const char *namespace_str = &buffer[pos];
+    type.namespace_str = &buffer[pos];
     pos += strnlen(&buffer[pos], length - pos) + 1;
 
-    const char *data_type =  &buffer[pos];
+    type.data_type_str =  &buffer[pos];
     pos += strnlen(&buffer[pos], length - pos) + 1;
 
     msg.msg_type = PgReplMsgType::TYPE;
-    msg.msg.type.oid = oid;
-    msg.msg.type.namespace_str = namespace_str;
-    msg.msg.type.data_type_str = data_type;
+    msg.msg.emplace<MsgType>(type);
 
     return pos;
 }
@@ -640,89 +627,109 @@ std::string PgReplMsg::dumpMsg(const PgReplMsgDecoded &msg)
     std::stringstream ss;
 
     switch(msg.msg_type) {
-        case BEGIN:
-            ss << "BEGIN" << std::endl;
-            ss << "  xid=" << msg.msg.begin.xid << std::endl;
-            ss << "  LSN=" << msg.msg.begin.xact_lsn << " ("
-               << lsnToStr(msg.msg.begin.xact_lsn) << ")\n";
+        case BEGIN: {
+            MsgBegin begin = std::get<MsgBegin>(msg.msg);
+            ss << "\nBEGIN" << std::endl;
+            ss << "  xid=" << begin.xid << std::endl;
+            ss << "  LSN=" << begin.xact_lsn << " ("
+               << lsnToStr(begin.xact_lsn) << ")\n";
             break;
+        }
 
-        case COMMIT:
-            ss << "COMMIT" << std::endl;
-            ss << "  commit LSN=" << msg.msg.commit.commit_lsn
-               << " (" << lsnToStr(msg.msg.commit.commit_lsn) << ")\n";
-            ss << "  xact LSN=" << msg.msg.commit.xact_lsn
-               << " (" << lsnToStr(msg.msg.commit.xact_lsn) << ")\n";
+        case COMMIT: {
+            MsgCommit commit = std::get<MsgCommit>(msg.msg);
+            ss << "\nCOMMIT" << std::endl;
+            ss << "  commit LSN=" << commit.commit_lsn
+               << " (" << lsnToStr(commit.commit_lsn) << ")\n";
+            ss << "  xact LSN=" << commit.xact_lsn
+               << " (" << lsnToStr(commit.xact_lsn) << ")\n";
             break;
+        }
 
-        case RELATION:
-            ss << "RELATION" << std::endl;
-            ss << "  rel_id=" << msg.msg.relation.rel_id << std::endl;
-            ss << "  namespace=" << msg.msg.relation.namespace_str << std::endl;
-            ss << "  rel_name=" << msg.msg.relation.rel_name_str << std::endl;
+        case RELATION: {
+            MsgRelation relation = std::get<MsgRelation>(msg.msg);
+            ss << "\nRELATION" << std::endl;
+            ss << "  rel_id=" << relation.rel_id << std::endl;
+            ss << "  namespace=" << relation.namespace_str << std::endl;
+            ss << "  rel_name=" << relation.rel_name_str << std::endl;
 
             ss << "  Columns" << std::endl;
-            for (int i = 0; i < msg.msg.relation.num_columns; i++) {
-                ss << "  - name=" << msg.msg.relation.columns[i].column_name << std::endl;
-                ss << "  - key=" << msg.msg.relation.columns[i].flags << std::endl;
-                ss << "  - oid=" << msg.msg.relation.columns[i].oid << std::endl;
-                ss << "  - type modifier=" << msg.msg.relation.columns[i].type_modifier << std::endl;
+            for (int i = 0; i < relation.num_columns; i++) {
+                ss << "  - name=" << relation.columns[i].column_name << std::endl;
+                ss << "  - key=" << relation.columns[i].flags << std::endl;
+                ss << "  - oid=" << relation.columns[i].oid << std::endl;
+                ss << "  - type modifier=" << relation.columns[i].type_modifier << std::endl;
             }
 
             break;
+        }
 
-        case INSERT:
-            ss << "INSERT" << std::endl;
-            ss << "  rel_id=" << msg.msg.insert.rel_id << std::endl;
+        case INSERT: {
+            MsgInsert insert = std::get<MsgInsert>(msg.msg);
+            ss << "\nINSERT" << std::endl;
+            ss << "  rel_id=" << insert.rel_id << std::endl;
             ss << "  New tuples" << std::endl;
-            dumpTuple(msg.msg.insert.new_tuple, ss);
+            dumpTuple(insert.new_tuple, ss);
             break;
+        }
 
-        case DELETE:
-            ss << "DELETE";
-            ss << "  rel_id=" << msg.msg.delete_msg.rel_id << std::endl;
+        case DELETE: {
+            MsgDelete delete_msg = std::get<MsgDelete>(msg.msg);
+            ss << "\nDELETE";
+            ss << "  rel_id=" << delete_msg.rel_id << std::endl;
             ss << "  Tuples\n";
-            dumpTuple(msg.msg.delete_msg.tuple, ss);
+            dumpTuple(delete_msg.tuple, ss);
             break;
+        }
 
-        case UPDATE:
-            ss << "UPDATE";
-            ss << "  rel_id=" << msg.msg.update.rel_id << std::endl;
+        case UPDATE: {
+            MsgUpdate update = std::get<MsgUpdate>(msg.msg);
+            ss << "\nUPDATE";
+            ss << "  rel_id=" << update.rel_id << std::endl;
             ss << "  Old tuples" << std::endl;
-            dumpTuple(msg.msg.update.old_tuple, ss);
+            dumpTuple(update.old_tuple, ss);
             ss << "  New tuples" << std::endl;
-            dumpTuple(msg.msg.update.new_tuple, ss);
+            dumpTuple(update.new_tuple, ss);
             break;
+        }
 
-        case TRUNCATE:
-            ss << "TRUNCATE" << std::endl;
-            for (int32_t rel_id: msg.msg.truncate.rel_ids) {
+        case TRUNCATE: {
+            MsgTruncate truncate = std::get<MsgTruncate>(msg.msg);
+            ss << "\nTRUNCATE" << std::endl;
+            for (int32_t rel_id: truncate.rel_ids) {
                 ss << "  rel_id=" << rel_id << std::endl;
             }
             break;
+        }
 
-        case ORIGIN:
-            ss << "ORIGIN" << std::endl;
-            ss << "  commit LSN=" << msg.msg.origin.commit_lsn
-               << " (" << lsnToStr(msg.msg.origin.commit_lsn) << ")\n";
-            ss << "  name=" << msg.msg.origin.name_str << std::endl;
+        case ORIGIN: {
+            MsgOrigin origin = std::get<MsgOrigin>(msg.msg);
+            ss << "\nORIGIN" << std::endl;
+            ss << "  commit LSN=" << origin.commit_lsn
+               << " (" << lsnToStr(origin.commit_lsn) << ")\n";
+            ss << "  name=" << origin.name_str << std::endl;
             break;
+        }
 
-        case MESSAGE:
-            ss << "MESSAGE" << std::endl;
-            ss << "  xid=" << msg.msg.message.xid << std::endl;
-            ss << "  LSN=" << msg.msg.message.lsn
-               << " (" << lsnToStr(msg.msg.message.lsn) << ")\n";
-            ss << "  prefix=" << msg.msg.message.prefix_str << std::endl;
+        case MESSAGE: {
+            MsgMessage message = std::get<MsgMessage>(msg.msg);
+            ss << "\nMESSAGE" << std::endl;
+            ss << "  xid=" << message.xid << std::endl;
+            ss << "  LSN=" << message.lsn
+               << " (" << lsnToStr(message.lsn) << ")\n";
+            ss << "  prefix=" << message.prefix_str << std::endl;
             break;
+        }
 
-        case TYPE:
-            ss << "TYPE" << std::endl;
-            ss << "  xid=" << msg.msg.type.xid << std::endl;
-            ss << "  oid=" << msg.msg.type.oid << std::endl;
-            ss << "  namespace=" << msg.msg.type.namespace_str << std::endl;
-            ss << "  data type=" << msg.msg.type.data_type_str << std::endl;
+        case TYPE: {
+            MsgType type = std::get<MsgType>(msg.msg);
+            ss << "\nTYPE" << std::endl;
+            ss << "  xid=" << type.xid << std::endl;
+            ss << "  oid=" << type.oid << std::endl;
+            ss << "  namespace=" << type.namespace_str << std::endl;
+            ss << "  data type=" << type.data_type_str << std::endl;
             break;
+        }
 
         default:
             break;

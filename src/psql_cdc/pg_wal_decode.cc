@@ -7,75 +7,6 @@
 // springtail includes
 #include <psql_cdc/pg_repl_msg.hh>
 
-void output_msg(const PgReplMsgDecoded &msg)
-{
-    switch(msg.msg_type) {
-        case BEGIN:
-            std::cout << "BEGIN";
-            std::cout << "xid=" << msg.msg.begin.xid
-                      << "; LSN=" << msg.msg.begin.xact_lsn;
-            break;
-
-        case COMMIT:
-            std::cout << "COMMIT";
-            std::cout << "commit LSN=" << msg.msg.commit.commit_lsn
-                      << "; xact LSN=" << msg.msg.commit.xact_lsn;
-            break;
-
-        case RELATION:
-            std::cout << "RELATION";
-            std::cout << "rel_id=" << msg.msg.relation.rel_id
-                      << "; namespace=" << msg.msg.relation.namespace_str
-                      << "; rel_name=" << msg.msg.relation.rel_name_str;
-            break;
-
-        case INSERT:
-            std::cout << "INSERT";
-            std::cout << "rel_id=" << msg.msg.insert.rel_id;
-            break;
-
-        case DELETE:
-            std::cout << "DELETE";
-            std::cout << "rel_id=" << msg.msg.delete_msg.rel_id;
-            break;
-
-        case UPDATE:
-            std::cout << "UPDATE";
-            std::cout << "rel_id=" << msg.msg.update.rel_id;
-            break;
-
-        case TRUNCATE:
-            std::cout << "TRUNCATE";
-            for (int32_t rel_id: msg.msg.truncate.rel_ids) {
-                std::cout << "rel_id=" << rel_id;
-            }
-            break;
-
-        case ORIGIN:
-            std::cout << "ORIGIN";
-            std::cout << "commit LSN=" << msg.msg.origin.commit_lsn
-                      << "; name=" << msg.msg.origin.name_str;
-            break;
-
-        case MESSAGE:
-            std::cout << "MESSAGE";
-            std::cout << "xid=" << msg.msg.message.xid
-                      << "; LSN=" << msg.msg.message.lsn
-                      << "; prefix=" << msg.msg.message.prefix_str;
-            break;
-
-        case TYPE:
-            std::cout << "TYPE";
-            std::cout << "xid=" << msg.msg.type.xid
-                      << "; oid=" << msg.msg.type.oid
-                      << "; namespace=" << msg.msg.type.namespace_str;
-            break;
-
-        default:
-            break;
-    }
-}
-
 int main(int argc, char* argv[])
 {
     std::string file;
@@ -141,7 +72,8 @@ int main(int argc, char* argv[])
         msg.setBuffer((const char *)buffer, len);
         while (msg.hasNextMsg()) {
             const PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
-            output_msg(decoded_msg);
+            std::string s = msg.dumpMsg(decoded_msg);
+            std::cout << s;
         }
 
     }

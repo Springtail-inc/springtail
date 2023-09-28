@@ -1,8 +1,10 @@
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
+#include <memory>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <fmt/core.h>
 
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_connection.hh>
@@ -12,8 +14,7 @@ const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
     "SELECT pg_catalog.set_config('search_path', '', false);";
 
 /** SQL command to fetch current LSN from server */
-const char *CURRENT_LSN_SQL =
-    "SELECT pg_current_wal_lsn()";
+const char *CURRENT_LSN_SQL = "SELECT pg_current_wal_lsn()";
 
 /**
  * @brief Constructor
@@ -26,17 +27,20 @@ const char *CURRENT_LSN_SQL =
  * @param slot_name replication slot name
  */
 PgReplConnection::PgReplConnection(const int db_port,
-                                   const std::string& db_host,
-                                   const std::string& db_name,
-                                   const std::string& db_user,
-                                   const std::string& db_pass,
-                                   const std::string& slot_name)
+                                   const std::string &db_host,
+                                   const std::string &db_name,
+                                   const std::string &db_user,
+                                   const std::string &db_pass,
+                                   const std::string &pub_name,
+                                   const std::string &slot_name)
+
 {
     _db_host = db_host;
     _db_port = db_port;
     _db_name = db_name;
     _db_user = db_user;
     _db_pass = db_pass;
+    _pub_name = pub_name;
     _slot_name = slot_name;
 }
 
@@ -57,10 +61,12 @@ PgReplConnection::~PgReplConnection()
  */
 int PgReplConnection::pgExec(const std::string cmd)
 {
-    std::cout << "Executing query: " << cmd;
+    std::cout << "Executing query: " << cmd << std::endl;
     PGresult *res = PQexec(_connection, cmd.c_str());
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        std::cerr << "Error setting search path: " << PQerrorMessage(_connection);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK &&
+        PQresultStatus(res) != PGRES_TUPLES_OK) {
+        std::cerr << "Error executing query: " << PQerrorMessage(_connection)
+                  << ", status=" << PQresultStatus(res) << std::endl;
         PQclear(res);
         return -1;
     }
@@ -75,34 +81,39 @@ int PgReplConnection::pgExec(const std::string cmd)
 int PgReplConnection::connect()
 {
     // create key value list for: host, port, dbname, user, password, options
-    std::stringstream s;
-
     // escape options
-    char *host = PQescapeLiteral(_connection, _db_host.c_str(), _db_host.length());
-    char *name = PQescapeLiteral(_connection, _db_name.c_str(), _db_name.length());
-    char *user = PQescapeLiteral(_connection, _db_user.c_str(), _db_user.length());
-    char *pass = PQescapeLiteral(_connection, _db_pass.c_str(), _db_pass.length());
+    std::unique_ptr<char[]> host(new char[_db_host.length() * 2 + 1]);
+    std::unique_ptr<char[]> name(new char[_db_name.length() * 2 + 1]);
+    std::unique_ptr<char[]> user(new char[_db_user.length() * 2 + 1]);
+    std::unique_ptr<char[]> pass(new char[_db_pass.length() * 2 + 1]);
 
-    s << "host='" << host << "' port=" << _db_port << " dbname='" << name
-      << "' user='" << user << "' password='" << pass << "'' "
-      << "options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'";
+    PQescapeString(host.get(), _db_host.c_str(), _db_host.length());
+    PQescapeString(name.get(), _db_name.c_str(), _db_name.length());
+    PQescapeString(user.get(), _db_user.c_str(), _db_user.length());
+    PQescapeString(pass.get(), _db_pass.c_str(), _db_pass.length());
 
-    const std::string& tmp = s.str();
-    const char* conninfo = tmp.c_str();
+    // setting client encoding to UTF8
+    // setting database=replication to put connection in replication mode
+    std::string encoding("UTF8");
+
+    std::string conninfo = fmt::format("host={} port={} dbname={} user={} \
+        password={} replication=database client_encoding={} \
+        options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
+        host.get(), _db_port, name.get(), user.get(), pass.get(), encoding);
+
+    std::cout << "Attempting to connect: " << conninfo << std::endl;
 
     // try connection
-    _connection = PQconnectdb(conninfo);
-
-    // free mem
-    PQfreemem(host);
-    PQfreemem(name);
-    PQfreemem(user);
-    PQfreemem(pass);
+    _connection = PQconnectdb(conninfo.c_str());
 
     if (PQstatus(_connection) != CONNECTION_OK) {
-        std::cerr << "Error connecting: " << PQerrorMessage(_connection);
+        std::cerr << "Error connecting: " << PQerrorMessage(_connection) << std::endl;
+        PQfinish(_connection);
         return -1;
     }
+
+    // get protocol version
+    _server_version = PQserverVersion(_connection);
 
     // for safety set search path
     int res = pgExec(ALWAYS_SECURE_SEARCH_PATH_SQL);
@@ -129,6 +140,8 @@ void PgReplConnection::close()
         _copy_buffer = nullptr;
         _copy_buffer_length = 0;
     }
+
+    PQfinish(_connection);
 }
 
 
@@ -140,43 +153,39 @@ void PgReplConnection::close()
  */
 int PgReplConnection::startStreaming(LSN_t LSN)
 {
-    // get protocol version
-    _server_version = PQserverVersion(_connection);
-
-    /*
-    int proto_version =
-        server_version >= 160000 ? 4 :      // pg16+ supports 4
-        server_version >= 150000 ? 3 :      // pg15+ supports 3
-        server_version >= 140000 ? 2 : 1;   // pg14+ supports 2; <14 supports 1
-    */
     // for now hardcode proto version to 1 since that is all we support
+    // version 2 supports streaming xacts (from PG 14+);
+    // version 3 for PG 15+; two phase commit
+    // version 4 for PG 16+; parallel streaming
     _proto_version = 1;
 
     // convert LSN to X/X format
     uint32_t lsn_higher = (uint32_t)(LSN>>32);
     uint32_t lsn_lower = (uint32_t)(LSN);
 
-    // create replication start command
-    char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
+    // replication start command
+    char *pub_name = PQescapeLiteral(_connection, _pub_name.c_str(), _pub_name.length());
 
-    std::stringstream s;
-    s << "START_REPLICATION SLOT \"" << slot_name << "\" LOGICAL "
-      << std::hex << lsn_higher << "/" << std::hex << lsn_lower
-      << " (proto_version '" << _proto_version << "')";
+    std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names {}",
+        _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name);
 
-    const std::string& tmp = s.str();
-    const char* cmd = tmp.c_str();
-
-    // execute command remotely
-    int res = pgExec(cmd);
-
-    PQfreemem(slot_name);
-
-    if (res == 0) {
-        _started_streaming = true;
+    if (_server_version >= 140000) {
+        cmd += ", binary 'true')";
+    } else {
+        cmd += ")";
     }
 
-    return res;
+    PGresult *res = PQexec(_connection, cmd.c_str());
+    PQfreemem(pub_name);
+    if (PQresultStatus(res) != PGRES_COPY_BOTH) {
+        std::cerr << "Error could not start WAL streaming: " << PQerrorMessage(_connection) << std::endl;
+        PQclear(res);
+        return -1;
+    }
+
+    _started_streaming = true;
+
+    return 0;
 }
 
 
@@ -193,7 +202,7 @@ int PgReplConnection::endStreaming()
     // taken from libpqwalreceiver.c libpqrcv_endstreaming()
     // send copy end message
     if (PQputCopyEnd(_connection, nullptr) <= 0 || PQflush(_connection)) {
-        std::cerr << "Error could not send end-of-streaming message to primary";
+        std::cerr << "Error could not send end-of-streaming message to primary" << std::endl;
         return -1;
     }
 
@@ -272,8 +281,10 @@ int PgReplConnection::readData(PgCopyData &dataOut)
     setLastFlushedLSN(_last_received_lsn);
 
     int rawlen = 0;
+
     while (rawlen == 0) {
 
+        // free copy buffer
         if (_copy_buffer != nullptr) {
             PQfreemem(_copy_buffer);
             _copy_buffer = nullptr;
@@ -281,7 +292,10 @@ int PgReplConnection::readData(PgCopyData &dataOut)
         }
 
         // get copy data, the 1 indicates async
-        int rawlen = PQgetCopyData(_connection, &_copy_buffer, 1);
+        rawlen = PQgetCopyData(_connection, &_copy_buffer, 1);
+
+        std::cout << "Read raw data: " << rawlen << std::endl;
+
         if (rawlen == 0) {
 
             // check to see if we should fetch latest LSN to sync back
@@ -302,7 +316,7 @@ int PgReplConnection::readData(PgCopyData &dataOut)
             int r = checkDataStream(READ_TIMEOUT_SEC);
             if (r == -1) {
                 // end of stream
-                std::cerr << "End of streaming";
+                std::cerr << "End of streaming" << std::endl;
                 return -1;
             }
 
@@ -311,15 +325,15 @@ int PgReplConnection::readData(PgCopyData &dataOut)
                 // consume it and go around again trying to read it
                 if (PQconsumeInput(_connection) == 0) {
                     // error can't consume data
-                    std::cerr << "Error consuming data";
+                    std::cerr << "Error consuming data" << std::endl;
                     return -1;
                 }
             }
         } else if (rawlen == -1) {
-            std::cerr << "End of streaming";
+            std::cerr << "End of streaming" << std::endl;
             return -1;
         } else if (rawlen == -2) {
-            std::cerr << "No copy in progress";
+            std::cerr << "No copy in progress" << std::endl;
             return -2;
         }
     }
@@ -330,15 +344,17 @@ int PgReplConnection::readData(PgCopyData &dataOut)
     // see: https://www.postgresql.org/docs/14/protocol-replication.html
     switch (_copy_buffer[0]) {
         case MSG_KEEP_ALIVE:
+            std::cout << "Found keep alive\n";
             _copy_buffer_offset = processKeepAlive(_copy_buffer, rawlen);
             break;
 
         case MSG_XLOG_DATA:
+            std::cout << "Found keep xlog data\n";
             _copy_buffer_offset = processXlogHeader(_copy_buffer, rawlen);
             break;
 
         default:
-            std::cerr << "Unknown copy data command: " << _copy_buffer[0];
+            std::cerr << "Unknown copy data command: " << _copy_buffer[0] << std::endl;
             return -1;
     }
 
@@ -358,7 +374,7 @@ int PgReplConnection::processKeepAlive(const char *buffer, int length)
 {
     // handle keep alive
     if (length < (1 + 8 + 8)) {
-        std::cerr << "Error keep alive msg too small: " << length;
+        std::cerr << "Error keep alive msg too small: " << length << std::endl;
         return -1;
     }
 
@@ -399,7 +415,7 @@ int PgReplConnection::processXlogHeader(const char *buffer, int length)
 {
     // handle log data
     if (length < (1 + 8 + 8 + 8)) {
-        std::cerr << "Error xlog data message too small: " << length;
+        std::cerr << "Error xlog data message too small: " << length << std::endl;
         return false;
     }
 
@@ -510,14 +526,12 @@ bool PgReplConnection::checkSlotExists()
 {
     char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
-    std::stringstream s;
-    s << "SELECT 1 from pg_catalog.pg_replication slots WHERE slot_name=" << slot_name;
-
-    const std::string& tmp = s.str();
-    const char* cmd = tmp.c_str();
+    std::string cmd = fmt::format("SELECT 1 from pg_catalog.pg_replication_slots WHERE slot_name={}",
+                                  slot_name);
 
     // execute query
-    PGresult *res = PQexec(_connection, cmd);
+    std::cout << "Executing query: " << cmd << std::endl;
+    PGresult *res = PQexec(_connection, cmd.c_str());
 
     // free slot name
     PQfreemem(slot_name);
@@ -525,13 +539,18 @@ bool PgReplConnection::checkSlotExists()
     // process results
     if (PQresultStatus(res) == PGRES_COMMAND_OK ||
         PQresultStatus(res) == PGRES_TUPLES_OK) {
+        std::cout << "Got command OK or TUPLES_OK tuples=" << PQntuples(res) << std::endl;
+
         if (PQntuples(res) > 0 && PQgetlength(res, 0, 0) > 0) {
             int res_int = (int)std::atoi(PQgetvalue(res, 0, 0));
+            std::cout << "Got res int=" << res_int << std::endl;
             if (res_int == 1) {
                 PQclear(res);
                 return true;
             }
         }
+    } else {
+        std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
     }
 
     PQclear(res);
@@ -546,23 +565,19 @@ bool PgReplConnection::checkSlotExists()
  */
 int PgReplConnection::dropReplicationSlot()
 {
-    std::stringstream s;
-
     char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
-    s << "DROP REPLICATION SLOT " << "\"" << _slot_name << "\"";
-
-    const std::string& tmp = s.str();
-    const char* cmd = tmp.c_str();
+    std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
 
     // execute query
-    PGresult *res = PQexec(_connection, cmd);
+    std::cout << "Executing query: " << cmd << std::endl;
+    PGresult *res = PQexec(_connection, cmd.c_str());
 
     PQfreemem(slot_name);
 
     // process results
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        std::cerr << "Error dropping replication slot";
+        std::cerr << "Error dropping replication slot" << std::endl;
         PQclear(res);
         return -1;
     }
@@ -575,13 +590,11 @@ int PgReplConnection::dropReplicationSlot()
 /**
  * @brief Create replication slot
  *
- * @param output_plugin one of:
  * @param export_snapshot should export be create (true/false)
  * @param temporary is replication slot temporary
  * @return 0 success, -1 failure
  */
-int PgReplConnection::createReplicationSlot(OutputPlugin output_plugin,
-                                            bool export_snapshot,
+int PgReplConnection::createReplicationSlot(bool export_snapshot,
                                             bool temporary)
 {
     std::stringstream s;
@@ -589,28 +602,37 @@ int PgReplConnection::createReplicationSlot(OutputPlugin output_plugin,
     // escape slot name
     char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
+    bool use_new_syntax = (_server_version >= 150000);
+
     // setup command
-    s << "CREATE REPLICATION SLOT " << "\"" << _slot_name << "\"";
+    s << "CREATE_REPLICATION_SLOT " << "\"" << _slot_name << "\"";
     if (temporary) {
         s << " TEMPORARY";
     }
 
-    s << " LOGICAL";
-    if (output_plugin == OutputPlugin::WAL2JSON) {
-        s << " wal2json";
-    } else if (output_plugin == OutputPlugin::PGOUTPUT) {
-        s << " pgoutput";
-    }
+    s << " LOGICAL pgoutput";
 
-    // uses old format style
-    if (export_snapshot) {
-        s << " EXPORT_SNAPSHOT";
+    if (use_new_syntax) {
+        s << " (";
+        if (export_snapshot) {
+            s << "SNAPSHOT 'export'";
+        } else {
+            s << "SNAPSHOT 'nothing'";
+        }
+        s << ")";
     } else {
-        s << " NOEXPORT_SNAPSHOT";
+        // uses old format style
+        if (export_snapshot) {
+            s << " EXPORT_SNAPSHOT";
+        } else {
+            s << " NOEXPORT_SNAPSHOT";
+        }
     }
 
     const std::string& tmp = s.str();
     const char* cmd = tmp.c_str();
+
+    std::cout << "Executing query: " << cmd << std::endl;
 
     // execute query
     PGresult *res = PQexec(_connection, cmd);
@@ -622,7 +644,7 @@ int PgReplConnection::createReplicationSlot(OutputPlugin output_plugin,
     if (PQresultStatus(res) == PGRES_TUPLES_OK) {
         if (PQntuples(res) != 1 || PQnfields(res) != 4) {
             std::cerr << "Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows="
-                 <<  PQntuples(res) << " cols=" << PQnfields(res);
+                 <<  PQntuples(res) << " cols=" << PQnfields(res) << std::endl;
         } else {
             slot_name = PQgetvalue(res, 0, 0);
             // char *consistent_point = PQgetvalue(res, 0, 1); // XXX/XXX earliest LSN for streaming
@@ -637,7 +659,7 @@ int PgReplConnection::createReplicationSlot(OutputPlugin output_plugin,
             return 0;
         }
     } else {
-        std::cerr << "Error executing CREATE REPLICATION SLOT";
+        std::cerr << "Error executing CREATE_REPLICATION_SLOT: " << PQerrorMessage(_connection) << std::endl;
     }
 
     PQclear(res);
@@ -660,7 +682,7 @@ int PgReplConnection::sendStandbyStatusMsg()
                                      now, replybuf);
 
     if (PQputCopyData(_connection, replybuf, len) <= 0 || PQflush(_connection)) {
-        std::cerr << "Error sending standby status update";
+        std::cerr << "Error sending standby status update" << std::endl;
         return -1;
     }
 

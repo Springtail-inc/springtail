@@ -7,8 +7,8 @@
 // springtail includes
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_connection.hh>
+#include <psql_cdc/pg_repl_msg.hh>
 
-static const std::string SLOT_NAME="springtail";
 
 int main(int argc, char* argv[])
 {
@@ -16,9 +16,11 @@ int main(int argc, char* argv[])
     std::string db_name;
     std::string user_name;
     std::string password;
+    std::string pub_name;
     std::string slot_name;
     std::filesystem::path outfile;
 
+    bool dump_buffer = false;
     bool create_slot = false;
     int port;
 
@@ -32,7 +34,9 @@ int main(int argc, char* argv[])
         ("user,u", boost::program_options::value<std::string>(&user_name)->default_value("springtail"), "DB user name")
         ("password,P", boost::program_options::value<std::string>(&password)->default_value(""), "DB Password")
         ("outfile,o", boost::program_options::value<std::filesystem::path>(&outfile)->default_value("wal.log"), "WAL output file")
-        ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value(""), "Slot name; if none specified slot will be created");
+        ("publication,b", boost::program_options::value<std::string>(&pub_name)->default_value("springtail"), "Publication name")
+        ("dump,D", "Dump contents of buffer to stdout")
+        ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -44,41 +48,41 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    // if no slot specified use default, but set create slot to true
-    if (slot_name.empty()) {
-        create_slot = true;
-        slot_name = SLOT_NAME;
+    if (vm.count("dump")) {
+        dump_buffer = true;
+    }
+
+    if (!vm.count("password")) {
+        std::cerr << "No password set\n";
+        std::cerr << desc;
+        return -1;
     }
 
     // create postgres connection
-    PgReplConnection pg_conn(port, host, db_name, user_name, password, slot_name);
+    PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
 
-    std::cout << "Connecting to postgres server: " << host;
+    std::cout << "Connecting to postgres server: " << host << std::endl;
     int r = pg_conn.connect();
     if (r != 0) {
         return r;
     }
 
     // create slot if need be
+    create_slot = !pg_conn.checkSlotExists();
+
     if (create_slot) {
-        std::cout << "Creating replication slot: " << slot_name;
-        r = pg_conn.createReplicationSlot(PgReplConnection::OutputPlugin::PGOUTPUT,
-                                          false, false);
+        std::cout << "Creating replication slot: " << slot_name << std::endl;
+        r = pg_conn.createReplicationSlot(false,  // export
+                                          false); // temporary
         if (r != 0) {
             return r;
         }
     }
 
-    // check that the slot exists
-    if (!pg_conn.checkSlotExists()) {
-        std::cerr << "Error: replication slot not found: " << slot_name;
-        return -1;
-    }
-
     // start steaming
     r = pg_conn.startStreaming(INVALID_LSN);
     if (r < 0) {
-        std::cerr << "Error: start streaming failed";
+        std::cerr << "Error: start streaming failed" << std::endl;
         return -1;
     }
 
@@ -86,14 +90,29 @@ int main(int argc, char* argv[])
     std::fstream out_fh;
     out_fh.open(outfile, std::ios::out | std::ios::binary);
     if (!out_fh) {
-        std::cerr << "Error opening output file: " << outfile;
+        std::cerr << "Error opening output file: " << outfile << std::endl;
         return -1;
     }
 
     // loop through reading data and writing it to disk
+    std::cout << "Connection and streaming have started.  Dumping data.\n";
     PgCopyData data;
-    while ((r = pg_conn.readData(data)) != 0) {
-        std::cout << "Recevied data: " << data.length << " B";
+
+    PgReplMsg msg(1); // init repl message w/proto vers 1
+
+    while (true) {
+        r = pg_conn.readData(data);
+        if (r < 0) {
+            std::cerr << "Error reading copy data" << std::endl;
+            break;
+        }
+
+        std::cout << "Recevied data: " << data.length << " B" << std::endl;
+
+        if (data.length == 0) {
+            // possible data has been consumed by keep alive
+            continue;
+        }
 
         // write out length
         char len_buf[4];
@@ -102,10 +121,16 @@ int main(int argc, char* argv[])
         out_fh.write(len_buf, 4);
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
-    }
 
-    if (r < 0) {
-        std::cerr << "Error reading copy data";
+        if (dump_buffer) {
+            // iterate through the messages
+            msg.setBuffer(data.buffer, data.length);
+            while (msg.hasNextMsg()) {
+                const PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
+                std::string s = msg.dumpMsg(decoded_msg);
+                std::cout << s;
+            }
+        }
     }
 
     return 0;

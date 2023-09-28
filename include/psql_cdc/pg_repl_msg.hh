@@ -85,38 +85,19 @@ struct MsgUpdate {
 };
 
 struct MsgRelColumn {
-    int8_t flags;
+    int8_t flags;  // 0 or 1 - key
     const char *column_name;
-    int32_t data_type_id;
-    int32_t type_modifier;
+    int32_t oid;   // oid from pg_types table
+    int32_t type_modifier; // pg_attribute.atttypmod type specific data; default -1
 };
 
 struct MsgRelation {
     int32_t rel_id;
     const char *namespace_str;
     const char *rel_name_str;
-    int8_t identity;
+    int8_t identity;      // replica identit; pg_class.relreplident
     int16_t num_columns;
     std::vector<MsgRelColumn> columns;
-};
-
-/** Union of all messages */
-union PgReplMsgDecodedUnion {
-    PgReplMsgDecodedUnion() {}
-    ~PgReplMsgDecodedUnion() {}
-
-    MsgKeepAlive keep_alive;
-    MsgBegin begin;
-    MsgCommit commit;
-    MsgOrigin origin;
-    MsgCopy copy;
-    MsgMessage message;
-    MsgType type;
-    MsgTruncate truncate;
-    MsgDelete delete_msg;
-    MsgUpdate update;
-    MsgInsert insert;
-    MsgRelation relation;
 };
 
 /** Message types */
@@ -133,7 +114,20 @@ enum PgReplMsgType {
  *          specified by the msg_type
  */
 struct PgReplMsgDecoded {
-    PgReplMsgDecodedUnion msg;
+    std::variant<
+        MsgKeepAlive,
+        MsgBegin,
+        MsgCommit,
+        MsgOrigin,
+        MsgCopy,
+        MsgMessage,
+        MsgType,
+        MsgTruncate,
+        MsgDelete,
+        MsgUpdate,
+        MsgInsert,
+        MsgRelation
+    > msg;
     PgReplMsgType msg_type;    // type defining union member
 };
 
@@ -192,6 +186,8 @@ private:
     static int decodeXlogHeader(const char *buffer, int length, PgReplMsgDecoded &msg);
     static int decodeType(const char *buffer, int length, PgReplMsgDecoded &msg);
 
+    static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss);
+
 public:
     /**
      * @brief Constructor
@@ -220,6 +216,22 @@ public:
      * @return reference to internal decoded message
      */
     const PgReplMsgDecoded &decodeNextMsg();
+
+    /**
+     * @brief convert a message to a printable string
+     *
+     * @param msg refernece to message to convert
+     * @return readable string of msg
+     */
+    static std::string dumpMsg(const PgReplMsgDecoded &msg);
+
+    /**
+     * @brief Convert LSN to string of format XXX/XXX
+     *
+     * @param lsn LSN to convert
+     * @return string of LSN in format: "XXX/XXX"
+     */
+    static std::string lsnToStr(LSN_t lsn);
 };
 
 
