@@ -1,3 +1,6 @@
+#include <sstream>
+#include <fmt/core.h>
+
 #include <psql_cdc/pg_repl_msg.hh>
 
 
@@ -39,6 +42,8 @@ const PgReplMsgDecoded &PgReplMsg::decodeNextMsg()
     int pos = 0;
 
     initMsg();
+
+    std::cout << "Message type: " << msg_type << std::endl;
 
     switch(msg_type) {
 
@@ -97,10 +102,17 @@ const PgReplMsgDecoded &PgReplMsg::decodeNextMsg()
 
     // sanity check
     if (pos > _buffer_length) {
-        std::cerr << "Buffer overrun in decode";
+        std::cerr << "Buffer overrun in decode: consumed="
+                  << pos << ", bytes available=" << _buffer_length << std::endl;
+
         initMsg();
+        _buffer = nullptr;
+        _buffer_length = 0;
+
         return _decoded_msg;
     }
+
+    std::cout << "Message decode consumed: " << pos << "/" << _buffer_length << std::endl;
 
     _buffer_length -= pos;
     _buffer += pos;
@@ -125,6 +137,7 @@ int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
     pos += 2;
 
     tuple.num_columns = num_columns;
+    tuple.tuple_data = std::make_unique<MsgTupleDataColumn[]>(num_columns);
 
     for (int i = 0; i < num_columns; i++) {
         char type = buffer[pos];
@@ -136,12 +149,12 @@ int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
         const char *data = &buffer[pos];
         pos += data_len;
 
-        MsgTupleDataColumn column;
-        column.type = type;
-        column.data_len = data_len;
-        column.data = data;
+//        MsgTupleDataColumn column;
+        tuple.tuple_data[i].type = type;
+        tuple.tuple_data[i].data_len = data_len;
+        tuple.tuple_data[i].data = data;
 
-        tuple.tuple_data.push_back(column);
+//        tuple.tuple_data.push_back(column);
     }
 
     return pos;
@@ -183,9 +196,8 @@ int PgReplMsg::decodeMessage(const char *buffer, int length,
     LSN_t lsn = recvint64(&buffer[pos]);
     pos += 8;
 
-    int string_len = strnlen(&buffer[pos], length-pos);
     const char *prefix_str = &buffer[pos];
-    pos += string_len;
+    pos += strnlen(&buffer[pos], length-pos) + 1;
 
     int32_t data_len = recvint32(&buffer[pos]);
     pos += 4;
@@ -219,10 +231,12 @@ int PgReplMsg::decodeOrigin(const char *buffer, int length,
     LSN_t lsn = recvint64(&buffer[pos]);
     pos += 8;
 
+    const char *origin_name = &buffer[pos];
+    pos += strnlen(&buffer[pos], length - pos) + 1;
+
     msg.msg_type = PgReplMsgType::ORIGIN;
     msg.msg.origin.commit_lsn = lsn;
-    msg.msg.origin.name_str = &buffer[pos];
-    pos += strnlen(&buffer[pos], length - pos);
+    msg.msg.origin.name_str = origin_name;
 
     return pos;
 }
@@ -323,10 +337,10 @@ int PgReplMsg::decodeRelation(const char *buffer, int length,
     pos += 4;
 
     const char *namespace_str = &buffer[pos];
-    pos += strnlen(&buffer[pos], length - pos);
+    pos += strnlen(&buffer[pos], length - pos) + 1;
 
     const char *rel_name = &buffer[pos];
-    pos += strnlen(&buffer[pos], length - pos);
+    pos += strnlen(&buffer[pos], length - pos) + 1;
 
     int8_t identity = (int8_t)buffer[pos];
     pos += 1;
@@ -334,22 +348,22 @@ int PgReplMsg::decodeRelation(const char *buffer, int length,
     int16_t num_columns = recvint16(&buffer[pos]);
     pos += 2;
 
-    for (int i = 0; i < num_columns; i++) {
-        MsgRelColumn column;
+    msg.msg.relation.columns = std::make_unique<MsgRelColumn[]>(num_columns);
 
-        column.flags = (int8_t)buffer[pos]; // 0 no flags; 1 key
+    for (int i = 0; i < num_columns; i++) {
+        msg.msg.relation.columns[i].flags = (int8_t)buffer[pos]; // 0 no flags; 1 key
         pos += 1;
 
-        column.column_name = &buffer[pos];
-        pos += strnlen(column.column_name, length - pos);
+        msg.msg.relation.columns[i].column_name = &buffer[pos];
+        pos += strnlen(&buffer[pos], length - pos) + 1;
 
-        column.data_type_id = recvint32(&buffer[pos]);
+        msg.msg.relation.columns[i].oid = recvint32(&buffer[pos]);
         pos += 4;
 
-        column.type_modifier = recvint32(&buffer[pos]);
+        msg.msg.relation.columns[i].type_modifier = recvint32(&buffer[pos]);
         pos += 4;
 
-        msg.msg.relation.columns.push_back(column);
+//        msg.msg.relation.columns.push_back(column);
     }
 
     msg.msg_type = PgReplMsgType::RELATION;
@@ -390,6 +404,7 @@ int PgReplMsg::decodeInsert(const char *buffer, int length,
         // no type present
         // XXX check if this means no tuple to decode...
         new_type = '\0';
+        pos += 1;
     }
 
     pos += decodeTuple(&buffer[pos], length - pos, msg.msg.insert.new_tuple);
@@ -584,10 +599,10 @@ int PgReplMsg::decodeType(const char *buffer, int length,
     pos += 4;
 
     const char *namespace_str = &buffer[pos];
-    pos += strnlen(&buffer[pos], length - pos);
+    pos += strnlen(&buffer[pos], length - pos) + 1;
 
     const char *data_type =  &buffer[pos];
-    pos += strnlen(&buffer[pos], length - pos);
+    pos += strnlen(&buffer[pos], length - pos) + 1;
 
     msg.msg_type = PgReplMsgType::TYPE;
     msg.msg.type.oid = oid;
@@ -595,5 +610,124 @@ int PgReplMsg::decodeType(const char *buffer, int length,
     msg.msg.type.data_type_str = data_type;
 
     return pos;
+}
+
+void PgReplMsg::dumpTuple(const MsgTupleData &tuple,
+                          std::stringstream &ss)
+{
+    for (int i = 0; i < tuple.num_columns; i++) {
+        ss << "  - type=" << tuple.tuple_data[i].type << std::endl;
+        ss << "  - data_len=" << tuple.tuple_data[i].data_len << std::endl;
+    }
+}
+
+std::string PgReplMsg::lsnToStr(const LSN_t lsn)
+{
+    uint32_t lsn_higher = (uint32_t)(lsn>>32);
+    uint32_t lsn_lower = (uint32_t)(lsn);
+
+    return fmt::format("{:X}/{:X}", lsn_higher, lsn_lower);
+}
+
+/**
+ * @brief convert a message to a printable string
+ *
+ * @param msg refernece to message to convert
+ * @return readable string of msg
+ */
+std::string PgReplMsg::dumpMsg(const PgReplMsgDecoded &msg)
+{
+    std::stringstream ss;
+
+    switch(msg.msg_type) {
+        case BEGIN:
+            ss << "BEGIN" << std::endl;
+            ss << "  xid=" << msg.msg.begin.xid << std::endl;
+            ss << "  LSN=" << msg.msg.begin.xact_lsn << " ("
+               << lsnToStr(msg.msg.begin.xact_lsn) << ")\n";
+            break;
+
+        case COMMIT:
+            ss << "COMMIT" << std::endl;
+            ss << "  commit LSN=" << msg.msg.commit.commit_lsn
+               << " (" << lsnToStr(msg.msg.commit.commit_lsn) << ")\n";
+            ss << "  xact LSN=" << msg.msg.commit.xact_lsn
+               << " (" << lsnToStr(msg.msg.commit.xact_lsn) << ")\n";
+            break;
+
+        case RELATION:
+            ss << "RELATION" << std::endl;
+            ss << "  rel_id=" << msg.msg.relation.rel_id << std::endl;
+            ss << "  namespace=" << msg.msg.relation.namespace_str << std::endl;
+            ss << "  rel_name=" << msg.msg.relation.rel_name_str << std::endl;
+
+            ss << "  Columns" << std::endl;
+            for (int i = 0; i < msg.msg.relation.num_columns; i++) {
+                ss << "  - name=" << msg.msg.relation.columns[i].column_name << std::endl;
+                ss << "  - key=" << msg.msg.relation.columns[i].flags << std::endl;
+                ss << "  - oid=" << msg.msg.relation.columns[i].oid << std::endl;
+                ss << "  - type modifier=" << msg.msg.relation.columns[i].type_modifier << std::endl;
+            }
+
+            break;
+
+        case INSERT:
+            ss << "INSERT" << std::endl;
+            ss << "  rel_id=" << msg.msg.insert.rel_id << std::endl;
+            ss << "  New tuples" << std::endl;
+            dumpTuple(msg.msg.insert.new_tuple, ss);
+            break;
+
+        case DELETE:
+            ss << "DELETE";
+            ss << "  rel_id=" << msg.msg.delete_msg.rel_id << std::endl;
+            ss << "  Tuples\n";
+            dumpTuple(msg.msg.delete_msg.tuple, ss);
+            break;
+
+        case UPDATE:
+            ss << "UPDATE";
+            ss << "  rel_id=" << msg.msg.update.rel_id << std::endl;
+            ss << "  Old tuples" << std::endl;
+            dumpTuple(msg.msg.update.old_tuple, ss);
+            ss << "  New tuples" << std::endl;
+            dumpTuple(msg.msg.update.new_tuple, ss);
+            break;
+
+        case TRUNCATE:
+            ss << "TRUNCATE" << std::endl;
+            for (int32_t rel_id: msg.msg.truncate.rel_ids) {
+                ss << "  rel_id=" << rel_id << std::endl;
+            }
+            break;
+
+        case ORIGIN:
+            ss << "ORIGIN" << std::endl;
+            ss << "  commit LSN=" << msg.msg.origin.commit_lsn
+               << " (" << lsnToStr(msg.msg.origin.commit_lsn) << ")\n";
+            ss << "  name=" << msg.msg.origin.name_str << std::endl;
+            break;
+
+        case MESSAGE:
+            ss << "MESSAGE" << std::endl;
+            ss << "  xid=" << msg.msg.message.xid << std::endl;
+            ss << "  LSN=" << msg.msg.message.lsn
+               << " (" << lsnToStr(msg.msg.message.lsn) << ")\n";
+            ss << "  prefix=" << msg.msg.message.prefix_str << std::endl;
+            break;
+
+        case TYPE:
+            ss << "TYPE" << std::endl;
+            ss << "  xid=" << msg.msg.type.xid << std::endl;
+            ss << "  oid=" << msg.msg.type.oid << std::endl;
+            ss << "  namespace=" << msg.msg.type.namespace_str << std::endl;
+            ss << "  data type=" << msg.msg.type.data_type_str << std::endl;
+            break;
+
+        default:
+            break;
+    }
+
+    return ss.str();
 }
 
