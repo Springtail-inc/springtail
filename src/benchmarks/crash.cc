@@ -2,6 +2,7 @@
 
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include <common/common.hh>
 
 void crash(const char *str) {
     std::cout << *str << std::endl;
@@ -12,9 +13,8 @@ void error() {
 }
 
 int main() {
-    // reference the global to force linker to resolve
-    backward::sh.loaded();
-    springtail::init_logging();
+    // initialize the common framework
+    springtail::springtail_init();
 
     std::cout << "Throw!" << std::endl;
     try {

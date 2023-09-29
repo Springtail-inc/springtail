@@ -1,6 +1,6 @@
 # Common library
 
-set(COMMON_LIB_SOURCES exception.cc logging.cc)
+set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc)
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
