@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
-        ("file,o", boost::program_options::value<std::string>(&file)->default_value("wal.log"), "WAL file to process");
+        ("file,f", boost::program_options::value<std::string>(&file)->default_value("wal.log"), "WAL file to process");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
     }
 
     // init with protocol 1
-    PgReplMsg msg(1);
+    st_psql_cdc::PgReplMsg msg(1);
 
     void *buffer = nullptr;
     int max_buffer_len = 0;
@@ -44,14 +44,14 @@ int main(int argc, char* argv[])
     while (true) {
         // read first 4 bytes for length
         int r = std::fread(len_buf, 4, 1, f);
-        int32_t len = recvint32(len_buf);
+        int32_t len = st_psql_cdc::recvint32(len_buf);
 
         if (r <= 0) {
             // eof
             return 0;
         }
 
-        std::cout << "Read buffer of length: " << len;
+        std::cout << "Read buffer of length: " << len << std::endl;
 
         // see if another buffer is required
         if (len > max_buffer_len) {
@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
         // iterate through the messages
         msg.setBuffer((const char *)buffer, len);
         while (msg.hasNextMsg()) {
-            const PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
+            const st_psql_cdc::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
             std::string s = msg.dumpMsg(decoded_msg);
             std::cout << s;
         }

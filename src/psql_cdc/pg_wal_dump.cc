@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     }
 
     // create postgres connection
-    PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
+    st_psql_cdc::PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
 
     std::cout << "Connecting to postgres server: " << host << std::endl;
     int r = pg_conn.connect();
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
     }
 
     // start steaming
-    r = pg_conn.startStreaming(INVALID_LSN);
+    r = pg_conn.startStreaming(st_psql_cdc::INVALID_LSN);
     if (r < 0) {
         std::cerr << "Error: start streaming failed" << std::endl;
         return -1;
@@ -96,9 +96,9 @@ int main(int argc, char* argv[])
 
     // loop through reading data and writing it to disk
     std::cout << "Connection and streaming have started.  Dumping data.\n";
-    PgCopyData data;
+    st_psql_cdc::PgCopyData data;
 
-    PgReplMsg msg(1); // init repl message w/proto vers 1
+    st_psql_cdc::PgReplMsg msg(1); // init repl message w/proto vers 1
 
     while (true) {
         r = pg_conn.readData(data);
@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
 
         // write out length
         char len_buf[4];
-        sendint32(data.length, len_buf);
+        st_psql_cdc::sendint32(data.length, len_buf);
 
         out_fh.write(len_buf, 4);
         out_fh.write(data.buffer, data.length);
@@ -126,7 +126,7 @@ int main(int argc, char* argv[])
             // iterate through the messages
             msg.setBuffer(data.buffer, data.length);
             while (msg.hasNextMsg()) {
-                const PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
+                const st_psql_cdc::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
                 std::string s = msg.dumpMsg(decoded_msg);
                 std::cout << s;
             }
