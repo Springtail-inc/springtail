@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <sys/time.h>
 
-namespace st_psql_cdc
+namespace springtail
 {
     /** Defined by CMake pass in with -D */
     #if !defined(CXX_BYTE_ORDER)

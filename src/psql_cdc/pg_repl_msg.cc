@@ -3,7 +3,7 @@
 
 #include <psql_cdc/pg_repl_msg.hh>
 
-namespace st_psql_cdc
+namespace springtail
 {
     PgReplMsg::PgReplMsg(int proto_version)
       : _proto_version(proto_version) {}

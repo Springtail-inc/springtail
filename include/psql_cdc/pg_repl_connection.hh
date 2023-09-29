@@ -5,7 +5,7 @@
 
 #include <psql_cdc/pg_types.hh>
 
-namespace st_psql_cdc
+namespace springtail
 {
     /**
      * @brief Output data structure used by read data call

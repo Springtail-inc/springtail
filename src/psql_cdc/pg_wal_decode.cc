@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
     }
 
     // init with protocol 1
-    st_psql_cdc::PgReplMsg msg(1);
+    springtail::PgReplMsg msg(1);
 
     void *buffer = nullptr;
     int max_buffer_len = 0;
@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
     while (true) {
         // read first 4 bytes for length
         int r = std::fread(len_buf, 4, 1, f);
-        int32_t len = st_psql_cdc::recvint32(len_buf);
+        int32_t len = springtail::recvint32(len_buf);
 
         if (r <= 0) {
             // eof
@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
         // iterate through the messages
         msg.setBuffer((const char *)buffer, len);
         while (msg.hasNextMsg()) {
-            const st_psql_cdc::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
+            const springtail::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
             std::string s = msg.dumpMsg(decoded_msg);
             std::cout << s;
         }

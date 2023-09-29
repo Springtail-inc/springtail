@@ -2,7 +2,7 @@
 
 #include <psql_cdc/pg_types.hh>
 
-namespace st_psql_cdc
+namespace springtail
 {
     /* Postgres message types, see decode functions in
      * PgReplMsg.cc for formats */

@@ -9,7 +9,7 @@
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 
-namespace st_psql_cdc
+namespace springtail
 {
 
     /** SQL command to set serach path */

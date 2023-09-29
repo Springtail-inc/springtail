@@ -54,12 +54,12 @@ target_link_libraries(pg_wal_decode
 
 if (${MACOSX})
     add_custom_command(TARGET pg_wal_dump POST_BUILD
-        COMMAND ${PROJECT_SOURCE_DIR}/build_utils/mac_enable_core.sh pg_wal_dump
+        COMMAND ${PROJECT_SOURCE_DIR}/build_scripts/mac_enable_core.sh pg_wal_dump
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Enabling core dumps...pg_wal_dump")
 
     add_custom_command(TARGET pg_wal_decode POST_BUILD
-        COMMAND ${PROJECT_SOURCE_DIR}/build_utils/mac_enable_core.sh pg_wal_dump
+        COMMAND ${PROJECT_SOURCE_DIR}/build_scripts/mac_enable_core.sh pg_wal_dump
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Enabling core dumps...pg_wal_decode")
 
