@@ -13,11 +13,11 @@ namespace st_psql_cdc
 {
 
     /** SQL command to set serach path */
-    const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
+    static const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
         "SELECT pg_catalog.set_config('search_path', '', false);";
 
     /** SQL command to fetch current LSN from server */
-    const char *CURRENT_LSN_SQL = "SELECT pg_current_wal_lsn()";
+    static const char *CURRENT_LSN_SQL = "SELECT pg_current_wal_lsn()";
 
     /**
      * @brief Constructor
