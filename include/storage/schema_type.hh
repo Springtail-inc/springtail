@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace st_storage {
+namespace springtail {
 
     /** The available types for fields. */
     enum class SchemaType : uint8_t {

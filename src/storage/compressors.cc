@@ -1,7 +1,7 @@
-#include <exception.hh>
+#include <storage/exception.hh>
 #include <storage/compressors.hh>
 
-namespace st_storage {
+namespace springtail {
     Lz4Compressor::Lz4Compressor()
     {
         _lz4_stream = LZ4_createStream();
@@ -36,8 +36,7 @@ namespace st_storage {
                                                       src.data(), dst.data() + offset + 8,
                                                       src.size(), target_size, 1);
         if (dst_size <= 0) {
-            BOOST_THROW_EXCEPTION(ErrorCompressor()
-                                  << ErrorMessage("Unable to compress the data."));
+            throw CompressionStorageError();
         }
 
         // save the original data size and compressed data size
@@ -82,12 +81,10 @@ namespace st_storage {
         // decompress the block
         int size = LZ4_decompress_safe_continue(_lz4_stream, src, dst.data(), src_size, dst_size);
         if (size <= 0) {
-            BOOST_THROW_EXCEPTION(ErrorCompressor()
-                                  << ErrorMessage("Unable to decompress the data."));
+            throw DecompressionStorageError();
         }
         if (size != dst_size) {
-            BOOST_THROW_EXCEPTION(ErrorCompressor()
-                                  << ErrorMessage("Decompressed size mis-match."));
+            throw DecompressionStorageError();
         }
 
         // read the full compressed data and 2 4-byte sizes

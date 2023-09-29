@@ -1,9 +1,7 @@
-#include <tao/json.hpp>
-
-#include <schema/schema_column.hh>
+#include <storage/schema_column.hh>
 #include <storage/field.hh>
 
-namespace st_storage {
+namespace springtail {
 
     //// SchemaColumn
 

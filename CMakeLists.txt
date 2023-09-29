@@ -28,12 +28,14 @@ include_directories(/usr/local/include)
 
 find_package(Psql)
 find_package(Backward CONFIG REQUIRED)
+find_package(spdlog)
 # find_package(Boost REQUIRED boost-program-options)
 
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
 
 add_subdirectory(src/common)
+add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
 
 ## Messages keep at end of file

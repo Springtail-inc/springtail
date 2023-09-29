@@ -5,7 +5,7 @@
 #include <storage/compressors.hh>
 #include <storage/extent.hh>
 
-namespace st_storage {
+namespace springtail {
     /** Provides the interface for a single datafile. */
     class Datafile {
     public: // constants
@@ -67,5 +67,3 @@ namespace st_storage {
         void close();
     };
 }
-
-#endif // __CIRCLE__DATAFILE_HH__

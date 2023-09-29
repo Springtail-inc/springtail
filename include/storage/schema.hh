@@ -6,7 +6,7 @@
 
 #include "schema_column.hh"
 
-namespace st_storage {
+namespace springtail {
     // pre-declare classes
     class Field;
 
@@ -59,10 +59,9 @@ namespace st_storage {
          *
          *  @param name The name of the column.
          *  @param details The details of the column (type, nullable, default value, etc.).
-         *  @return The column index for the new column.
          */
-        uint32_t add_column(const std::string &name,
-                            const SchemaColumnDetails &details);
+        void add_column(const std::string &name,
+                        const SchemaColumnDetails &details);
 
         /** Removes a column from the schema.
          * 

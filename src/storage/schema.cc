@@ -1,8 +1,10 @@
+#include <fmt/core.h>
+
 #include <storage/exception.hh>
 #include <storage/schema.hh>
 #include <storage/field.hh>
 
-namespace st_storage {
+namespace springtail {
 
     Schema::Schema(uint64_t id)
         : _bool_bit_pos(0),
@@ -15,8 +17,8 @@ namespace st_storage {
     Schema::Schema(const Schema &schema)
         : _bool_bit_pos(schema._bool_bit_pos),
           _null_bit_pos(schema._null_bit_pos),
-          _id(schema._id),
-          _columns(schema._columns)
+          _columns(schema._columns),
+          _id(schema._id)
     {
         // intentionally empty
     }
@@ -66,8 +68,8 @@ namespace st_storage {
 
         case SchemaType::DECIMAL128:
         default:
-            BOOST_THROW_EXCEPTION(ErrorSchema()
-                                  << ErrorMessage("Unsupported SchemaColumn type" + std::to_string((int)details.type())));
+            std::cerr << fmt::format("Unsupported SchemaColumn type {:d}", static_cast<int>(details.type())) << std::endl;
+            throw BadTypeSchemaError();
         }
     }
 
@@ -82,7 +84,7 @@ namespace st_storage {
         }
 
         // construct the column based on the details
-        std::shared_ptr<SchemaColumn> column = _create_column(name, details);
+        std::shared_ptr<SchemaColumn> column = _create_column(details);
 
         // add the column
         _name_map[name] = _columns.size();
@@ -93,13 +95,18 @@ namespace st_storage {
     }
 
     void
-    Schema::remove_column(uint32_t column_index)
+    Schema::remove_column(const std::string &name)
     {
-        std::shared_ptr<SchemaColumn> column = _columns[column_index];
+        auto &&i = _name_map.find(name);
+        if (i == _name_map.end()) {
+            throw ColumnExistsSchemaError();
+        }
+
+        std::shared_ptr<SchemaColumn> column = _columns[i->second];
 
         // remove the references to the column
-        _columns.erase(column_index);
-        _name_map.erase(column->name);
+        _columns.erase(_columns.begin() + i->second);
+        _name_map.erase(i);
 
         // update the column positions
         _update_positions();
@@ -115,7 +122,7 @@ namespace st_storage {
         if (i == _name_map.end()) {
             throw ColumnNotExistsSchemaError();
         }
-        std::shared_ptr<SchemaColumn> column = i->second;
+        std::shared_ptr<SchemaColumn> column = _columns[i->second];
 
         // check for rename
         if (from != to) {
@@ -126,9 +133,9 @@ namespace st_storage {
             }
 
             // rename the column
-            _name_map.erase(from);
-            _name_map[to] = column;
-            column->name = to;
+            uint32_t index = i->second;
+            _name_map.erase(i);
+            _name_map[to] = index;
         }
 
         // XXX alter the column details
@@ -141,14 +148,12 @@ namespace st_storage {
     std::shared_ptr<Field>
     Schema::get_field(const std::string &name)
     {
-        std::shared_ptr<SchemaColumn> column;
-
         // get the column details
         auto &&i = _name_map.find(name);
         if (i == _name_map.end()) {
             throw ColumnNotExistsSchemaError();
         }
-        std::shared_ptr<SchemaColumn> column = i->second;
+        std::shared_ptr<SchemaColumn> column = _columns[i->second];
         
         // return the field accessor for this column
         return column->get_field(_bool_bit_pos, _null_bit_pos);

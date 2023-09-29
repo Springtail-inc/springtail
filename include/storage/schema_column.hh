@@ -6,9 +6,9 @@
 #include <variant>
 
 #include <storage/exception.hh>
-#include "schema_type.hh"
+#include <storage/schema_type.hh>
 
-namespace st_storage {
+namespace springtail {
     // pre-declare classes
     class Field;
 

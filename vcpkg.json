@@ -4,6 +4,8 @@
         "libpq",
         "boost-program-options",
         "fmt",
-        "backward-cpp"
+        "backward-cpp",
+        "cityhash",
+        "spdlog"
     ]
 }

@@ -1,6 +1,6 @@
 #include <chrono>
 
-namespace st_common {
+namespace springtail {
 
     /**
      * Tracks elapsed time.  Repeated calls to start()/stop() will result in cumulative elapsed time.

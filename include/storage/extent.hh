@@ -6,10 +6,10 @@
 
 #include <city.h>
 
-#include <schema/schema.hh>
+#include <storage/schema.hh>
 #include <storage/compressors.hh>
 
-namespace st_storage {
+namespace springtail {
     // pre-declare classes to avoid circular dependencies
     class Field;
     class CompressedExtent;
@@ -54,6 +54,7 @@ namespace st_storage {
             }
         };
 
+        /** Interface to read a row in an extent. */
         class Row {
         public:
             const Extent * const extent;
@@ -72,6 +73,7 @@ namespace st_storage {
             { }
         };
 
+        /** Iterator over the rows in an extent. */
         class Iterator {
             // to allow use of the private constructor
             friend Extent;
@@ -109,26 +111,29 @@ namespace st_storage {
             Iterator operator-(difference_type n) const { Iterator tmp = *this; tmp -= n; return tmp; }
         };
 
+        /** Returns an iterator to the first row of the extent. */
         Iterator begin() const {
             return Iterator(this, _fixed_data.data());
         }
 
+        /** Returns an iterator that matches the end of the extent. */
         Iterator end() const {
             return Iterator(this, _fixed_data.data() + _fixed_data.size());
         }
 
     private: // types
+        /** Definition of the extent header. */
         struct ExtentHeader {
             uint64_t schema_id;
             uint64_t commit_id;
 
-            // for uncommitted extents
+            /** Constructor for uncommitted extents.*/
             ExtentHeader(uint64_t schema_id)
                 : schema_id(schema_id),
                   commit_id(0)
             { }
 
-            // deserialize the header
+            /** Constructor that deserializes the header. */
             ExtentHeader(const std::vector<char> &data)
             {
                 std::copy_n(data.data(), sizeof(uint64_t),
@@ -137,7 +142,7 @@ namespace st_storage {
                             reinterpret_cast<char *>(&commit_id));
             }
 
-            // serialize the header
+            /** Serialize the header. */
             std::vector<char> pack()
             {
                 std::vector<char> data(8);
@@ -179,27 +184,24 @@ namespace st_storage {
               _variable_data(variable)
         {
             // XXX get the schema based on the schema ID
-            std::shared_ptr<Schema> schema = schema_mgr->get_schema(_header.schema_id);
-            _row_size = schema->row_size();
+            // std::shared_ptr<Schema> schema = schema_mgr->get_schema(_header.schema_id);
+            // _row_size = schema->row_size();
         }
 
         Extent(const std::vector<char> &header,
                std::vector<char> &fixed,
-               std::vector<char> &variable,
-               std::vector<char> &untyped,
-               const std::vector<char> &keys)
-            : _header(header),
-              _next_untyped_key(1)
+               std::vector<char> &variable)
+            : _header(header)
         {
             _fixed_data.swap(fixed);
             _variable_data.swap(variable);
 
             // XXX get the schema based on the schema ID
-            std::shared_ptr<Schema> schema = schema_mgr->get_schema(_header.schema_id);
-            _row_size = schema->row_size();
+            // std::shared_ptr<Schema> schema = schema_mgr->get_schema(_header.schema_id);
+            // _row_size = schema->row_size();
         }
 
-        std::shared_ptr<Field> get_field(const std::vector<std::string> &column) {
+        std::shared_ptr<Field> get_field(const std::string &column) {
             return _schema->get_field(column);
         }
 

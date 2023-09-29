@@ -1,8 +1,8 @@
-#include <common/logging.hh>
+// #include <common/logging.hh>
 #include <storage/compressors.hh>
 #include <storage/extent.hh>
 
-namespace st_storage {
+namespace springtail {
 
     std::shared_ptr<CompressedExtent>
     Extent::compress(std::shared_ptr<Compressor> compressor)
@@ -25,13 +25,11 @@ namespace st_storage {
         uint32_t checksum = CityHash32(reinterpret_cast<char *>(compressed_data.data()), compressed_data.size() - 4);
         std::copy_n(reinterpret_cast<char *>(&checksum), sizeof(uint32_t), compressed_data.data() + offset);
 
-        CIRCLE_LOG_DEBUG << "compress()" << std::endl
-                         << "\t" << _fixed_data.size() << std::endl
-                         << "\t" << _variable_data.size() << std::endl
-                         << "\t" << _untyped_data.size() << std::endl
-                         << "\t" << untyped_keys.size() << std::endl
-                         << "\t" << checksum << std::endl
-                         << "\tcompressed size: " << compressed_data.size() << std::endl;
+        std::cerr << "compress()" << std::endl
+                  << "\t" << _fixed_data.size() << std::endl
+                  << "\t" << _variable_data.size() << std::endl
+                  << "\t" << checksum << std::endl
+                  << "\tcompressed size: " << compressed_data.size() << std::endl;
 
         return std::make_shared<CompressedExtent>(compressed_data);
     }
@@ -47,8 +45,8 @@ namespace st_storage {
         if (verify_checksum) {
             uint32_t c = CityHash32(reinterpret_cast<char *>(_data.data()), _data.size() - 4);
             if (c != checksum) {
-                BOOST_THROW_EXCEPTION(ErrorDatafile()
-                                      << ErrorMessage("Checksum mis-match"));
+                std::cerr << "Checksum mis-match" << std::endl;
+                throw ValidationStorageError();
             }
         }
 

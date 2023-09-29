@@ -1,8 +1,8 @@
-#include <common/logging.hh>
+// #include <common/logging.hh>
 #include <storage/field.hh>
 #include <storage/datafile.hh>
 
-namespace st_storage {
+namespace springtail {
 
     void
     Datafile::create()

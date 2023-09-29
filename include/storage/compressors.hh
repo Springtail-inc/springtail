@@ -3,7 +3,7 @@
 #include <lz4.h>
 #include <vector>
 
-namespace st_storage {
+namespace springtail {
     /** Interface for compression objects. */
     class Compressor {
     public:
