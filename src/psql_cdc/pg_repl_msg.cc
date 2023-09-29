@@ -128,6 +128,18 @@ namespace springtail
      */
     int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
     {
+        /*
+            TupleData
+            Int16  Number of columns.
+            Next, one of the following submessages appears for each column (except generated columns):
+                Byte1('n') Identifies the data as NULL value. (no more data sent)
+            Or
+                Byte1('u') Identifies unchanged TOASTed value (the actual value is not sent).
+            Or
+                Byte1('t') Identifies the data as text formatted value.
+                Int32 Length of the column value.
+                Byten The value of the column, in text format. (A future release might support additional formats.) n is the above length.
+         */
         int pos = 0;
 
         tuple.num_columns = recvint16(&buffer[pos]);
@@ -136,18 +148,21 @@ namespace springtail
         tuple.tuple_data.resize(tuple.num_columns);
 
         for (int i = 0; i < tuple.num_columns; i++) {
-            char type = buffer[pos];
+            tuple.tuple_data[i].type = buffer[pos];
             pos += 1;
 
-            int32_t data_len = recvint32(&buffer[pos]);
+            if (tuple.tuple_data[i].type == 'n' ||
+                tuple.tuple_data[i].type == 'u') {
+                tuple.tuple_data[i].data_len = 0;
+                tuple.tuple_data[i].data = nullptr;
+                continue;
+            }
+
+            tuple.tuple_data[i].data_len = recvint32(&buffer[pos]);
             pos += 4;
 
-            const char *data = &buffer[pos];
-            pos += data_len;
-
-            tuple.tuple_data[i].type = type;
-            tuple.tuple_data[i].data_len = data_len;
-            tuple.tuple_data[i].data = data;
+            tuple.tuple_data[i].data = &buffer[pos];
+            pos += tuple.tuple_data[i].data_len;
         }
 
         return pos;
@@ -346,7 +361,7 @@ namespace springtail
         relation.columns.resize(relation.num_columns);
 
         for (int i = 0; i < relation.num_columns; i++) {
-            relation.columns[i].flags = (int8_t)buffer[pos]; // 0 no flags; 1 key
+            relation.columns[i].flags = *((int8_t *)&buffer[pos]); // 0 no flags; 1 key
             pos += 1;
 
             relation.columns[i].column_name = &buffer[pos];
@@ -653,11 +668,10 @@ namespace springtail
                 ss << "  Columns" << std::endl;
                 for (int i = 0; i < relation.num_columns; i++) {
                     ss << "  - name=" << relation.columns[i].column_name << std::endl;
-                    ss << "  - key=" << relation.columns[i].flags << std::endl;
+                    ss << "  - key=" << (relation.columns[i].flags == 1) << std::endl;
                     ss << "  - oid=" << relation.columns[i].oid << std::endl;
                     ss << "  - type modifier=" << relation.columns[i].type_modifier << std::endl;
                 }
-
                 break;
             }
 
