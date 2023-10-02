@@ -42,6 +42,7 @@ namespace springtail
         char msg_type = _buffer[0];
         int pos = 0;
 
+        // initialize internal decoded message structure
         initMsg();
 
         switch(msg_type) {
@@ -92,11 +93,13 @@ namespace springtail
             case MSG_STREAM_COMMIT:
             case MSG_STREAM_ABORT:
                 std::cerr << "Streaming not supported";
-                return _decoded_msg;
+                pos = -1;
+                break;
 
             default: // unknown/unhandled
                 std::cerr << "Unknown opcode to decode: " << msg_type << std::endl;
-                return _decoded_msg;
+                pos = -1;
+                break;
         }
 
         // sanity check
@@ -104,9 +107,19 @@ namespace springtail
             std::cerr << "Buffer overrun in decode: consumed="
                       << pos << ", bytes available=" << _buffer_length << std::endl;
 
-            initMsg();
-            _buffer = nullptr;
-            _buffer_length = 0;
+            setBuffer(nullptr, 0);
+            /* Note: an error here will really require closing and re-opening the
+             * replication stream to try and re-read the data */
+
+            return _decoded_msg;
+        }
+
+        // error decoding occured, bail...
+        if (pos == -1) {
+            std::cerr << "Error decoding buffer\n";
+            setBuffer(nullptr, 0);
+            /* Note: an error here will really require closing and re-opening the
+             * replication stream to try and re-read the data */
 
             return _decoded_msg;
         }
@@ -119,6 +132,38 @@ namespace springtail
 
 
     /**
+     * @brief decode string from buffer given max length; check for null terminating char
+     *
+     * @param buffer input buffer
+     * @param length length of input buffer
+     * @param str_out output string (set to input_buffer on success, null on error)
+     * @return length of string, -1 on error
+     */
+    int PgReplMsg::decodeString(const char *buffer, int length, const char **str_out)
+    {
+        int len = strnlen(buffer, length);
+        int null_offset = 0;
+
+        if (len == length) {
+            // probably not a valid string, as strings need to be null terminated
+            // and strlen doesn't include the null char in the length
+            null_offset = len;
+        } else {
+            null_offset = len + 1;
+        }
+
+        if (buffer[null_offset] != '\0') {
+            *str_out = nullptr;
+            std::cerr << "Error decoding string\n";
+            return -1;
+        }
+
+        *str_out = buffer;
+        return null_offset;
+    }
+
+
+    /**
      * @brief Decode tuple data within a message
      *
      * @param buffer pointer to a buffer
@@ -126,7 +171,7 @@ namespace springtail
      * @param tuple tuple struct to hold output
      * @return number of bytes consumed
      */
-    int decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
+    int PgReplMsg::decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
     {
         /*
             TupleData
@@ -207,8 +252,12 @@ namespace springtail
         message.lsn = recvint64(&buffer[pos]);
         pos += 8;
 
-        message.prefix_str = &buffer[pos];
-        pos += strnlen(&buffer[pos], length-pos) + 1;
+
+        int str_len = decodeString(&buffer[pos], length - pos, &message.prefix_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
         message.data_len = recvint32(&buffer[pos]);
         pos += 4;
@@ -240,8 +289,11 @@ namespace springtail
         origin.commit_lsn = recvint64(&buffer[pos]);
         pos += 8;
 
-        origin.name_str = &buffer[pos];
-        pos += strnlen(&buffer[pos], length - pos) + 1;
+        int str_len = decodeString(&buffer[pos], length - pos, &origin.name_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
         msg.msg_type = PgReplMsgType::ORIGIN;
         msg.msg.emplace<MsgOrigin>(origin);
@@ -346,11 +398,17 @@ namespace springtail
         relation.rel_id = recvint32(&buffer[pos]);
         pos += 4;
 
-        relation.namespace_str = &buffer[pos];
-        pos += strnlen(&buffer[pos], length - pos) + 1;
+        int str_len = decodeString(&buffer[pos], length - pos, &relation.namespace_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
-        relation.rel_name_str = &buffer[pos];
-        pos += strnlen(&buffer[pos], length - pos) + 1;
+        str_len = decodeString(&buffer[pos], length - pos, &relation.rel_name_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
         relation.identity = (int8_t)buffer[pos];
         pos += 1;
@@ -364,8 +422,11 @@ namespace springtail
             relation.columns[i].flags = *((int8_t *)&buffer[pos]); // 0 no flags; 1 key
             pos += 1;
 
-            relation.columns[i].column_name = &buffer[pos];
-            pos += strnlen(&buffer[pos], length - pos) + 1;
+            str_len = decodeString(&buffer[pos], length - pos, &relation.columns[i].column_name);
+            if (str_len == -1) {
+                return -1;
+            }
+            pos += str_len;
 
             relation.columns[i].oid = recvint32(&buffer[pos]);
             pos += 4;
@@ -599,11 +660,17 @@ namespace springtail
         type.oid = recvint32(&buffer[pos]);
         pos += 4;
 
-        type.namespace_str = &buffer[pos];
-        pos += strnlen(&buffer[pos], length - pos) + 1;
+        int str_len = decodeString(&buffer[pos], length - pos, &type.namespace_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
-        type.data_type_str =  &buffer[pos];
-        pos += strnlen(&buffer[pos], length - pos) + 1;
+        str_len = decodeString(&buffer[pos], length - pos, &type.data_type_str);
+        if (str_len == -1) {
+            return -1;
+        }
+        pos += str_len;
 
         msg.msg_type = PgReplMsgType::TYPE;
         msg.msg.emplace<MsgType>(type);

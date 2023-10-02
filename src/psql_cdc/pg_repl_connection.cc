@@ -644,29 +644,32 @@ namespace springtail
         PQfreemem(slot_name);
 
         // process results
-        if (PQresultStatus(res) == PGRES_TUPLES_OK) {
-            if (PQntuples(res) != 1 || PQnfields(res) != 4) {
-                std::cerr << "Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows="
-                     <<  PQntuples(res) << " cols=" << PQnfields(res) << std::endl;
-            } else {
-                slot_name = PQgetvalue(res, 0, 0);
-                // char *consistent_point = PQgetvalue(res, 0, 1); // XXX/XXX earliest LSN for streaming
-                char *snapshot_name = PQgetvalue(res, 0, 2);
-                // char *output_plugin = PQgetvalue(res, 0, 3);  // unused
-
-                // save export name in class
-                _export_name = std::string(snapshot_name);
-
-                PQclear(res);
-
-                return 0;
-            }
-        } else {
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             std::cerr << "Error executing CREATE_REPLICATION_SLOT: " << PQerrorMessage(_connection) << std::endl;
+            PQclear(res);
+            return -1;
         }
 
+        // check result number of tuples and columns
+        if (PQntuples(res) != 1 || PQnfields(res) != 4) {
+            std::cerr << "Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows="
+                      <<  PQntuples(res) << " cols=" << PQnfields(res) << std::endl;
+            PQclear(res);
+            return -1;
+        }
+
+        slot_name = PQgetvalue(res, 0, 0);
+
+        // char *consistent_point = PQgetvalue(res, 0, 1); // XXX/XXX earliest LSN for streaming
+        char *snapshot_name = PQgetvalue(res, 0, 2);
+        // char *output_plugin = PQgetvalue(res, 0, 3);  // unused
+
+        // save export name in class
+        _export_name = std::string(snapshot_name);
+
         PQclear(res);
-        return -1;
+
+        return 0;
     }
 
 

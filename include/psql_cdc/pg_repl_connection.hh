@@ -24,16 +24,19 @@ namespace springtail
     class PgReplConnection
     {
     private:
-        // timeout between keep alive messages
+        /** timeout between keep alive messages */
         static const int64_t STANDBY_MSG_INTERVAL_MSEC = 30000L;
-        // timeout for an idle slot -- no lsn received; fast forward stream
+        /** timeout for an idle slot -- no lsn received; fast forward stream */
         static const int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
-        // read timeout for copy data
+        /** read timeout for copy data */
         static const int     READ_TIMEOUT_SEC = 10;
 
         // Message constants
+        /** Standby message identifier */
         static const char MSG_STANDBY_STATUS = 'r';
+        /** Keep alive message identifier */
         static const char MSG_KEEP_ALIVE = 'k';
+        /** XLOG data message identifier */
         static const char MSG_XLOG_DATA = 'w';
 
         int _db_port;
@@ -45,34 +48,33 @@ namespace springtail
         std::string _slot_name;
         std::string _export_name;
 
-        // remote server version
+        /** remote server version */
         int _server_version;
 
-        // remote protocol version; only support 1 for now
+        /** remote protocol version; only support 1 for now */
         int _proto_version;
 
         bool _started_streaming = false;
 
         PGconn *_connection = nullptr;
 
-        // buffer allocated for copy data
-        // will be released on subsequent read calls
+        /** buffer allocated for copy data, will be released on subsequent read calls */
         char *_copy_buffer = nullptr;
         int _copy_buffer_offset = 0;
         int _copy_buffer_length = 0;
 
-        // last flushed lsn
+        /** last flushed lsn */
         LSN_t _last_flushed_lsn = INVALID_LSN;
-        // last received lsn from data copy (from wal_start)
+        /** last received lsn from data copy (from wal_start) */
         LSN_t _last_received_lsn = INVALID_LSN;
-        // servers latest lsn (from wal_end)
+        /** servers latest lsn (from wal_end) */
         LSN_t _server_latest_lsn = INVALID_LSN;
 
-        // last time copy data received
+        /** last time copy data received */
         int64_t _last_received_time;
-        // last time status was sent
+        /** last time status was sent */
         int64_t _last_status_time;
-        // last time data was flushed
+        /** last time data was flushed */
         int64_t _last_flushed_time;
 
         /**

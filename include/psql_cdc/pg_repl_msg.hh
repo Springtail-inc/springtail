@@ -187,6 +187,8 @@ namespace springtail
         static int decodeCopyData(const char *buffer, int length, PgReplMsgDecoded &msg);
         static int decodeXlogHeader(const char *buffer, int length, PgReplMsgDecoded &msg);
         static int decodeType(const char *buffer, int length, PgReplMsgDecoded &msg);
+        static int decodeTuple(const char *buffer, int length, MsgTupleData &tuple);
+        static int decodeString(const char *buffer, int length, const char** str_out);
 
         static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss);
 
