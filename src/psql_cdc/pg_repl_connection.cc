@@ -36,16 +36,14 @@ namespace springtail
                                        const std::string &db_pass,
                                        const std::string &pub_name,
                                        const std::string &slot_name)
-
-    {
-        _db_host = db_host;
-        _db_port = db_port;
-        _db_name = db_name;
-        _db_user = db_user;
-        _db_pass = db_pass;
-        _pub_name = pub_name;
-        _slot_name = slot_name;
-    }
+        : _db_port(db_port),
+          _db_host(db_host),
+          _db_name(db_name),
+          _db_user(db_user),
+          _db_pass(db_pass),
+          _pub_name(pub_name),
+          _slot_name(slot_name)
+    {}
 
     /**
      * @brief Destructor

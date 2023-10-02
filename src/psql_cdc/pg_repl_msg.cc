@@ -89,11 +89,19 @@ namespace springtail
                 break;
 
             case MSG_STREAM_START:
+                pos = decodeStreamStart(_buffer, _buffer_length, _decoded_msg);
+                break;
+
             case MSG_STREAM_STOP:
+                pos = decodeStreamStop(_buffer, _buffer_length, _decoded_msg);
+                break;
+
             case MSG_STREAM_COMMIT:
+                pos = decodeStreamCommit(_buffer, _buffer_length, _decoded_msg);
+                break;
+
             case MSG_STREAM_ABORT:
-                std::cerr << "Streaming not supported";
-                pos = -1;
+                pos = decodeStreamAbort(_buffer, _buffer_length, _decoded_msg);
                 break;
 
             default: // unknown/unhandled
@@ -239,12 +247,12 @@ namespace springtail
 
         int pos = 1;
 
-    /*
-        int32_t xid = recvint32(&buffer[pos]);  // only version 2
-        pos += 4;
-    */
-
         MsgMessage message;
+
+        if (_proto_version > 1) {
+            message.xid = recvint32(&buffer[pos]);  // only version 2
+            pos += 4;
+        }
 
         message.flags = (int8_t)buffer[pos];
         pos += 1;
@@ -388,12 +396,12 @@ namespace springtail
 
         int pos = 1;
 
-        /*
-        int32_t xid = recvint32(&buffer[pos]);     // only present in v2
-        pos += 4;
-        */
-
         MsgRelation relation;
+
+        if (_proto_version > 1) {
+            relation.xid = recvint32(&buffer[pos]);     // only present in v2
+            pos += 4;
+        }
 
         relation.rel_id = recvint32(&buffer[pos]);
         pos += 4;
@@ -454,12 +462,12 @@ namespace springtail
         */
         int pos = 1;
 
-        /*
-        int32_t xid = recvint32(&buffer[pos]);     // only present in v2
-        pos += 4;
-        */
-
         MsgInsert insert;
+
+        if (_proto_version > 1) {
+            insert.xid = recvint32(&buffer[pos]);     // only present in v2
+            pos += 4;
+        }
 
         insert.rel_id = recvint32(&buffer[pos]);
         pos += 4;
@@ -509,12 +517,13 @@ namespace springtail
         */
 
         int pos = 1;
-        /*
-        int32_t xid = recvint32(&buffer[pos]);     // only present in v2
-        pos += 4;
-        */
 
         MsgUpdate update;
+
+        if (_proto_version > 1) {
+            update.xid = recvint32(&buffer[pos]);     // only present in v2
+            pos += 4;
+        }
 
         update.rel_id = recvint32(&buffer[pos]);
         pos += 4;
@@ -569,12 +578,12 @@ namespace springtail
 
         int pos = 1;
 
-        /*
-        int32_t xid = recvint32(&buffer[pos]);     // only present in v2
-        pos += 4;
-        */
-
         MsgDelete delete_msg;
+
+        if (_proto_version > 1) {
+            delete_msg.xid = recvint32(&buffer[pos]);     // only present in v2
+            pos += 4;
+        }
 
         delete_msg.rel_id = recvint32(&buffer[pos]);
         pos += 4;
@@ -610,12 +619,12 @@ namespace springtail
 
         int pos = 1;
 
-        /*
-        int32_t xid = recvint32(&buffer[pos]);     // only present in v2
-        pos += 4;
-        */
-
         MsgTruncate truncate;
+
+        if (_proto_version > 1) {
+            truncate.xid = recvint32(&buffer[pos]);     // only present in v2
+            pos += 4;
+        }
 
         truncate.num_rels = recvint32(&buffer[pos]);
         pos += 4;
@@ -650,12 +659,12 @@ namespace springtail
 
         int pos = 1;
 
-        /*
-        int32_t xid = recvint32(&buffer[pos]); // only version 2+
-        pos += 4;
-        */
-
         MsgType type;
+
+        if (_proto_version > 1) {
+            type.xid = recvint32(&buffer[pos]); // only version 2+
+            pos += 4;
+        }
 
         type.oid = recvint32(&buffer[pos]);
         pos += 4;
@@ -677,6 +686,155 @@ namespace springtail
 
         return pos;
     }
+
+
+    /**
+     * @brief Stream start message
+     *
+     * @param buffer input buffer
+     * @param length input buffer length
+     * @param msg output message
+     * @return number of bytes consumed
+     */
+    int PgReplMsg::decodeStreamStart(const char *buffer, int length, PgReplMsgDecoded &msg)
+    {
+        /*
+            Byte1('S')  Identifies the message as a stream start message.
+            Int32       Xid of the transaction.
+            Int8_t      A value of 1 indicates this is the first stream segment for this XID, 0 for any other stream segment.
+        */
+
+        int pos = 1;
+
+        MsgStreamStart stream_start;
+
+        stream_start.xid = recvint32(&buffer[pos]);
+        pos += 4;
+
+        stream_start.first = ((int8_t)buffer[pos] == 1);
+        pos += 1;
+
+        msg.msg_type = PgReplMsgType::STREAM_START;
+        msg.msg.emplace<MsgStreamStart>(stream_start);
+
+        return pos;
+    }
+
+
+    /**
+     * @brief Stream stop message
+     *
+     * @param buffer input buffer
+     * @param length input buffer length
+     * @param msg output message
+     * @return number of bytes consumed
+     */
+    int PgReplMsg::decodeStreamStop(const char *buffer, int length, PgReplMsgDecoded &msg)
+    {
+        /*
+            Byte1('E')  Identifies the message as a stream stop message.
+        */
+
+        int pos = 1;
+
+        MsgStreamStop stream_stop;
+
+        msg.msg_type = PgReplMsgType::STREAM_STOP;
+        msg.msg.emplace<MsgStreamStop>(stream_stop);
+
+        return pos;
+    }
+
+
+    /**
+     * @brief Stream commit message
+     *
+     * @param buffer input buffer
+     * @param length input buffer length
+     * @param msg output message
+     * @return number of bytes consumed
+     */
+    int PgReplMsg::decodeStreamCommit(const char *buffer, int length, PgReplMsgDecoded &msg)
+    {
+        /*
+            Byte1('c')  Identifies the message as a stream commit message.
+            Int32       Xid of the transaction.
+            Int8(0)     Flags; currently unused.
+            Int64       The LSN of the commit.
+            Int64       The end LSN of the transaction.
+            Int64       Commit timestamp of the transaction. The value is in number of
+                        microseconds since PostgreSQL epoch (2000-01-01).
+        */
+
+        int pos = 1;
+
+        MsgStreamCommit stream_commit;
+
+        stream_commit.xid = recvint32(&buffer[pos]);
+        pos += 4;
+
+        // skip flags
+        pos += 1;
+
+        stream_commit.commit_lsn = recvint64(&buffer[pos]);
+        pos += 8;
+
+        stream_commit.xact_lsn = recvint64(&buffer[pos]);
+        pos += 8;
+
+        stream_commit.commit_ts = recvint64(&buffer[pos]);
+        pos += 8;
+
+        msg.msg_type = PgReplMsgType::STREAM_COMMIT;
+        msg.msg.emplace<MsgStreamCommit>(stream_commit);
+
+        return pos;
+    }
+
+
+    /**
+     * @brief Stream abort message
+     *
+     * @param buffer input buffer
+     * @param length input buffer length
+     * @param msg output message
+     * @return number of bytes consumed
+     */
+    int PgReplMsg::decodeStreamAbort(const char *buffer, int length, PgReplMsgDecoded &msg)
+    {
+        /*
+            Byte1('A')  Identifies the message as a stream abort message.
+            Int32       Xid of the transaction.
+            Int32       Xid of the subtransaction (will be same as xid of the transaction for top-level transactions).
+            Int64       The LSN of the abort. This field is available since protocol version 4.
+            Int64       Abort timestamp of the transaction. The value is in number of
+                        microseconds since PostgreSQL epoch (2000-01-01). This field is available
+                        since protocol version 4.
+        */
+        int pos = 1;
+
+        MsgStreamAbort stream_abort;
+
+        stream_abort.xid = recvint32(&buffer[pos]);
+        pos += 4;
+
+        stream_abort.sub_xid = recvint32(&buffer[pos]);
+        pos += 4;
+
+        if (_proto_version > 3) {
+            stream_abort.abort_lsn = recvint64(&buffer[pos]);
+            pos += 8;
+
+            stream_abort.abort_ts = recvint64(&buffer[pos]);
+            pos += 8;
+        }
+
+        msg.msg_type = PgReplMsgType::STREAM_ABORT;
+        msg.msg.emplace<MsgStreamAbort>(stream_abort);
+
+        return pos;
+    }
+
 
     void PgReplMsg::dumpTuple(const MsgTupleData &tuple,
                               std::stringstream &ss)
@@ -806,6 +964,38 @@ namespace springtail
                 ss << "  oid=" << type.oid << std::endl;
                 ss << "  namespace=" << type.namespace_str << std::endl;
                 ss << "  data type=" << type.data_type_str << std::endl;
+                break;
+            }
+
+            case STREAM_START: {
+                MsgStreamStart start = std::get<MsgStreamStart>(msg.msg);
+                ss << "\nSTREAM START" << std::endl;
+                ss << "  xid=" << start.xid << std::endl;
+                ss << "  first=" << start.first << std::endl;
+                break;
+            }
+
+            case STREAM_STOP: {
+                ss << "\nSTREAM STOP" << std::endl;
+                break;
+            }
+
+            case STREAM_COMMIT: {
+                MsgStreamCommit commit = std::get<MsgStreamCommit>(msg.msg);
+                ss << "\nSTREAM COMMIT" << std::endl;
+                ss << "  xid=" << commit.xid << std::endl;
+                ss << "  commit LSN=" << commit.commit_lsn
+                   << " (" << lsnToStr(commit.commit_lsn) << ")\n";
+                ss << "  xact LSN=" << commit.xact_lsn
+                   << " (" << lsnToStr(commit.xact_lsn) << ")\n";
+                break;
+            }
+
+            case STREAM_ABORT: {
+                MsgStreamAbort abort = std::get<MsgStreamAbort>(msg.msg);
+                ss << "\nSTREAM ABORT" << std::endl;
+                ss << "  xid=" << abort.xid << std::endl;
+                ss << "  sub_xid=" << abort.sub_xid << std::endl;
                 break;
             }
 
