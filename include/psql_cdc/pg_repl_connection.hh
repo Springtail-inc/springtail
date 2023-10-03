@@ -30,6 +30,8 @@ namespace springtail
         static const int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
         /** read timeout for copy data */
         static const int     READ_TIMEOUT_SEC = 10;
+        /** postgres 14 version constant */
+        static const int     PG_VERS_14 = 140000;
 
         // Message constants
         /** Standby message identifier */
@@ -154,10 +156,22 @@ namespace springtail
         int endStreaming();
 
         /**
-         * @brief Check if the slot exists on server
-         * @return true if exists; false otherwise
+         * @brief Check if the slot exists on the server
+         * @return true if slot exists; false otherwise
          */
         bool checkSlotExists();
+
+        /**
+         * @brief Check if the slot exists on the server
+         *
+         * @param restart_lsn_out output param: restart LSN
+         * @param flushed_lsn_out output param: last flushed LSN
+         *
+         * @return true if slot exists, false otherwise
+         */
+        bool checkSlotExists(LSN_t &restart_lsn_out,
+                             LSN_t &flushed_lsn_out);
+
 
         /**
          * @brief Create the replication slot

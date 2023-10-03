@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 
 #include <psql_cdc/pg_types.hh>
+#include <psql_cdc/pg_repl_msg.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 
 namespace springtail
@@ -154,11 +155,17 @@ namespace springtail
      */
     int PgReplConnection::startStreaming(LSN_t LSN)
     {
-        // for now hardcode proto version to 1 since that is all we support
+        // currently only support version 1 or 2, pick which to use
         // version 2 supports streaming xacts (from PG 14+);
         // version 3 for PG 15+; two phase commit
         // version 4 for PG 16+; parallel streaming
-        _proto_version = 1;
+        if (_server_version >= PG_VERS_14) {
+            // enable streaming, which tries to remove the need
+            // for spooling xact logs to disk in pgoutput which lessens lag
+            _proto_version = 2;
+        } else {
+            _proto_version = 1;
+        }
 
         // convert LSN to X/X format
         uint32_t lsn_higher = (uint32_t)(LSN>>32);
@@ -170,7 +177,7 @@ namespace springtail
         std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names {}",
             _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name);
 
-        if (_server_version >= 140000) {
+        if (_server_version >= PG_VERS_14) {
             cmd += ", binary 'true')";
         } else {
             cmd += ")";
@@ -183,6 +190,8 @@ namespace springtail
             PQclear(res);
             return -1;
         }
+
+        PQclear(res);
 
         _started_streaming = true;
 
@@ -213,8 +222,10 @@ namespace springtail
         if (status == PGRES_TUPLES_OK) {
             if (PQnfields(res) < 2 || PQntuples(res) != 1) {
                 // error unexpected result set after end-of-streaming
+                PQclear(res);
                 return -1;
             }
+
             PQclear(res);
 
             // result should be followed by CommandComplete
@@ -222,6 +233,7 @@ namespace springtail
 
         } else if (status == PGRES_COPY_OUT) {
             PQclear(res);
+
             if (PQendcopy(_connection)) {
                 // error shutting down copy
                 return -1;
@@ -232,9 +244,11 @@ namespace springtail
 
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
             // error reading result of streaming command
+            PQclear(res);
             return -1;
+        } else {
+            PQclear(res);
         }
-        PQclear(res);
 
         // verify no more results
         res = PQgetResult(_connection);
@@ -525,9 +539,27 @@ namespace springtail
      */
     bool PgReplConnection::checkSlotExists()
     {
+        LSN_t restart_lsn;
+        LSN_t flushed_lsn;
+
+        return checkSlotExists(restart_lsn, flushed_lsn);
+    }
+
+
+    /**
+     * @brief Check if the slot exists on the server
+     *
+     * @param restart_lsn_out output param: restart LSN
+     * @param flushed_lsn_out output param: last flushed LSN
+     *
+     * @return true if slot exists, false otherwise
+     */
+    bool PgReplConnection::checkSlotExists(LSN_t &restart_lsn_out,
+                                           LSN_t &flushed_lsn_out)
+    {
         char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
-        std::string cmd = fmt::format("SELECT 1 from pg_catalog.pg_replication_slots WHERE slot_name={}",
+        std::string cmd = fmt::format("SELECT restart_lsn, confirmed_flush_lsn from pg_catalog.pg_replication_slots WHERE slot_name={}",
                                       slot_name);
 
         // execute query
@@ -542,19 +574,22 @@ namespace springtail
             PQresultStatus(res) == PGRES_TUPLES_OK) {
             std::cout << "Got command OK or TUPLES_OK tuples=" << PQntuples(res) << std::endl;
 
-            if (PQntuples(res) > 0 && PQgetlength(res, 0, 0) > 0) {
-                int res_int = (int)std::atoi(PQgetvalue(res, 0, 0));
-                std::cout << "Got res int=" << res_int << std::endl;
-                if (res_int == 1) {
-                    PQclear(res);
-                    return true;
-                }
+            if (PQntuples(res) > 0 && PQnfields(res) == 2) {
+                char *restart_lsn_str = PQgetvalue(res, 0, 0);
+                char *confirmed_flush_lsn_str = PQgetvalue(res, 0, 1);
+
+                restart_lsn_out = PgReplMsg::strToLSN(restart_lsn_str);
+                flushed_lsn_out = PgReplMsg::strToLSN(confirmed_flush_lsn_str);
+
+                PQclear(res);
+                return true;
             }
-        } else {
-            std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
         }
 
+        std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
+
         PQclear(res);
+
         return false;
     }
 

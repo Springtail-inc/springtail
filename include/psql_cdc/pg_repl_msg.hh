@@ -278,5 +278,13 @@ namespace springtail
          * @return string of LSN in format: "XXX/XXX"
          */
         static std::string lsnToStr(LSN_t lsn);
+
+        /**
+         * @brief Convert LSN in string format XXX/XXX to LSN_t (uint64_t)
+         *
+         * @param lsn_str string of LSN in format XXX/XXX
+         * @return LSN_t
+         */
+        static LSN_t strToLSN(const char *lsn_str);
     };
 }

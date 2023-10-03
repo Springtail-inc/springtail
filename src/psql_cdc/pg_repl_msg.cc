@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <sstream>
 #include <fmt/core.h>
 
@@ -845,12 +846,46 @@ namespace springtail
         }
     }
 
+    /**
+     * @brief Convert LSN to string of format XXX/XXX
+     *
+     * @param lsn LSN to convert
+     * @return string of LSN in format: "XXX/XXX"
+     */
     std::string PgReplMsg::lsnToStr(const LSN_t lsn)
     {
         uint32_t lsn_higher = (uint32_t)(lsn>>32);
         uint32_t lsn_lower = (uint32_t)(lsn);
 
         return fmt::format("{:X}/{:X}", lsn_higher, lsn_lower);
+    }
+
+    /**
+     * @brief Convert LSN in string format XXX/XXX to LSN_t (uint64_t)
+     *
+     * @param lsn_str string of LSN in format XXX/XXX
+     * @return LSN_t
+     */
+    LSN_t PgReplMsg::strToLSN(const char *lsn_str)
+    {
+        char *end_ptr = nullptr;
+
+        if (lsn_str == nullptr) {
+            return INVALID_LSN;
+        }
+
+        // convert high bits
+        uint64_t lsn_higher = strtol(lsn_str, &end_ptr, 16);
+
+        // end_ptr now points to the '/' -- validate
+        if (end_ptr == nullptr || *end_ptr != '/') {
+            return INVALID_LSN;
+        }
+
+        // convert low bits starting at end_ptr + 1
+        uint64_t lsn_lower = strtol(end_ptr+1, nullptr, 16);
+
+        return (lsn_higher << 32) | (0xFFFFFFFF & lsn_lower);
     }
 
     /**
