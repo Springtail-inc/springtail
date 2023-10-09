@@ -14,7 +14,21 @@ namespace springtail {
     class Field;
     class CompressedExtent;
 
-    /** Provides the interface for a single extent within a datafile. */
+    /** Provides the interface for a single extent within a datafile.
+     *
+     *  An extent is composed of a header block, the fixed data, and the variable data.
+     *
+     *  The header block contains the schema ID and commit ID at which this extent was written.
+     *
+     *  The fixed data contains fixed-width rows of data defined by the schema.  By using
+     *  fixed-width rows, it becomes possible to cheaply perform array-like operations against the
+     *  rows in an extent such as index-based access or binary search.  All columns are represented
+     *  by a fixed position within the fixed-width row to enable efficient scanning of data.
+     *
+     *  The variable data contains any variable-length values for columns such as text or binary
+     *  data.  The extent does internal de-duplication of variable-length data to reduce space
+     *  utilization.  The fixed data contains pointers into the variable data for any such columns.
+     */
     class Extent {
     public:
         // pre-declarations

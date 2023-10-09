@@ -8,6 +8,16 @@
 
 namespace springtail {
 
+    /**
+     * The Field class is to create an accessor object for a given column of an extent.  It stores
+     * the position of the column within the extent's fixed data and then interprets it based on the
+     * type of the column.
+     *
+     * The data of a column in an extent is extracted by passing an Extent::Row to the Field's
+     * approrpiate get_* function.  Calling the wrong function for a column of a given type will
+     * result in an exception being thrown, so the caller must ensure that the type is compatible
+     * with the get_* function being called.
+     */
     class Field {
     protected:
         uint32_t _offset; ///< The offset into the fixed data for the row.
