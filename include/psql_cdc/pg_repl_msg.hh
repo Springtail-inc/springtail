@@ -176,21 +176,21 @@ namespace springtail
 
     private:
         // Proto V1; message flags, first byte
-        static const char MSG_BEGIN = 'B';
-        static const char MSG_COMMIT = 'C';
-        static const char MSG_RELATION = 'R';
-        static const char MSG_INSERT = 'I';
-        static const char MSG_UPDATE = 'U';
-        static const char MSG_DELETE = 'D';
-        static const char MSG_TRUNCATE = 'T';
-        static const char MSG_ORIGIN = 'O';
-        static const char MSG_MESSAGE = 'M';
-        static const char MSG_TYPE = 'Y';
+        static inline constexpr char MSG_BEGIN    = 'B';
+        static inline constexpr char MSG_COMMIT   = 'C';
+        static inline constexpr char MSG_RELATION = 'R';
+        static inline constexpr char MSG_INSERT   = 'I';
+        static inline constexpr char MSG_UPDATE   = 'U';
+        static inline constexpr char MSG_DELETE   = 'D';
+        static inline constexpr char MSG_TRUNCATE = 'T';
+        static inline constexpr char MSG_ORIGIN   = 'O';
+        static inline constexpr char MSG_MESSAGE  = 'M';
+        static inline constexpr char MSG_TYPE     = 'Y';
         // Proto V2
-        static const char MSG_STREAM_START = 'S';
-        static const char MSG_STREAM_STOP = 'E';
-        static const char MSG_STREAM_COMMIT = 'c';
-        static const char MSG_STREAM_ABORT = 'A';
+        static inline constexpr char MSG_STREAM_START  = 'S';
+        static inline constexpr char MSG_STREAM_STOP   = 'E';
+        static inline constexpr char MSG_STREAM_COMMIT = 'c';
+        static inline constexpr char MSG_STREAM_ABORT  = 'A';
 
         /** Protocol version */
         int _proto_version;

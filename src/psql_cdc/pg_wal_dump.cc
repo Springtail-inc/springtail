@@ -61,30 +61,20 @@ int main(int argc, char* argv[])
     // create postgres connection
     springtail::PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
 
+    pg_conn.connect();
     std::cout << "Connecting to postgres server: " << host << std::endl;
-    int r = pg_conn.connect();
-    if (r != 0) {
-        return r;
-    }
 
     // create slot if need be
     create_slot = !pg_conn.checkSlotExists();
 
     if (create_slot) {
         std::cout << "Creating replication slot: " << slot_name << std::endl;
-        r = pg_conn.createReplicationSlot(false,  // export
-                                          false); // temporary
-        if (r != 0) {
-            return r;
-        }
+        pg_conn.createReplicationSlot(false,  // export
+                                      false); // temporary
     }
 
     // start steaming
-    r = pg_conn.startStreaming(springtail::INVALID_LSN);
-    if (r < 0) {
-        std::cerr << "Error: start streaming failed" << std::endl;
-        return -1;
-    }
+    pg_conn.startStreaming(springtail::INVALID_LSN);
 
     // open output file
     std::fstream out_fh;
@@ -101,13 +91,10 @@ int main(int argc, char* argv[])
     springtail::PgReplMsg msg(1); // init repl message w/proto vers 1
 
     while (true) {
-        r = pg_conn.readData(data);
-        if (r < 0) {
-            std::cerr << "Error reading copy data" << std::endl;
-            break;
-        }
+        pg_conn.readData(data);
 
-        std::cout << "Recevied data: " << data.length << " B" << std::endl;
+        std::cout << "Recevied data: " << data.length << "; msg length=" << data.msg_length
+                  << "; msg offset=" << data.msg_offset << std::endl;
 
         if (data.length == 0) {
             // possible data has been consumed by keep alive

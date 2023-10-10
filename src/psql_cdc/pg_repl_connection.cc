@@ -4,15 +4,21 @@
 #include <memory>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <fmt/core.h>
 
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_msg.hh>
 #include <psql_cdc/pg_repl_connection.hh>
+#include <psql_cdc/exception.hh>
+
+// from socket.h; indicates more data is coming to send
+#if !defined(MSG_MORE)
+    #define MSG_MORE 0x00 // a bit messy, macosx doesn't support MSG_MORE
+#endif
 
 namespace springtail
 {
-
     /** SQL command to set serach path */
     static const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
         "SELECT pg_catalog.set_config('search_path', '', false);";
@@ -46,6 +52,7 @@ namespace springtail
           _slot_name(slot_name)
     {}
 
+
     /**
      * @brief Destructor
      */
@@ -54,33 +61,49 @@ namespace springtail
         close();
     }
 
+
     /**
      * @brief Helper to execute queries that have no return result
      *
      * @param cmd sql command to execute
      *
-     * @return 0 on success; -1 otherwise
+     * @throws PgQueryError on failure
      */
-    int PgReplConnection::pgExec(const std::string cmd)
+    void PgReplConnection::pgExec(PGconn *connection, const std::string cmd)
     {
         std::cout << "Executing query: " << cmd << std::endl;
-        PGresult *res = PQexec(_connection, cmd.c_str());
+        PGresult *res = PQexec(connection, cmd.c_str());
         if (PQresultStatus(res) != PGRES_COMMAND_OK &&
             PQresultStatus(res) != PGRES_TUPLES_OK) {
-            std::cerr << "Error executing query: " << PQerrorMessage(_connection)
+            std::cerr << "Error executing query: " << PQerrorMessage(connection)
                       << ", status=" << PQresultStatus(res) << std::endl;
             PQclear(res);
-            return -1;
+
+            throw PgQueryError();
         }
         PQclear(res);
-        return 0;
     }
+
 
     /**
      * @brief Connect to server using params from constructor
-     * @return 0 success; <0 failure
+     * @throws PgIOError on connection failure
+     * @throws PgQueryError on failure to set search path
      */
-    int PgReplConnection::connect()
+    void PgReplConnection::connect()
+    {
+        _connection = internalConnect();
+    }
+
+
+    /**
+     * @brief Internal connection helper
+     *
+     * @return returns a libpq connection
+     * @throws PgIOError on connection failure
+     * @throws PgQueryError on failure to set search path
+     */
+    PGconn *PgReplConnection::internalConnect()
     {
         // create key value list for: host, port, dbname, user, password, options
         // escape options
@@ -106,24 +129,26 @@ namespace springtail
         std::cout << "Attempting to connect: " << conninfo << std::endl;
 
         // try connection
-        _connection = PQconnectdb(conninfo.c_str());
-
-        if (PQstatus(_connection) != CONNECTION_OK) {
-            std::cerr << "Error connecting: " << PQerrorMessage(_connection) << std::endl;
-            PQfinish(_connection);
-            return -1;
+        PGconn *connection = PQconnectdb(conninfo.c_str());
+        if (PQstatus(connection) != CONNECTION_OK) {
+            std::cerr << "Error connecting: " << PQerrorMessage(connection) << std::endl;
+            PQfinish(connection);
+            throw PgIOError();
         }
 
-        // get protocol version
-        _server_version = PQserverVersion(_connection);
+        std::cout << fmt::format("PG connected, protocol version={}, server version={}\n",
+                                 PQprotocolVersion(connection), PQserverVersion(connection));
 
         // for safety set search path
-        int res = pgExec(ALWAYS_SECURE_SEARCH_PATH_SQL);
-        if (res == -1) {
+        try {
+            pgExec(connection, ALWAYS_SECURE_SEARCH_PATH_SQL);
+        } catch(PgQueryError &e) {
             // disconnect
-            close();
+            PQfinish(connection);
+            throw e;
         }
-        return res;
+
+        return connection;
     }
 
 
@@ -137,12 +162,6 @@ namespace springtail
             _started_streaming = false;
         }
 
-        if (_copy_buffer != nullptr) {
-            PQfreemem(_copy_buffer);
-            _copy_buffer = nullptr;
-            _copy_buffer_length = 0;
-        }
-
         PQfinish(_connection);
     }
 
@@ -151,10 +170,21 @@ namespace springtail
      * @brief Start streaming at specified LSN,
      *
      * @param LSN LSN to start streaming from; INVALID_LSN (0) specifies server current LSN
-     * @return 0 success, <0 failure
+     * @throws PgStreamingError if connection is already streaming
+     * @throws PgQueryError if replication command failed
      */
-    int PgReplConnection::startStreaming(LSN_t LSN)
+    void PgReplConnection::startStreaming(LSN_t LSN)
     {
+        if (_started_streaming) {
+            // error already streaming
+            throw PgStreamingError();
+        }
+
+        _stream_connection = internalConnect();
+
+        // get protocol version
+        _server_version = PQserverVersion(_stream_connection);
+
         // currently only support version 1 or 2, pick which to use
         // version 2 supports streaming xacts (from PG 14+);
         // version 3 for PG 15+; two phase commit
@@ -172,7 +202,7 @@ namespace springtail
         uint32_t lsn_lower = (uint32_t)(LSN);
 
         // replication start command
-        char *pub_name = PQescapeLiteral(_connection, _pub_name.c_str(), _pub_name.length());
+        char *pub_name = PQescapeLiteral(_stream_connection, _pub_name.c_str(), _pub_name.length());
 
         std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names {}",
             _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name);
@@ -183,103 +213,461 @@ namespace springtail
             cmd += ")";
         }
 
-        PGresult *res = PQexec(_connection, cmd.c_str());
         PQfreemem(pub_name);
-        if (PQresultStatus(res) != PGRES_COPY_BOTH) {
-            std::cerr << "Error could not start WAL streaming: " << PQerrorMessage(_connection) << std::endl;
-            PQclear(res);
-            return -1;
+
+        // extract message buffer
+        const char *cmd_buffer = cmd.c_str();
+        int cmd_length = std::strlen(cmd_buffer) + 1; // strlen doesn't include null
+
+        // send header and then data
+        // we do this on using sockets to support non-blocking reads of less
+        // than the full message length on the stream connection for copy data
+        sendCopyData(cmd_buffer, cmd_length, MSG_QUERY);
+
+        // read message header for response; msg type placed in _msg_type
+        readMsgHeader();
+        if (_msg_type != MSG_COPY_BOTH) {
+            std::cerr << "Error could not start WAL streaming: (msg type=" << _msg_type << ")\n";
+            PQfinish(_stream_connection);
+            throw PgQueryError();
         }
 
-        PQclear(res);
+        // skip over rest of result message
+        skipMessage();
 
+        _copy_state = NEW_MSG;
         _started_streaming = true;
-
-        return 0;
     }
 
 
     /**
-     * @brief End streaming
-     * @return 0 on success, -1 on failure
+     * @brief End streaming; close streaming connection
+     * @throws PqQueryError if end streaming command failed
      */
-    int PgReplConnection::endStreaming()
+    void PgReplConnection::endStreaming()
     {
         if (!_started_streaming) {
-            return 0;
+            return;
         }
+
+        // after this point assume streaming has ended
+        _started_streaming = false;
+        _copy_buffer_length = 0;
+        _copy_buffer_offset = 0;
+        _copy_msg_length = 0;
+        _copy_msg_offset = 0;
 
         // taken from libpqwalreceiver.c libpqrcv_endstreaming()
         // send copy end message
-        if (PQputCopyEnd(_connection, nullptr) <= 0 || PQflush(_connection)) {
+        if (PQputCopyEnd(_stream_connection, nullptr) <= 0 || PQflush(_stream_connection)) {
             std::cerr << "Error could not send end-of-streaming message to primary" << std::endl;
-            return -1;
+            PQfinish(_stream_connection);
+            throw PgQueryError();
         }
 
-        PGresult *res = PQgetResult(_connection);
+        PGresult *res = PQgetResult(_stream_connection);
 
         ExecStatusType status = PQresultStatus(res);
         if (status == PGRES_TUPLES_OK) {
             if (PQnfields(res) < 2 || PQntuples(res) != 1) {
                 // error unexpected result set after end-of-streaming
                 PQclear(res);
-                return -1;
+                PQfinish(_stream_connection);
+                throw PgQueryError();
             }
 
             PQclear(res);
 
             // result should be followed by CommandComplete
-            res = PQgetResult(_connection);
+            res = PQgetResult(_stream_connection);
 
         } else if (status == PGRES_COPY_OUT) {
             PQclear(res);
 
-            if (PQendcopy(_connection)) {
+            if (PQendcopy(_stream_connection)) {
                 // error shutting down copy
-                return -1;
+                PQfinish(_stream_connection);
+                throw PgQueryError();
             }
             // result should be followed by CommandComplete
-            res = PQgetResult(_connection);
+            res = PQgetResult(_stream_connection);
         }
 
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
             // error reading result of streaming command
             PQclear(res);
-            return -1;
+            throw PgQueryError();
         } else {
             PQclear(res);
         }
 
         // verify no more results
-        res = PQgetResult(_connection);
+        res = PQgetResult(_stream_connection);
         if (res != nullptr) {
             PQclear(res);
             // unexpected result after command complete
-            return -1;
+            PQfinish(_stream_connection);
+            throw PgQueryError();
         }
 
-        return 0;
+        PQfinish(_stream_connection);
     }
 
 
     /**
      * @brief Check the data stream for waiting data
-     * @details [long description]
      *
      * @param timeout_secs timeout in seconds; 0 return immediately
-     * @return 0 if no data (would block); -1 on error; 1 if data
+     * @return true if has data, false otherwise
+     * @throws PgIOError on stream error
      */
-    int PgReplConnection::checkDataStream(int timeout_secs)
+    bool PgReplConnection::checkDataStream(int timeout_secs)
     {
         fd_set fds;
         FD_ZERO(&fds);
-        FD_SET(PQsocket(_connection), &fds);
+        FD_SET(PQsocket(_stream_connection), &fds);
 
         struct timeval t;
         t.tv_usec = 0;
         t.tv_sec = timeout_secs;
 
-        return select(PQsocket(_connection) + 1, &fds, nullptr, nullptr, &t);
+        // r < 0 error; r == 0 timeout; r > 0 readable socket
+        std::cout << "Blocking in select for: " << timeout_secs << " secs\n";
+        int r = select(PQsocket(_stream_connection) + 1, &fds, nullptr, nullptr, &t);
+        if (r < 0) {
+            throw PgIOError();
+        }
+
+        return (r > 0); // true if data on socket
+    }
+
+
+    /**
+     * @brief No data received handle timeout, wait for more data
+     * @return true if has data, false otherwise
+     * @throws PgIOError on stream error
+     */
+    bool PgReplConnection::handleTimeout()
+    {
+
+        if (_started_streaming) {
+            // check to see if we should fetch latest LSN to sync back
+            int64_t now = getPgTimeInMillis();
+            if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
+                // see if we've been idle for longer (received no data)
+                // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
+                // based on the current LSN
+                fastForwardStream();
+            }
+
+            // check to see if we should send a standby message
+            if ((now - _last_status_time) > STANDBY_MSG_INTERVAL_MSEC) {
+                sendStandbyStatusMsg();
+            }
+        }
+
+        // select wait on data stream
+        return checkDataStream(READ_TIMEOUT_SEC);
+    }
+
+
+    /**
+     * @brief Send data on streaming connection
+     *
+     * @param buffer buffer to send
+     * @param length length of data within buffer
+     * @param msg_type type of message (optional; default COPY_DATA message)
+     * @throws PgIOError on send error
+     */
+    void PgReplConnection::sendCopyData(const char *buffer,
+                                        int length,
+                                        char cmd = MSG_COPY_DATA)
+    {
+        char msg_header[COPY_MSG_HDR_SIZE];
+
+        // marshall header, first byte is operation, next 4 bytes are length
+        msg_header[0] = cmd;
+        // add 4 to length, since length includes length field
+        sendint32(length + 4, &msg_header[1]);
+
+        int flags = MSG_NOSIGNAL | MSG_MORE ; // no SIGPIPE if connection is closed
+
+        // send the header and then the operation
+        int r = send(PQsocket(_stream_connection), msg_header, 5, flags);
+        if (r != 5) {
+            std::cerr << "Failed to write copy data header (r=" << r << ")\n";
+            throw PgIOError();
+        }
+
+        r = send(PQsocket(_stream_connection), buffer, length, MSG_NOSIGNAL);
+        if (r < length) {
+            // XXX if r > 0 this technically isn't an error and we should
+            // really continue retrying the send
+            std::cerr << "Failed to write copy data body (r=" << r << ")\n";
+            throw PgIOError();
+        }
+    }
+
+
+    /**
+     * @brief Read data from streaming connection
+     *
+     * @param buffer buffer to receive into
+     * @param length length of data to read
+     * @param async  flag to specify read should be non-blocking (optional; default=true)
+     * @returns bytes read
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     */
+    int PgReplConnection::recvCopyData(char *buffer,
+                                        int length,
+                                        bool async=true)
+    {
+        while (true) {
+            int r = recv(PQsocket(_stream_connection),
+                         buffer, length, (async ? MSG_DONTWAIT : 0));
+
+            std::cout << "Read raw data: " << r << std::endl;
+
+            if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+                std::cout << "Recv got ewouldblock\n";
+                r = handleTimeout();
+                if (r >= 0) {
+                    // either data is now available or it isn't
+                    // either way go around again.
+                    continue;
+                }
+            }
+
+            if (r < 0) {
+                std::cerr << "Error recv return < 0; errno=" << errno << std::endl;
+                throw PgIOError();
+            }
+
+            if (r == 0) {
+                std::cerr << "Error recv got EOF\n";
+                throw PgNotConnectedError();
+            }
+
+            return r;
+        }
+    }
+
+
+    /**
+     * @brief Read in full message header (1B msg type; 4B length)
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     */
+    void PgReplConnection::readMsgHeader()
+    {
+        // msg header 1B for message type, 4B for length
+        char msg_header[5];
+        int  msg_header_offset = 0;
+
+        // this is the start of a message; read the header
+        while (msg_header_offset < COPY_MSG_HDR_SIZE) {
+
+            // do a non-blocking read on the socket
+            int r = recvCopyData(&msg_header[msg_header_offset],
+                                 COPY_MSG_HDR_SIZE-msg_header_offset);
+
+            msg_header_offset += r;
+        }
+
+        // decode header
+        int32_t length = recvint32(&msg_header[1]);
+        _msg_type = msg_header[0];
+
+        // set msg length -- length includes the length field
+        _copy_msg_length = length - 4;
+        _copy_msg_offset = 0;
+
+        // try and read in and parse error message as long as it all
+        // fits within a single copy buffer (which it should)
+        // other message types are handled by the caller
+        if (_msg_type == MSG_ERROR_RESPONSE && _copy_msg_length < COPY_BUFFER_SIZE) {
+            readMsgData(false);
+            dumpErrorResponse();
+        }
+    }
+
+
+    /**
+     * @brief Helper to dump out error response
+     */
+    void PgReplConnection::dumpErrorResponse()
+    {
+        // format: code 1B, message string null terminated
+        // code: 'M' has the most useful message
+        int offset = 0;
+        char code;
+        // terminate loop if code='\0' terminate, or if no more data to read after code
+        while ((code =_copy_buffer[offset]) != '\0' && ++offset < _copy_buffer_length) {
+            char *str = &_copy_buffer[offset];
+            int str_len = strnlen(str, _copy_buffer_length - offset);
+            if (str_len < _copy_buffer_length - offset - 1) {
+                std::cerr << "Code: " << code << " Msg: " << str << std::endl;
+                offset += str_len + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+
+    /**
+     * @brief Read in message data; may be partial message
+     * @param async flag to specify operation is non-blocking (optional; default=true)
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     */
+    void PgReplConnection::readMsgData(bool async=true)
+    {
+        int to_read = std::min(_copy_msg_length - _copy_msg_offset,
+                               COPY_BUFFER_SIZE);
+
+        int length = 0, offset = 0;
+
+        while (to_read > 0) {
+            // non blocking read, read the min of: COPY_BUFFER_SIZE
+            // or the remaining data left for this message
+            // this ensures we can at least decode the keep alive
+            // message
+            int r = recvCopyData(&_copy_buffer[offset],
+                                 to_read, async);
+            to_read -= r;
+            length += r;
+            offset += r;
+        }
+
+        _copy_buffer_length = length;
+        _copy_buffer_offset = 0;
+
+        // this may be ahead of where the consumer is, but it is where we are
+        _copy_msg_offset += length;
+    }
+
+
+    /**
+     * @brief Skipping over current message
+     *
+     * @param size data to skip
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     */
+    void PgReplConnection::skipMessage()
+    {
+        while (_copy_msg_offset < _copy_msg_length) {
+            // should read min of COPY_BUFFER_SIZE or remaining copy msg size
+            // this shouldn't block since we've already read in the header
+            readMsgData(false); // async=false
+            _copy_msg_offset += _copy_buffer_length;
+        }
+
+        // discard copy buffer data
+        _copy_buffer_length = 0;
+        _copy_buffer_offset = 0;
+
+        // reset message msg
+        _copy_msg_offset = 0;
+        _copy_msg_length = 0;
+    }
+
+
+    /**
+     * @brief Read in copy data header; sets the copy message length
+     *
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     * @throws PgCopyDoneError if copy done is returned
+     */
+    void PgReplConnection::readCopyHeader()
+    {
+        // this will essentially block until data is read
+        // _copy_msg_length will be set
+        readMsgHeader();
+
+        // check for COPY DATA msg, handle other messages
+        switch (_msg_type) {
+            case MSG_COPY_DATA:
+                _copy_state = READ_COPY_HEADER;
+                return;
+
+            case MSG_COPY_DONE:
+                std::cout << "Got COPY DONE message\n";
+                throw PgCopyDoneError();
+
+            case MSG_ERROR_RESPONSE:
+                // message is decoded in readMsgHeader
+                std::cerr << "Got error response\n";
+                throw PgIOError();
+
+            case MSG_NOTIFICATION_RESPONSE:
+            case MSG_NOTICE_RESPONSE:
+            case MSG_PARAM_STATUS:
+            default:
+                // skip message for now
+                std::cout << "Skipping message: " << _msg_type << std::endl;
+                skipMessage();
+                _copy_state = NEW_MSG;
+                return;
+        }
+    }
+
+
+    /**
+     * @brief Read in the copy data, decoding the msg and processing keep alives
+     *
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     * @throws PgCopyDoneError if copy done is returned
+     */
+    void PgReplConnection::readCopyData()
+    {
+        // read the copy message data
+        readMsgData();
+
+        // if this is the first part of the message we've read
+        // decode the copy message; either a keep alive or xlog data
+        if (_copy_state == READ_COPY_HEADER) {
+            // see: https://www.postgresql.org/docs/14/protocol-replication.html
+            // these message should be smaller than the copy buffer length
+            int offset = 0;
+            switch (_copy_buffer[0]) {
+                case MSG_KEEP_ALIVE:
+                    std::cout << "Found keep alive\n";
+                    offset = processKeepAlive(_copy_buffer, _copy_buffer_length);
+
+                    // there shouldn't be more data
+                    if (offset != _copy_msg_length) {
+                        std::cerr << "Found unexpected data after keep alive message\n";
+                        throw PgUnexpectedDataError();
+                    }
+
+                    // need to read a new message
+                    _copy_state = NEW_MSG;
+
+                    break;
+
+                case MSG_XLOG_DATA:
+                    std::cout << "Found xlog data\n";
+                    offset = processXlogHeader(_copy_buffer, _copy_buffer_length);
+
+                    // adjust msg size to remove xlog header
+                    _copy_msg_offset -= offset;
+                    _copy_msg_length -= offset;
+                    _copy_buffer_offset = offset;
+
+                    _copy_state = STREAMING;
+
+                    break;
+
+                default:
+                    std::cerr << "Unknown copy data command: " << _copy_buffer[0] << std::endl;
+                    throw PgUnknownMessageError();
+            }
+        }
     }
 
 
@@ -288,109 +676,74 @@ namespace springtail
      *
      * @param dataOut  Reference to hold output buffer and length; freed on
      *                 next call to readData
-     * @return 0 success; -1 end of stream; -2 some other error
+     * @throws PgIOError on receive error
+     * @throws PgNotConnectedError if connection has closed
+     * @throws PgNotStreamingError if connection is not streaming
      */
-    int PgReplConnection::readData(PgCopyData &dataOut)
+    void PgReplConnection::readData(PgCopyData &dataOut)
     {
+        if (!_started_streaming) {
+            throw PgNotStreamingError();
+        }
+
         // calling readData implicitly ack's the last received LSN
-        setLastFlushedLSN(_last_received_lsn);
-
-        int rawlen = 0;
-
-        while (rawlen == 0) {
-
-            // free copy buffer
-            if (_copy_buffer != nullptr) {
-                PQfreemem(_copy_buffer);
-                _copy_buffer = nullptr;
-                _copy_buffer_offset = 0;
-            }
-
-            // get copy data, the 1 indicates async
-            rawlen = PQgetCopyData(_connection, &_copy_buffer, 1);
-
-            std::cout << "Read raw data: " << rawlen << std::endl;
-
-            if (rawlen == 0) {
-
-                // check to see if we should fetch latest LSN to sync back
-                int64_t now = getPgTimeInMillis();
-                if ((now - _last_received_time) > IDLE_SLOT_TIMEOUT_MSEC) {
-                    // see if we've been idle for longer (received no data)
-                    // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
-                    // based on the current LSN
-                    fastForwardStream();
-                }
-
-                // check to see if we should send a standby message
-                if ((now - _last_status_time) > STANDBY_MSG_INTERVAL_MSEC) {
-                    sendStandbyStatusMsg();
-                }
-
-                // select wait on data stream
-                int r = checkDataStream(READ_TIMEOUT_SEC);
-                if (r == -1) {
-                    // end of stream
-                    std::cerr << "End of streaming" << std::endl;
-                    return -1;
-                }
-
-                if (r > 0) {
-                    // r > 0 indicating data available
-                    // consume it and go around again trying to read it
-                    if (PQconsumeInput(_connection) == 0) {
-                        // error can't consume data
-                        std::cerr << "Error consuming data" << std::endl;
-                        return -1;
-                    }
-                }
-            } else if (rawlen == -1) {
-                std::cerr << "End of streaming" << std::endl;
-                return -1;
-            } else if (rawlen == -2) {
-                std::cerr << "No copy in progress" << std::endl;
-                return -2;
-            }
+        // only do this if full message has been consumed
+        if (_copy_state == NEW_MSG) {
+            setLastFlushedLSN(_last_received_lsn);
         }
 
-        _copy_buffer_length = rawlen;
+        do {
+            // see if we need to read the messsage header first
+            if (_copy_state == NEW_MSG) {
+                readCopyHeader();
+            }
 
-        // got data, decode copy header
-        // see: https://www.postgresql.org/docs/14/protocol-replication.html
-        switch (_copy_buffer[0]) {
-            case MSG_KEEP_ALIVE:
-                std::cout << "Found keep alive\n";
-                _copy_buffer_offset = processKeepAlive(_copy_buffer, rawlen);
-                break;
+            // read the header in, now read the data message (or continue reading it)
+            // skip if we need to read a new message
+            if (_copy_state == READ_COPY_HEADER ||
+                _copy_state == STREAMING) {
+                readCopyData();
+            }
 
-            case MSG_XLOG_DATA:
-                std::cout << "Found keep xlog data\n";
-                _copy_buffer_offset = processXlogHeader(_copy_buffer, rawlen);
-                break;
+            // if all data was consumed we go around again
+            // this shouldn't be the case, but being safe...
+            if (_copy_state == STREAMING && (_copy_buffer_length == 0)) {
+                _copy_state = NEW_MSG;
+            }
 
-            default:
-                std::cerr << "Unknown copy data command: " << _copy_buffer[0] << std::endl;
-                return -1;
+        // see if we have to read a new message
+        } while (_copy_state == NEW_MSG);
+
+        // if we got here we should be in the streaming state
+
+        // if this is the last buffer reset the state for when we come back
+        if (_copy_state == STREAMING && (_copy_msg_offset == _copy_msg_length)) {
+            _copy_state = NEW_MSG;
         }
 
-        // set output
-        dataOut.buffer = _copy_buffer + _copy_buffer_offset;
-        dataOut.length = rawlen - _copy_buffer_offset;
+        // set the output data appropriately
+        // _copy_buffer_offset may be non-zero due to xlog message
+        dataOut.buffer = &_copy_buffer[_copy_buffer_offset];
+        dataOut.length = _copy_buffer_length - _copy_buffer_offset;
+        dataOut.msg_length = _copy_msg_length;
 
-        return 0;
+        // copy msg offset is ahead by the length of data we just read
+        // but dataOut.msg_offset points to where the consumer is in the stream
+        dataOut.msg_offset = _copy_msg_offset - dataOut.length;
     }
 
 
     /**
      * @brief Decode keep alive
      * @return number of bytes consumed
+     * @throws PgMessageToSmallError if buffer not big enough for message
      */
     int PgReplConnection::processKeepAlive(const char *buffer, int length)
     {
         // handle keep alive
         if (length < (1 + 8 + 8)) {
             std::cerr << "Error keep alive msg too small: " << length << std::endl;
-            return -1;
+            throw PgMessageTooSmallError();
         }
 
         int pos = 1;
@@ -400,6 +753,9 @@ namespace springtail
 
         int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
+
+        std::cout << "Keep alive: wal_end: " << wal_end << ", send time: "
+                  << send_time << std::endl;
 
         bool response_requested = false;
         if (length >= (1 + 8 + 8 + 1)) {
@@ -425,13 +781,14 @@ namespace springtail
     /**
      * @brief Decode xlog data header
      * @return number of bytes consumed
+     * @throws PgMessageToSmallError if buffer not big enough for message
      */
     int PgReplConnection::processXlogHeader(const char *buffer, int length)
     {
         // handle log data
         if (length < (1 + 8 + 8 + 8)) {
             std::cerr << "Error xlog data message too small: " << length << std::endl;
-            return false;
+            throw PgMessageTooSmallError();
         }
 
         int pos = 1;
@@ -454,6 +811,7 @@ namespace springtail
 
     /**
      * @brief Fast forward the data stream to current LSN (ack to server)
+     * @throws PgQueryError if query to get current LSN fails
      */
     void PgReplConnection::fastForwardStream()
     {
@@ -465,12 +823,14 @@ namespace springtail
 
         // process results; sanity checks first
         if (PQresultStatus(res) != PGRES_TUPLES_OK ||
-            PQntuples(res) <= 0 || PQgetlength(res, 0, 0) != 4) {
-            // error
-            return;
+            PQntuples(res) <= 0 || PQgetlength(res, 0, 0) < 3) {
+            std::cerr << "Error querying current LSN\n";
+            throw PgQueryError();
         }
 
-        LSN_t lsn = (LSN_t)std::atoll(PQgetvalue(res, 0, 0));
+        // result in form: XXX/XXX; convert to LSN_t
+        char *str = PQgetvalue(res, 0, 0);
+        LSN_t lsn = PgReplMsg::strToLSN(str);
         PQclear(res);
 
         // check that LSN is ahead of where we are
@@ -479,10 +839,9 @@ namespace springtail
             return;
         }
 
-        // check that there is still no data; 0 means no data
+        // check that there is still no data; false means no data
         // timeout of 0 means return immediately (i.e., poll)
-        int r = checkDataStream(0);
-        if (r != 0) {
+        if (checkDataStream(0)) {
             return;
         }
 
@@ -533,9 +892,33 @@ namespace springtail
 
 
     /**
+     * @brief Send standby status feedback message to server
+     * @throws PgIOError on send error
+     */
+    void PgReplConnection::sendStandbyStatusMsg()
+    {
+        char replybuf[STANDBY_MSG_SIZE];
+        int64_t now = getPgTimeInMillis();
+
+        // set applied lsn and flushed lsn to same value
+        int len = encodeStandbyStatusMsg(_last_flushed_lsn,
+                                         _last_flushed_lsn,
+                                         now, replybuf);
+
+        std::cout << "Standby message send: LSN=" << _last_flushed_lsn << std::endl;
+
+        // send data
+        sendCopyData(replybuf, len);
+
+        _last_status_time = now;
+    }
+
+
+    /**
      * @brief Check if slot exists
      *
-     * @return true if exists, false otherwise
+     * @return true if slot exists, false otherwise
+     * @throws PgQueryError on error
      */
     bool PgReplConnection::checkSlotExists()
     {
@@ -553,10 +936,15 @@ namespace springtail
      * @param flushed_lsn_out output param: last flushed LSN
      *
      * @return true if slot exists, false otherwise
+     * @throws PgQueryError on error
      */
     bool PgReplConnection::checkSlotExists(LSN_t &restart_lsn_out,
                                            LSN_t &flushed_lsn_out)
     {
+        if (_started_streaming) {
+            throw std::runtime_error("No queries after streaming starts");
+        }
+
         char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
         std::string cmd = fmt::format("SELECT restart_lsn, confirmed_flush_lsn from pg_catalog.pg_replication_slots WHERE slot_name={}",
@@ -570,26 +958,28 @@ namespace springtail
         PQfreemem(slot_name);
 
         // process results
-        if (PQresultStatus(res) == PGRES_COMMAND_OK ||
-            PQresultStatus(res) == PGRES_TUPLES_OK) {
-            std::cout << "Got command OK or TUPLES_OK tuples=" << PQntuples(res) << std::endl;
+        if (PQresultStatus(res) != PGRES_COMMAND_OK &&
+            PQresultStatus(res) != PGRES_TUPLES_OK) {
+            std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
+            PQclear(res);
 
-            if (PQntuples(res) > 0 && PQnfields(res) == 2) {
-                char *restart_lsn_str = PQgetvalue(res, 0, 0);
-                char *confirmed_flush_lsn_str = PQgetvalue(res, 0, 1);
-
-                restart_lsn_out = PgReplMsg::strToLSN(restart_lsn_str);
-                flushed_lsn_out = PgReplMsg::strToLSN(confirmed_flush_lsn_str);
-
-                PQclear(res);
-                return true;
-            }
+            throw PgQueryError();
         }
 
-        std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
+        std::cout << "Got command OK or TUPLES_OK tuples=" << PQntuples(res) << std::endl;
+
+        if (PQntuples(res) > 0 && PQnfields(res) == 2) {
+            char *restart_lsn_str = PQgetvalue(res, 0, 0);
+            char *confirmed_flush_lsn_str = PQgetvalue(res, 0, 1);
+
+            restart_lsn_out = PgReplMsg::strToLSN(restart_lsn_str);
+            flushed_lsn_out = PgReplMsg::strToLSN(confirmed_flush_lsn_str);
+
+            PQclear(res);
+            return true;
+        }
 
         PQclear(res);
-
         return false;
     }
 
@@ -597,10 +987,15 @@ namespace springtail
     /**
      * @brief Drop replication slot
      *
-     * @return 0 on success, -1 otherwise
+     * @throws PgQueryError on error
+     * @throws PgStreamingError if already streaming
      */
-    int PgReplConnection::dropReplicationSlot()
+    void PgReplConnection::dropReplicationSlot()
     {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
         char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
 
         std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
@@ -615,11 +1010,10 @@ namespace springtail
         if (PQresultStatus(res) == PGRES_COMMAND_OK) {
             std::cerr << "Error dropping replication slot" << std::endl;
             PQclear(res);
-            return -1;
+            throw PgQueryError();
         }
 
         PQclear(res);
-        return 0;
     }
 
 
@@ -628,11 +1022,16 @@ namespace springtail
      *
      * @param export_snapshot should export be create (true/false)
      * @param temporary is replication slot temporary
-     * @return 0 success, -1 failure
+     * @throws PgStreamingError if streaming already started
+     * @throws PgQueryError on query error
      */
-    int PgReplConnection::createReplicationSlot(bool export_snapshot,
+    void PgReplConnection::createReplicationSlot(bool export_snapshot,
                                                 bool temporary)
     {
+        if (_started_streaming) {
+            throw PgStreamingError();
+        }
+
         std::stringstream s;
 
         // escape slot name
@@ -680,7 +1079,7 @@ namespace springtail
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             std::cerr << "Error executing CREATE_REPLICATION_SLOT: " << PQerrorMessage(_connection) << std::endl;
             PQclear(res);
-            return -1;
+            throw PgQueryError();
         }
 
         // check result number of tuples and columns
@@ -688,7 +1087,7 @@ namespace springtail
             std::cerr << "Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows="
                       <<  PQntuples(res) << " cols=" << PQnfields(res) << std::endl;
             PQclear(res);
-            return -1;
+            throw PgQueryError();
         }
 
         slot_name = PQgetvalue(res, 0, 0);
@@ -701,34 +1100,8 @@ namespace springtail
         _export_name = std::string(snapshot_name);
 
         PQclear(res);
-
-        return 0;
     }
 
-
-    /**
-     * @brief Send standby status feedback message to server
-     * @return 0 on success, -1 on failure
-     */
-    int PgReplConnection::sendStandbyStatusMsg()
-    {
-        char replybuf[1 + 8 + 8 + 8 + 8 + 1];
-        int64_t now = getPgTimeInMillis();
-
-        // set applied lsn and flushed lsn to same value
-        int len = encodeStandbyStatusMsg(_last_flushed_lsn,
-                                         _last_flushed_lsn,
-                                         now, replybuf);
-
-        if (PQputCopyData(_connection, replybuf, len) <= 0 || PQflush(_connection)) {
-            std::cerr << "Error sending standby status update" << std::endl;
-            return -1;
-        }
-
-        _last_status_time = now;
-
-        return 0;
-    }
 
     /**
      * @brief Update last flushed lsn, we are safe to move log forward to here
