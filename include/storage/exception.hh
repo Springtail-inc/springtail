@@ -12,83 +12,30 @@ namespace springtail {
         { }
     };
 
-    /** Parent of schema exceptions. */
+    /** For schema manipulation errors. */
     class SchemaError : public Error {
-
-    };
-
-    class ColumnExistsSchemaError : public SchemaError {
     public:
-        const char *what() const noexcept {
-            return "A column already exists with this name.";
-        }
+        SchemaError() { }
+        SchemaError(const std::string &error)
+            : Error(error)
+        { }
     };
 
-    class ColumnNotExistsSchemaError : public SchemaError {
-    public:
-        const char *what() const noexcept {
-            return "The requested column does not exist.";
-        }
-    };
-
-    class BadTypeSchemaError : public SchemaError {
-    public:
-        const char *what() const noexcept {
-            return "The requested column type is unsupported.";
-        }
-    };
-
-    /** Parent of storage errors. */
+    /** For storage access errors. */
     class StorageError : public Error {
-
+    public:
+        StorageError() { }
+        StorageError(const std::string &error)
+            : Error(error)
+        { }
     };
 
-    class OpenFileStorageError : public StorageError {
+    /** For validation errors when accessing data. */
+    class ValidationError : public Error {
     public:
-        const char *what() const noexcept {
-            return "Unable to open file.";
-        }
-    };
-
-    class CreateFileStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Unable to create file.";
-        }
-    };
-
-    class ReadFileStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Error to reading file.";
-        }
-    };
-
-    class ValidationStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Validation error reading file.";
-        }
-    };
-
-    class CompressionStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Unable to compress the data.";
-        }
-    };
-
-    class DecompressionStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Unable to decompress the data.";
-        }
-    };
-
-    class FieldStorageError : public StorageError {
-    public:
-        const char *what() const noexcept {
-            return "Error accessing extent field.";
-        }
+        ValidationError() { }
+        ValidationError(const std::string &error)
+            : Error(error)
+        { }
     };
 }

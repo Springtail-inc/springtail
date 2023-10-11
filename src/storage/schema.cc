@@ -69,7 +69,7 @@ namespace springtail {
         case SchemaType::DECIMAL128:
         default:
             std::cerr << fmt::format("Unsupported SchemaColumn type {:d}", static_cast<int>(details.type())) << std::endl;
-            throw BadTypeSchemaError();
+            throw TypeError("Unsupported schema column type");
         }
     }
 
@@ -80,7 +80,7 @@ namespace springtail {
         // verify that the column name isn't already in use
         auto &&i = _name_map.find(name);
         if (i == _name_map.end()) {
-            throw ColumnExistsSchemaError();
+            throw SchemaError(fmt::format("Column already exists {}", name));
         }
 
         // construct the column based on the details
@@ -99,7 +99,7 @@ namespace springtail {
     {
         auto &&i = _name_map.find(name);
         if (i == _name_map.end()) {
-            throw ColumnExistsSchemaError();
+            throw SchemaError(fmt::format("Column does not exist {}", name));
         }
 
         std::shared_ptr<SchemaColumn> column = _columns[i->second];
@@ -120,7 +120,7 @@ namespace springtail {
         // get the existing column details
         auto &&i = _name_map.find(from);
         if (i == _name_map.end()) {
-            throw ColumnNotExistsSchemaError();
+            throw SchemaError(fmt::format("Column does not exist {}", from));
         }
         std::shared_ptr<SchemaColumn> column = _columns[i->second];
 
@@ -129,7 +129,7 @@ namespace springtail {
             // check that the new name doesn't already exist
             i = _name_map.find(to);
             if (i != _name_map.end()) {
-                throw ColumnExistsSchemaError();
+                throw SchemaError(fmt::format("Column already exists {}", to));
             }
 
             // rename the column
@@ -151,7 +151,7 @@ namespace springtail {
         // get the column details
         auto &&i = _name_map.find(name);
         if (i == _name_map.end()) {
-            throw ColumnNotExistsSchemaError();
+            throw SchemaError(fmt::format("Column does not exist {}", name));
         }
         std::shared_ptr<SchemaColumn> column = _columns[i->second];
         

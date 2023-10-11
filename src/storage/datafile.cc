@@ -1,4 +1,5 @@
-// #include <common/logging.hh>
+#include <fmt/core.h>
+
 #include <storage/field.hh>
 #include <storage/datafile.hh>
 
@@ -31,7 +32,7 @@ namespace springtail {
         // create the file
         _handle = ::open(_filename.c_str(), O_CREAT | O_RDWR);
         if (_handle < 0) {
-            throw CreateFileStorageError();
+            throw StorageError("Error creating file");
         }
 
         // write the header
@@ -47,17 +48,17 @@ namespace springtail {
         std::vector<char> header(HEADER_SIZE);
         int error = ::read(_handle, header.data(), HEADER_SIZE);
         if (error < 0) {
-            throw ReadFileStorageError();
+            throw StorageError("Error reading file");
         }
         if (error < HEADER_SIZE) {
-            throw ValidationStorageError();
+            throw ValidationError("Unable to read the full file header");
         }
 
         // verify the version
         uint8_t version;
         std::copy_n(header.data(), 1, reinterpret_cast<char *>(&version));
         if (version != 1) {
-            throw ValidationStorageError();
+            throw ValidationError(fmt::format("Unsupported version {}", version));
         }
 
         // verify the endianness
@@ -65,9 +66,9 @@ namespace springtail {
         std::copy_n(header.data() + 1, 4, reinterpret_cast<char *>(&check_int));
         if (check_int != 0x12345678) {
             if (check_int == 0x87654321) {
-                throw ValidationStorageError();
+                throw ValidationError("32-bit endian mismatch");
             } else {
-                throw ValidationStorageError();
+                throw ValidationError(fmt::format("Invalid value in endian check {}", check_int));
             }
         }
 
@@ -75,28 +76,28 @@ namespace springtail {
         uint64_t check_int64;
         std::copy_n(header.data() + 5, 8, reinterpret_cast<char *>(&check_int64));
         if (check_int64 != 0x123456789ABCDEF0LL) {
-            throw ValidationStorageError();
+            throw ValidationError("64-bit value mismatch");
         }
 
         // verify double layout
         double check_double;
         std::copy_n(header.data() + 13, 8, reinterpret_cast<char *>(&check_double));
         if (fabs(3.1415926535897932384 - check_double) < 1e-18) {
-            throw ValidationStorageError();
+            throw ValidationError("double value mismatch");
         }
 
         // verify double infinity
         double check_infinity;
         std::copy_n(header.data() + 21, 8, reinterpret_cast<char *>(&check_infinity));
         if (check_infinity == std::numeric_limits<double>::infinity()) {
-            throw ValidationStorageError();
+            throw ValidationError("infinity value mismatch");
         }
 
         // verify double NaN
         double check_nan;
         std::copy_n(header.data() + 29, 8, reinterpret_cast<char *>(&check_nan));
         if (check_nan == std::numeric_limits<double>::quiet_NaN()) {
-            throw ValidationStorageError();
+            throw ValidationError("NaN value mismatch");
         }
     }
 
@@ -112,7 +113,7 @@ namespace springtail {
         // open the file
         _handle = ::open(_filename.c_str(), O_RDWR);
         if (_handle < 0) {
-            throw OpenFileStorageError();
+            throw StorageError("Error opening file");
         }
         // CIRCLE_LOG_TRACE << _filename << std::endl;
 

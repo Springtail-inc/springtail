@@ -46,7 +46,7 @@ namespace springtail {
             uint32_t c = CityHash32(reinterpret_cast<char *>(_data.data()), _data.size() - 4);
             if (c != checksum) {
                 std::cerr << "Checksum mis-match" << std::endl;
-                throw ValidationStorageError();
+                throw ValidationError("Checksum mismatch");
             }
         }
 

@@ -36,7 +36,7 @@ namespace springtail {
                                                       src.data(), dst.data() + offset + 8,
                                                       src.size(), target_size, 1);
         if (dst_size <= 0) {
-            throw CompressionStorageError();
+            throw ValidationError("Error compressing data");
         }
 
         // save the original data size and compressed data size
@@ -81,10 +81,10 @@ namespace springtail {
         // decompress the block
         int size = LZ4_decompress_safe_continue(_lz4_stream, src, dst.data(), src_size, dst_size);
         if (size <= 0) {
-            throw DecompressionStorageError();
+            throw ValidationError("Error decompressing data");
         }
         if (size != dst_size) {
-            throw DecompressionStorageError();
+            throw ValidationError("Unexpected decompression size while decompressing data");
         }
 
         // read the full compressed data and 2 4-byte sizes
