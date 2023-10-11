@@ -3,6 +3,10 @@
         "minio-cpp",
         "libpq",
         "boost-program-options",
-        "fmt"
+        "boost-filesystem",
+        "fmt",
+        "backward-cpp",
+        "cityhash",
+        "spdlog"
     ]
 }

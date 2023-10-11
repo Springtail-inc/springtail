@@ -39,7 +39,7 @@ writer(const std::filesystem::path &directory,
     // create a block of data
     std::vector<char> buf(block_size);
 
-    springtail::common::Timer timer;
+    springtail::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
         // round robin through the files
@@ -81,7 +81,7 @@ reader(const std::filesystem::path &directory,
     std::vector<char> buf(block_size);
 
     // read random blocks
-    springtail::common::Timer timer;
+    springtail::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
         int file = rand() % file_count;
@@ -139,7 +139,7 @@ int main(int argc, char* argv[]) {
     std::vector<std::thread> writers;
     int files_per_thread = file_count / writer_count;
     int blocks_per_thread = block_count / writer_count;
-    springtail::common::Timer timer;
+    springtail::Timer timer;
 
     timer.start();
     for (int i = 0; i < writer_count; i++) {

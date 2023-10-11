@@ -21,7 +21,18 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
 
-# include modules
+find_library(LIB_ELF NAMES elf PATHS /usr/local/lib)
+find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
+include_directories(/usr/local/include)
+
+find_package(Psql)
+find_package(Backward CONFIG REQUIRED)
+find_package(spdlog)
+# find_package(Boost REQUIRED boost-program-options)
+
+## source modules
+add_subdirectory(src/common)
+add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
 add_subdirectory(src/psql_cdc)
 
