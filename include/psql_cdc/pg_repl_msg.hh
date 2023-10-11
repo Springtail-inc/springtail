@@ -211,28 +211,28 @@ namespace springtail
         }
 
         // v1 messages
-        int decodeBegin(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeCommit(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeRelation(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeInsert(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeUpdate(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeDelete(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeTruncate(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeOrigin(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeMessage(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeType(const char *buffer, int length, PgReplMsgDecoded &msg);
+        int decodeBegin();
+        int decodeCommit();
+        int decodeRelation();
+        int decodeInsert();
+        int decodeUpdate();
+        int decodeDelete();
+        int decodeTruncate();
+        int decodeOrigin();
+        int decodeMessage();
+        int decodeType();
 
         // v2 messages
-        int decodeStreamStart(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeStreamStop(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeStreamCommit(const char *buffer, int length, PgReplMsgDecoded &msg);
-        int decodeStreamAbort(const char *buffer, int length, PgReplMsgDecoded &msg);
+        int decodeStreamStart();
+        int decodeStreamStop();
+        int decodeStreamCommit();
+        int decodeStreamAbort();
 
         // helpers
         static int decodeTuple(const char *buffer, int length, MsgTupleData &tuple);
         static int decodeString(const char *buffer, int length, const char** str_out);
 
-        static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss);
+        static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
 
     public:
         /**
@@ -240,7 +240,7 @@ namespace springtail
          *
          * @param proto_version Postgres replication protocol version
          */
-        PgReplMsg(int proto_version);
+        PgReplMsg(int proto_version) noexcept;
 
         /**
          * @brief Set the internal buffer based on buffer passed in
@@ -248,18 +248,21 @@ namespace springtail
          * @param buffer pointer to buffer containing undecoded msg data
          * @param length length of buffer
          */
-        void setBuffer(const char *buffer, int length);
+        void setBuffer(const char *buffer, int length) noexcept;
 
         /**
          * @brief Is there additional data that can be decoded
          *        within internal buffer
          * @return true if additional data exists; false otherwise
          */
-        bool hasNextMsg();
+        bool hasNextMsg() noexcept;
 
         /**
          * @brief Retrieve next message from internal buffer
          * @return reference to internal decoded message
+         * @throws PgMessageTooSmallError
+         * @throws PgUnexpectedDataError
+         * @throws PgUnknownMessageError
          */
         const PgReplMsgDecoded &decodeNextMsg();
 
@@ -277,7 +280,7 @@ namespace springtail
          * @param lsn LSN to convert
          * @return string of LSN in format: "XXX/XXX"
          */
-        static std::string lsnToStr(LSN_t lsn);
+        static std::string lsnToStr(LSN_t lsn) noexcept;
 
         /**
          * @brief Convert LSN in string format XXX/XXX to LSN_t (uint64_t)
@@ -285,6 +288,6 @@ namespace springtail
          * @param lsn_str string of LSN in format XXX/XXX
          * @return LSN_t
          */
-        static LSN_t strToLSN(const char *lsn_str);
+        static LSN_t strToLSN(const char *lsn_str) noexcept;
     };
 }

@@ -2,18 +2,19 @@
 #include <sstream>
 #include <fmt/core.h>
 
+#include <psql_cdc/exception.hh>
 #include <psql_cdc/pg_repl_msg.hh>
 
 namespace springtail
 {
-    PgReplMsg::PgReplMsg(int proto_version)
+    PgReplMsg::PgReplMsg(int proto_version) noexcept
       : _proto_version(proto_version) {}
 
 
     /**
      * @brief Initialize message to empty/invalid message
      */
-    void PgReplMsg::setBuffer(const char *buffer, int length)
+    void PgReplMsg::setBuffer(const char *buffer, int length) noexcept
     {
         _buffer = buffer;
         _buffer_length = length;
@@ -26,20 +27,22 @@ namespace springtail
      *
      * @return true if more data exists, false otherwise
      */
-    bool PgReplMsg::hasNextMsg()
+    bool PgReplMsg::hasNextMsg() noexcept
     {
         return (_buffer_length > 0);
     }
 
 
     /**
-     * @brief Decode message in buffer, after xlog header
-     * @return number of bytes consumed
+     * @brief Retrieve next message from internal buffer
+     * @return reference to internal decoded message
+     * @throws PgMessageTooSmallError
+     * @throws PgUnexpectedDataError
+     * @throws PgUnknownMessageError
      */
     const PgReplMsgDecoded &PgReplMsg::decodeNextMsg()
     {
         // first byte is opcode
-        // then int32 length (usually)
         char msg_type = _buffer[0];
         int pos = 0;
 
@@ -50,65 +53,65 @@ namespace springtail
 
             // V1 Protocol
             case MSG_BEGIN: // begin
-                pos = decodeBegin(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeBegin();
                 break;
 
             case MSG_COMMIT: // commit
-                pos = decodeCommit(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeCommit();
                 break;
 
             case MSG_RELATION: // relation
-                pos = decodeRelation(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeRelation();
                 break;
 
             case MSG_INSERT: // insert
-                pos = decodeInsert(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeInsert();
                 break;
 
             case MSG_UPDATE: // update
-                pos = decodeUpdate(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeUpdate();
                 break;
 
             case MSG_DELETE: // delete
-                pos = decodeDelete(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeDelete();
                 break;
 
             case MSG_TRUNCATE: // truncate
-                pos = decodeTruncate(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeTruncate();
                 break;
 
             case MSG_ORIGIN: // origin
-                pos = decodeOrigin(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeOrigin();
                 break;
 
             case MSG_MESSAGE: // message
-                pos = decodeMessage(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeMessage();
                 break;
 
             case MSG_TYPE: // type
-                pos = decodeType(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeType();
                 break;
 
             case MSG_STREAM_START:
-                pos = decodeStreamStart(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeStreamStart();
                 break;
 
             case MSG_STREAM_STOP:
-                pos = decodeStreamStop(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeStreamStop();
                 break;
 
             case MSG_STREAM_COMMIT:
-                pos = decodeStreamCommit(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeStreamCommit();
                 break;
 
             case MSG_STREAM_ABORT:
-                pos = decodeStreamAbort(_buffer, _buffer_length, _decoded_msg);
+                pos = decodeStreamAbort();
                 break;
 
             default: // unknown/unhandled
                 std::cerr << "Unknown opcode to decode: " << msg_type << std::endl;
-                pos = -1;
-                break;
+                setBuffer(nullptr, 0);
+                throw PgUnknownMessageError();
         }
 
         // sanity check
@@ -120,17 +123,7 @@ namespace springtail
             /* Note: an error here will really require closing and re-opening the
              * replication stream to try and re-read the data */
 
-            return _decoded_msg;
-        }
-
-        // error decoding occured, bail...
-        if (pos == -1) {
-            std::cerr << "Error decoding buffer\n";
-            setBuffer(nullptr, 0);
-            /* Note: an error here will really require closing and re-opening the
-             * replication stream to try and re-read the data */
-
-            return _decoded_msg;
+            throw PgUnexpectedDataError();
         }
 
         _buffer_length -= pos;
@@ -150,6 +143,11 @@ namespace springtail
      */
     int PgReplMsg::decodeString(const char *buffer, int length, const char **str_out)
     {
+        if (length < 0) {
+            std::cerr << "DecodeString: message has been consumed\n";
+            throw PgMessageTooSmallError();
+        }
+
         int len = strnlen(buffer, length);
         int null_offset = 0;
 
@@ -161,10 +159,11 @@ namespace springtail
             null_offset = len + 1;
         }
 
+        // sanity check
         if (buffer[null_offset] != '\0') {
             *str_out = nullptr;
-            std::cerr << "Error decoding string\n";
-            return -1;
+            std::cerr << "DecodeString: error decoding string\n";
+            throw PgUnexpectedDataError();
         }
 
         *str_out = buffer;
@@ -175,9 +174,6 @@ namespace springtail
     /**
      * @brief Decode tuple data within a message
      *
-     * @param buffer pointer to a buffer
-     * @param length length of data in buffer
-     * @param tuple tuple struct to hold output
      * @return number of bytes consumed
      */
     int PgReplMsg::decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
@@ -194,6 +190,11 @@ namespace springtail
                 Int32 Length of the column value.
                 Byten The value of the column, in text format. (A future release might support additional formats.) n is the above length.
          */
+        if (length < 0) {
+            std::cerr << "DecodeTuple: message has been consumed\n";
+            throw PgMessageTooSmallError();
+        }
+
         int pos = 0;
 
         tuple.num_columns = recvint16(&buffer[pos]);
@@ -202,6 +203,11 @@ namespace springtail
         tuple.tuple_data.resize(tuple.num_columns);
 
         for (int i = 0; i < tuple.num_columns; i++) {
+            if (pos >= length) {
+                std::cerr << "DecodeTuple: error, consumed too much data\n";
+                throw PgUnexpectedDataError();
+            }
+
             tuple.tuple_data[i].type = buffer[pos];
             pos += 1;
 
@@ -224,16 +230,11 @@ namespace springtail
 
 
     /**
-     * @brief [brief description]
-     * @details [long description]
+     * @brief decode Message
      *
-     * @param buffer [description]
-     * @param length [description]
-     * @param msg [description]
-     * @return [description]
+     * @return number of bytes consumed
      */
-    int PgReplMsg::decodeMessage(const char *buffer, int length,
-                                 PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeMessage()
     {
         /*
             Byte1('M') Identifies the message as a logical decoding message.
@@ -251,38 +252,33 @@ namespace springtail
         MsgMessage message;
 
         if (_proto_version > 1) {
-            message.xid = recvint32(&buffer[pos]);  // only version 2
+            message.xid = recvint32(&_buffer[pos]);  // only version 2
             pos += 4;
         }
 
-        message.flags = (int8_t)buffer[pos];
+        message.flags = (int8_t)_buffer[pos];
         pos += 1;
 
-        message.lsn = recvint64(&buffer[pos]);
+        message.lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-
-        int str_len = decodeString(&buffer[pos], length - pos, &message.prefix_str);
-        if (str_len == -1) {
-            return -1;
-        }
+        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &message.prefix_str);
         pos += str_len;
 
-        message.data_len = recvint32(&buffer[pos]);
+        message.data_len = recvint32(&_buffer[pos]);
         pos += 4;
 
-        message.data = &buffer[pos];
+        message.data = &_buffer[pos];
         pos += message.data_len;
 
-        msg.msg_type = PgReplMsgType::MESSAGE;
-        msg.msg.emplace<MsgMessage>(message);
+        _decoded_msg.msg_type = PgReplMsgType::MESSAGE;
+        _decoded_msg.msg.emplace<MsgMessage>(message);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeOrigin(const char *buffer, int length,
-                                PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeOrigin()
     {
         /*
             Byte1('O') Identifies the message as an origin message.
@@ -295,24 +291,23 @@ namespace springtail
 
         MsgOrigin origin;
 
-        origin.commit_lsn = recvint64(&buffer[pos]);
+        origin.commit_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        int str_len = decodeString(&buffer[pos], length - pos, &origin.name_str);
+        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &origin.name_str);
         if (str_len == -1) {
             return -1;
         }
         pos += str_len;
 
-        msg.msg_type = PgReplMsgType::ORIGIN;
-        msg.msg.emplace<MsgOrigin>(origin);
+        _decoded_msg.msg_type = PgReplMsgType::ORIGIN;
+        _decoded_msg.msg.emplace<MsgOrigin>(origin);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeBegin(const char *buffer, int length,
-                               PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeBegin()
     {
         /*
             Byte1('B') Identifies the message as a begin message.
@@ -324,24 +319,23 @@ namespace springtail
 
         MsgBegin begin;
 
-        begin.xact_lsn = recvint64(&buffer[pos]);
+        begin.xact_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        begin.commit_ts = recvint64(&buffer[pos]);
+        begin.commit_ts = recvint64(&_buffer[pos]);
         pos += 8;
 
-        begin.xid = recvint32(&buffer[pos]);
+        begin.xid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        msg.msg_type = PgReplMsgType::BEGIN;
-        msg.msg.emplace<MsgBegin>(begin);
+        _decoded_msg.msg_type = PgReplMsgType::BEGIN;
+        _decoded_msg.msg.emplace<MsgBegin>(begin);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeCommit(const char *buffer, int length,
-                                PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeCommit()
     {
         /*
             Byte1('C') Identifies the message as a commit message.
@@ -356,24 +350,23 @@ namespace springtail
 
         MsgCommit commit;
 
-        commit.commit_lsn = recvint64(&buffer[pos]);
+        commit.commit_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        commit.xact_lsn = recvint64(&buffer[pos]);
+        commit.xact_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        commit.commit_ts = recvint64(&buffer[pos]);
+        commit.commit_ts = recvint64(&_buffer[pos]);
         pos += 8;
 
-        msg.msg_type = PgReplMsgType::COMMIT;
-        msg.msg.emplace<MsgCommit>(commit);
+        _decoded_msg.msg_type = PgReplMsgType::COMMIT;
+        _decoded_msg.msg.emplace<MsgCommit>(commit);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeRelation(const char *buffer, int length,
-                                  PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeRelation()
     {
         /*
             Byte1('R')  Identifies the message as a relation message.
@@ -400,59 +393,55 @@ namespace springtail
         MsgRelation relation;
 
         if (_proto_version > 1) {
-            relation.xid = recvint32(&buffer[pos]);     // only present in v2
+            relation.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
 
-        relation.rel_id = recvint32(&buffer[pos]);
+        relation.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&buffer[pos], length - pos, &relation.namespace_str);
-        if (str_len == -1) {
-            return -1;
-        }
+        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.namespace_str);
         pos += str_len;
 
-        str_len = decodeString(&buffer[pos], length - pos, &relation.rel_name_str);
-        if (str_len == -1) {
-            return -1;
-        }
+        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.rel_name_str);
         pos += str_len;
 
-        relation.identity = (int8_t)buffer[pos];
+        relation.identity = (int8_t)_buffer[pos];
         pos += 1;
 
-        relation.num_columns = recvint16(&buffer[pos]);
+        relation.num_columns = recvint16(&_buffer[pos]);
         pos += 2;
 
         relation.columns.resize(relation.num_columns);
 
+        // sanity check, need at least 10B per column
+        if (_buffer_length - pos < (10 * relation.num_columns)) {
+            throw PgMessageTooSmallError();
+        }
+
         for (int i = 0; i < relation.num_columns; i++) {
-            relation.columns[i].flags = *((int8_t *)&buffer[pos]); // 0 no flags; 1 key
+            relation.columns[i].flags = *((int8_t *)&_buffer[pos]); // 0 no flags; 1 key
             pos += 1;
 
-            str_len = decodeString(&buffer[pos], length - pos, &relation.columns[i].column_name);
-            if (str_len == -1) {
-                return -1;
-            }
+            str_len = decodeString(&_buffer[pos], _buffer_length - pos,
+                                   &relation.columns[i].column_name);
             pos += str_len;
 
-            relation.columns[i].oid = recvint32(&buffer[pos]);
+            relation.columns[i].oid = recvint32(&_buffer[pos]);
             pos += 4;
 
-            relation.columns[i].type_modifier = recvint32(&buffer[pos]);
+            relation.columns[i].type_modifier = recvint32(&_buffer[pos]);
             pos += 4;
         }
 
-        msg.msg_type = PgReplMsgType::RELATION;
-        msg.msg.emplace<MsgRelation>(relation);
+        _decoded_msg.msg_type = PgReplMsgType::RELATION;
+        _decoded_msg.msg.emplace<MsgRelation>(relation);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeInsert(const char *buffer, int length,
-                                PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeInsert()
     {
         /*
             Byte1('I')  Identifies the message as an insert message.
@@ -466,14 +455,14 @@ namespace springtail
         MsgInsert insert;
 
         if (_proto_version > 1) {
-            insert.xid = recvint32(&buffer[pos]);     // only present in v2
+            insert.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
 
-        insert.rel_id = recvint32(&buffer[pos]);
+        insert.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        insert.new_type = buffer[pos]; // should be 'N'
+        insert.new_type = _buffer[pos]; // should be 'N'
         if (insert.new_type == 'N') {
             pos += 1;
         } else {
@@ -483,17 +472,16 @@ namespace springtail
             pos += 1;
         }
 
-        pos += decodeTuple(&buffer[pos], length - pos, insert.new_tuple);
+        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, insert.new_tuple);
 
-        msg.msg_type = PgReplMsgType::INSERT;
-        msg.msg.emplace<MsgInsert>(insert);
+        _decoded_msg.msg_type = PgReplMsgType::INSERT;
+        _decoded_msg.msg.emplace<MsgInsert>(insert);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeUpdate(const char *buffer, int length,
-                                PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeUpdate()
     {
         /*
             Byte1('U')      Identifies the message as an update message.
@@ -522,14 +510,14 @@ namespace springtail
         MsgUpdate update;
 
         if (_proto_version > 1) {
-            update.xid = recvint32(&buffer[pos]);     // only present in v2
+            update.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
 
-        update.rel_id = recvint32(&buffer[pos]);
+        update.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        update.old_type = buffer[pos];
+        update.old_type = _buffer[pos];
         if (update.old_type == 'K' || update.old_type == 'O') {
             pos += 1;
         } else {
@@ -537,9 +525,9 @@ namespace springtail
             update.old_type = '\0';
         }
 
-        pos += decodeTuple(&buffer[pos], length - pos, update.old_tuple);
+        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, update.old_tuple);
 
-        update.new_type = buffer[pos]; // should be 'N'
+        update.new_type = _buffer[pos]; // should be 'N'
         if (update.new_type == 'N') {
             pos += 1;
         } else {
@@ -548,17 +536,16 @@ namespace springtail
             update.new_type = '\0';
         }
 
-        pos += decodeTuple(&buffer[pos], length - pos, update.new_tuple);
+        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, update.new_tuple);
 
-        msg.msg_type = PgReplMsgType::UPDATE;
-        msg.msg.emplace<MsgUpdate>(update);
+        _decoded_msg.msg_type = PgReplMsgType::UPDATE;
+        _decoded_msg.msg.emplace<MsgUpdate>(update);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeDelete(const char *buffer, int length,
-                                PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeDelete()
     {
         /*
             Byte1('D')      Identifies the message as a delete message.
@@ -582,14 +569,14 @@ namespace springtail
         MsgDelete delete_msg;
 
         if (_proto_version > 1) {
-            delete_msg.xid = recvint32(&buffer[pos]);     // only present in v2
+            delete_msg.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
 
-        delete_msg.rel_id = recvint32(&buffer[pos]);
+        delete_msg.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        delete_msg.type = buffer[pos];
+        delete_msg.type = _buffer[pos];
         if (delete_msg.type == 'K' || delete_msg.type == 'O') {
             pos += 1;
         } else {
@@ -597,17 +584,16 @@ namespace springtail
             delete_msg.type = '\0';
         }
 
-        pos += decodeTuple(&buffer[pos], length - pos, delete_msg.tuple);
+        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, delete_msg.tuple);
 
-        msg.msg_type = PgReplMsgType::DELETE;
-        msg.msg.emplace<MsgDelete>(delete_msg);
+        _decoded_msg.msg_type = PgReplMsgType::DELETE;
+        _decoded_msg.msg.emplace<MsgDelete>(delete_msg);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeTruncate(const char *buffer, int length,
-                                  PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeTruncate()
     {
         /*
             Byte1('T')      Identifies the message as a truncate message.
@@ -623,31 +609,35 @@ namespace springtail
         MsgTruncate truncate;
 
         if (_proto_version > 1) {
-            truncate.xid = recvint32(&buffer[pos]);     // only present in v2
+            truncate.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
 
-        truncate.num_rels = recvint32(&buffer[pos]);
+        truncate.num_rels = recvint32(&_buffer[pos]);
         pos += 4;
 
-        truncate.options = (int8_t)buffer[pos];
+        truncate.options = (int8_t)_buffer[pos];
         pos += 1;
+
+        // sanity check
+        if (_buffer_length - pos < truncate.num_rels * 4) {
+            throw PgMessageTooSmallError();
+        }
 
         truncate.rel_ids.resize(truncate.num_rels);
         for (int i = 0; i < truncate.num_rels; i++) {
-            truncate.rel_ids[i] = recvint32(&buffer[pos]);
+            truncate.rel_ids[i] = recvint32(&_buffer[pos]);
             pos += 4;
         }
 
-        msg.msg_type = PgReplMsgType::TRUNCATE;
-        msg.msg.emplace<MsgTruncate>(truncate);
+        _decoded_msg.msg_type = PgReplMsgType::TRUNCATE;
+        _decoded_msg.msg.emplace<MsgTruncate>(truncate);
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeType(const char *buffer, int length,
-                              PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeType()
     {
         /*
             Byte1('Y') Identifies the message as a type message.
@@ -663,27 +653,21 @@ namespace springtail
         MsgType type;
 
         if (_proto_version > 1) {
-            type.xid = recvint32(&buffer[pos]); // only version 2+
+            type.xid = recvint32(&_buffer[pos]); // only version 2+
             pos += 4;
         }
 
-        type.oid = recvint32(&buffer[pos]);
+        type.oid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&buffer[pos], length - pos, &type.namespace_str);
-        if (str_len == -1) {
-            return -1;
-        }
+        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.namespace_str);
         pos += str_len;
 
-        str_len = decodeString(&buffer[pos], length - pos, &type.data_type_str);
-        if (str_len == -1) {
-            return -1;
-        }
+        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.data_type_str);
         pos += str_len;
 
-        msg.msg_type = PgReplMsgType::TYPE;
-        msg.msg.emplace<MsgType>(type);
+        _decoded_msg.msg_type = PgReplMsgType::TYPE;
+        _decoded_msg.msg.emplace<MsgType>(type);
 
         return pos;
     }
@@ -692,12 +676,9 @@ namespace springtail
     /**
      * @brief Stream start message
      *
-     * @param buffer input buffer
-     * @param length input buffer length
-     * @param msg output message
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamStart(const char *buffer, int length, PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeStreamStart()
     {
         /*
             Byte1('S')  Identifies the message as a stream start message.
@@ -709,14 +690,14 @@ namespace springtail
 
         MsgStreamStart stream_start;
 
-        stream_start.xid = recvint32(&buffer[pos]);
+        stream_start.xid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        stream_start.first = ((int8_t)buffer[pos] == 1);
+        stream_start.first = ((int8_t)_buffer[pos] == 1);
         pos += 1;
 
-        msg.msg_type = PgReplMsgType::STREAM_START;
-        msg.msg.emplace<MsgStreamStart>(stream_start);
+        _decoded_msg.msg_type = PgReplMsgType::STREAM_START;
+        _decoded_msg.msg.emplace<MsgStreamStart>(stream_start);
 
         return pos;
     }
@@ -725,12 +706,9 @@ namespace springtail
     /**
      * @brief Stream stop message
      *
-     * @param buffer input buffer
-     * @param length input buffer length
-     * @param msg output message
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamStop(const char *buffer, int length, PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeStreamStop()
     {
         /*
             Byte1('E')  Identifies the message as a stream stop message.
@@ -740,8 +718,8 @@ namespace springtail
 
         MsgStreamStop stream_stop;
 
-        msg.msg_type = PgReplMsgType::STREAM_STOP;
-        msg.msg.emplace<MsgStreamStop>(stream_stop);
+        _decoded_msg.msg_type = PgReplMsgType::STREAM_STOP;
+        _decoded_msg.msg.emplace<MsgStreamStop>(stream_stop);
 
         return pos;
     }
@@ -750,12 +728,9 @@ namespace springtail
     /**
      * @brief Stream commit message
      *
-     * @param buffer input buffer
-     * @param length input buffer length
-     * @param msg output message
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamCommit(const char *buffer, int length, PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeStreamCommit()
     {
         /*
             Byte1('c')  Identifies the message as a stream commit message.
@@ -771,23 +746,23 @@ namespace springtail
 
         MsgStreamCommit stream_commit;
 
-        stream_commit.xid = recvint32(&buffer[pos]);
+        stream_commit.xid = recvint32(&_buffer[pos]);
         pos += 4;
 
         // skip flags
         pos += 1;
 
-        stream_commit.commit_lsn = recvint64(&buffer[pos]);
+        stream_commit.commit_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        stream_commit.xact_lsn = recvint64(&buffer[pos]);
+        stream_commit.xact_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        stream_commit.commit_ts = recvint64(&buffer[pos]);
+        stream_commit.commit_ts = recvint64(&_buffer[pos]);
         pos += 8;
 
-        msg.msg_type = PgReplMsgType::STREAM_COMMIT;
-        msg.msg.emplace<MsgStreamCommit>(stream_commit);
+        _decoded_msg.msg_type = PgReplMsgType::STREAM_COMMIT;
+        _decoded_msg.msg.emplace<MsgStreamCommit>(stream_commit);
 
         return pos;
     }
@@ -796,12 +771,9 @@ namespace springtail
     /**
      * @brief Stream abort message
      *
-     * @param buffer input buffer
-     * @param length input buffer length
-     * @param msg output message
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamAbort(const char *buffer, int length, PgReplMsgDecoded &msg)
+    int PgReplMsg::decodeStreamAbort()
     {
         /*
             Byte1('A')  Identifies the message as a stream abort message.
@@ -816,29 +788,29 @@ namespace springtail
 
         MsgStreamAbort stream_abort;
 
-        stream_abort.xid = recvint32(&buffer[pos]);
+        stream_abort.xid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        stream_abort.sub_xid = recvint32(&buffer[pos]);
+        stream_abort.sub_xid = recvint32(&_buffer[pos]);
         pos += 4;
 
         if (_proto_version > 3) {
-            stream_abort.abort_lsn = recvint64(&buffer[pos]);
+            stream_abort.abort_lsn = recvint64(&_buffer[pos]);
             pos += 8;
 
-            stream_abort.abort_ts = recvint64(&buffer[pos]);
+            stream_abort.abort_ts = recvint64(&_buffer[pos]);
             pos += 8;
         }
 
-        msg.msg_type = PgReplMsgType::STREAM_ABORT;
-        msg.msg.emplace<MsgStreamAbort>(stream_abort);
+        _decoded_msg.msg_type = PgReplMsgType::STREAM_ABORT;
+        _decoded_msg.msg.emplace<MsgStreamAbort>(stream_abort);
 
         return pos;
     }
 
 
     void PgReplMsg::dumpTuple(const MsgTupleData &tuple,
-                              std::stringstream &ss)
+                              std::stringstream &ss) noexcept
     {
         for (int i = 0; i < tuple.num_columns; i++) {
             ss << "  - type=" << tuple.tuple_data[i].type << std::endl;
@@ -852,7 +824,7 @@ namespace springtail
      * @param lsn LSN to convert
      * @return string of LSN in format: "XXX/XXX"
      */
-    std::string PgReplMsg::lsnToStr(const LSN_t lsn)
+    std::string PgReplMsg::lsnToStr(const LSN_t lsn) noexcept
     {
         uint32_t lsn_higher = (uint32_t)(lsn>>32);
         uint32_t lsn_lower = (uint32_t)(lsn);
@@ -866,7 +838,7 @@ namespace springtail
      * @param lsn_str string of LSN in format XXX/XXX
      * @return LSN_t
      */
-    LSN_t PgReplMsg::strToLSN(const char *lsn_str)
+    LSN_t PgReplMsg::strToLSN(const char *lsn_str) noexcept
     {
         char *end_ptr = nullptr;
 
