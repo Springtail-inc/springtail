@@ -1,13 +1,19 @@
 cmake_minimum_required(VERSION 3.27)
 
 ## Need to set top level include for conan, must be before project
-set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
+# disable for now
+# set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "./cmake/conan_provider.cmake")
 
 ## project definition
 project(Springtail
     VERSION 0.1
     DESCRIPTION "Springtail source code"
     LANGUAGES CXX)
+
+## check for vcpkg install
+if (NOT IS_DIRECTORY "${PROJECT_SOURCE_DIR}/external/vcpkg")
+    message(FATAL_ERROR "Error: external/vcpkg does not exist, run vcpkg.sh")
+endif()
 
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")

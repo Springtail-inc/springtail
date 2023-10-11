@@ -5,6 +5,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
+#include <common/common.hh>
 #include <psql_cdc/pg_repl_msg.hh>
 
 int main(int argc, char* argv[])
@@ -26,6 +27,9 @@ int main(int argc, char* argv[])
         std::cout << desc << std::endl;
         return 0;
     }
+
+    // init logging/backtrace
+    springtail::springtail_init();
 
     // open wal log file (written by pg_wal_dump)
     std::FILE* f = std::fopen(file.c_str(), "rb");

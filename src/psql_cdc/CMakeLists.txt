@@ -36,6 +36,7 @@ target_include_directories(pg_wal_decode
 target_link_libraries(psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE fmt::fmt
+    PUBLIC springtail_common
 )
 
 target_link_libraries(pg_wal_dump
@@ -43,6 +44,7 @@ target_link_libraries(pg_wal_dump
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
     PRIVATE fmt::fmt
+    PUBLIC springtail_common
 )
 
 target_link_libraries(pg_wal_decode
@@ -50,6 +52,7 @@ target_link_libraries(pg_wal_decode
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
     PRIVATE fmt::fmt
+    PUBLIC springtail_common
 )
 
 if (${MACOSX})

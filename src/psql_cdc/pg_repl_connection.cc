@@ -726,6 +726,7 @@ namespace springtail
         dataOut.buffer = &_copy_buffer[_copy_buffer_offset];
         dataOut.length = _copy_buffer_length - _copy_buffer_offset;
         dataOut.msg_length = _copy_msg_length;
+        dataOut.starting_lsn = _last_received_lsn;
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream

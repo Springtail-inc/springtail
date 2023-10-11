@@ -17,6 +17,7 @@ namespace springtail
         int length;          // length of data in this buffer
         int msg_length;      // length of message; may be larger than buffer
         int msg_offset;      // offset of message for start of buffer
+        LSN_t starting_lsn;  // starting LSN for message buffer
     };
 
     /**

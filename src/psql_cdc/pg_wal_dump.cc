@@ -5,6 +5,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
+#include <common/common.hh>
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 #include <psql_cdc/pg_repl_msg.hh>
@@ -57,6 +58,9 @@ int main(int argc, char* argv[])
         std::cerr << desc;
         return -1;
     }
+
+    // init logging/backtrace
+    springtail::springtail_init();
 
     // create postgres connection
     springtail::PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
