@@ -22,16 +22,21 @@ include(SetSystem)
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
+find_library(LIB_ELF NAMES elf PATHS /usr/local/lib)
+find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
+include_directories(/usr/local/include)
 
 find_package(Psql)
-
+find_package(Backward CONFIG REQUIRED)
+find_package(spdlog)
 # find_package(Boost REQUIRED boost-program-options)
 
 ## Source modules in ./modules
 add_subdirectory(modules/cdc)
 
-## Benchmarks
-include(benchmarks)
+add_subdirectory(src/common)
+add_subdirectory(src/storage)
+add_subdirectory(src/benchmarks)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
