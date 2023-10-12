@@ -826,8 +826,8 @@ namespace springtail
      */
     std::string PgReplMsg::lsnToStr(const LSN_t lsn) noexcept
     {
-        uint32_t lsn_higher = (uint32_t)(lsn>>32);
-        uint32_t lsn_lower = (uint32_t)(lsn);
+        uint32_t lsn_higher = static_cast<uint32_t>(lsn>>32);
+        uint32_t lsn_lower = static_cast<uint32_t>(lsn);
 
         return fmt::format("{:X}/{:X}", lsn_higher, lsn_lower);
     }
