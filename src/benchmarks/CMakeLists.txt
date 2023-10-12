@@ -51,11 +51,11 @@ set(FILE_SOURCES file_bench.cc)
 
 # benchmarks
 add_executable(minio_bench ${MINIO_SOURCES})
-target_include_directories(minio_bench PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(minio_bench PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(minio_bench PRIVATE fmt::fmt ${minio_requiredlibs})
 
 add_executable(file_bench ${FILE_SOURCES})
-target_include_directories(file_bench PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(file_bench PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(file_bench PRIVATE fmt::fmt Boost::program_options)
 
 add_executable(crash crash.cc)

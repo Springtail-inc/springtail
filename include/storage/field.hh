@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <type_traits>
+#include <cassert>
 
 #include <storage/extent.hh>
 #include <storage/schema_type.hh>

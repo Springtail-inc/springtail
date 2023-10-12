@@ -3,7 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
-
+#include <cassert>
 #include <city.h>
 
 #include <storage/schema.hh>

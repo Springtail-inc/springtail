@@ -1,5 +1,4 @@
 [requires]
-taocpp-json/1.0.0-beta.14
 
 [layout]
 cmake_layout
