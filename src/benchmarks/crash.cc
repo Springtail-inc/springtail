@@ -4,12 +4,20 @@
 #include <common/logging.hh>
 #include <common/common.hh>
 
+class CrashError : public springtail::Error {
+public:
+    CrashError() { }
+    CrashError(const std::string &error)
+        : springtail::Error(error)
+    { }
+};
+
 void crash(const char *str) {
     std::cout << *str << std::endl;
 }
 
 void error() {
-    throw springtail::Error();
+    throw CrashError();
 }
 
 int main() {

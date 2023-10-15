@@ -18,7 +18,8 @@ namespace springtail {
 
     public:
         /** Captures the stack trace on construction. */
-        Error() {
+        Error()
+        {
             _trace.load_here();
         }
 
@@ -30,13 +31,15 @@ namespace springtail {
         }
 
         /** Prints the backtrace captured by this exception. */
-        void print_trace() {
+        void print_trace()
+        {
             backward::Printer printer;
             printer.print(_trace);
         }
 
         /** Return the provided error string. */
-        virtual const char *what() const noexcept {
+        virtual const char *what() const noexcept
+        {
             return _error.data();
         }
     };
