@@ -29,7 +29,6 @@ include(SetSystem)
 
 find_library(LIB_ELF NAMES elf PATHS /usr/local/lib)
 find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
-include_directories(/usr/local/include)
 
 find_package(Psql)
 find_package(Backward CONFIG REQUIRED)
