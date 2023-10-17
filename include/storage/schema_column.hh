@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <variant>
+#include <memory>
 
 #include <storage/exception.hh>
 #include <storage/schema_type.hh>

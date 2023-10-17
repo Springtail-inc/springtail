@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <sstream>
+#include <variant>
+
 #include <fmt/core.h>
 
 #include <psql_cdc/exception.hh>
