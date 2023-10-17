@@ -3,7 +3,6 @@
         "minio-cpp",
         "libpq",
         "boost-program-options",
-        "boost-filesystem",
         "fmt",
         "backward-cpp",
         "cityhash",

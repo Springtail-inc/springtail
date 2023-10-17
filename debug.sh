@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [ $(uname -p) == aarch64 ]; then
+    export VCPKG_FORCE_SYSTEM_BINARIES=1
+fi
+
 # install dependent packages with vcpkg
 ./vcpkg.sh
 
