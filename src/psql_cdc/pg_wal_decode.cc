@@ -1,6 +1,6 @@
 #include <fstream>
 #include <iostream>
-#include <thread>
+#include <cstdio>
 
 #include <boost/program_options.hpp>
 
@@ -38,24 +38,30 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    // init with protocol 1
-    springtail::PgReplMsg msg(1);
-
     void *buffer = nullptr;
     int max_buffer_len = 0;
 
-    char len_buf[4];
+    char int_buf[4];
+    int r = std::fread(int_buf, 4, 1, f);
+    if (r <= 0) {
+        // eof
+        return 0;
+    }
+    int proto_version = springtail::recvint32(int_buf);
+
+    // init with protocol version
+    springtail::PgReplMsg msg(proto_version);
+
     while (true) {
         // read first 4 bytes for length
-        int r = std::fread(len_buf, 4, 1, f);
-        int32_t len = springtail::recvint32(len_buf);
-
+        int r = std::fread(int_buf, 4, 1, f);
         if (r <= 0) {
             // eof
             return 0;
         }
+        int32_t len = springtail::recvint32(int_buf);
 
-        std::cout << "Read buffer of length: " << len << std::endl;
+        std::cout << "\nRead buffer of length: " << len << std::endl;
 
         // see if another buffer is required
         if (len > max_buffer_len) {

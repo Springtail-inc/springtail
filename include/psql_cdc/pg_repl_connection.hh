@@ -87,10 +87,10 @@ namespace springtail
         std::string _export_name;
 
         /** remote server version */
-        int _server_version;
+        int _server_version = -1;
 
         /** remote pgoutput protocol version; only support 1, 2 for now */
-        int _proto_version;
+        int _proto_version = -1;
 
         bool _started_streaming = false;
 
@@ -267,6 +267,18 @@ namespace springtail
          *
          * @param lsn LSN to set as latest flushed
          */
-        void setLastFlushedLSN(LSN_t lsn);
+        void setLastFlushedLSN(LSN_t lsn) noexcept;
+
+        /**
+         * @brief Get server version
+         * @return get remote server version; -1 if not set
+         */
+        int getServerVersion() noexcept;
+
+        /**
+         * @brief Get pgoutput protocol version
+         * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
+         */
+        int getProtocolVersion() noexcept;
     };
 }

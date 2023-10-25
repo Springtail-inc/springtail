@@ -40,7 +40,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     message(STATUS "Detected MacOSX build env")
     # Set mac specific build flags
     # Linker flags to avoid no compact unwind errors
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,-no_compact_unwind ${CMAKE_EXE_LINKER_FLAGS}")
+#    set(CMAKE_EXE_LINKER_FLAGS "-Wl,-keep_dwarf_unwind -Wl,-no_compact_unwind ${CMAKE_EXE_LINKER_FLAGS}")
 else()
     set(MACOSX FALSE)
 endif()

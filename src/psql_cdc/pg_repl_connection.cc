@@ -11,6 +11,7 @@
 #include <fmt/core.h>
 
 #include <psql_cdc/pg_types.hh>
+#include <psql_cdc/libpq_helper.hh>
 #include <psql_cdc/pg_repl_msg.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 #include <psql_cdc/exception.hh>
@@ -22,10 +23,6 @@
 
 namespace springtail
 {
-    /** SQL command to set serach path */
-    static const char *ALWAYS_SECURE_SEARCH_PATH_SQL =
-        "SELECT pg_catalog.set_config('search_path', '', false);";
-
     /** SQL command to fetch current LSN from server */
     static const char *CURRENT_LSN_SQL = "SELECT pg_current_wal_lsn()";
 
@@ -66,29 +63,6 @@ namespace springtail
 
 
     /**
-     * @brief Helper to execute queries that have no return result
-     *
-     * @param cmd sql command to execute
-     *
-     * @throws PgQueryError on failure
-     */
-    void PgReplConnection::pgExec(PGconn *connection, const std::string cmd)
-    {
-        std::cout << "Executing query: " << cmd << std::endl;
-        PGresult *res = PQexec(connection, cmd.c_str());
-        if (PQresultStatus(res) != PGRES_COMMAND_OK &&
-            PQresultStatus(res) != PGRES_TUPLES_OK) {
-            std::cerr << "Error executing query: " << PQerrorMessage(connection)
-                      << ", status=" << PQresultStatus(res) << std::endl;
-            PQclear(res);
-
-            throw PgQueryError();
-        }
-        PQclear(res);
-    }
-
-
-    /**
      * @brief Connect to server using params from constructor
      * @throws PgIOError on connection failure
      * @throws PgQueryError on failure to set search path
@@ -108,50 +82,7 @@ namespace springtail
      */
     PGconn *PgReplConnection::internalConnect()
     {
-        // create key value list for: host, port, dbname, user, password, options
-        // escape options
-        std::unique_ptr<char[]> host(new char[_db_host.length() * 2 + 1]);
-        std::unique_ptr<char[]> name(new char[_db_name.length() * 2 + 1]);
-        std::unique_ptr<char[]> user(new char[_db_user.length() * 2 + 1]);
-        std::unique_ptr<char[]> pass(new char[_db_pass.length() * 2 + 1]);
-
-        PQescapeString(host.get(), _db_host.c_str(), _db_host.length());
-        PQescapeString(name.get(), _db_name.c_str(), _db_name.length());
-        PQescapeString(user.get(), _db_user.c_str(), _db_user.length());
-        PQescapeString(pass.get(), _db_pass.c_str(), _db_pass.length());
-
-        // setting client encoding to UTF8
-        // setting database=replication to put connection in replication mode
-        std::string encoding("UTF8");
-
-        std::string conninfo = fmt::format("host={} port={} dbname={} user={} \
-            password={} replication=database client_encoding={} \
-            options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
-            host.get(), _db_port, name.get(), user.get(), pass.get(), encoding);
-
-        std::cout << "Attempting to connect: " << conninfo << std::endl;
-
-        // try connection
-        PGconn *connection = PQconnectdb(conninfo.c_str());
-        if (PQstatus(connection) != CONNECTION_OK) {
-            std::cerr << "Error connecting: " << PQerrorMessage(connection) << std::endl;
-            PQfinish(connection);
-            throw PgIOError();
-        }
-
-        std::cout << fmt::format("PG connected, protocol version={}, server version={}\n",
-                                 PQprotocolVersion(connection), PQserverVersion(connection));
-
-        // for safety set search path
-        try {
-            pgExec(connection, ALWAYS_SECURE_SEARCH_PATH_SQL);
-        } catch(PgQueryError &e) {
-            // disconnect
-            PQfinish(connection);
-            throw e;
-        }
-
-        return connection;
+        return libpq::connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
     }
 
 
@@ -211,7 +142,8 @@ namespace springtail
             _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name);
 
         if (_server_version >= PG_VERS_14) {
-            cmd += ", binary 'true')";
+            // binary and logical messages not supported prior to pg14
+            cmd += ", binary, messages)";
         } else {
             cmd += ")";
         }
@@ -225,6 +157,7 @@ namespace springtail
         // send header and then data
         // we do this on using sockets to support non-blocking reads of less
         // than the full message length on the stream connection for copy data
+        std::cout << "Executing: " << cmd << std::endl;
         sendCopyData(cmd_buffer, cmd_length, MSG_QUERY);
 
         // read message header for response; msg type placed in _msg_type
@@ -1030,7 +963,7 @@ namespace springtail
      * @throws PgQueryError on query error
      */
     void PgReplConnection::createReplicationSlot(bool export_snapshot,
-                                                bool temporary)
+                                                 bool temporary)
     {
         if (_started_streaming) {
             throw PgStreamingError();
@@ -1112,7 +1045,7 @@ namespace springtail
      *
      * @param lsn LSN indicating safe point to truncate log up to
      */
-    void PgReplConnection::setLastFlushedLSN(LSN_t lsn)
+    void PgReplConnection::setLastFlushedLSN(LSN_t lsn) noexcept
     {
         if (lsn == INVALID_LSN || lsn <= _last_flushed_lsn) {
             return;
@@ -1120,5 +1053,23 @@ namespace springtail
 
         _last_flushed_lsn = lsn;
         _last_flushed_time = getPgTimeInMillis();
+    }
+
+    /**
+     * @brief Get server version
+     * @return get remote server version; -1 if not set
+     */
+    int PgReplConnection::getServerVersion() noexcept
+    {
+        return _server_version;
+    }
+
+    /**
+     * @brief Get pgoutput protocol version
+     * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
+     */
+    int PgReplConnection::getProtocolVersion() noexcept
+    {
+        return _proto_version;
     }
 }

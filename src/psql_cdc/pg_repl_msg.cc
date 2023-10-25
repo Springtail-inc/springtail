@@ -156,9 +156,9 @@ namespace springtail
         if (len == length) {
             // probably not a valid string, as strings need to be null terminated
             // and strlen doesn't include the null char in the length
-            null_offset = len;
+            null_offset = len - 1;
         } else {
-            null_offset = len + 1;
+            null_offset = len;
         }
 
         // sanity check
@@ -169,7 +169,7 @@ namespace springtail
         }
 
         *str_out = buffer;
-        return null_offset;
+        return null_offset + 1;
     }
 
 
@@ -253,7 +253,7 @@ namespace springtail
 
         MsgMessage message;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             message.xid = recvint32(&_buffer[pos]);  // only version 2
             pos += 4;
         }
@@ -264,8 +264,7 @@ namespace springtail
         message.lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &message.prefix_str);
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &message.prefix_str);
 
         message.data_len = recvint32(&_buffer[pos]);
         pos += 4;
@@ -296,11 +295,7 @@ namespace springtail
         origin.commit_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &origin.name_str);
-        if (str_len == -1) {
-            return -1;
-        }
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &origin.name_str);
 
         _decoded_msg.msg_type = PgReplMsgType::ORIGIN;
         _decoded_msg.msg.emplace<MsgOrigin>(origin);
@@ -394,7 +389,7 @@ namespace springtail
 
         MsgRelation relation;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             relation.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -402,11 +397,9 @@ namespace springtail
         relation.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.namespace_str);
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &relation.namespace_str);
 
-        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.rel_name_str);
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &relation.rel_name_str);
 
         relation.identity = (int8_t)_buffer[pos];
         pos += 1;
@@ -425,9 +418,8 @@ namespace springtail
             relation.columns[i].flags = *((int8_t *)&_buffer[pos]); // 0 no flags; 1 key
             pos += 1;
 
-            str_len = decodeString(&_buffer[pos], _buffer_length - pos,
-                                   &relation.columns[i].column_name);
-            pos += str_len;
+            pos += decodeString(&_buffer[pos], _buffer_length - pos,
+                                &relation.columns[i].column_name);
 
             relation.columns[i].oid = recvint32(&_buffer[pos]);
             pos += 4;
@@ -456,7 +448,7 @@ namespace springtail
 
         MsgInsert insert;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             insert.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -511,7 +503,7 @@ namespace springtail
 
         MsgUpdate update;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             update.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -570,7 +562,7 @@ namespace springtail
 
         MsgDelete delete_msg;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             delete_msg.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -610,7 +602,7 @@ namespace springtail
 
         MsgTruncate truncate;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             truncate.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -654,7 +646,7 @@ namespace springtail
 
         MsgType type;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             type.xid = recvint32(&_buffer[pos]); // only version 2+
             pos += 4;
         }
@@ -662,11 +654,9 @@ namespace springtail
         type.oid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.namespace_str);
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &type.namespace_str);
 
-        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.data_type_str);
-        pos += str_len;
+        pos += decodeString(&_buffer[pos], _buffer_length - pos, &type.data_type_str);
 
         _decoded_msg.msg_type = PgReplMsgType::TYPE;
         _decoded_msg.msg.emplace<MsgType>(type);
@@ -701,6 +691,8 @@ namespace springtail
         _decoded_msg.msg_type = PgReplMsgType::STREAM_START;
         _decoded_msg.msg.emplace<MsgStreamStart>(stream_start);
 
+        _streaming = true;
+
         return pos;
     }
 
@@ -722,6 +714,8 @@ namespace springtail
 
         _decoded_msg.msg_type = PgReplMsgType::STREAM_STOP;
         _decoded_msg.msg.emplace<MsgStreamStop>(stream_stop);
+
+        _streaming = false;
 
         return pos;
     }
@@ -895,6 +889,9 @@ namespace springtail
             case RELATION: {
                 MsgRelation relation = std::get<MsgRelation>(msg.msg);
                 ss << "\nRELATION" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << relation.xid << std::endl;
+                }
                 ss << "  rel_id=" << relation.rel_id << std::endl;
                 ss << "  namespace=" << relation.namespace_str << std::endl;
                 ss << "  rel_name=" << relation.rel_name_str << std::endl;
@@ -911,7 +908,10 @@ namespace springtail
 
             case INSERT: {
                 MsgInsert insert = std::get<MsgInsert>(msg.msg);
-                ss << "\nINSERT" << std::endl;
+                ss << "\nINSERT" << " (" << msg.proto_version << ")" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << insert.xid << std::endl;
+                }
                 ss << "  rel_id=" << insert.rel_id << std::endl;
                 ss << "  New tuples" << std::endl;
                 dumpTuple(insert.new_tuple, ss);
@@ -921,6 +921,9 @@ namespace springtail
             case DELETE: {
                 MsgDelete delete_msg = std::get<MsgDelete>(msg.msg);
                 ss << "\nDELETE";
+                if (_streaming) {
+                    ss << "  xid=" << delete_msg.xid << std::endl;
+                }
                 ss << "  rel_id=" << delete_msg.rel_id << std::endl;
                 ss << "  Tuples\n";
                 dumpTuple(delete_msg.tuple, ss);
@@ -930,6 +933,9 @@ namespace springtail
             case UPDATE: {
                 MsgUpdate update = std::get<MsgUpdate>(msg.msg);
                 ss << "\nUPDATE";
+                if (_streaming) {
+                    ss << "  xid=" << update.xid << std::endl;
+                }
                 ss << "  rel_id=" << update.rel_id << std::endl;
                 ss << "  Old tuples" << std::endl;
                 dumpTuple(update.old_tuple, ss);
@@ -941,6 +947,9 @@ namespace springtail
             case TRUNCATE: {
                 MsgTruncate truncate = std::get<MsgTruncate>(msg.msg);
                 ss << "\nTRUNCATE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << truncate.xid << std::endl;
+                }
                 for (int32_t rel_id: truncate.rel_ids) {
                     ss << "  rel_id=" << rel_id << std::endl;
                 }
@@ -959,17 +968,26 @@ namespace springtail
             case MESSAGE: {
                 MsgMessage message = std::get<MsgMessage>(msg.msg);
                 ss << "\nMESSAGE" << std::endl;
-                ss << "  xid=" << message.xid << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << message.xid << std::endl;
+                }
                 ss << "  LSN=" << message.lsn
                    << " (" << lsnToStr(message.lsn) << ")\n";
                 ss << "  prefix=" << message.prefix_str << std::endl;
+
+                char data_str[message.data_len + 1];
+                std::memcpy(data_str, message.data, message.data_len);
+                data_str[message.data_len] = '\0';
+                ss << "  message=" << data_str << std::endl;
                 break;
             }
 
             case TYPE: {
                 MsgType type = std::get<MsgType>(msg.msg);
                 ss << "\nTYPE" << std::endl;
-                ss << "  xid=" << type.xid << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << type.xid << std::endl;
+                }
                 ss << "  oid=" << type.oid << std::endl;
                 ss << "  namespace=" << type.namespace_str << std::endl;
                 ss << "  data type=" << type.data_type_str << std::endl;

@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
         dump_buffer = true;
     }
 
-    if (!vm.count("password")) {
+    if (!vm.count("password") || password.empty()) {
         std::cerr << "No password set\n";
         std::cerr << desc;
         return -1;
@@ -81,6 +81,8 @@ int main(int argc, char* argv[])
     // start steaming
     pg_conn.startStreaming(springtail::INVALID_LSN);
 
+    int proto_version = pg_conn.getProtocolVersion();
+
     // open output file
     std::fstream out_fh;
     out_fh.open(outfile, std::ios::out | std::ios::binary);
@@ -93,7 +95,11 @@ int main(int argc, char* argv[])
     std::cout << "Connection and streaming have started.  Dumping data.\n";
     springtail::PgCopyData data;
 
-    springtail::PgReplMsg msg(1); // init repl message w/proto vers 1
+    springtail::PgReplMsg msg(proto_version); // init repl message w/proto vers
+
+    char int_buf[4];
+    springtail::sendint32(proto_version, int_buf);
+    out_fh.write(int_buf, 4);
 
     while (true) {
         pg_conn.readData(data);
@@ -106,15 +112,16 @@ int main(int argc, char* argv[])
             continue;
         }
 
-        // write out length
-        char len_buf[4];
-        springtail::sendint32(data.length, len_buf);
+        // write out length if start of message
+        if (data.msg_offset == 0) {
+            springtail::sendint32(data.msg_length, int_buf);
+            out_fh.write(int_buf, 4);
+        }
 
-        out_fh.write(len_buf, 4);
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
 
-        if (dump_buffer) {
+        if (dump_buffer && data.msg_offset == 0) {
             // iterate through the messages
             msg.setBuffer(data.buffer, data.length);
             while (msg.hasNextMsg()) {

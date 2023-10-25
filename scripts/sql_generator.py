@@ -81,6 +81,10 @@ if __name__ == '__main__':
     idx = 1
     print (len(sys.argv))
 
+    ntables = 1
+    rsize = 200
+    iters = 1
+
     while idx < len(sys.argv):
         if sys.argv[idx] == '-h':
             host = sys.argv[idx+1]
@@ -90,9 +94,15 @@ if __name__ == '__main__':
             password = sys.argv[idx+1]
         elif sys.argv[idx] == '-d':
             dbname = sys.argv[idx+1]
+        elif sys.argv[idx] == '-i':
+            iters = int(sys.argv[idx+1])
+        elif sys.argv[idx] == '-s':
+            rsize = int(sys.argv[idx+1])
+        elif sys.argv[idx] == '-n':
+            ntables = int(sys.argv[idx+1])
         else:
             print ("Unknown option: {}".format(sys.argv[idx]))
-            print ("Usage: -h hostname -u username -p password -d dbname")
+            print ("Usage: -h hostname -u username -p password -d dbname -i iterations -s rowsize -n number of tables")
             sys.exit(1)
 
         print ("{} {}".format(sys.argv[idx], sys.argv[idx+1]))
@@ -100,40 +110,27 @@ if __name__ == '__main__':
         idx = idx + 2
 
     if host is None or user is None or password is None or dbname is None:
-        print ("Usage: -h hostname -u username -p password -d dbname")
+        print ("Usage: -h hostname -u username -p password -d dbname -i iterations -s rowsize -n number of tables")
         sys.exit(1)
 
 
     generator = Generator()
 
-    print ("Connected")
+    print ("Connecting")
     generator.connect(host, user, password, dbname)
 
-    print ("Table created")
-    table = generator.create_table()
+    print ("Creating tables: {}".format(ntables))
+    tables = []
+    for i in range(0, ntables):
+        table = generator.create_table()
+        tables.append(table)
     generator.commit()
 
-    print ("8K text generated")
-    text = generator.generate_text(8192)
-    generator.insert(table, 8192, text)
-    generator.commit()
-
-
-    print ("64k text generated")
-    text = generator.generate_text(65536)
-    generator.insert(table, 65536, text)
-    generator.commit()
-
-
-    print ("512K text generated")
-    text = generator.generate_text(512 * 1024)
-    generator.insert(table, 512 * 1024, text)
-    generator.commit()
-
-
-    print ("1MB text generated")
-    text = generator.generate_text(1024 * 1024)
-    generator.insert(table, 1024 * 1024, text)
+    print ("Generating inserts: {}".format(iters))
+    text = generator.generate_text(rsize);
+    for i in range(0, iters):
+        for j in range(0, ntables):
+            generator.insert(tables[j], i, text)
     generator.commit()
 
     generator.close()

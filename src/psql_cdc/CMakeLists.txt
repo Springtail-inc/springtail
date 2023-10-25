@@ -2,7 +2,7 @@
 add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 
 # source files
-set(LIBSOURCES pg_repl_connection.cc pg_repl_msg.cc)
+set(LIBSOURCES pg_repl_connection.cc pg_repl_msg.cc libpq_helper.cc pg_copy_table.cc)
 
 # dependencies
 find_package(PostgreSQL REQUIRED)
@@ -15,6 +15,7 @@ add_library(psqlcdc STATIC ${LIBSOURCES})
 # executables
 add_executable(pg_wal_dump pg_wal_dump.cc)
 add_executable(pg_wal_decode pg_wal_decode.cc)
+add_executable(pg_copy pg_copy_table.cc)
 
 # include dirs
 target_include_directories(psqlcdc
@@ -32,10 +33,13 @@ target_include_directories(pg_wal_decode
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 
+target_include_directories(pg_copy
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+
 # libs to link against
 target_link_libraries(psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
-    PRIVATE fmt::fmt
     PUBLIC springtail_common
 )
 
@@ -43,7 +47,6 @@ target_link_libraries(pg_wal_dump
     PRIVATE psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
-    PRIVATE fmt::fmt
     PUBLIC springtail_common
 )
 
@@ -51,7 +54,11 @@ target_link_libraries(pg_wal_decode
     PRIVATE psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
-    PRIVATE fmt::fmt
+    PUBLIC springtail_common
+)
+
+target_link_libraries(pg_copy
+    PRIVATE psqlcdc
     PUBLIC springtail_common
 )
 

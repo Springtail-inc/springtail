@@ -77,4 +77,10 @@ namespace springtail {
         }
     };
 
+    class PgDataOutOfRangeError: public PgMessageError {
+        const char *what() const noexcept {
+            return "Data out of range";
+        }
+    };
+
 }

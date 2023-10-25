@@ -195,6 +195,9 @@ namespace springtail
         /** Protocol version */
         int _proto_version;
 
+        /** In streaming mode, set true after Stream Start, set false after Stream Stop */
+        bool _streaming = false;
+
         /** Internal buffer to decode messages out of, set by setBuffer() */
         const char *_buffer = nullptr;
         int _buffer_length = 0;
@@ -272,7 +275,7 @@ namespace springtail
          * @param msg refernece to message to convert
          * @return readable string of msg
          */
-        static std::string dumpMsg(const PgReplMsgDecoded &msg);
+        std::string dumpMsg(const PgReplMsgDecoded &msg);
 
         /**
          * @brief Convert LSN to string of format XXX/XXX
