@@ -237,9 +237,11 @@ namespace springtail
         for (auto &el: column_json.items()) {
             MsgSchemaColumn column;
             nlohmann::json json = el.value();
-            column.column_name = json["name"];
-            column.is_nullable = json["is_nullable"].get<bool>();
-            column.udt_type = json["type"];
+
+            json["name"].get_to(column.column_name);
+            json["type"].get_to(column.udt_type);
+            json["is_nullable"].get_to(column.is_nullable);
+            json["is_pkey"].get_to(column.is_pkey);
 
             if (!json["default"].is_null()) {
                 json["default"].get_to(column.default_value);
@@ -1150,6 +1152,7 @@ namespace springtail
                     ss << "  - type=" << column.udt_type << std::endl;
                     ss << "  - default=" << column.default_value << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
+                    ss << "  - is_pkey=" << column.is_pkey << std::endl;
                 }
 
                 break;

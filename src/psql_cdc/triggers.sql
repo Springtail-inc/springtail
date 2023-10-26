@@ -35,10 +35,17 @@ BEGIN
         SELECT json_agg(json_build_object('name', column_name, 
                 'is_nullable', is_nullable::boolean,
                 'type', udt_name, 
-                'default', column_default)
+                'default', column_default,
+                'is_pkey', (pga.attnum=any(pgi.indkey))::boolean)
             ) INTO json_columns 
-            FROM information_schema.columns
-            WHERE table_schema || '.' || table_name = obj.object_identity;
+            FROM pg_attribute pga
+            JOIN pg_index pgi
+            ON pga.attrelid=pgi.indrelid
+            JOIN information_schema.columns
+            ON column_name=pga.attname
+            WHERE pgi.indrelid=obj.objid
+              AND pga.attrelid=obj.objid
+              AND table_schema || '.' || table_name = obj.object_identity;
 
         msg := json_build_object('xid', txid_current(),
             'cmd', obj.command_tag,

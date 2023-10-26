@@ -135,8 +135,9 @@ namespace springtail
     struct MsgSchemaColumn {
         std::string column_name;
         std::string udt_type;
-        bool is_nullable;
         std::string default_value;
+        bool is_nullable;
+        bool is_pkey;        // is primary key
     };
 
     struct MsgTable { // used by both create table and alter table
