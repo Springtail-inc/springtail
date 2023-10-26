@@ -1,7 +1,7 @@
 -- Triggers for create/alter table and drop table events
 -- https://www.postgresql.org/docs/current/plpgsql-trigger.html
 
-CREATE FUNCTION springtail_event_trigger_for_drops()
+CREATE OR REPLACE FUNCTION springtail_event_trigger_for_drops()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -9,16 +9,16 @@ DECLARE
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
-        msg := json_build_object('cmd', object.command_tag,
-            'oid', obj.objid,
-            'is_temporary', obj.is_temporary,
-            'obj', obj.object_type,
-            'schema', obj.schema_name,
-            'name', obj.object_name,
-            'identity', obj.object_identity);
+        IF NOT obj.is_temporary AND obj.object_type = 'table' THEN
+            msg := json_build_object('cmd', tg_tag,
+                'oid', obj.objid::bigint, -- oid is unsigned int, but comes as string
+                'obj', obj.object_type,
+                'schema', obj.schema_name,
+                'name', obj.object_name,
+                'identity', obj.object_identity);
 
-        PERFORM pg_logical_emit_message(true, 'springtail ' || obj.command_tag, msg::text);
-
+            PERFORM pg_logical_emit_message(true, 'springtail ' || tg_tag, msg::text);
+        END IF;
     END LOOP;
 END;
 $$;
@@ -42,7 +42,7 @@ BEGIN
 
         msg := json_build_object('xid', txid_current(),
             'cmd', obj.command_tag,
-            'oid', obj.objid,
+            'oid', obj.objid::bigint,
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'columns', json_columns,
@@ -53,13 +53,13 @@ BEGIN
 END;
 $$;
 
-DROP EVENT TRIGGER springtail_event_trigger_for_drops;
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
    WHEN TAG IN ( 'DROP TABLE' )
    EXECUTE FUNCTION springtail_event_trigger_for_drops();
 
-DROP EVENT TRIGGER springtail_event_trigger_for_ddl;
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_ddl
    ON ddl_command_end 
    WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )

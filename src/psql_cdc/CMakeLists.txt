@@ -8,6 +8,7 @@ set(LIBSOURCES pg_repl_connection.cc pg_repl_msg.cc libpq_helper.cc pg_copy_tabl
 find_package(PostgreSQL REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 # destination library
 add_library(psqlcdc STATIC ${LIBSOURCES})
@@ -47,6 +48,7 @@ target_link_libraries(pg_wal_dump
     PRIVATE psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
+    PRIVATE nlohmann_json::nlohmann_json
     PUBLIC springtail_common
 )
 
@@ -54,6 +56,7 @@ target_link_libraries(pg_wal_decode
     PRIVATE psqlcdc
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
+    PRIVATE nlohmann_json::nlohmann_json
     PUBLIC springtail_common
 )
 

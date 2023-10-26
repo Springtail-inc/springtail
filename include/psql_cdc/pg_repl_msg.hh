@@ -1,6 +1,7 @@
 #pragma once
 
 #include <psql_cdc/pg_types.hh>
+#include <nlohmann/json.hpp>
 
 namespace springtail
 {
@@ -45,21 +46,21 @@ namespace springtail
     };
 
     struct MsgTruncate {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t num_rels;
         int8_t options; // 1 for cascade; 2 for restart identity
         std::vector<int32_t> rel_ids;
     };
 
     struct MsgType {
-        int32_t xid;   // proto vers 2+ only
-        int32_t oid;
+        int32_t xid;   // proto vers 2+ only if streaming
+        uint32_t oid;
         const char *namespace_str;
         const char *data_type_str;
     };
 
     struct MsgMessage {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int8_t flags;
         LSN_t lsn;
         const char *prefix_str;    // null terminated string
@@ -68,21 +69,21 @@ namespace springtail
     };
 
     struct MsgDelete {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
         MsgTupleData tuple;
     };
 
     struct MsgInsert {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char new_type;
         MsgTupleData new_tuple;
     };
 
     struct MsgUpdate {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char old_type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
         MsgTupleData old_tuple;
@@ -93,12 +94,12 @@ namespace springtail
     struct MsgRelColumn {
         int8_t flags;  // 0 or 1 - key
         const char *column_name;
-        int32_t oid;   // oid from pg_types table
+        uint32_t oid;   // oid from pg_types table
         int32_t type_modifier; // pg_attribute.atttypmod type specific data; default -1
     };
 
     struct MsgRelation {
-        int32_t xid;      // proto vers 2+ only
+        int32_t xid;      // proto vers 2+ only if streaming
         int32_t rel_id;
         const char *namespace_str;
         const char *rel_name_str;
@@ -131,13 +132,39 @@ namespace springtail
         int64_t abort_ts;   // proto vers 4+
     };
 
+    struct MsgSchemaColumn {
+        std::string column_name;
+        std::string udt_type;
+        bool is_nullable;
+        std::string default_value;
+    };
+
+    struct MsgTable { // used by both create table and alter table
+        uint32_t oid;
+        LSN_t lsn;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string table;
+        std::vector<MsgSchemaColumn> columns;
+    };
+
+    struct MsgDropTable {
+        uint32_t oid;
+        LSN_t lsn;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string table;
+    };
+
 
     /** Message types */
     enum PgReplMsgType {
         INVALID, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
         ORIGIN, MESSAGE, TYPE,
         // version 2
-        STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT
+        STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT,
+        // decoded messages
+        CREATE_TABLE, ALTER_TABLE, DROP_TABLE
     };
 
     /**
@@ -162,7 +189,9 @@ namespace springtail
             MsgStreamStart,
             MsgStreamStop,
             MsgStreamCommit,
-            MsgStreamAbort
+            MsgStreamAbort,
+            MsgTable,
+            MsgDropTable
         > msg;
         PgReplMsgType msg_type;    // type defining union member
         int proto_version;         // which protocol version
@@ -191,6 +220,12 @@ namespace springtail
         static inline constexpr char MSG_STREAM_STOP   = 'E';
         static inline constexpr char MSG_STREAM_COMMIT = 'c';
         static inline constexpr char MSG_STREAM_ABORT  = 'A';
+
+
+        // Message prefixes
+        static inline constexpr char MSG_PREFIX_CREATE_TABLE[] = "springtail CREATE TABLE";
+        static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail ALTER TABLE";
+        static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail DROP TABLE";
 
         /** Protocol version */
         int _proto_version;
@@ -230,6 +265,12 @@ namespace springtail
         int decodeStreamStop();
         int decodeStreamCommit();
         int decodeStreamAbort();
+
+        // decoded messages
+        bool decodeCreateTable(MsgMessage &message);
+        bool decodeAlterTable(MsgMessage &message);
+        bool decodeDropTable(MsgMessage &message);
+        void decodeSchemaColumns(nlohmann::json &json, std::vector<MsgSchemaColumn> &columns);
 
         // helpers
         static int decodeTuple(const char *buffer, int length, MsgTupleData &tuple);

@@ -3,6 +3,7 @@
 #include <variant>
 
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include <psql_cdc/exception.hh>
 #include <psql_cdc/pg_repl_msg.hh>
@@ -230,6 +231,102 @@ namespace springtail
         return pos;
     }
 
+    void PgReplMsg::decodeSchemaColumns(nlohmann::json &column_json,
+                                        std::vector<MsgSchemaColumn> &columns)
+    {
+        for (auto &el: column_json.items()) {
+            MsgSchemaColumn column;
+            nlohmann::json json = el.value();
+            column.column_name = json["name"];
+            column.is_nullable = json["is_nullable"].get<bool>();
+            column.udt_type = json["type"];
+
+            if (!json["default"].is_null()) {
+                json["default"].get_to(column.default_value);
+            }
+
+            columns.push_back(column);
+        }
+    }
+
+    bool PgReplMsg::decodeCreateTable(MsgMessage &msg)
+    {
+        MsgTable table_msg;
+        std::string data_str(msg.data, msg.data_len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            std::cout << "Create/alter table not for table, for: " << object_type << std::endl;
+            return false;
+        }
+
+        table_msg.xid = msg.xid; // only valid in streaming mode
+        table_msg.lsn = msg.lsn;
+        json["schema"].get_to(table_msg.schema);
+        json["oid"].get_to(table_msg.oid);
+
+        // identity in form: schema.table; parse out table
+        std::string identity;
+        json["identity"].get_to(identity);
+        auto const pos = identity.find_last_of('.');
+        table_msg.table = identity.substr(pos + 1);
+
+        decodeSchemaColumns(json["columns"], table_msg.columns);
+
+        _decoded_msg.msg_type = PgReplMsgType::CREATE_TABLE;
+        _decoded_msg.msg.emplace<MsgTable>(table_msg);
+
+        return true;
+    }
+
+
+    bool PgReplMsg::decodeAlterTable(MsgMessage &msg)
+    {
+        // same data as in create table, call that to do the decode and
+        // then just switch the type so we know it is an alter table
+
+        if (!decodeCreateTable(msg)) {
+            return false;
+        }
+
+        _decoded_msg.msg_type = PgReplMsgType::ALTER_TABLE;
+
+        return true;
+    }
+
+
+    bool PgReplMsg::decodeDropTable(MsgMessage &msg)
+    {
+        MsgDropTable drop_table_msg;
+        std::string data_str(msg.data, msg.data_len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            std::cout << "Drop table not for table, for: " << object_type << std::endl;
+            return false;
+        }
+
+        drop_table_msg.xid = msg.xid; // only valid in streaming mode
+        drop_table_msg.lsn = msg.lsn;
+
+        json["oid"].get_to(drop_table_msg.oid);
+        json["schema"].get_to(drop_table_msg.schema);
+        json["name"].get_to(drop_table_msg.table);
+
+        _decoded_msg.msg_type = PgReplMsgType::DROP_TABLE;
+        _decoded_msg.msg.emplace<MsgDropTable>(drop_table_msg);
+
+        return true;
+    }
+
 
     /**
      * @brief decode Message
@@ -256,6 +353,8 @@ namespace springtail
         if (_streaming) {
             message.xid = recvint32(&_buffer[pos]);  // only version 2
             pos += 4;
+        } else {
+            message.xid = 0;
         }
 
         message.flags = (int8_t)_buffer[pos];
@@ -272,8 +371,19 @@ namespace springtail
         message.data = &_buffer[pos];
         pos += message.data_len;
 
-        _decoded_msg.msg_type = PgReplMsgType::MESSAGE;
-        _decoded_msg.msg.emplace<MsgMessage>(message);
+        bool message_handled = false;
+        if (strcmp(message.prefix_str, MSG_PREFIX_CREATE_TABLE) == 0) {
+            message_handled = decodeCreateTable(message);
+        } else if (strcmp(message.prefix_str, MSG_PREFIX_ALTER_TABLE) == 0) {
+            message_handled = decodeAlterTable(message);
+        } else if (strcmp(message.prefix_str, MSG_PREFIX_DROP_TABLE) == 0) {
+            message_handled = decodeDropTable(message);
+        }
+
+        if (!message_handled) {
+            _decoded_msg.msg_type = PgReplMsgType::MESSAGE;
+            _decoded_msg.msg.emplace<MsgMessage>(message);
+        }
 
         return pos;
     }
@@ -974,10 +1084,7 @@ namespace springtail
                 ss << "  LSN=" << message.lsn
                    << " (" << lsnToStr(message.lsn) << ")\n";
                 ss << "  prefix=" << message.prefix_str << std::endl;
-
-                char data_str[message.data_len + 1];
-                std::memcpy(data_str, message.data, message.data_len);
-                data_str[message.data_len] = '\0';
+                std::string data_str(message.data, message.data_len);
                 ss << "  message=" << data_str << std::endl;
                 break;
             }
@@ -1023,6 +1130,63 @@ namespace springtail
                 ss << "\nSTREAM ABORT" << std::endl;
                 ss << "  xid=" << abort.xid << std::endl;
                 ss << "  sub_xid=" << abort.sub_xid << std::endl;
+                break;
+            }
+
+            case CREATE_TABLE: {
+                MsgTable table = std::get<MsgTable>(msg.msg);
+                ss << "\nCREATE TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << table.xid << std::endl;
+                }
+                ss << "  oid=" << table.oid << std::endl;
+                ss << "  LSN=" << table.lsn << std::endl;
+                ss << "  schema=" << table.schema << std::endl;
+                ss << "  table=" << table.table << std::endl;
+                ss << "  columns=" << table.columns.size() << std::endl;
+
+                for (MsgSchemaColumn column: table.columns) {
+                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - default=" << column.default_value << std::endl;
+                    ss << "  - is_nullable=" << column.is_nullable << std::endl;
+                }
+
+                break;
+            }
+
+            case ALTER_TABLE: {
+                MsgTable table = std::get<MsgTable>(msg.msg);
+                ss << "\nALTER TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << table.xid << std::endl;
+                }
+                ss << "  oid=" << table.oid << std::endl;
+                ss << "  LSN=" << table.lsn << std::endl;
+                ss << "  schema=" << table.schema << std::endl;
+                ss << "  table=" << table.table << std::endl;
+                ss << "  columns=" << table.columns.size() << std::endl;
+
+                for (MsgSchemaColumn column: table.columns) {
+                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - default=" << column.default_value << std::endl;
+                    ss << "  - is_nullable=" << column.is_nullable << std::endl;
+                }
+
+                break;
+            }
+
+            case DROP_TABLE: {
+                MsgDropTable drop_table = std::get<MsgDropTable>(msg.msg);
+                ss << "\nDROP TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << drop_table.xid << std::endl;
+                }
+                ss << "  oid=" << drop_table.oid << std::endl;
+                ss << "  LSN=" << drop_table.lsn << std::endl;
+                ss << "  schema=" << drop_table.schema << std::endl;
+                ss << "  table=" << drop_table.table << std::endl;
                 break;
             }
 
