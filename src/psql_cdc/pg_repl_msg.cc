@@ -231,9 +231,17 @@ namespace springtail
         return pos;
     }
 
+
+    /**
+     * @brief Decode columns found in create/alter table messages
+     *
+     * @param column_json JSON array of column schema data
+     * @param columns Output vector containing struct MsgSchemaColumn
+     */
     void PgReplMsg::decodeSchemaColumns(nlohmann::json &column_json,
                                         std::vector<MsgSchemaColumn> &columns)
     {
+        // iterate through json array
         for (auto &el: column_json.items()) {
             MsgSchemaColumn column;
             nlohmann::json json = el.value();
@@ -251,9 +259,19 @@ namespace springtail
         }
     }
 
+
+    /**
+     * @brief Decode create table message.  Stored as JSON in message data.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
     bool PgReplMsg::decodeCreateTable(MsgMessage &msg)
     {
         MsgTable table_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
         std::string data_str(msg.data, msg.data_len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
@@ -262,7 +280,8 @@ namespace springtail
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            std::cout << "Create/alter table not for table, for: " << object_type << std::endl;
+            std::cout << "Create/alter table msg not for table object, for: "
+                      << object_type << std::endl;
             return false;
         }
 
@@ -286,11 +305,18 @@ namespace springtail
     }
 
 
+    /**
+     * @brief Decode alter table message, it follows same format
+     *        as create table message, but we store the message type
+     *        differently so we can recoginize it as such.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
     bool PgReplMsg::decodeAlterTable(MsgMessage &msg)
     {
         // same data as in create table, call that to do the decode and
         // then just switch the type so we know it is an alter table
-
         if (!decodeCreateTable(msg)) {
             return false;
         }
@@ -301,6 +327,12 @@ namespace springtail
     }
 
 
+    /**
+     * @brief Decode drop table message.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
     bool PgReplMsg::decodeDropTable(MsgMessage &msg)
     {
         MsgDropTable drop_table_msg;
@@ -308,11 +340,11 @@ namespace springtail
         nlohmann::json json = nlohmann::json::parse(data_str);
 
         // check object type, could be an index, default value or something other
-        // than a table
+        // than a table; if so we skip decoding
         std::string object_type;
         json["obj"].get_to(object_type);
         if (object_type != "table") {
-            std::cout << "Drop table not for table, for: " << object_type << std::endl;
+            std::cout << "Drop table not for table object, for: " << object_type << std::endl;
             return false;
         }
 
