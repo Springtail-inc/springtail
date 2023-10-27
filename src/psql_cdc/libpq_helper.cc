@@ -102,6 +102,28 @@ namespace libpq {
 
 
     /**
+     * @brief Get boolean value from query result
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return boolean value for row/col; null is mapped to false
+     */
+    bool getBoolean(PGresult *res, int row, int col)
+    {
+        char *value = PQgetvalue(res, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+
+        if (value[0] == 't' || value[0] == 1 || value[0] == 'y') {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * @brief escape a string
      *
      * @param str string to escape

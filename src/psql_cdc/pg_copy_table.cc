@@ -18,10 +18,27 @@
 namespace springtail
 {
     /** get oid for table */
-    static const char *TABLE_OID_QUERY = "SELECT pg_class.oid FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace ON relnamespace=pg_namespace.oid WHERE pg_class.relname='{}' and nspname='{}'";
+    static const char *TABLE_OID_QUERY =
+        "SELECT pg_class.oid "
+        "FROM pg_catalog.pg_class "
+        "JOIN pg_catalog.pg_namespace "
+        "ON relnamespace=pg_namespace.oid "
+        "WHERE pg_class.relname='{}' and nspname='{}'";
 
-    /** select name, position, is_nullable, default and type for each column in table */
-    static const char *SCHEMA_QUERY = "SELECT column_name, ordinal_position, is_nullable, column_default, udt_name FROM information_schema.columns WHERE table_name='{}' AND table_schema='{}' order by ordinal_position";
+    /** select name, position, is_nullable, default, type, and is primary key for each column */
+    static const char *SCHEMA_QUERY =
+        "SELECT column_name, ordinal_position, is_nullable::boolean, "
+        "       column_default, udt_name, "
+        "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey "
+        "FROM pg_attribute pga "
+        "JOIN information_schema.columns "
+        "ON column_name=pga.attname "
+        "LEFT OUTER JOIN pg_index pgi "
+        "ON pga.attrelid=pgi.indrelid "
+        "WHERE pga.attrelid={} "
+        "AND table_schema='{}' "
+        "AND table_name='{}' "
+        "ORDER BY ordinal_position";
 
     /** copy command, output in binary using utf-8 encoding */
     static const char *COPY_QUERY = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
@@ -34,21 +51,6 @@ namespace springtail
 
     /** end xact */
     static const char *END_QUERY = "END";
-
-    /** primary key query, row per column */
-    static const char *PKEY_QUERY =
-        "SELECT pg_attribute.attname "
-        "FROM pg_index, pg_class, pg_attribute, pg_namespace "
-        "WHERE "
-        "pg_class.relname = '{}' AND "
-        "indrelid = pg_class.oid AND "
-        "nspname = '{}' AND "
-        "pg_class.relnamespace = pg_namespace.oid AND "
-        "pg_attribute.attrelid = pg_class.oid AND "
-        "pg_attribute.attnum = any(pg_index.indkey) AND "
-        "pg_attribute.attisdropped = false "
-        "AND indisprimary ";
-
 
     /**
      * @brief Connect to database
@@ -137,27 +139,12 @@ namespace springtail
         PQclear(res);
     }
 
-    /**
-     * @brief Get primary keys for a table
-     */
-    void PgCopyTable::getPkeys()
-    {
-        PGresult *res = libpq::exec(_connection, fmt::format(PKEY_QUERY, _table_name, _schema_name));
-
-        _schema.pkeys.resize(PQntuples(res));
-        for (int i = 0; i < PQntuples(res); i++) {
-            std::string column = libpq::getString(res, i, 0);
-            _schema.pkeys.push_back(column);
-        }
-
-        PQclear(res);
-    }
 
     /**
      * @brief Extract schema from table and store in internal _schema object
      * @details Uses udt_name from information_catalog.columns table for name of type
      *          Saves the column name, ordinal position, default value (as string), column type
-     *          and is_nullable flag for each table column.
+     *          and is_nullable flag for each table column.  Requires getTableOid() first.
      *
      */
     void PgCopyTable::getSchema()
@@ -165,16 +152,18 @@ namespace springtail
         std::unique_ptr<char[]> table_name = libpq::escapeString(_connection, _table_name);
         std::unique_ptr<char[]> schema_name = libpq::escapeString(_connection, _schema_name);
 
-        PGresult *res = libpq::exec(_connection, fmt::format(SCHEMA_QUERY, table_name.get(),
-                                                             schema_name.get()));
+        PGresult *res = libpq::exec(_connection, fmt::format(SCHEMA_QUERY,
+                                                             _schema.table_oid,
+                                                             schema_name.get(),
+                                                             table_name.get()));
 
         if (PQntuples(res) == 0) {
-            std::cerr << fmt::format("Table not found: {}.{}\n", _table_name, _schema_name);
+            std::cerr << fmt::format("Table not found: {}.{}\n", _schema_name, _table_name);
             PQclear(res);
             throw PgQueryError();
         }
 
-        if (PQnfields(res) != 5) {
+        if (PQnfields(res) != 6) {
             std::cerr << "Error: unexpected data from schema query or table not found\n";
             std::cerr << "fields: " << PQnfields(res) << ", tuples: " << PQntuples(res) << std::endl;
             PQclear(res);
@@ -201,12 +190,7 @@ namespace springtail
                 column.position = libpq::getInt32(res, i, 1);
 
                 // is_nullable varchar
-                char *value = PQgetvalue(res, i, 2);
-                if (value != nullptr && (value[0] == 'y' || value[0] == 'Y' || value[0] == 't')) {
-                    column.is_nullable = true;
-                } else {
-                    column.is_nullable = false;
-                }
+                column.is_nullable = libpq::getBoolean(res, i, 2);
 
                 // column_default varchar
                 column.default_value = libpq::getStringOptional(res, i, 3);
@@ -214,16 +198,12 @@ namespace springtail
                 // udt_name varchar
                 column.type = libpq::getString(res, i, 4);
 
-                // check for column in set of pkeys, not super efficient by pkeys should be small
-                if (std::find(_schema.pkeys.begin(), _schema.pkeys.end(), column.name) != _schema.pkeys.end()) {
-                    column.is_pkey = true;
-                } else {
-                    column.is_pkey = false;
-                }
+                // is primary key
+                column.is_pkey = libpq::getBoolean(res, i, 5);
 
-                std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={}\n",
-                                         column.name, column.type, column.position,
-                                         column.is_nullable, column.default_value.value_or("NULL"));
+                std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={} pkey={}\n",
+                                         column.name, column.type, column.position, column.is_nullable,
+                                         column.default_value.value_or("NULL"), column.is_pkey);
 
                 _schema.columns[i] = column;
             }
@@ -241,7 +221,7 @@ namespace springtail
 
 
     /**
-     * @brief Read boolean from file
+     * @brief Read boolean from file; copy stores 1 as true, 0 as false
      *
      * @return boolean
      */
@@ -514,11 +494,12 @@ namespace springtail
             _schema.columns[i].type = readString();
             _schema.columns[i].default_value = readStringOptional();
 
-            std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={}\n",
+            std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={} pkey={}\n",
                                      _schema.columns[i].name, _schema.columns[i].type,
                                      _schema.columns[i].position,
                                      _schema.columns[i].is_nullable,
-                                     _schema.columns[i].default_value.value_or("NULL"));
+                                     _schema.columns[i].default_value.value_or("NULL"),
+                                     _schema.columns[i].is_pkey);
         }
     }
 
@@ -604,7 +585,6 @@ namespace springtail
 
         getTableOid();
         getXactXids();
-        getPkeys();
         getSchema();
         writeSchema();
         copyData();
@@ -700,7 +680,8 @@ namespace springtail
             for (int i = 0; i < num_columns; i++) {
                 int32_t length = readInt32();
 
-                std::cout << fmt::format("column type={}, length={}\n",
+                std::cout << fmt::format(" - column {} type={}, length={}, data=",
+                                         _schema.columns[i].name,
                                          _schema.columns[i].type, length);
 
                 std::string type = _schema.columns[i].type;

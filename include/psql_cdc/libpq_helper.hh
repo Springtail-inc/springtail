@@ -26,7 +26,7 @@ namespace libpq {
     int32_t getInt32(PGresult *res, int row, int col);
 
     /**
-     * @brief Retreive an string column value from a query result; maintains NULL value
+     * @brief Retreive a string column value from a query result; maintains NULL value
      *
      * @param res query result
      * @param row row index
@@ -37,7 +37,7 @@ namespace libpq {
 
 
     /**
-     * @brief Retreive an string column value from a query result; maps NULL to empty string
+     * @brief Retreive a string column value from a query result; maps NULL to empty string
      *
      * @param res query result
      * @param row row index
@@ -45,6 +45,16 @@ namespace libpq {
      * @return string value for row/col; null is mapped to empty string
      */
     std::string getString(PGresult *res, int row, int col);
+
+    /**
+     * @brief Get boolean value from query result
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return boolean value for row/col; null is mapped to false
+     */
+    bool getBoolean(PGresult *res, int row, int col);
 
     /**
      * @brief escape a string
