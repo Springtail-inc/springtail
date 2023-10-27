@@ -11,7 +11,7 @@ namespace springtail
     struct PgColumn {
         std::string name;
         std::string type;
-        std::string default_value;
+        std::optional<std::string> default_value;
         int32_t position;
         bool is_nullable;
         bool is_pkey;
@@ -57,7 +57,8 @@ namespace springtail
         // write to file
         void writeInt32(const int32_t val);
         void writeString(const std::string &str);
-        void writeString(const char *str);
+        void writeString(const char *str, unsigned len);
+        void writeString(const std::optional<std::string> str);
         void writeBool(const bool val);
 
         // read from file
@@ -66,6 +67,7 @@ namespace springtail
         int16_t readInt16();
         char readChar();
         bool readBool();
+        std::optional<std::string> readStringOptional();
         std::string readString();
         std::string readString(int length);
 

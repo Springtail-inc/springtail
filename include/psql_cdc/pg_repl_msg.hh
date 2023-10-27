@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <psql_cdc/pg_types.hh>
 #include <nlohmann/json.hpp>
 
@@ -135,7 +136,7 @@ namespace springtail
     struct MsgSchemaColumn {
         std::string column_name;
         std::string udt_type;
-        std::string default_value;
+        std::optional<std::string> default_value;
         bool is_nullable;
         bool is_pkey;        // is primary key
     };

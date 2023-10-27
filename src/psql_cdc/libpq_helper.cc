@@ -1,6 +1,7 @@
 #include <string>
 #include <iostream>
 #include <climits>
+#include <optional>
 #include <fmt/core.h>
 
 #include <psql_cdc/libpq_helper.hh>
@@ -20,7 +21,7 @@ namespace libpq {
      * @param cmd SQL command
      * @return result, must be freed with PQclear(res)
      */
-    PGresult *exec(PGconn *connection, const std::string cmd)
+    PGresult *exec(PGconn *connection, const std::string &cmd)
     {
         std::cout << "Executing query: " << cmd << std::endl;
         PGresult *res = PQexec(connection, cmd.c_str());
@@ -33,7 +34,6 @@ namespace libpq {
 
             throw PgQueryError();
         }
-
         return res;
     }
 
@@ -60,18 +60,41 @@ namespace libpq {
     }
 
     /**
-     * @brief Retreive an string column value from a query result
+     * @brief Retreive a string column value from a query result; maps NULL to empty string
      *
      * @param res query result
      * @param row row index
      * @param col col index
-     * @return string value for row/col
+     * @return string value for row/col; null is mapped to empty string
      */
     std::string getString(PGresult *res, int row, int col)
     {
         char *value = PQgetvalue(res, row, col);
         if (value == nullptr) {
             throw PgQueryError();
+        }
+
+        return std::string(value);
+    }
+
+    /**
+     * @brief Retreive a string column value from a query result; maintains NULL value
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return string value for row/col; optional is false if string is null
+     */
+    std::optional<std::string> getStringOptional(PGresult *res, int row, int col)
+    {
+        char *value = PQgetvalue(res, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+        // PQgetvalue maps NULL to empty string, so need to explicitly check
+        if (value[0] == '\0' && PQgetisnull(res, row, col)) {
+            // string is actually null
+            return {};
         }
 
         return std::string(value);

@@ -40,12 +40,13 @@ namespace springtail
         "SELECT pg_attribute.attname "
         "FROM pg_index, pg_class, pg_attribute, pg_namespace "
         "WHERE "
-        "pg_class.oid = '{}'::regclass AND "
+        "pg_class.relname = '{}' AND "
         "indrelid = pg_class.oid AND "
         "nspname = '{}' AND "
         "pg_class.relnamespace = pg_namespace.oid AND "
         "pg_attribute.attrelid = pg_class.oid AND "
-        "pg_attribute.attnum = any(pg_index.indkey) "
+        "pg_attribute.attnum = any(pg_index.indkey) AND "
+        "pg_attribute.attisdropped = false "
         "AND indisprimary ";
 
 
@@ -121,7 +122,6 @@ namespace springtail
 
     /**
      * @brief Get table's oid based on schema / table, store in schema
-     *
      */
     void PgCopyTable::getTableOid()
     {
@@ -138,8 +138,7 @@ namespace springtail
     }
 
     /**
-     * @brief Get table's oid based on schema / table, store in schema
-     *
+     * @brief Get primary keys for a table
      */
     void PgCopyTable::getPkeys()
     {
@@ -203,14 +202,14 @@ namespace springtail
 
                 // is_nullable varchar
                 char *value = PQgetvalue(res, i, 2);
-                if (value != nullptr && (value[0] == 'y' || value[0] == 'Y')) {
+                if (value != nullptr && (value[0] == 'y' || value[0] == 'Y' || value[0] == 't')) {
                     column.is_nullable = true;
                 } else {
                     column.is_nullable = false;
                 }
 
                 // column_default varchar
-                column.default_value = libpq::getString(res, i, 3);
+                column.default_value = libpq::getStringOptional(res, i, 3);
 
                 // udt_name varchar
                 column.type = libpq::getString(res, i, 4);
@@ -222,8 +221,9 @@ namespace springtail
                     column.is_pkey = false;
                 }
 
-                std::cout << fmt::format("Column: {} type={} position={} nullable={}\n",
-                                         column.name, column.type, column.position, column.is_nullable);
+                std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={}\n",
+                                         column.name, column.type, column.position,
+                                         column.is_nullable, column.default_value.value_or("NULL"));
 
                 _schema.columns[i] = column;
             }
@@ -313,20 +313,37 @@ namespace springtail
 
 
     /**
-     * @brief Read string from file; length followed by bytes
+     * @brief Read string from file; length followed by bytes; maps NULL to empty string
      *
-     * @return string
+     * @return string; NULL mapped to empty string
      */
     std::string PgCopyTable::readString()
     {
         int len = readInt32();
-        if (len == 0) {
-            return {};
+        if (len <= 0) {
+            return "";
         }
 
         return readString(len);
     }
 
+
+    /**
+     * @brief Read string from file; length followed by bytes; maintains NULL
+     *
+     * @return optional string; optional is false if string is NULL
+     */
+    std::optional<std::string> PgCopyTable::readStringOptional()
+    {
+        int len = readInt32();
+        if (len == 0) {
+            return "";
+        }
+        if (len == -1) {
+            return {};
+        }
+        return readString(len);
+    }
 
     /**
      * @brief Read string from file given length
@@ -373,20 +390,33 @@ namespace springtail
      */
     void PgCopyTable::writeString(const std::string &str)
     {
-        writeString(str.c_str());
+        writeString(str.c_str(), str.length());
     }
 
+    /**
+     * @brief Helper to call writeString
+     *
+     * @param str string to write out
+     */
+    void PgCopyTable::writeString(const std::optional<std::string> str)
+    {
+        if (!str.has_value()) {
+            // write null
+            writeInt32(-1);
+            return;
+        }
+
+        writeString(str.value());
+    }
 
     /**
      * @brief Write a string, length (excluding null) followed by bytes (excluding null)
      *
      * @param str String value to write out
      */
-    void PgCopyTable::writeString(const char *str)
+    void PgCopyTable::writeString(const char *str, unsigned len)
     {
-        int32_t len = (str == nullptr ? 0 : strlen(str));
         writeInt32(len);
-
         if (len == 0) {
             return;
         }
@@ -482,11 +512,13 @@ namespace springtail
             _schema.columns[i].is_pkey = readBool();
             _schema.columns[i].name = readString();
             _schema.columns[i].type = readString();
-            _schema.columns[i].default_value = readString();
+            _schema.columns[i].default_value = readStringOptional();
 
-            std::cout << fmt::format("Column: {} type={} position={} nullable={}\n",
+            std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={}\n",
                                      _schema.columns[i].name, _schema.columns[i].type,
-                                     _schema.columns[i].position, _schema.columns[i].is_nullable);
+                                     _schema.columns[i].position,
+                                     _schema.columns[i].is_nullable,
+                                     _schema.columns[i].default_value.value_or("NULL"));
         }
     }
 
@@ -671,14 +703,24 @@ namespace springtail
                 std::cout << fmt::format("column type={}, length={}\n",
                                          _schema.columns[i].type, length);
 
-                if (length > 0) {
-                    std::string type = _schema.columns[i].type;
+                std::string type = _schema.columns[i].type;
 
+                // NOTE: a length of -1 indicates a NULL value
+                if (length == -1) {
+                    std::cout << "NULL\n";
+                }
+
+                // a length of 0 indicates empty string
+                if (length == 0 && (type == "text" || type == "varchar")) {
+                    std::cout << "\n"; // empty string
+                }
+
+                if (length > 0) {
                     if (type == "int4" || type == "int" || type == "serial4" || type == "serial") {
                         assert(length == 4);
                         std::cout << readInt32() << std::endl;
                     }
-                    else if (type == "text" || type =="varchar") {
+                    else if (type == "text" || type == "varchar") {
                         std::cout << readString(length) << std::endl;
                     }
                     else if (type == "int8" || type == "serial8") {
@@ -740,7 +782,7 @@ namespace springtail
                     } else {
                         std::fseek(_file, length, SEEK_CUR);
                     }
-                }
+                }  // if (length > 0)
             }
         }
     }

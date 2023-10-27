@@ -1,6 +1,7 @@
 #pragma once
 
 #include <libpq-fe.h>
+#include <optional>
 
 namespace springtail {
 
@@ -12,7 +13,7 @@ namespace libpq {
      * @param cmd SQL command
      * @return result, must be freed with PQclear(res)
      */
-    PGresult *exec(PGconn *connection, const std::string cmd);
+    PGresult *exec(PGconn *connection, const std::string &cmd);
 
     /**
      * @brief Retreive an int32 column value from a query result
@@ -25,12 +26,23 @@ namespace libpq {
     int32_t getInt32(PGresult *res, int row, int col);
 
     /**
-     * @brief Retreive an string column value from a query result
+     * @brief Retreive an string column value from a query result; maintains NULL value
      *
      * @param res query result
      * @param row row index
      * @param col col index
-     * @return string value for row/col
+     * @return string value for row/col; optional is false if string is null
+     */
+    std::optional<std::string> getStringOptional(PGresult *res, int row, int col);
+
+
+    /**
+     * @brief Retreive an string column value from a query result; maps NULL to empty string
+     *
+     * @param res query result
+     * @param row row index
+     * @param col col index
+     * @return string value for row/col; null is mapped to empty string
      */
     std::string getString(PGresult *res, int row, int col);
 

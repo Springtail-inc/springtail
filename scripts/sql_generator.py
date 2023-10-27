@@ -2,6 +2,7 @@ import psycopg2
 import sys
 import string
 import random
+import argparse
 
 class Generator:
 
@@ -78,58 +79,33 @@ class Generator:
 
 if __name__ == '__main__':
 
-    idx = 1
-    print (len(sys.argv))
+    parser = argparse.ArgumentParser(description='Generate SQL load against a database.')
+    parser.add_argument('-H', help='hostname', dest='host', required=True)
+    parser.add_argument('-u', help='username', dest='user', required=True)
+    parser.add_argument('-p', help='password', dest='password', required=True)
+    parser.add_argument('-d', help='database name', dest='dbname', required=True)
+    parser.add_argument('-i', help='number of inserts per table', dest='iters', type=int, default=1)
+    parser.add_argument('-s', help='row size (B) per insert', dest='rsize', type=int, default=200)
+    parser.add_argument('-n', help='number of tables', dest='ntables', type=int, default=1)
 
-    ntables = 1
-    rsize = 200
-    iters = 1
-
-    while idx < len(sys.argv):
-        if sys.argv[idx] == '-h':
-            host = sys.argv[idx+1]
-        elif sys.argv[idx] == '-u':
-            user = sys.argv[idx+1]
-        elif sys.argv[idx] == '-p':
-            password = sys.argv[idx+1]
-        elif sys.argv[idx] == '-d':
-            dbname = sys.argv[idx+1]
-        elif sys.argv[idx] == '-i':
-            iters = int(sys.argv[idx+1])
-        elif sys.argv[idx] == '-s':
-            rsize = int(sys.argv[idx+1])
-        elif sys.argv[idx] == '-n':
-            ntables = int(sys.argv[idx+1])
-        else:
-            print ("Unknown option: {}".format(sys.argv[idx]))
-            print ("Usage: -h hostname -u username -p password -d dbname -i iterations -s rowsize -n number of tables")
-            sys.exit(1)
-
-        print ("{} {}".format(sys.argv[idx], sys.argv[idx+1]))
-
-        idx = idx + 2
-
-    if host is None or user is None or password is None or dbname is None:
-        print ("Usage: -h hostname -u username -p password -d dbname -i iterations -s rowsize -n number of tables")
-        sys.exit(1)
-
+    args = parser.parse_args();
 
     generator = Generator()
 
     print ("Connecting")
-    generator.connect(host, user, password, dbname)
+    generator.connect(args.host, args.user, args.password, args.dbname)
 
-    print ("Creating tables: {}".format(ntables))
+    print ("Creating tables: {}".format(args.ntables))
     tables = []
-    for i in range(0, ntables):
+    for i in range(0, args.ntables):
         table = generator.create_table()
         tables.append(table)
     generator.commit()
 
-    print ("Generating inserts: {}".format(iters))
-    text = generator.generate_text(rsize);
-    for i in range(0, iters):
-        for j in range(0, ntables):
+    print ("Generating inserts: {}".format(args.iters))
+    text = generator.generate_text(args.rsize);
+    for i in range(0, args.iters):
+        for j in range(0, args.ntables):
             generator.insert(tables[j], i, text)
     generator.commit()
 

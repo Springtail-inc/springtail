@@ -252,7 +252,9 @@ namespace springtail
             json["is_pkey"].get_to(column.is_pkey);
 
             if (!json["default"].is_null()) {
-                json["default"].get_to(column.default_value);
+                column.default_value = json["default"].get<std::string>();
+            } else {
+                column.default_value = {};
             }
 
             columns.push_back(column);
@@ -1182,7 +1184,7 @@ namespace springtail
                 for (MsgSchemaColumn column: table.columns) {
                     ss << "  - name=" << column.column_name << std::endl;
                     ss << "  - type=" << column.udt_type << std::endl;
-                    ss << "  - default=" << column.default_value << std::endl;
+                    ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
                     ss << "  - is_pkey=" << column.is_pkey << std::endl;
                 }
@@ -1205,7 +1207,7 @@ namespace springtail
                 for (MsgSchemaColumn column: table.columns) {
                     ss << "  - name=" << column.column_name << std::endl;
                     ss << "  - type=" << column.udt_type << std::endl;
-                    ss << "  - default=" << column.default_value << std::endl;
+                    ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
                 }
 
