@@ -32,7 +32,10 @@ writer(const std::filesystem::path &directory,
             std::string file_name = fmt::format("{:03d}", file_name_start + i);
 
             // open a file handle
-            int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR);
+            int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
+            if (handle < 0) {
+                std::cerr << "ERROR: creating file" << std::endl;
+            }
             handles.push_back(handle);
         } catch (std::exception &e) {
             std::cerr << "Error: " << e.what() << std::endl;
@@ -49,7 +52,10 @@ writer(const std::filesystem::path &directory,
         int handle = handles[i % handles.size()];
 
         // append a block
-        ::write(handle, buf.data(), buf.size());
+        int count = ::write(handle, buf.data(), buf.size());
+        if (count < 0) {
+            std::cerr << "ERROR: writing to file" << std::endl;
+        }
     }
     timer.stop();
 
@@ -84,8 +90,10 @@ reader(const std::filesystem::path &directory,
 
         // open a file handle
         int handle = ::open((directory / file_name).c_str(), O_RDONLY);
+        if (handle < 0) {
+            std::cerr << "ERROR: opening file for read" << std::endl;
+        }
         handles.push_back(handle);
-
     }
 
     // create a block
@@ -100,7 +108,10 @@ reader(const std::filesystem::path &directory,
 
         int handle = handles[file];
         ::lseek(handle, pos * block_size, SEEK_SET);
-        ::read(handle, buf.data(), block_size);
+        int count = ::read(handle, buf.data(), block_size);
+        if (count < 0) {
+            std::cerr << "ERROR: reading from file" << std::endl;
+        }
     }
     timer.stop();
 
@@ -124,7 +135,10 @@ concurrent_setup(const std::filesystem::path &directory,
         std::string file_name = "1";
 
         // open a file handle
-        handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR);
+        handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
+        if (handle < 0) {
+            std::cerr << "Error opening: " << handle << std::endl;
+        }
     } catch (std::exception &e) {
         std::cerr << "Error: " << e.what() << std::endl;
     }
@@ -136,7 +150,10 @@ concurrent_setup(const std::filesystem::path &directory,
     timer.start();
     for (int i = 0; i < block_count; i++) {
         // append a block
-        ::write(handle, buf.data(), buf.size());
+        int count = ::write(handle, buf.data(), buf.size());
+        if (count < 0) {
+            std::cerr << "Error writing: " << count << std::endl;
+        }
     }
     timer.stop();
 
@@ -159,8 +176,12 @@ concurrent_writer(const std::filesystem::path &directory,
 
         // open a file handle
         handle = ::open((directory / file_name).c_str(), O_APPEND | O_RDWR);
+        if (handle < 0) {
+            std::cerr << "ERROR: opening file for append" << std::endl;
+        }
+        ::lseek(handle, 0, SEEK_END);
     } catch (std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "ERROR: " << e.what() << std::endl;
     }
 
     // create a block of data
@@ -170,7 +191,10 @@ concurrent_writer(const std::filesystem::path &directory,
     timer.start();
     for (int i = 0; i < block_count; i++) {
         // append a block
-        ::write(handle, buf.data(), buf.size());
+        int count = ::write(handle, buf.data(), buf.size());
+        if (count < 0) {
+            std::cerr << "ERROR: writing to file" << std::endl;
+        }
     }
     timer.stop();
 
@@ -191,8 +215,11 @@ concurrent_reader(const std::filesystem::path &directory,
 
         // open a file handle
         handle = ::open((directory / file_name).c_str(), O_RDONLY);
+        if (handle < 0) {
+            std::cerr << "ERROR: opening file for read" << std::endl;
+        }
     } catch (std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "ERROR: " << e.what() << std::endl;
     }
 
     // create a block
@@ -205,7 +232,10 @@ concurrent_reader(const std::filesystem::path &directory,
         int pos = rand() % block_count;
 
         ::lseek(handle, pos * block_size, SEEK_SET);
-        ::read(handle, buf.data(), block_size);
+        int count = ::read(handle, buf.data(), block_size);
+        if (count < 0) {
+            std::cerr << "ERROR: reading file" << std::endl;
+        }
     }
     timer.stop();
 
@@ -220,6 +250,7 @@ concurrent_reader(const std::filesystem::path &directory,
  * Benchmark for any filesystem
  */
 int main(int argc, char* argv[]) {
+    bool run_concurrent;
     int block_count, block_size, file_count;
     int writer_count, reader_count;
     std::filesystem::path directory;
@@ -228,6 +259,7 @@ int main(int argc, char* argv[]) {
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
+        ("concurrent,x", boost::program_options::value<bool>(&run_concurrent)->default_value(false), "Run the concurrent read/write test")
         ("count,n", boost::program_options::value<int>(&block_count)->default_value(1024*1024), "Number of blocks to write")
         ("size,s", boost::program_options::value<int>(&block_size)->default_value(64*1024), "Size of a block")
         ("files,f", boost::program_options::value<int>(&file_count)->default_value(16), "Number of files to distribute the blocks over")
@@ -310,45 +342,46 @@ int main(int argc, char* argv[]) {
     std::filesystem::remove_all(directory);
     std::cout << "Benchmark complete" << std::endl;
 
-    // Evaluate doing reads while concurrently appending to a file to understand locking behaviors
-    timer.reset();
-    timer.start();
+    if (run_concurrent) {
+        // Evaluate doing reads while concurrently appending to a file to understand locking behaviors
+        timer.reset();
+        timer.start();
 
-    std::filesystem::create_directories(directory);
+        std::filesystem::create_directories(directory);
 
-    // create a file with some data in it
-    concurrent_setup(directory, block_count, block_size);
+        // create a file with some data in it
+        concurrent_setup(directory, block_count, block_size);
 
-    // concurrent writer thread
-    int cwriter_iops;
-    std::thread cwriter(concurrent_writer,
-                        directory,
-                        block_count,
-                        block_size,
-                        std::ref(cwriter_iops));
+        // concurrent writer thread
+        int cwriter_iops;
+        std::thread cwriter(concurrent_writer,
+                            directory,
+                            block_count,
+                            block_size,
+                            std::ref(cwriter_iops));
 
-    // concurrent reader thread
-    int creader_iops;
-    std::thread creader(concurrent_reader,
-                        directory,
-                        block_count,
-                        block_size,
-                        std::ref(creader_iops));
+        // concurrent reader thread
+        int creader_iops;
+        std::thread creader(concurrent_reader,
+                            directory,
+                            block_count,
+                            block_size,
+                            std::ref(creader_iops));
 
-    // wait for writer and reader to complete
-    cwriter.join();
-    creader.join();
+        // wait for writer and reader to complete
+        cwriter.join();
+        creader.join();
 
-    timer.stop();
+        timer.stop();
 
-    // report on writer and reader IOPS
-    std::cout << fmt::format("concurrent writer iops: {:d}", cwriter_iops) << std::endl;
-    std::cout << fmt::format("concurrent reader iops: {:d}", creader_iops) << std::endl;
+        // report on writer and reader IOPS
+        std::cout << fmt::format("concurrent writer iops: {:d}", cwriter_iops) << std::endl;
+        std::cout << fmt::format("concurrent reader iops: {:d}", creader_iops) << std::endl;
 
-    std::cout << "Start cleanup" << std::endl;
-    std::filesystem::remove_all(directory);
-    std::cout << "Benchmark complete" << std::endl;
-
+        std::cout << "Start cleanup" << std::endl;
+        std::filesystem::remove_all(directory);
+        std::cout << "Benchmark complete" << std::endl;
+    }
 
     return 0;
 }
