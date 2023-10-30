@@ -59,7 +59,7 @@ writer(const std::filesystem::path &directory,
         ::close(handle);
     }
 
-    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    iops = static_cast<int>(static_cast<float>(block_count * 1000) / (static_cast<float>(timer.elapsed_ms().count())));
     std::cout << fmt::format("Writer thread IOPS: {:d}", iops) << std::endl;
 }
 
@@ -109,7 +109,7 @@ reader(const std::filesystem::path &directory,
         ::close(handle);
     }
 
-    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
     std::cout << fmt::format("Reader thread IOPS: {:d}", iops) << std::endl;
 }
 
@@ -132,13 +132,19 @@ concurrent_setup(const std::filesystem::path &directory,
     // create a block of data
     std::vector<char> buf(block_size);
 
+    springtail::Timer timer;
+    timer.start();
     for (int i = 0; i < block_count; i++) {
         // append a block
         ::write(handle, buf.data(), buf.size());
     }
+    timer.stop();
 
     // close the handle
     ::close(handle);
+
+    int iops = static_cast<int>(static_cast<float>(block_count * 1000) / (static_cast<float>(timer.elapsed_ms().count())));
+    std::cout << fmt::format("Setup IOPS: {:d}", iops) << std::endl;
 }
 
 void
@@ -206,7 +212,7 @@ concurrent_reader(const std::filesystem::path &directory,
     // close the handle
     ::close(handle);
 
-    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
     std::cout << fmt::format("Reader thread IOPS: {:d}", iops) << std::endl;
 }
 
