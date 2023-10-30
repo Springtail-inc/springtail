@@ -2,7 +2,7 @@
 add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 
 # source files
-set(LIBSOURCES pg_repl_connection.cc pg_repl_msg.cc libpq_helper.cc pg_copy_table.cc)
+set(LIBSOURCES pg_repl_connection.cc pg_repl_msg.cc libpq_connection.cc pg_copy_table.cc)
 
 # dependencies
 find_package(PostgreSQL REQUIRED)

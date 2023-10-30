@@ -19,6 +19,12 @@ namespace springtail {
         }
     };
 
+    class PgAlreadyConnectedError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "Already connected";
+        }
+    };
+
     class PgIOError : public PgConnectionError {
         const char *what() const noexcept {
             return "An IO error occurred";
@@ -46,6 +52,12 @@ namespace springtail {
     class PgCopyDoneError : public PgConnectionError {
         const char *what() const noexcept {
             return "Copy is done";
+        }
+    };
+
+    class PgNoResultError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "No query result found";
         }
     };
 

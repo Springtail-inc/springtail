@@ -1,10 +1,10 @@
 #pragma once
 
 #include <string>
-#include <libpq-fe.h>
 
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/exception.hh>
+#include <psql_cdc/libpq_connection.hh>
 
 namespace springtail
 {
@@ -95,10 +95,13 @@ namespace springtail
         bool _started_streaming = false;
 
         /** replication (copy data) streaming connection */
-        PGconn *_stream_connection = nullptr;
+        LibPqConnection *_stream_connection = nullptr;
 
         /** query connection; issuing a query on stream conn will stop the copy */
-        PGconn *_connection = nullptr;
+        LibPqConnection *_connection = nullptr;
+
+        /** streaming socket */
+        int _streaming_socket;
 
         /** buffer allocated for copy data */
         char _copy_buffer[COPY_BUFFER_SIZE];
@@ -130,8 +133,6 @@ namespace springtail
         void sendStandbyStatusMsg();
 
         void fastForwardStream();
-
-        PGconn *internalConnect();
 
         // return true if data, false otherwise
         bool checkDataStream(int timeout_secs);

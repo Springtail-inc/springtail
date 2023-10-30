@@ -11,7 +11,7 @@
 #include <psql_cdc/exception.hh>
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/pg_copy_table.hh>
-#include <psql_cdc/libpq_helper.hh>
+#include <psql_cdc/libpq_connection.hh>
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 
@@ -30,27 +30,22 @@ namespace springtail
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, udt_name, "
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey "
-        "FROM pg_attribute pga "
+        "FROM pg_catalog.pg_attribute pga "
         "JOIN information_schema.columns "
         "ON column_name=pga.attname "
-        "LEFT OUTER JOIN pg_index pgi "
+        "LEFT OUTER JOIN pg_catalog.pg_index pgi "
         "ON pga.attrelid=pgi.indrelid "
         "WHERE pga.attrelid={} "
         "AND table_schema='{}' "
         "AND table_name='{}' "
         "ORDER BY ordinal_position";
 
-    /** copy command, output in binary using utf-8 encoding */
-    static const char *COPY_QUERY = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
-
-    /** start the xact in repeatable read isolation, creates a snapshot at xact start */
-    static const char *BEGIN_QUERY = "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ";
-
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction */
     static const char *XID_QUERY = "SELECT txid_current_snapshot()";
 
-    /** end xact */
-    static const char *END_QUERY = "END";
+    /** copy command, output in binary using utf-8 encoding */
+    static const char *COPY_QUERY = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
+
 
     /**
      * @brief Connect to database
@@ -67,13 +62,13 @@ namespace springtail
                               const std::string &password,
                               const int port)
     {
-        _connection = libpq::connect(hostname, _db_name, username, password, port, false);
+        _connection = new LibPqConnection();
+        _connection->connect(hostname, _db_name, username, password, port, false);
 
         try {
-            PGresult *res = libpq::exec(_connection, BEGIN_QUERY);
-            PQclear(res);
+            _connection->startTransaction();
         } catch (PgQueryError &e) {
-            PQfinish(_connection);
+            delete _connection;
             _connection = nullptr;
             std::cerr << "Error starting transaction failed\n";
             throw e;
@@ -90,11 +85,9 @@ namespace springtail
             return;
         }
 
-        try {
-            libpq::exec(_connection, END_QUERY);
-        } catch (PgQueryError &e) {}
+        _connection->disconnect();
+        delete _connection;
 
-        PQfinish(_connection);
         _connection = nullptr;
     }
 
@@ -109,16 +102,16 @@ namespace springtail
      */
     void PgCopyTable::getXactXids()
     {
-        PGresult *res = libpq::exec(_connection, XID_QUERY);
-        if (PQntuples(res) == 0) {
-            PQclear(res);
+        _connection->exec(XID_QUERY);
+        if (_connection->ntuples() == 0) {
+            _connection->clear();
             std::cerr << "Unexpected results from query: " << XID_QUERY << std::endl;
             throw PgQueryError();
         }
 
-        _schema.xids = libpq::getString(res, 0, 0);
+        _schema.xids = _connection->getString(0, 0);
 
-        PQclear(res);
+        _connection->clear();
     }
 
 
@@ -127,16 +120,16 @@ namespace springtail
      */
     void PgCopyTable::getTableOid()
     {
-        PGresult *res = libpq::exec(_connection, fmt::format(TABLE_OID_QUERY, _table_name, _schema_name));
-        if (PQntuples(res) == 0) {
-            PQclear(res);
+        _connection->exec(fmt::format(TABLE_OID_QUERY, _table_name, _schema_name));
+        if (_connection->ntuples() == 0) {
+            _connection->clear();
             std::cerr << "Unexpected results from query: " << TABLE_OID_QUERY << std::endl;
             throw PgQueryError();
         }
 
-        _schema.table_oid = libpq::getInt32(res, 0, 0);
+        _schema.table_oid = _connection->getInt32(0, 0);
 
-        PQclear(res);
+        _connection->clear();
     }
 
 
@@ -149,24 +142,23 @@ namespace springtail
      */
     void PgCopyTable::getSchema()
     {
-        std::unique_ptr<char[]> table_name = libpq::escapeString(_connection, _table_name);
-        std::unique_ptr<char[]> schema_name = libpq::escapeString(_connection, _schema_name);
+        std::unique_ptr<char[]> table_name = _connection->escapeString(_table_name);
+        std::unique_ptr<char[]> schema_name = _connection->escapeString(_schema_name);
 
-        PGresult *res = libpq::exec(_connection, fmt::format(SCHEMA_QUERY,
-                                                             _schema.table_oid,
-                                                             schema_name.get(),
-                                                             table_name.get()));
+        _connection->exec(fmt::format(SCHEMA_QUERY, _schema.table_oid,
+                                     schema_name.get(), table_name.get()));
 
-        if (PQntuples(res) == 0) {
+        if (_connection->ntuples() == 0) {
             std::cerr << fmt::format("Table not found: {}.{}\n", _schema_name, _table_name);
-            PQclear(res);
+            _connection->clear();
             throw PgQueryError();
         }
 
-        if (PQnfields(res) != 6) {
+        if (_connection->nfields() != 6) {
             std::cerr << "Error: unexpected data from schema query or table not found\n";
-            std::cerr << "fields: " << PQnfields(res) << ", tuples: " << PQntuples(res) << std::endl;
-            PQclear(res);
+            std::cerr << "fields: " << _connection->nfields() << ", tuples: "
+                      << _connection->ntuples() << std::endl;
+            _connection->clear();
             throw PgQueryError();
         }
 
@@ -176,7 +168,7 @@ namespace springtail
             _schema.schema_name = _schema_name;
 
             // get columns
-            int rows = PQntuples(res);
+            int rows = _connection->ntuples();
             _schema.columns.resize(rows);
 
             for (int i = 0; i < rows; i++) {
@@ -184,22 +176,22 @@ namespace springtail
                 PgColumn column;
 
                 // column_name string
-                column.name = libpq::getString(res, i, 0);
+                column.name = _connection->getString(i, 0);
 
                 // ordinal position int4
-                column.position = libpq::getInt32(res, i, 1);
+                column.position = _connection->getInt32(i, 1);
 
                 // is_nullable varchar
-                column.is_nullable = libpq::getBoolean(res, i, 2);
+                column.is_nullable = _connection->getBoolean(i, 2);
 
                 // column_default varchar
-                column.default_value = libpq::getStringOptional(res, i, 3);
+                column.default_value = _connection->getStringOptional(i, 3);
 
                 // udt_name varchar
-                column.type = libpq::getString(res, i, 4);
+                column.type = _connection->getString(i, 4);
 
                 // is primary key
-                column.is_pkey = libpq::getBoolean(res, i, 5);
+                column.is_pkey = _connection->getBoolean(i, 5);
 
                 std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={} pkey={}\n",
                                          column.name, column.type, column.position, column.is_nullable,
@@ -208,7 +200,7 @@ namespace springtail
                 _schema.columns[i] = column;
             }
         } catch (...) {
-            PQclear(res);
+            _connection->clear();
 
             std::exception_ptr eptr;
             if (eptr) {
@@ -216,7 +208,7 @@ namespace springtail
             }
         }
 
-        PQclear(res);
+        _connection->clear();
     }
 
 
@@ -510,48 +502,48 @@ namespace springtail
      */
     void PgCopyTable::copyData()
     {
-        std::unique_ptr<char[]> table_name = libpq::escapeString(_connection, _table_name);
-        std::unique_ptr<char[]> schema_name = libpq::escapeString(_connection, _schema_name);
+        std::unique_ptr<char[]> table_name = _connection->escapeString(_table_name);
+        std::unique_ptr<char[]> schema_name = _connection->escapeString(_schema_name);
 
-        PGresult *res = libpq::exec(_connection, fmt::format(COPY_QUERY, schema_name.get(),
-                                                             table_name.get()));
-        if (PQresultStatus(res) != PGRES_COPY_OUT) {
+        _connection->exec(fmt::format(COPY_QUERY, schema_name.get(), table_name.get()));
+
+        if (_connection->status() != PGRES_COPY_OUT) {
             std::cerr << "Copy command did not receive PGRES_COPY_OUT\n";
-            PQclear(res);
+            _connection->clear();
             throw PgQueryError();
         }
 
         // some sanity checks
-        if (PQbinaryTuples(res) != 1) {
+        if (_connection->binary_tuples() != 1) {
             std::cerr << "Copy command not outputting binary\n";
-            PQclear(res);
+            _connection->clear();
             throw PgQueryError();
         }
 
-        if (PQnfields(res) != _schema.columns.size()) {
+        if (_connection->nfields() != _schema.columns.size()) {
             std::cerr << "Mismatch in copy fields\n";
-            PQclear(res);
+            _connection->clear();
             throw PgQueryError();
         }
 
-        PQclear(res);
+        _connection->clear();
 
         char *buffer = nullptr;
         while (true) {
-            int r = PQgetCopyData(_connection, &buffer, false);
+            int r = _connection->get_copy_data(false);
+            buffer = _connection->get_copy_buffer();
             if (r == -1) {
                 // end of copy, get final result
-                res = PQgetResult(_connection);
-                if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-                    std::cerr << "Finished copy, got not-ok status: " << PQresultStatus(res) << std::endl;
-                    PQclear(res);
+                if (_connection->status() != PGRES_COMMAND_OK) {
+                    std::cerr << "Finished copy, got not-ok status: " << _connection->status() << std::endl;
+                    _connection->clear();
                     throw PgQueryError();
                 }
-                PQclear(res);
+                _connection->clear();
                 break;
             } else if (r == -2) {
                 // an error occured
-                std::cerr << "Copy command error: " << PQerrorMessage(_connection) << std::endl;
+                std::cerr << "Copy command error: " << _connection->error_message() << std::endl;
                 throw PgQueryError();
             } else if (r == 0 || buffer == nullptr) {
                 continue;
@@ -562,11 +554,11 @@ namespace springtail
             std::cout << fmt::format("Copy got: {} bytes\n", r);
             if (std::fwrite(buffer, 1, r, _file) < r) {
                 std::cerr << "Error writing copy data\n";
-                PQfreemem(buffer);
+                _connection->free_copy_buffer();
                 throw PgIOError();
             }
 
-            PQfreemem(buffer);
+            _connection->free_copy_buffer();
             buffer = nullptr;
         }
     }

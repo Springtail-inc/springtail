@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <string>
 
-#include <libpq-fe.h>
+#include <psql_cdc/libpq_connection.hh>
 
 namespace springtail
 {
@@ -41,7 +41,7 @@ namespace springtail
         /** header of copy data signature */
         static inline constexpr char COPY_SIGNATURE[] = "PGCOPY\n\377\r\n\0";
 
-        PGconn *_connection = nullptr;
+        LibPqConnection *_connection = nullptr;
         std::string _db_name;
         std::string _schema_name;
         std::string _table_name;
@@ -114,7 +114,7 @@ namespace springtail
         ~PgCopyTable()
         {
             if (_connection != nullptr) {
-                PQfinish(_connection);
+                delete _connection;
             }
         }
 

@@ -11,7 +11,7 @@
 #include <fmt/core.h>
 
 #include <psql_cdc/pg_types.hh>
-#include <psql_cdc/libpq_helper.hh>
+#include <psql_cdc/libpq_connection.hh>
 #include <psql_cdc/pg_repl_msg.hh>
 #include <psql_cdc/pg_repl_connection.hh>
 #include <psql_cdc/exception.hh>
@@ -69,20 +69,11 @@ namespace springtail
      */
     void PgReplConnection::connect()
     {
-        _connection = internalConnect();
-    }
-
-
-    /**
-     * @brief Internal connection helper
-     *
-     * @return returns a libpq connection
-     * @throws PgIOError on connection failure
-     * @throws PgQueryError on failure to set search path
-     */
-    PGconn *PgReplConnection::internalConnect()
-    {
-        return libpq::connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
+        if (_connection != nullptr) {
+            throw PgAlreadyConnectedError();
+        }
+        _connection = new LibPqConnection();
+        _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
     }
 
 
@@ -91,12 +82,17 @@ namespace springtail
      */
     void PgReplConnection::close()
     {
+        if (_connection == nullptr) {
+            throw PgNotConnectedError();
+        }
+
         if (_started_streaming) {
             endStreaming();
             _started_streaming = false;
         }
 
-        PQfinish(_connection);
+        delete _connection;
+        _connection = nullptr;
     }
 
 
@@ -114,10 +110,11 @@ namespace springtail
             throw PgStreamingError();
         }
 
-        _stream_connection = internalConnect();
+        _stream_connection = new LibPqConnection();
+        _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
 
         // get protocol version
-        _server_version = PQserverVersion(_stream_connection);
+        _server_version = _stream_connection->server_version();
 
         // currently only support version 1 or 2, pick which to use
         // version 2 supports streaming xacts (from PG 14+);
@@ -136,10 +133,9 @@ namespace springtail
         uint32_t lsn_lower = (uint32_t)(LSN);
 
         // replication start command
-        char *pub_name = PQescapeLiteral(_stream_connection, _pub_name.c_str(), _pub_name.length());
-
-        std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names {}",
-            _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name);
+        std::unique_ptr<char[]> pub_name = _stream_connection->escapeString(_pub_name);
+        std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names '{}'",
+            _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name.get());
 
         if (_server_version >= PG_VERS_14) {
             // binary and logical messages not supported prior to pg14
@@ -147,8 +143,6 @@ namespace springtail
         } else {
             cmd += ")";
         }
-
-        PQfreemem(pub_name);
 
         // extract message buffer
         const char *cmd_buffer = cmd.c_str();
@@ -164,7 +158,8 @@ namespace springtail
         readMsgHeader();
         if (_msg_type != MSG_COPY_BOTH) {
             std::cerr << "Error could not start WAL streaming: (msg type=" << _msg_type << ")\n";
-            PQfinish(_stream_connection);
+            delete _stream_connection;
+            _stream_connection = nullptr;
             throw PgQueryError();
         }
 
@@ -172,13 +167,14 @@ namespace springtail
         skipMessage();
 
         _copy_state = NEW_MSG;
+        _streaming_socket = _stream_connection->socket();
         _started_streaming = true;
     }
 
 
     /**
      * @brief End streaming; close streaming connection
-     * @throws PqQueryError if end streaming command failed
+     *        hide errors, as not useful at this point, as connection is being closed
      */
     void PgReplConnection::endStreaming()
     {
@@ -193,60 +189,26 @@ namespace springtail
         _copy_msg_length = 0;
         _copy_msg_offset = 0;
 
-        // taken from libpqwalreceiver.c libpqrcv_endstreaming()
+        // see libpqwalreceiver.c libpqrcv_endstreaming() for detailed way to shutdown cleanly
         // send copy end message
-        if (PQputCopyEnd(_stream_connection, nullptr) <= 0 || PQflush(_stream_connection)) {
+        if (_stream_connection->put_copy_end(nullptr) <= 0 || _stream_connection->flush()) {
             std::cerr << "Error could not send end-of-streaming message to primary" << std::endl;
-            PQfinish(_stream_connection);
-            throw PgQueryError();
+            delete _stream_connection;
+            _stream_connection = nullptr;
+            return;
         }
 
-        PGresult *res = PQgetResult(_stream_connection);
-
-        ExecStatusType status = PQresultStatus(res);
-        if (status == PGRES_TUPLES_OK) {
-            if (PQnfields(res) < 2 || PQntuples(res) != 1) {
-                // error unexpected result set after end-of-streaming
-                PQclear(res);
-                PQfinish(_stream_connection);
-                throw PgQueryError();
-            }
-
-            PQclear(res);
-
-            // result should be followed by CommandComplete
-            res = PQgetResult(_stream_connection);
-
-        } else if (status == PGRES_COPY_OUT) {
-            PQclear(res);
-
-            if (PQendcopy(_stream_connection)) {
-                // error shutting down copy
-                PQfinish(_stream_connection);
-                throw PgQueryError();
-            }
-            // result should be followed by CommandComplete
-            res = PQgetResult(_stream_connection);
+        ExecStatusType status = _stream_connection->status();
+        _stream_connection->clear();
+        if (status == PGRES_COPY_OUT) {
+            // end the copy
+            _stream_connection->end_copy();
         }
 
-        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-            // error reading result of streaming command
-            PQclear(res);
-            throw PgQueryError();
-        } else {
-            PQclear(res);
-        }
-
-        // verify no more results
-        res = PQgetResult(_stream_connection);
-        if (res != nullptr) {
-            PQclear(res);
-            // unexpected result after command complete
-            PQfinish(_stream_connection);
-            throw PgQueryError();
-        }
-
-        PQfinish(_stream_connection);
+        // just close connection; cleans up result and other state
+        // no need to go through too much trouble...
+        delete _stream_connection;
+        _stream_connection = nullptr;
     }
 
 
@@ -261,7 +223,7 @@ namespace springtail
     {
         fd_set fds;
         FD_ZERO(&fds);
-        FD_SET(PQsocket(_stream_connection), &fds);
+        FD_SET(_streaming_socket, &fds);
 
         struct timeval t;
         t.tv_usec = 0;
@@ -269,7 +231,7 @@ namespace springtail
 
         // r < 0 error; r == 0 timeout; r > 0 readable socket
         std::cout << "Blocking in select for: " << timeout_secs << " secs\n";
-        int r = select(PQsocket(_stream_connection) + 1, &fds, nullptr, nullptr, &t);
+        int r = select(_streaming_socket + 1, &fds, nullptr, nullptr, &t);
         if (r < 0) {
             throw PgIOError();
         }
@@ -329,13 +291,13 @@ namespace springtail
         int flags = MSG_NOSIGNAL | MSG_MORE ; // no SIGPIPE if connection is closed
 
         // send the header and then the operation
-        int r = send(PQsocket(_stream_connection), msg_header, 5, flags);
+        int r = send(_streaming_socket, msg_header, 5, flags);
         if (r != 5) {
             std::cerr << "Failed to write copy data header (r=" << r << ")\n";
             throw PgIOError();
         }
 
-        r = send(PQsocket(_stream_connection), buffer, length, MSG_NOSIGNAL);
+        r = send(_streaming_socket, buffer, length, MSG_NOSIGNAL);
         if (r < length) {
             // XXX if r > 0 this technically isn't an error and we should
             // really continue retrying the send
@@ -360,7 +322,7 @@ namespace springtail
                                         bool async=true)
     {
         while (true) {
-            int r = recv(PQsocket(_stream_connection),
+            int r = recv(_streaming_socket,
                          buffer, length, (async ? MSG_DONTWAIT : 0));
 
             std::cout << "Read raw data: " << r << std::endl;
@@ -756,19 +718,19 @@ namespace springtail
         const char *cmd = CURRENT_LSN_SQL;
 
         // execute query
-        PGresult *res = PQexec(_connection, cmd);
+        _connection->exec(cmd);
 
         // process results; sanity checks first
-        if (PQresultStatus(res) != PGRES_TUPLES_OK ||
-            PQntuples(res) <= 0 || PQgetlength(res, 0, 0) < 3) {
+        if (_connection->status() != PGRES_TUPLES_OK ||
+            _connection->ntuples() <= 0 || _connection->length(0, 0) < 3) {
             std::cerr << "Error querying current LSN\n";
             throw PgQueryError();
         }
 
         // result in form: XXX/XXX; convert to LSN_t
-        char *str = PQgetvalue(res, 0, 0);
+        char *str = _connection->get_value(0, 0);
         LSN_t lsn = PgReplMsg::strToLSN(str);
-        PQclear(res);
+        _connection->clear();
 
         // check that LSN is ahead of where we are
         if (lsn < _last_received_lsn) {
@@ -882,41 +844,37 @@ namespace springtail
             throw std::runtime_error("No queries after streaming starts");
         }
 
-        char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
-
-        std::string cmd = fmt::format("SELECT restart_lsn, confirmed_flush_lsn from pg_catalog.pg_replication_slots WHERE slot_name={}",
-                                      slot_name);
+        std::unique_ptr<char[]> slot_name = _connection->escapeString(_slot_name);
+        std::string cmd = fmt::format("SELECT restart_lsn, confirmed_flush_lsn from pg_catalog.pg_replication_slots WHERE slot_name='{}'",
+                                      slot_name.get());
 
         // execute query
         std::cout << "Executing query: " << cmd << std::endl;
-        PGresult *res = PQexec(_connection, cmd.c_str());
-
-        // free slot name
-        PQfreemem(slot_name);
+        _connection->exec(cmd);
 
         // process results
-        if (PQresultStatus(res) != PGRES_COMMAND_OK &&
-            PQresultStatus(res) != PGRES_TUPLES_OK) {
-            std::cerr << "Error executing query: " << PQerrorMessage(_connection) << std::endl;
-            PQclear(res);
+        if (_connection->status() != PGRES_COMMAND_OK &&
+            _connection->status() != PGRES_TUPLES_OK) {
+            std::cerr << "Error executing query: " << _connection->error_message() << std::endl;
+            _connection->clear();
 
             throw PgQueryError();
         }
 
-        std::cout << "Got command OK or TUPLES_OK tuples=" << PQntuples(res) << std::endl;
+        std::cout << "Got command OK or TUPLES_OK tuples=" << _connection->ntuples() << std::endl;
 
-        if (PQntuples(res) > 0 && PQnfields(res) == 2) {
-            char *restart_lsn_str = PQgetvalue(res, 0, 0);
-            char *confirmed_flush_lsn_str = PQgetvalue(res, 0, 1);
+        if (_connection->ntuples() > 0 && _connection->nfields() == 2) {
+            char *restart_lsn_str = _connection->get_value(0, 0);
+            char *confirmed_flush_lsn_str = _connection->get_value(0, 1);
 
             restart_lsn_out = PgReplMsg::strToLSN(restart_lsn_str);
             flushed_lsn_out = PgReplMsg::strToLSN(confirmed_flush_lsn_str);
 
-            PQclear(res);
+            _connection->clear();
             return true;
         }
 
-        PQclear(res);
+        _connection->clear();
         return false;
     }
 
@@ -933,24 +891,22 @@ namespace springtail
             throw PgStreamingError();
         }
 
-        char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
+        std::unique_ptr<char[]> slot_name = _connection->escapeString(_slot_name);
 
-        std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
+        std::string cmd = fmt::format("DROP_REPLICATION_SLOT '{}'", slot_name.get());
 
         // execute query
         std::cout << "Executing query: " << cmd << std::endl;
-        PGresult *res = PQexec(_connection, cmd.c_str());
-
-        PQfreemem(slot_name);
+        _connection->exec(cmd);
 
         // process results
-        if (PQresultStatus(res) == PGRES_COMMAND_OK) {
+        if (_connection->status() == PGRES_COMMAND_OK) {
             std::cerr << "Error dropping replication slot" << std::endl;
-            PQclear(res);
+            _connection->clear();
             throw PgQueryError();
         }
 
-        PQclear(res);
+        _connection->clear();
     }
 
 
@@ -972,12 +928,12 @@ namespace springtail
         std::stringstream s;
 
         // escape slot name
-        char *slot_name = PQescapeLiteral(_connection, _slot_name.c_str(), _slot_name.length());
+        std::unique_ptr<char[]> slot_name = _connection->escapeString(_slot_name);
 
         bool use_new_syntax = (_server_version >= 150000);
 
         // setup command
-        s << "CREATE_REPLICATION_SLOT " << "\"" << _slot_name << "\"";
+        s << "CREATE_REPLICATION_SLOT " << "\"" << slot_name.get() << "\"";
         if (temporary) {
             s << " TEMPORARY";
         }
@@ -1007,36 +963,30 @@ namespace springtail
         std::cout << "Executing query: " << cmd << std::endl;
 
         // execute query
-        PGresult *res = PQexec(_connection, cmd);
-
-        // free slot name
-        PQfreemem(slot_name);
+        _connection->exec(cmd);
 
         // process results
-        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-            std::cerr << "Error executing CREATE_REPLICATION_SLOT: " << PQerrorMessage(_connection) << std::endl;
-            PQclear(res);
+        if (_connection->status() != PGRES_TUPLES_OK) {
+            std::cerr << "Error executing CREATE_REPLICATION_SLOT: " << _connection->error_message() << std::endl;
+            _connection->clear();
             throw PgQueryError();
         }
 
         // check result number of tuples and columns
-        if (PQntuples(res) != 1 || PQnfields(res) != 4) {
+        if (_connection->ntuples() != 1 || _connection->nfields() != 4) {
             std::cerr << "Unexpected number of rows or columns for CREATE REPLICATION SLOT: rows="
-                      <<  PQntuples(res) << " cols=" << PQnfields(res) << std::endl;
-            PQclear(res);
+                      <<  _connection->ntuples() << " cols=" << _connection->nfields() << std::endl;
+            _connection->clear();
             throw PgQueryError();
         }
 
-        slot_name = PQgetvalue(res, 0, 0);
+        // result unused:
+        // 0,0 = slot_name, 0,1 = XXX/XXX earliest LSN for streaming
+        // 0,2 = snapshot name, 0,3 = output plugin
 
-        // char *consistent_point = PQgetvalue(res, 0, 1); // XXX/XXX earliest LSN for streaming
-        char *snapshot_name = PQgetvalue(res, 0, 2);
-        // char *output_plugin = PQgetvalue(res, 0, 3);  // unused
+        _export_name = _connection->getString(0,2);
 
-        // save export name in class
-        _export_name = std::string(snapshot_name);
-
-        PQclear(res);
+        _connection->clear();
     }
 
 
