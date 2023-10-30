@@ -80,12 +80,13 @@ reader(const std::filesystem::path &directory,
        int &iops)
 {
     // open handles to all of the files
-    std::vector<int> handles, sizes;
+    std::vector<int> handles;
+    std::vector<uint64_t> sizes;
     for (int i = 0; i < file_count; i++) {
         std::string file_name = fmt::format("{:03d}", i);
 
         // check the size of the file
-        int file_size = std::filesystem::file_size(directory / file_name);
+        uint64_t file_size = std::filesystem::file_size(directory / file_name);
         sizes.push_back(file_size);
 
         // open a file handle
@@ -104,7 +105,7 @@ reader(const std::filesystem::path &directory,
     timer.start();
     for (int i = 0; i < block_count; i++) {
         int file = rand() % file_count;
-        int pos = rand() % (sizes[file] / block_size);
+        uint64_t pos = rand() % (sizes[file] / block_size);
 
         int handle = handles[file];
         ::lseek(handle, pos * block_size, SEEK_SET);
@@ -229,7 +230,7 @@ concurrent_reader(const std::filesystem::path &directory,
     springtail::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
-        int pos = rand() % block_count;
+        uint64_t pos = rand() % block_count;
 
         ::lseek(handle, pos * block_size, SEEK_SET);
         int count = ::read(handle, buf.data(), block_size);
