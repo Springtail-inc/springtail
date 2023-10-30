@@ -82,17 +82,14 @@ namespace springtail
      */
     void PgReplConnection::close()
     {
-        if (_connection == nullptr) {
-            throw PgNotConnectedError();
-        }
+        // end streaming if started, this will close streaming connection
+        endStreaming();
 
-        if (_started_streaming) {
-            endStreaming();
-            _started_streaming = false;
+        // free the libpq standard connection if open
+        if (_connection != nullptr) {
+            delete _connection;
+            _connection = nullptr;
         }
-
-        delete _connection;
-        _connection = nullptr;
     }
 
 
