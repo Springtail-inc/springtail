@@ -53,6 +53,12 @@ writer(const std::filesystem::path &directory,
     }
     timer.stop();
 
+    // close the file
+    // close the handles
+    for (int handle : handles) {
+        ::close(handle);
+    }
+
     iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
     std::cout << fmt::format("Writer thread IOPS: {:d}", iops) << std::endl;
 }
@@ -90,18 +96,119 @@ reader(const std::filesystem::path &directory,
     timer.start();
     for (int i = 0; i < block_count; i++) {
         int file = rand() % file_count;
-        int pos = rand() % (sizes[file] / block_count);
+        int pos = rand() % (sizes[file] / block_size);
 
         int handle = handles[file];
-        ::lseek(handle, pos, SEEK_SET);
+        ::lseek(handle, pos * block_size, SEEK_SET);
         ::read(handle, buf.data(), block_size);
     }
     timer.stop();
+
+    // close the handles
+    for (int handle : handles) {
+        ::close(handle);
+    }
 
     iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
     std::cout << fmt::format("Reader thread IOPS: {:d}", iops) << std::endl;
 }
 
+
+void
+concurrent_setup(const std::filesystem::path &directory,
+                 int block_count,
+                 int block_size)
+{
+    int handle;
+    try {
+        std::string file_name = "1";
+
+        // open a file handle
+        handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR);
+    } catch (std::exception &e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+
+    // create a block of data
+    std::vector<char> buf(block_size);
+
+    for (int i = 0; i < block_count; i++) {
+        // append a block
+        ::write(handle, buf.data(), buf.size());
+    }
+
+    // close the handle
+    ::close(handle);
+}
+
+void
+concurrent_writer(const std::filesystem::path &directory,
+                  int block_count,
+                  int block_size,
+                  int &iops)
+{
+    int handle;
+    try {
+        std::string file_name = "1";
+
+        // open a file handle
+        handle = ::open((directory / file_name).c_str(), O_APPEND | O_RDWR);
+    } catch (std::exception &e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+
+    // create a block of data
+    std::vector<char> buf(block_size);
+
+    springtail::Timer timer;
+    timer.start();
+    for (int i = 0; i < block_count; i++) {
+        // append a block
+        ::write(handle, buf.data(), buf.size());
+    }
+    timer.stop();
+
+    iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
+}
+
+
+void
+concurrent_reader(const std::filesystem::path &directory,
+                  int block_count,
+                  int block_size,
+                  int &iops)
+{
+    int handle;
+
+    try {
+        std::string file_name = "1";
+
+        // open a file handle
+        handle = ::open((directory / file_name).c_str(), O_RDONLY);
+    } catch (std::exception &e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+
+    // create a block
+    std::vector<char> buf(block_size);
+
+    // read random blocks
+    springtail::Timer timer;
+    timer.start();
+    for (int i = 0; i < block_count; i++) {
+        int pos = rand() % block_count;
+
+        ::lseek(handle, pos * block_size, SEEK_SET);
+        ::read(handle, buf.data(), block_size);
+    }
+    timer.stop();
+
+    // close the handle
+    ::close(handle);
+
+    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    std::cout << fmt::format("Reader thread IOPS: {:d}", iops) << std::endl;
+}
 
 /**
  * Benchmark for any filesystem
@@ -190,12 +297,52 @@ int main(int argc, char* argv[]) {
 
     std::cout << "total reader time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
     std::cout << fmt::format("total reader iops: {:d}", std::reduce(reader_iops.begin(), reader_iops.end())) << std::endl;
-    // XXX evaluate doing reads while appending to a file to understand locking behaviors
+
 
     // cleanup
     std::cout << "Start cleanup" << std::endl;
     std::filesystem::remove_all(directory);
     std::cout << "Benchmark complete" << std::endl;
+
+    // Evaluate doing reads while concurrently appending to a file to understand locking behaviors
+    timer.reset();
+    timer.start();
+
+    std::filesystem::create_directories(directory);
+
+    // create a file with some data in it
+    concurrent_setup(directory, block_count, block_size);
+
+    // concurrent writer thread
+    int cwriter_iops;
+    std::thread cwriter(concurrent_writer,
+                        directory,
+                        block_count,
+                        block_size,
+                        std::ref(cwriter_iops));
+
+    // concurrent reader thread
+    int creader_iops;
+    std::thread creader(concurrent_reader,
+                        directory,
+                        block_count,
+                        block_size,
+                        std::ref(creader_iops));
+
+    // wait for writer and reader to complete
+    cwriter.join();
+    creader.join();
+
+    timer.stop();
+
+    // report on writer and reader IOPS
+    std::cout << fmt::format("concurrent writer iops: {:d}", cwriter_iops) << std::endl;
+    std::cout << fmt::format("concurrent reader iops: {:d}", creader_iops) << std::endl;
+
+    std::cout << "Start cleanup" << std::endl;
+    std::filesystem::remove_all(directory);
+    std::cout << "Benchmark complete" << std::endl;
+
 
     return 0;
 }
