@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include <thread>
 
 #include <boost/program_options.hpp>
@@ -21,7 +22,8 @@ writer(const std::filesystem::path &directory,
        int file_name_start,
        int file_count,
        int block_count,
-       int block_size)
+       int block_size,
+       int &iops)
 {
     // create the files for this writer thread
     std::vector<int> handles;
@@ -51,8 +53,8 @@ writer(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    float iops = static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000)
-    std::cout << fmt::format("Writer IOPS: {:f}", iops) << std::endl;
+    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    std::cout << fmt::format("Writer thread IOPS: {:d}", iops) << std::endl;
 }
 
 /**
@@ -62,7 +64,8 @@ void
 reader(const std::filesystem::path &directory,
        int file_count,
        int block_count,
-       int block_size)
+       int block_size,
+       int &iops)
 {
     // open handles to all of the files
     std::vector<int> handles, sizes;
@@ -95,8 +98,8 @@ reader(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    float iops = static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000)
-    std::cout << fmt::format("Reader IOPS: {:f}", iops) << std::endl;
+    iops = static_cast<int>(static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000));
+    std::cout << fmt::format("Reader thread IOPS: {:d}", iops) << std::endl;
 }
 
 
@@ -140,6 +143,7 @@ int main(int argc, char* argv[]) {
     //   pick a file name
     //   write the file (timed)
     std::vector<std::thread> writers;
+    std::vector<int> writer_iops(writer_count);
     int files_per_thread = file_count / writer_count;
     int blocks_per_thread = block_count / writer_count;
     springtail::Timer timer;
@@ -151,7 +155,8 @@ int main(int argc, char* argv[]) {
                                       i * files_per_thread,
                                       files_per_thread,
                                       blocks_per_thread,
-                                      block_size));
+                                      block_size,
+                                      std::ref(writer_iops[i])));
     }
     for (auto &&w : writers) {
         w.join();
@@ -159,6 +164,7 @@ int main(int argc, char* argv[]) {
     timer.stop();
 
     std::cout << "total writer time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
+    std::cout << fmt::format("total writer iops: {:d}", std::reduce(writer_iops.begin(), writer_iops.end())) << std::endl;
 
     std::cout << "about to start readers" << std::endl;
 
@@ -168,19 +174,22 @@ int main(int argc, char* argv[]) {
     timer.reset();
     timer.start();
     std::vector<std::thread> readers;
+    std::vector<int> reader_iops(writer_count);
     for (int i = 0; i < reader_count; i++) {
         readers.push_back(std::thread(reader,
                                       directory,
                                       file_count,
                                       block_count,
-                                      block_size));
+                                      block_size,
+                                      std::ref(reader_iops[i])));
     }
     for (auto &&r : readers) {
         r.join();
     }
     timer.stop();
-    std::cout << "total reader time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
 
+    std::cout << "total reader time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
+    std::cout << fmt::format("total reader iops: {:d}", std::reduce(reader_iops.begin(), reader_iops.end())) << std::endl;
     // XXX evaluate doing reads while appending to a file to understand locking behaviors
 
     // cleanup
