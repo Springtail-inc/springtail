@@ -98,9 +98,14 @@ namespace springtail {
         if (_connection == nullptr) {
             throw PgNotConnectedError();
         }
-        free_copy_buffer();
 
-        return PQgetCopyData(_connection, &_buffer, (async ? 1 : 0));
+        free_copy_buffer();
+        clear();
+
+        int res = PQgetCopyData(_connection, &_buffer, (async ? 1 : 0));
+        _result = PQgetResult(_connection);
+
+        return res;
     }
 
     /**
