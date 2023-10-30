@@ -109,6 +109,7 @@ namespace springtail
 
         _stream_connection = new LibPqConnection();
         _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
+        _streaming_socket = _stream_connection->socket();
 
         // get protocol version
         _server_version = _stream_connection->server_version();
@@ -164,7 +165,6 @@ namespace springtail
         skipMessage();
 
         _copy_state = NEW_MSG;
-        _streaming_socket = _stream_connection->socket();
         _started_streaming = true;
     }
 

@@ -280,10 +280,10 @@ namespace springtail {
 
         if (_connection == nullptr) {
             PQescapeString(str_ptr.get(), str.c_str(), str.length());
+        } else {
+            PQescapeStringConn(const_cast<PGconn *>(_connection), str_ptr.get(),
+                               str.c_str(), str.length(), nullptr);
         }
-
-        PQescapeStringConn(const_cast<PGconn *>(_connection), str_ptr.get(),
-                           str.c_str(), str.length(), nullptr);
 
         return str_ptr;
     }
