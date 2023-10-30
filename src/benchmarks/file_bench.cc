@@ -51,7 +51,8 @@ writer(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    std::cout << fmt::format("{:f}", (float)timer.elapsed_ms().count() / block_count) << std::endl;
+    float iops = static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000)
+    std::cout << fmt::format("Writer IOPS: {:f}", iops) << std::endl;
 }
 
 /**
@@ -94,7 +95,8 @@ reader(const std::filesystem::path &directory,
     }
     timer.stop();
 
-    std::cout << fmt::format("{:f}", (float)timer.elapsed_ms().count() / block_count) << std::endl;
+    float iops = static_cast<float>(block_count) / (static_cast<float>(timer.elapsed_ms().count()) / 1000)
+    std::cout << fmt::format("Reader IOPS: {:f}", iops) << std::endl;
 }
 
 
@@ -155,7 +157,8 @@ int main(int argc, char* argv[]) {
         w.join();
     }
     timer.stop();
-    std::cout << "total writer time: " << fmt::format("{:f}", (float)timer.elapsed_ms().count()) << std::endl;
+
+    std::cout << "total writer time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
 
     std::cout << "about to start readers" << std::endl;
 
@@ -165,7 +168,7 @@ int main(int argc, char* argv[]) {
     timer.reset();
     timer.start();
     std::vector<std::thread> readers;
-    for (int i = 0; i < writer_count; i++) {
+    for (int i = 0; i < reader_count; i++) {
         readers.push_back(std::thread(reader,
                                       directory,
                                       file_count,
@@ -176,7 +179,9 @@ int main(int argc, char* argv[]) {
         r.join();
     }
     timer.stop();
-    std::cout << "total reader time: " << fmt::format("{:f}", (float)timer.elapsed_ms().count()) << std::endl;
+    std::cout << "total reader time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
+
+    // XXX evaluate doing reads while appending to a file to understand locking behaviors
 
     // cleanup
     std::cout << "Start cleanup" << std::endl;
