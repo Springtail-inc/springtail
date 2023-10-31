@@ -188,6 +188,7 @@ concurrent_writer(const std::filesystem::path &directory,
     // create a block of data
     std::vector<char> buf(block_size);
 
+    std::cout << "Start writer" << std::endl;
     springtail::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
@@ -198,8 +199,10 @@ concurrent_writer(const std::filesystem::path &directory,
         }
     }
     timer.stop();
+    std::cout << "Stop writer" << std::endl;
 
     iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
+    ::close(handle);
 }
 
 
@@ -227,6 +230,7 @@ concurrent_reader(const std::filesystem::path &directory,
     std::vector<char> buf(block_size);
 
     // read random blocks
+    std::cout << "Start reader" << std::endl;
     springtail::Timer timer;
     timer.start();
     for (int i = 0; i < block_count; i++) {
@@ -241,6 +245,7 @@ concurrent_reader(const std::filesystem::path &directory,
     timer.stop();
 
     // close the handle
+    std::cout << "Stop reader" << std::endl;
     ::close(handle);
 
     iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
