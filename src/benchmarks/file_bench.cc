@@ -201,8 +201,10 @@ concurrent_writer(const std::filesystem::path &directory,
     timer.stop();
     std::cout << "Stop writer" << std::endl;
 
-    iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
     ::close(handle);
+
+    iops = static_cast<int>(static_cast<float>(block_count * 1000) / static_cast<float>(timer.elapsed_ms().count()));
+    std::cout << fmt::format("Writer thread IOPS: {:d}", iops) << std::endl;
 }
 
 
