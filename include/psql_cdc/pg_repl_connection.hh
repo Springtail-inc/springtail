@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <memory>
 
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/exception.hh>
@@ -95,10 +96,10 @@ namespace springtail
         bool _started_streaming = false;
 
         /** replication (copy data) streaming connection */
-        LibPqConnection *_stream_connection = nullptr;
+        std::unique_ptr<LibPqConnection> _stream_connection;
 
         /** query connection; issuing a query on stream conn will stop the copy */
-        LibPqConnection *_connection = nullptr;
+        std::unique_ptr<LibPqConnection> _connection;
 
         /** streaming socket */
         int _streaming_socket;

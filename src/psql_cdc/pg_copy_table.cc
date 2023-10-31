@@ -62,14 +62,13 @@ namespace springtail
                               const std::string &password,
                               const int port)
     {
-        _connection = new LibPqConnection();
+        _connection = std::make_unique<LibPqConnection>();
         _connection->connect(hostname, _db_name, username, password, port, false);
 
         try {
             _connection->startTransaction();
         } catch (PgQueryError &e) {
-            delete _connection;
-            _connection = nullptr;
+            _connection.reset(nullptr);
             std::cerr << "Error starting transaction failed\n";
             throw e;
         }
@@ -86,9 +85,7 @@ namespace springtail
         }
 
         _connection->disconnect();
-        delete _connection;
-
-        _connection = nullptr;
+        _connection.reset(nullptr);
     }
 
 

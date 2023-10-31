@@ -69,10 +69,10 @@ namespace springtail
      */
     void PgReplConnection::connect()
     {
-        if (_connection != nullptr) {
+        if (_connection.get() != nullptr) {
             throw PgAlreadyConnectedError();
         }
-        _connection = new LibPqConnection();
+        _connection = std::make_unique<LibPqConnection>();
         _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
     }
 
@@ -86,9 +86,8 @@ namespace springtail
         endStreaming();
 
         // free the libpq standard connection if open
-        if (_connection != nullptr) {
-            delete _connection;
-            _connection = nullptr;
+        if (_connection.get() != nullptr) {
+            _connection.reset(nullptr);
         }
     }
 
@@ -107,7 +106,7 @@ namespace springtail
             throw PgStreamingError();
         }
 
-        _stream_connection = new LibPqConnection();
+        _stream_connection = std::make_unique<LibPqConnection>();
         _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
         _streaming_socket = _stream_connection->socket();
 
@@ -156,8 +155,7 @@ namespace springtail
         readMsgHeader();
         if (_msg_type != MSG_COPY_BOTH) {
             std::cerr << "Error could not start WAL streaming: (msg type=" << _msg_type << ")\n";
-            delete _stream_connection;
-            _stream_connection = nullptr;
+            _stream_connection.reset(nullptr);
             throw PgQueryError();
         }
 
@@ -190,8 +188,7 @@ namespace springtail
         // send copy end message
         if (_stream_connection->put_copy_end(nullptr) <= 0 || _stream_connection->flush()) {
             std::cerr << "Error could not send end-of-streaming message to primary" << std::endl;
-            delete _stream_connection;
-            _stream_connection = nullptr;
+            _stream_connection.reset(nullptr);
             return;
         }
 
@@ -204,8 +201,7 @@ namespace springtail
 
         // just close connection; cleans up result and other state
         // no need to go through too much trouble...
-        delete _stream_connection;
-        _stream_connection = nullptr;
+        _stream_connection.reset(nullptr);
     }
 
 
