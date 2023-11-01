@@ -197,6 +197,7 @@ concurrent_writer(const std::filesystem::path &directory,
         if (count < 0) {
             std::cerr << "ERROR: writing to file" << std::endl;
         }
+        ::fsync(handle);
     }
     timer.stop();
     std::cout << "Stop writer" << std::endl;
