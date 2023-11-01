@@ -146,13 +146,13 @@ namespace springtail
 
     /** postgres command uses time as defined since 01/01/2000 00:00:00
         this is the number of msec from 1970 to 2000 */
-    static const int64_t MSEC_SINCE_Y2K = 946684800L;
+    static const int64_t MSEC_SINCE_Y2K = 946684800000L;
 
     /**
      * @brief Get number milliseconds since 01/01/2000 00:00
      * @return number of milliseconds
      */
-    static inline int64_t getPgTimeInMillis()
+    static inline int64_t get_pgtime_in_millis()
     {
         struct timeval t;
         gettimeofday(&t, nullptr);

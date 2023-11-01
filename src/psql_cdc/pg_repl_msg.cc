@@ -3,6 +3,7 @@
 #include <variant>
 
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include <psql_cdc/exception.hh>
 #include <psql_cdc/pg_repl_msg.hh>
@@ -16,11 +17,11 @@ namespace springtail
     /**
      * @brief Initialize message to empty/invalid message
      */
-    void PgReplMsg::setBuffer(const char *buffer, int length) noexcept
+    void PgReplMsg::set_buffer(const char *buffer, int length) noexcept
     {
         _buffer = buffer;
         _buffer_length = length;
-        initMsg();
+        init_msg();
     }
 
 
@@ -29,7 +30,7 @@ namespace springtail
      *
      * @return true if more data exists, false otherwise
      */
-    bool PgReplMsg::hasNextMsg() noexcept
+    bool PgReplMsg::has_next_msg() noexcept
     {
         return (_buffer_length > 0);
     }
@@ -42,77 +43,77 @@ namespace springtail
      * @throws PgUnexpectedDataError
      * @throws PgUnknownMessageError
      */
-    const PgReplMsgDecoded &PgReplMsg::decodeNextMsg()
+    const PgReplMsgDecoded &PgReplMsg::decode_next_msg()
     {
         // first byte is opcode
         char msg_type = _buffer[0];
         int pos = 0;
 
         // initialize internal decoded message structure
-        initMsg();
+        init_msg();
 
         switch(msg_type) {
 
             // V1 Protocol
             case MSG_BEGIN: // begin
-                pos = decodeBegin();
+                pos = decode_begin();
                 break;
 
             case MSG_COMMIT: // commit
-                pos = decodeCommit();
+                pos = decode_commit();
                 break;
 
             case MSG_RELATION: // relation
-                pos = decodeRelation();
+                pos = decode_relation();
                 break;
 
             case MSG_INSERT: // insert
-                pos = decodeInsert();
+                pos = decode_insert();
                 break;
 
             case MSG_UPDATE: // update
-                pos = decodeUpdate();
+                pos = decode_update();
                 break;
 
             case MSG_DELETE: // delete
-                pos = decodeDelete();
+                pos = decode_delete();
                 break;
 
             case MSG_TRUNCATE: // truncate
-                pos = decodeTruncate();
+                pos = decode_truncate();
                 break;
 
             case MSG_ORIGIN: // origin
-                pos = decodeOrigin();
+                pos = decode_origin();
                 break;
 
             case MSG_MESSAGE: // message
-                pos = decodeMessage();
+                pos = decode_message();
                 break;
 
             case MSG_TYPE: // type
-                pos = decodeType();
+                pos = decode_type();
                 break;
 
             case MSG_STREAM_START:
-                pos = decodeStreamStart();
+                pos = decode_stream_start();
                 break;
 
             case MSG_STREAM_STOP:
-                pos = decodeStreamStop();
+                pos = decode_stream_stop();
                 break;
 
             case MSG_STREAM_COMMIT:
-                pos = decodeStreamCommit();
+                pos = decode_stream_commit();
                 break;
 
             case MSG_STREAM_ABORT:
-                pos = decodeStreamAbort();
+                pos = decode_stream_abort();
                 break;
 
             default: // unknown/unhandled
                 std::cerr << "Unknown opcode to decode: " << msg_type << std::endl;
-                setBuffer(nullptr, 0);
+                set_buffer(nullptr, 0);
                 throw PgUnknownMessageError();
         }
 
@@ -121,7 +122,7 @@ namespace springtail
             std::cerr << "Buffer overrun in decode: consumed="
                       << pos << ", bytes available=" << _buffer_length << std::endl;
 
-            setBuffer(nullptr, 0);
+            set_buffer(nullptr, 0);
             /* Note: an error here will really require closing and re-opening the
              * replication stream to try and re-read the data */
 
@@ -143,10 +144,10 @@ namespace springtail
      * @param str_out output string (set to input_buffer on success, null on error)
      * @return length of string, -1 on error
      */
-    int PgReplMsg::decodeString(const char *buffer, int length, const char **str_out)
+    int PgReplMsg::decode_string(const char *buffer, int length, const char **str_out)
     {
         if (length < 0) {
-            std::cerr << "DecodeString: message has been consumed\n";
+            std::cerr << "decode_string: message has been consumed\n";
             throw PgMessageTooSmallError();
         }
 
@@ -156,20 +157,20 @@ namespace springtail
         if (len == length) {
             // probably not a valid string, as strings need to be null terminated
             // and strlen doesn't include the null char in the length
-            null_offset = len;
+            null_offset = len - 1;
         } else {
-            null_offset = len + 1;
+            null_offset = len;
         }
 
         // sanity check
         if (buffer[null_offset] != '\0') {
             *str_out = nullptr;
-            std::cerr << "DecodeString: error decoding string\n";
+            std::cerr << "decode_string: error decoding string\n";
             throw PgUnexpectedDataError();
         }
 
         *str_out = buffer;
-        return null_offset;
+        return null_offset + 1;
     }
 
 
@@ -178,7 +179,7 @@ namespace springtail
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeTuple(const char *buffer, int length, MsgTupleData &tuple)
+    int PgReplMsg::decode_tuple(const char *buffer, int length, MsgTupleData &tuple)
     {
         /*
             TupleData
@@ -193,7 +194,7 @@ namespace springtail
                 Byten The value of the column, in text format. (A future release might support additional formats.) n is the above length.
          */
         if (length < 0) {
-            std::cerr << "DecodeTuple: message has been consumed\n";
+            std::cerr << "decode_tuple: message has been consumed\n";
             throw PgMessageTooSmallError();
         }
 
@@ -206,7 +207,7 @@ namespace springtail
 
         for (int i = 0; i < tuple.num_columns; i++) {
             if (pos >= length) {
-                std::cerr << "DecodeTuple: error, consumed too much data\n";
+                std::cerr << "decode_tuple: error, consumed too much data\n";
                 throw PgUnexpectedDataError();
             }
 
@@ -232,11 +233,142 @@ namespace springtail
 
 
     /**
+     * @brief Decode columns found in create/alter table messages
+     *
+     * @param column_json JSON array of column schema data
+     * @param columns Output vector containing struct MsgSchemaColumn
+     */
+    void PgReplMsg::decode_schema_columns(nlohmann::json &column_json,
+                                          std::vector<MsgSchemaColumn> &columns)
+    {
+        // iterate through json array
+        for (auto &el: column_json.items()) {
+            MsgSchemaColumn column;
+            nlohmann::json json = el.value();
+
+            json["name"].get_to(column.column_name);
+            json["type"].get_to(column.udt_type);
+            json["is_nullable"].get_to(column.is_nullable);
+            json["is_pkey"].get_to(column.is_pkey);
+            json["position"].get_to(column.position);
+
+            if (!json["default"].is_null()) {
+                column.default_value = json["default"].get<std::string>();
+            }
+
+            columns.push_back(column);
+        }
+    }
+
+
+    /**
+     * @brief Decode create table message.  Stored as JSON in message data.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
+    bool PgReplMsg::decode_create_table(MsgMessage &msg)
+    {
+        MsgTable table_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(msg.data, msg.data_len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            std::cout << "Create/alter table msg not for table object, for: "
+                      << object_type << std::endl;
+            return false;
+        }
+
+        table_msg.xid = msg.xid; // only valid in streaming mode
+        table_msg.lsn = msg.lsn;
+        json["schema"].get_to(table_msg.schema);
+        json["oid"].get_to(table_msg.oid);
+
+        // identity in form: schema.table; parse out table
+        std::string identity;
+        json["identity"].get_to(identity);
+        auto const pos = identity.find_last_of('.');
+        table_msg.table = identity.substr(pos + 1);
+
+        decode_schema_columns(json["columns"], table_msg.columns);
+
+        _decoded_msg.msg_type = PgReplMsgType::CREATE_TABLE;
+        _decoded_msg.msg.emplace<MsgTable>(table_msg);
+
+        return true;
+    }
+
+
+    /**
+     * @brief Decode alter table message, it follows same format
+     *        as create table message, but we store the message type
+     *        differently so we can recoginize it as such.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
+    bool PgReplMsg::decode_alter_table(MsgMessage &msg)
+    {
+        // same data as in create table, call that to do the decode and
+        // then just switch the type so we know it is an alter table
+        if (!decode_create_table(msg)) {
+            return false;
+        }
+
+        _decoded_msg.msg_type = PgReplMsgType::ALTER_TABLE;
+
+        return true;
+    }
+
+
+    /**
+     * @brief Decode drop table message.
+     *
+     * @param msg Message containing JSON data
+     * @return true if successfully handled
+     */
+    bool PgReplMsg::decode_drop_table(MsgMessage &msg)
+    {
+        MsgDropTable drop_table_msg;
+        std::string data_str(msg.data, msg.data_len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table; if so we skip decoding
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            std::cout << "Drop table not for table object, for: " << object_type << std::endl;
+            return false;
+        }
+
+        drop_table_msg.xid = msg.xid; // only valid in streaming mode
+        drop_table_msg.lsn = msg.lsn;
+
+        json["oid"].get_to(drop_table_msg.oid);
+        json["schema"].get_to(drop_table_msg.schema);
+        json["name"].get_to(drop_table_msg.table);
+
+        _decoded_msg.msg_type = PgReplMsgType::DROP_TABLE;
+        _decoded_msg.msg.emplace<MsgDropTable>(drop_table_msg);
+
+        return true;
+    }
+
+
+    /**
      * @brief decode Message
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeMessage()
+    int PgReplMsg::decode_message()
     {
         /*
             Byte1('M') Identifies the message as a logical decoding message.
@@ -253,9 +385,11 @@ namespace springtail
 
         MsgMessage message;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             message.xid = recvint32(&_buffer[pos]);  // only version 2
             pos += 4;
+        } else {
+            message.xid = 0;
         }
 
         message.flags = (int8_t)_buffer[pos];
@@ -264,8 +398,7 @@ namespace springtail
         message.lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &message.prefix_str);
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &message.prefix_str);
 
         message.data_len = recvint32(&_buffer[pos]);
         pos += 4;
@@ -273,14 +406,25 @@ namespace springtail
         message.data = &_buffer[pos];
         pos += message.data_len;
 
-        _decoded_msg.msg_type = PgReplMsgType::MESSAGE;
-        _decoded_msg.msg.emplace<MsgMessage>(message);
+        bool message_handled = false;
+        if (strcmp(message.prefix_str, MSG_PREFIX_CREATE_TABLE) == 0) {
+            message_handled = decode_create_table(message);
+        } else if (strcmp(message.prefix_str, MSG_PREFIX_ALTER_TABLE) == 0) {
+            message_handled = decode_alter_table(message);
+        } else if (strcmp(message.prefix_str, MSG_PREFIX_DROP_TABLE) == 0) {
+            message_handled = decode_drop_table(message);
+        }
+
+        if (!message_handled) {
+            _decoded_msg.msg_type = PgReplMsgType::MESSAGE;
+            _decoded_msg.msg.emplace<MsgMessage>(message);
+        }
 
         return pos;
     }
 
 
-    int PgReplMsg::decodeOrigin()
+    int PgReplMsg::decode_origin()
     {
         /*
             Byte1('O') Identifies the message as an origin message.
@@ -296,11 +440,7 @@ namespace springtail
         origin.commit_lsn = recvint64(&_buffer[pos]);
         pos += 8;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &origin.name_str);
-        if (str_len == -1) {
-            return -1;
-        }
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &origin.name_str);
 
         _decoded_msg.msg_type = PgReplMsgType::ORIGIN;
         _decoded_msg.msg.emplace<MsgOrigin>(origin);
@@ -309,7 +449,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeBegin()
+    int PgReplMsg::decode_begin()
     {
         /*
             Byte1('B') Identifies the message as a begin message.
@@ -337,7 +477,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeCommit()
+    int PgReplMsg::decode_commit()
     {
         /*
             Byte1('C') Identifies the message as a commit message.
@@ -368,7 +508,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeRelation()
+    int PgReplMsg::decode_relation()
     {
         /*
             Byte1('R')  Identifies the message as a relation message.
@@ -394,7 +534,7 @@ namespace springtail
 
         MsgRelation relation;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             relation.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -402,11 +542,9 @@ namespace springtail
         relation.rel_id = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.namespace_str);
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &relation.namespace_str);
 
-        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &relation.rel_name_str);
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &relation.rel_name_str);
 
         relation.identity = (int8_t)_buffer[pos];
         pos += 1;
@@ -425,9 +563,8 @@ namespace springtail
             relation.columns[i].flags = *((int8_t *)&_buffer[pos]); // 0 no flags; 1 key
             pos += 1;
 
-            str_len = decodeString(&_buffer[pos], _buffer_length - pos,
-                                   &relation.columns[i].column_name);
-            pos += str_len;
+            pos += decode_string(&_buffer[pos], _buffer_length - pos,
+                                &relation.columns[i].column_name);
 
             relation.columns[i].oid = recvint32(&_buffer[pos]);
             pos += 4;
@@ -443,7 +580,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeInsert()
+    int PgReplMsg::decode_insert()
     {
         /*
             Byte1('I')  Identifies the message as an insert message.
@@ -456,7 +593,7 @@ namespace springtail
 
         MsgInsert insert;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             insert.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -474,7 +611,7 @@ namespace springtail
             pos += 1;
         }
 
-        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, insert.new_tuple);
+        pos += decode_tuple(&_buffer[pos], _buffer_length - pos, insert.new_tuple);
 
         _decoded_msg.msg_type = PgReplMsgType::INSERT;
         _decoded_msg.msg.emplace<MsgInsert>(insert);
@@ -483,7 +620,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeUpdate()
+    int PgReplMsg::decode_update()
     {
         /*
             Byte1('U')      Identifies the message as an update message.
@@ -511,7 +648,7 @@ namespace springtail
 
         MsgUpdate update;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             update.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -527,7 +664,7 @@ namespace springtail
             update.old_type = '\0';
         }
 
-        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, update.old_tuple);
+        pos += decode_tuple(&_buffer[pos], _buffer_length - pos, update.old_tuple);
 
         update.new_type = _buffer[pos]; // should be 'N'
         if (update.new_type == 'N') {
@@ -538,7 +675,7 @@ namespace springtail
             update.new_type = '\0';
         }
 
-        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, update.new_tuple);
+        pos += decode_tuple(&_buffer[pos], _buffer_length - pos, update.new_tuple);
 
         _decoded_msg.msg_type = PgReplMsgType::UPDATE;
         _decoded_msg.msg.emplace<MsgUpdate>(update);
@@ -547,7 +684,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeDelete()
+    int PgReplMsg::decode_delete()
     {
         /*
             Byte1('D')      Identifies the message as a delete message.
@@ -570,7 +707,7 @@ namespace springtail
 
         MsgDelete delete_msg;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             delete_msg.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -586,7 +723,7 @@ namespace springtail
             delete_msg.type = '\0';
         }
 
-        pos += decodeTuple(&_buffer[pos], _buffer_length - pos, delete_msg.tuple);
+        pos += decode_tuple(&_buffer[pos], _buffer_length - pos, delete_msg.tuple);
 
         _decoded_msg.msg_type = PgReplMsgType::DELETE;
         _decoded_msg.msg.emplace<MsgDelete>(delete_msg);
@@ -595,7 +732,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeTruncate()
+    int PgReplMsg::decode_truncate()
     {
         /*
             Byte1('T')      Identifies the message as a truncate message.
@@ -610,7 +747,7 @@ namespace springtail
 
         MsgTruncate truncate;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             truncate.xid = recvint32(&_buffer[pos]);     // only present in v2
             pos += 4;
         }
@@ -639,7 +776,7 @@ namespace springtail
     }
 
 
-    int PgReplMsg::decodeType()
+    int PgReplMsg::decode_type()
     {
         /*
             Byte1('Y') Identifies the message as a type message.
@@ -654,7 +791,7 @@ namespace springtail
 
         MsgType type;
 
-        if (_proto_version > 1) {
+        if (_streaming) {
             type.xid = recvint32(&_buffer[pos]); // only version 2+
             pos += 4;
         }
@@ -662,11 +799,9 @@ namespace springtail
         type.oid = recvint32(&_buffer[pos]);
         pos += 4;
 
-        int str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.namespace_str);
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &type.namespace_str);
 
-        str_len = decodeString(&_buffer[pos], _buffer_length - pos, &type.data_type_str);
-        pos += str_len;
+        pos += decode_string(&_buffer[pos], _buffer_length - pos, &type.data_type_str);
 
         _decoded_msg.msg_type = PgReplMsgType::TYPE;
         _decoded_msg.msg.emplace<MsgType>(type);
@@ -680,7 +815,7 @@ namespace springtail
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamStart()
+    int PgReplMsg::decode_stream_start()
     {
         /*
             Byte1('S')  Identifies the message as a stream start message.
@@ -701,6 +836,8 @@ namespace springtail
         _decoded_msg.msg_type = PgReplMsgType::STREAM_START;
         _decoded_msg.msg.emplace<MsgStreamStart>(stream_start);
 
+        _streaming = true;
+
         return pos;
     }
 
@@ -710,7 +847,7 @@ namespace springtail
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamStop()
+    int PgReplMsg::decode_stream_stop()
     {
         /*
             Byte1('E')  Identifies the message as a stream stop message.
@@ -723,6 +860,8 @@ namespace springtail
         _decoded_msg.msg_type = PgReplMsgType::STREAM_STOP;
         _decoded_msg.msg.emplace<MsgStreamStop>(stream_stop);
 
+        _streaming = false;
+
         return pos;
     }
 
@@ -732,7 +871,7 @@ namespace springtail
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamCommit()
+    int PgReplMsg::decode_stream_commit()
     {
         /*
             Byte1('c')  Identifies the message as a stream commit message.
@@ -775,7 +914,7 @@ namespace springtail
      *
      * @return number of bytes consumed
      */
-    int PgReplMsg::decodeStreamAbort()
+    int PgReplMsg::decode_stream_abort()
     {
         /*
             Byte1('A')  Identifies the message as a stream abort message.
@@ -811,8 +950,8 @@ namespace springtail
     }
 
 
-    void PgReplMsg::dumpTuple(const MsgTupleData &tuple,
-                              std::stringstream &ss) noexcept
+    void PgReplMsg::dump_tuple(const MsgTupleData &tuple,
+                               std::stringstream &ss) noexcept
     {
         for (int i = 0; i < tuple.num_columns; i++) {
             ss << "  - type=" << tuple.tuple_data[i].type << std::endl;
@@ -826,7 +965,7 @@ namespace springtail
      * @param lsn LSN to convert
      * @return string of LSN in format: "XXX/XXX"
      */
-    std::string PgReplMsg::lsnToStr(const LSN_t lsn) noexcept
+    std::string PgReplMsg::lsn_to_str(const LSN_t lsn) noexcept
     {
         uint32_t lsn_higher = static_cast<uint32_t>(lsn>>32);
         uint32_t lsn_lower = static_cast<uint32_t>(lsn);
@@ -840,7 +979,7 @@ namespace springtail
      * @param lsn_str string of LSN in format XXX/XXX
      * @return LSN_t
      */
-    LSN_t PgReplMsg::strToLSN(const char *lsn_str) noexcept
+    LSN_t PgReplMsg::str_to_LSN(const char *lsn_str) noexcept
     {
         char *end_ptr = nullptr;
 
@@ -868,7 +1007,7 @@ namespace springtail
      * @param msg refernece to message to convert
      * @return readable string of msg
      */
-    std::string PgReplMsg::dumpMsg(const PgReplMsgDecoded &msg)
+    std::string PgReplMsg::dump_msg(const PgReplMsgDecoded &msg)
     {
         std::stringstream ss;
 
@@ -878,7 +1017,7 @@ namespace springtail
                 ss << "\nBEGIN" << std::endl;
                 ss << "  xid=" << begin.xid << std::endl;
                 ss << "  LSN=" << begin.xact_lsn << " ("
-                   << lsnToStr(begin.xact_lsn) << ")\n";
+                   << lsn_to_str(begin.xact_lsn) << ")\n";
                 break;
             }
 
@@ -886,15 +1025,18 @@ namespace springtail
                 MsgCommit commit = std::get<MsgCommit>(msg.msg);
                 ss << "\nCOMMIT" << std::endl;
                 ss << "  commit LSN=" << commit.commit_lsn
-                   << " (" << lsnToStr(commit.commit_lsn) << ")\n";
+                   << " (" << lsn_to_str(commit.commit_lsn) << ")\n";
                 ss << "  xact LSN=" << commit.xact_lsn
-                   << " (" << lsnToStr(commit.xact_lsn) << ")\n";
+                   << " (" << lsn_to_str(commit.xact_lsn) << ")\n";
                 break;
             }
 
             case RELATION: {
                 MsgRelation relation = std::get<MsgRelation>(msg.msg);
                 ss << "\nRELATION" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << relation.xid << std::endl;
+                }
                 ss << "  rel_id=" << relation.rel_id << std::endl;
                 ss << "  namespace=" << relation.namespace_str << std::endl;
                 ss << "  rel_name=" << relation.rel_name_str << std::endl;
@@ -911,36 +1053,48 @@ namespace springtail
 
             case INSERT: {
                 MsgInsert insert = std::get<MsgInsert>(msg.msg);
-                ss << "\nINSERT" << std::endl;
+                ss << "\nINSERT" << " (" << msg.proto_version << ")" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << insert.xid << std::endl;
+                }
                 ss << "  rel_id=" << insert.rel_id << std::endl;
                 ss << "  New tuples" << std::endl;
-                dumpTuple(insert.new_tuple, ss);
+                dump_tuple(insert.new_tuple, ss);
                 break;
             }
 
             case DELETE: {
                 MsgDelete delete_msg = std::get<MsgDelete>(msg.msg);
                 ss << "\nDELETE";
+                if (_streaming) {
+                    ss << "  xid=" << delete_msg.xid << std::endl;
+                }
                 ss << "  rel_id=" << delete_msg.rel_id << std::endl;
                 ss << "  Tuples\n";
-                dumpTuple(delete_msg.tuple, ss);
+                dump_tuple(delete_msg.tuple, ss);
                 break;
             }
 
             case UPDATE: {
                 MsgUpdate update = std::get<MsgUpdate>(msg.msg);
                 ss << "\nUPDATE";
+                if (_streaming) {
+                    ss << "  xid=" << update.xid << std::endl;
+                }
                 ss << "  rel_id=" << update.rel_id << std::endl;
                 ss << "  Old tuples" << std::endl;
-                dumpTuple(update.old_tuple, ss);
+                dump_tuple(update.old_tuple, ss);
                 ss << "  New tuples" << std::endl;
-                dumpTuple(update.new_tuple, ss);
+                dump_tuple(update.new_tuple, ss);
                 break;
             }
 
             case TRUNCATE: {
                 MsgTruncate truncate = std::get<MsgTruncate>(msg.msg);
                 ss << "\nTRUNCATE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << truncate.xid << std::endl;
+                }
                 for (int32_t rel_id: truncate.rel_ids) {
                     ss << "  rel_id=" << rel_id << std::endl;
                 }
@@ -951,7 +1105,7 @@ namespace springtail
                 MsgOrigin origin = std::get<MsgOrigin>(msg.msg);
                 ss << "\nORIGIN" << std::endl;
                 ss << "  commit LSN=" << origin.commit_lsn
-                   << " (" << lsnToStr(origin.commit_lsn) << ")\n";
+                   << " (" << lsn_to_str(origin.commit_lsn) << ")\n";
                 ss << "  name=" << origin.name_str << std::endl;
                 break;
             }
@@ -959,17 +1113,23 @@ namespace springtail
             case MESSAGE: {
                 MsgMessage message = std::get<MsgMessage>(msg.msg);
                 ss << "\nMESSAGE" << std::endl;
-                ss << "  xid=" << message.xid << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << message.xid << std::endl;
+                }
                 ss << "  LSN=" << message.lsn
-                   << " (" << lsnToStr(message.lsn) << ")\n";
+                   << " (" << lsn_to_str(message.lsn) << ")\n";
                 ss << "  prefix=" << message.prefix_str << std::endl;
+                std::string data_str(message.data, message.data_len);
+                ss << "  message=" << data_str << std::endl;
                 break;
             }
 
             case TYPE: {
                 MsgType type = std::get<MsgType>(msg.msg);
                 ss << "\nTYPE" << std::endl;
-                ss << "  xid=" << type.xid << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << type.xid << std::endl;
+                }
                 ss << "  oid=" << type.oid << std::endl;
                 ss << "  namespace=" << type.namespace_str << std::endl;
                 ss << "  data type=" << type.data_type_str << std::endl;
@@ -994,9 +1154,9 @@ namespace springtail
                 ss << "\nSTREAM COMMIT" << std::endl;
                 ss << "  xid=" << commit.xid << std::endl;
                 ss << "  commit LSN=" << commit.commit_lsn
-                   << " (" << lsnToStr(commit.commit_lsn) << ")\n";
+                   << " (" << lsn_to_str(commit.commit_lsn) << ")\n";
                 ss << "  xact LSN=" << commit.xact_lsn
-                   << " (" << lsnToStr(commit.xact_lsn) << ")\n";
+                   << " (" << lsn_to_str(commit.xact_lsn) << ")\n";
                 break;
             }
 
@@ -1005,6 +1165,66 @@ namespace springtail
                 ss << "\nSTREAM ABORT" << std::endl;
                 ss << "  xid=" << abort.xid << std::endl;
                 ss << "  sub_xid=" << abort.sub_xid << std::endl;
+                break;
+            }
+
+            case CREATE_TABLE: {
+                MsgTable table = std::get<MsgTable>(msg.msg);
+                ss << "\nCREATE TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << table.xid << std::endl;
+                }
+                ss << "  oid=" << table.oid << std::endl;
+                ss << "  LSN=" << table.lsn << std::endl;
+                ss << "  schema=" << table.schema << std::endl;
+                ss << "  table=" << table.table << std::endl;
+                ss << "  columns=" << table.columns.size() << std::endl;
+
+                for (MsgSchemaColumn column: table.columns) {
+                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
+                    ss << "  - is_nullable=" << column.is_nullable << std::endl;
+                    ss << "  - is_pkey=" << column.is_pkey << std::endl;
+                    ss << "  - position=" << column.position << std::endl;
+                }
+
+                break;
+            }
+
+            case ALTER_TABLE: {
+                MsgTable table = std::get<MsgTable>(msg.msg);
+                ss << "\nALTER TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << table.xid << std::endl;
+                }
+                ss << "  oid=" << table.oid << std::endl;
+                ss << "  LSN=" << table.lsn << std::endl;
+                ss << "  schema=" << table.schema << std::endl;
+                ss << "  table=" << table.table << std::endl;
+                ss << "  columns=" << table.columns.size() << std::endl;
+
+                for (MsgSchemaColumn column: table.columns) {
+                    ss << "  - name=" << column.column_name << std::endl;
+                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
+                    ss << "  - is_nullable=" << column.is_nullable << std::endl;
+                    ss << "  - position=" << column.position << std::endl;
+                }
+
+                break;
+            }
+
+            case DROP_TABLE: {
+                MsgDropTable drop_table = std::get<MsgDropTable>(msg.msg);
+                ss << "\nDROP TABLE" << std::endl;
+                if (_streaming) {
+                    ss << "  xid=" << drop_table.xid << std::endl;
+                }
+                ss << "  oid=" << drop_table.oid << std::endl;
+                ss << "  LSN=" << drop_table.lsn << std::endl;
+                ss << "  schema=" << drop_table.schema << std::endl;
+                ss << "  table=" << drop_table.table << std::endl;
                 break;
             }
 

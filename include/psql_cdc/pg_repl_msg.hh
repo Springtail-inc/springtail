@@ -1,6 +1,8 @@
 #pragma once
 
+#include <optional>
 #include <psql_cdc/pg_types.hh>
+#include <nlohmann/json.hpp>
 
 namespace springtail
 {
@@ -45,21 +47,21 @@ namespace springtail
     };
 
     struct MsgTruncate {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t num_rels;
         int8_t options; // 1 for cascade; 2 for restart identity
         std::vector<int32_t> rel_ids;
     };
 
     struct MsgType {
-        int32_t xid;   // proto vers 2+ only
-        int32_t oid;
+        int32_t xid;   // proto vers 2+ only if streaming
+        uint32_t oid;
         const char *namespace_str;
         const char *data_type_str;
     };
 
     struct MsgMessage {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int8_t flags;
         LSN_t lsn;
         const char *prefix_str;    // null terminated string
@@ -68,21 +70,21 @@ namespace springtail
     };
 
     struct MsgDelete {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
         MsgTupleData tuple;
     };
 
     struct MsgInsert {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char new_type;
         MsgTupleData new_tuple;
     };
 
     struct MsgUpdate {
-        int32_t xid;   // proto vers 2+ only
+        int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char old_type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
         MsgTupleData old_tuple;
@@ -93,12 +95,12 @@ namespace springtail
     struct MsgRelColumn {
         int8_t flags;  // 0 or 1 - key
         const char *column_name;
-        int32_t oid;   // oid from pg_types table
+        uint32_t oid;   // oid from pg_types table
         int32_t type_modifier; // pg_attribute.atttypmod type specific data; default -1
     };
 
     struct MsgRelation {
-        int32_t xid;      // proto vers 2+ only
+        int32_t xid;      // proto vers 2+ only if streaming
         int32_t rel_id;
         const char *namespace_str;
         const char *rel_name_str;
@@ -131,13 +133,41 @@ namespace springtail
         int64_t abort_ts;   // proto vers 4+
     };
 
+    struct MsgSchemaColumn {
+        std::string column_name;
+        std::string udt_type;
+        std::optional<std::string> default_value;
+        int position;        // position is maintained if column is renamed
+        bool is_nullable;
+        bool is_pkey;        // is primary key
+    };
+
+    struct MsgTable { // used by both create table and alter table
+        uint32_t oid;
+        LSN_t lsn;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string table;
+        std::vector<MsgSchemaColumn> columns;
+    };
+
+    struct MsgDropTable {
+        uint32_t oid;
+        LSN_t lsn;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string table;
+    };
+
 
     /** Message types */
     enum PgReplMsgType {
         INVALID, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
         ORIGIN, MESSAGE, TYPE,
         // version 2
-        STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT
+        STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT,
+        // decoded messages
+        CREATE_TABLE, ALTER_TABLE, DROP_TABLE
     };
 
     /**
@@ -162,7 +192,9 @@ namespace springtail
             MsgStreamStart,
             MsgStreamStop,
             MsgStreamCommit,
-            MsgStreamAbort
+            MsgStreamAbort,
+            MsgTable,
+            MsgDropTable
         > msg;
         PgReplMsgType msg_type;    // type defining union member
         int proto_version;         // which protocol version
@@ -192,8 +224,17 @@ namespace springtail
         static inline constexpr char MSG_STREAM_COMMIT = 'c';
         static inline constexpr char MSG_STREAM_ABORT  = 'A';
 
+
+        // Message prefixes
+        static inline constexpr char MSG_PREFIX_CREATE_TABLE[] = "springtail CREATE TABLE";
+        static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail ALTER TABLE";
+        static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail DROP TABLE";
+
         /** Protocol version */
         int _proto_version;
+
+        /** In streaming mode, set true after Stream Start, set false after Stream Stop */
+        bool _streaming = false;
 
         /** Internal buffer to decode messages out of, set by setBuffer() */
         const char *_buffer = nullptr;
@@ -205,34 +246,40 @@ namespace springtail
         /**
          * @brief Initialize message to empty/invalid message
          */
-        inline void initMsg() {
+        inline void init_msg() {
             _decoded_msg.msg_type = PgReplMsgType::INVALID;
             _decoded_msg.proto_version = _proto_version;
         }
 
         // v1 messages
-        int decodeBegin();
-        int decodeCommit();
-        int decodeRelation();
-        int decodeInsert();
-        int decodeUpdate();
-        int decodeDelete();
-        int decodeTruncate();
-        int decodeOrigin();
-        int decodeMessage();
-        int decodeType();
+        int decode_begin();
+        int decode_commit();
+        int decode_relation();
+        int decode_insert();
+        int decode_update();
+        int decode_delete();
+        int decode_truncate();
+        int decode_origin();
+        int decode_message();
+        int decode_type();
 
         // v2 messages
-        int decodeStreamStart();
-        int decodeStreamStop();
-        int decodeStreamCommit();
-        int decodeStreamAbort();
+        int decode_stream_start();
+        int decode_stream_stop();
+        int decode_stream_commit();
+        int decode_stream_abort();
+
+        // decoded messages
+        bool decode_create_table(MsgMessage &message);
+        bool decode_alter_table(MsgMessage &message);
+        bool decode_drop_table(MsgMessage &message);
+        void decode_schema_columns(nlohmann::json &json, std::vector<MsgSchemaColumn> &columns);
 
         // helpers
-        static int decodeTuple(const char *buffer, int length, MsgTupleData &tuple);
-        static int decodeString(const char *buffer, int length, const char** str_out);
+        static int decode_tuple(const char *buffer, int length, MsgTupleData &tuple);
+        static int decode_string(const char *buffer, int length, const char** str_out);
 
-        static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
+        static void dump_tuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
 
     public:
         /**
@@ -248,14 +295,14 @@ namespace springtail
          * @param buffer pointer to buffer containing undecoded msg data
          * @param length length of buffer
          */
-        void setBuffer(const char *buffer, int length) noexcept;
+        void set_buffer(const char *buffer, int length) noexcept;
 
         /**
          * @brief Is there additional data that can be decoded
          *        within internal buffer
          * @return true if additional data exists; false otherwise
          */
-        bool hasNextMsg() noexcept;
+        bool has_next_msg() noexcept;
 
         /**
          * @brief Retrieve next message from internal buffer
@@ -264,7 +311,7 @@ namespace springtail
          * @throws PgUnexpectedDataError
          * @throws PgUnknownMessageError
          */
-        const PgReplMsgDecoded &decodeNextMsg();
+        const PgReplMsgDecoded &decode_next_msg();
 
         /**
          * @brief convert a message to a printable string
@@ -272,7 +319,7 @@ namespace springtail
          * @param msg refernece to message to convert
          * @return readable string of msg
          */
-        static std::string dumpMsg(const PgReplMsgDecoded &msg);
+        std::string dump_msg(const PgReplMsgDecoded &msg);
 
         /**
          * @brief Convert LSN to string of format XXX/XXX
@@ -280,7 +327,7 @@ namespace springtail
          * @param lsn LSN to convert
          * @return string of LSN in format: "XXX/XXX"
          */
-        static std::string lsnToStr(LSN_t lsn) noexcept;
+        static std::string lsn_to_str(LSN_t lsn) noexcept;
 
         /**
          * @brief Convert LSN in string format XXX/XXX to LSN_t (uint64_t)
@@ -288,6 +335,6 @@ namespace springtail
          * @param lsn_str string of LSN in format XXX/XXX
          * @return LSN_t
          */
-        static LSN_t strToLSN(const char *lsn_str) noexcept;
+        static LSN_t str_to_LSN(const char *lsn_str) noexcept;
     };
 }

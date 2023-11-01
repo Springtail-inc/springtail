@@ -19,6 +19,12 @@ namespace springtail {
         }
     };
 
+    class PgAlreadyConnectedError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "Already connected";
+        }
+    };
+
     class PgIOError : public PgConnectionError {
         const char *what() const noexcept {
             return "An IO error occurred";
@@ -49,6 +55,12 @@ namespace springtail {
         }
     };
 
+    class PgNoResultError : public PgConnectionError {
+        const char *what() const noexcept {
+            return "No query result found";
+        }
+    };
+
 
     class PgMessageError : public Error {
     public:
@@ -74,6 +86,12 @@ namespace springtail {
     class PgUnknownMessageError : public PgMessageError {
         const char *what() const noexcept {
             return "Unknown message type";
+        }
+    };
+
+    class PgDataOutOfRangeError: public PgMessageError {
+        const char *what() const noexcept {
+            return "Data out of range";
         }
     };
 

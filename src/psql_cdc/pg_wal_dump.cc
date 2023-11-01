@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
         dump_buffer = true;
     }
 
-    if (!vm.count("password")) {
+    if (!vm.count("password") || password.empty()) {
         std::cerr << "No password set\n";
         std::cerr << desc;
         return -1;
@@ -70,16 +70,18 @@ int main(int argc, char* argv[])
     std::cout << "Connecting to postgres server: " << host << std::endl;
 
     // create slot if need be
-    create_slot = !pg_conn.checkSlotExists();
+    create_slot = !pg_conn.check_slot_exists();
 
     if (create_slot) {
         std::cout << "Creating replication slot: " << slot_name << std::endl;
-        pg_conn.createReplicationSlot(false,  // export
-                                      false); // temporary
+        pg_conn.create_replication_slot(false,  // export
+                                        false); // temporary
     }
 
     // start steaming
-    pg_conn.startStreaming(springtail::INVALID_LSN);
+    pg_conn.start_streaming(springtail::INVALID_LSN);
+
+    int proto_version = pg_conn.get_protocol_version();
 
     // open output file
     std::fstream out_fh;
@@ -93,10 +95,14 @@ int main(int argc, char* argv[])
     std::cout << "Connection and streaming have started.  Dumping data.\n";
     springtail::PgCopyData data;
 
-    springtail::PgReplMsg msg(1); // init repl message w/proto vers 1
+    springtail::PgReplMsg msg(proto_version); // init repl message w/proto vers
+
+    char int_buf[4];
+    springtail::sendint32(proto_version, int_buf);
+    out_fh.write(int_buf, 4);
 
     while (true) {
-        pg_conn.readData(data);
+        pg_conn.read_data(data);
 
         std::cout << "Recevied data: " << data.length << "; msg length=" << data.msg_length
                   << "; msg offset=" << data.msg_offset << std::endl;
@@ -106,20 +112,21 @@ int main(int argc, char* argv[])
             continue;
         }
 
-        // write out length
-        char len_buf[4];
-        springtail::sendint32(data.length, len_buf);
+        // write out length if start of message
+        if (data.msg_offset == 0) {
+            springtail::sendint32(data.msg_length, int_buf);
+            out_fh.write(int_buf, 4);
+        }
 
-        out_fh.write(len_buf, 4);
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
 
-        if (dump_buffer) {
+        if (dump_buffer && data.msg_offset == 0) {
             // iterate through the messages
-            msg.setBuffer(data.buffer, data.length);
-            while (msg.hasNextMsg()) {
-                const springtail::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
-                std::string s = msg.dumpMsg(decoded_msg);
+            msg.set_buffer(data.buffer, data.length);
+            while (msg.has_next_msg()) {
+                const springtail::PgReplMsgDecoded &decoded_msg = msg.decode_next_msg();
+                std::string s = msg.dump_msg(decoded_msg);
                 std::cout << s;
             }
         }

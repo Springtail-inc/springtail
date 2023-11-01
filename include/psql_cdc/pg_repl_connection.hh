@@ -1,10 +1,11 @@
 #pragma once
 
 #include <string>
-#include <libpq-fe.h>
+#include <memory>
 
 #include <psql_cdc/pg_types.hh>
 #include <psql_cdc/exception.hh>
+#include <psql_cdc/libpq_connection.hh>
 
 namespace springtail
 {
@@ -87,18 +88,21 @@ namespace springtail
         std::string _export_name;
 
         /** remote server version */
-        int _server_version;
+        int _server_version = -1;
 
         /** remote pgoutput protocol version; only support 1, 2 for now */
-        int _proto_version;
+        int _proto_version = -1;
 
         bool _started_streaming = false;
 
         /** replication (copy data) streaming connection */
-        PGconn *_stream_connection = nullptr;
+        std::unique_ptr<LibPqConnection> _stream_connection;
 
         /** query connection; issuing a query on stream conn will stop the copy */
-        PGconn *_connection = nullptr;
+        std::unique_ptr<LibPqConnection> _connection;
+
+        /** streaming socket */
+        int _streaming_socket;
 
         /** buffer allocated for copy data */
         char _copy_buffer[COPY_BUFFER_SIZE];
@@ -125,43 +129,39 @@ namespace springtail
         /** last time data was flushed */
         int64_t _last_flushed_time;
 
-        void pgExec(PGconn *connection, std::string cmd);
+        void send_standby_status_msg();
 
-        void sendStandbyStatusMsg();
-
-        void fastForwardStream();
-
-        PGconn *internalConnect();
+        void fast_forward_stream();
 
         // return true if data, false otherwise
-        bool checkDataStream(int timeout_secs);
+        bool check_data_stream(int timeout_secs);
 
-        int processXlogHeader(const char *buffer, int length);
+        int process_xlog_header(const char *buffer, int length);
 
-        int processKeepAlive(const char *buffer, int length);
+        int process_keep_alive(const char *buffer, int length);
 
-        void readMsgHeader();
+        void read_msg_header();
 
-        void readMsgData(bool async);
+        void read_msg_data(bool async);
 
-        void readCopyHeader();
+        void read_copy_header();
 
-        void readCopyData();
+        void read_copy_data();
 
-        void sendCopyData(const char *buffer, int length, char cmd);
+        void send_copy_data(const char *buffer, int length, char cmd);
 
-        int recvCopyData(char *buffer, int length, bool async);
+        int recv_copy_data(char *buffer, int length, bool async);
 
-        bool handleTimeout();
+        bool handle_timeout();
 
-        void skipMessage();
+        void skip_message();
 
-        void dumpErrorResponse();
+        void dump_error_response();
 
-        static int encodeStandbyStatusMsg(LSN_t last_received_lsn,
-                                          LSN_t last_flushed_lsn,
-                                          int64_t send_time,
-                                          char replybuf[34]);
+        static int encode_standby_status_msg(LSN_t last_received_lsn,
+                                             LSN_t last_flushed_lsn,
+                                             int64_t send_time,
+                                             char replybuf[34]);
 
     public:
 
@@ -206,20 +206,20 @@ namespace springtail
          * @throws PgStreamingError if connection is already streaming
          * @throws PgQueryError if replication command failed
          */
-        void startStreaming(LSN_t LSN);
+        void start_streaming(LSN_t LSN);
 
         /**
          * @brief Stop streaming; close streaming connection
          * @throws PqQueryError if end streaming command failed
          */
-        void endStreaming();
+        void end_streaming();
 
         /**
          * @brief Check if the slot exists on the server
          * @return true if slot exists; false otherwise
          * @throws PgQueryError on error
          */
-        bool checkSlotExists();
+        bool check_slot_exists();
 
         /**
          * @brief Check if the slot exists on the server
@@ -230,8 +230,8 @@ namespace springtail
          * @return true if slot exists, false otherwise
          * @throws PgQueryError on error
          */
-        bool checkSlotExists(LSN_t &restart_lsn_out,
-                             LSN_t &flushed_lsn_out);
+        bool check_slot_exists(LSN_t &restart_lsn_out,
+                               LSN_t &flushed_lsn_out);
 
 
         /**
@@ -242,15 +242,15 @@ namespace springtail
          * @throws PgStreamingError if streaming already started
          * @throws PgQueryError on query error
          */
-        void createReplicationSlot(bool export_snapshot,
-                                   bool temporary);
+        void create_replication_slot(bool export_snapshot,
+                                     bool temporary);
 
         /**
          * @brief Drop the replication slot from the server
          * @throws PgQueryError on error
          * @throws PgStreamingError if already streaming
          */
-        void dropReplicationSlot();
+        void drop_replication_slot();
 
         /**
          * @brief Read WAL data from server; blocks
@@ -260,13 +260,25 @@ namespace springtail
          * @throws PgNotConnectedError if connection has closed
          * @throws PgNotStreamingError if connection is not streaming
          */
-        void readData(PgCopyData &dataOut);
+        void read_data(PgCopyData &dataOut);
 
         /**
          * @brief Sets the flushed LSN for ack to server (not required)
          *
          * @param lsn LSN to set as latest flushed
          */
-        void setLastFlushedLSN(LSN_t lsn);
+        void set_last_flushed_LSN(LSN_t lsn) noexcept;
+
+        /**
+         * @brief Get server version
+         * @return get remote server version; -1 if not set
+         */
+        int get_server_version() noexcept;
+
+        /**
+         * @brief Get pgoutput protocol version
+         * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
+         */
+        int get_protocol_version() noexcept;
     };
 }
