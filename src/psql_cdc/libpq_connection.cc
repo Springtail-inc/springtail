@@ -22,7 +22,7 @@ namespace springtail {
     /**
      * @brief Start a transaction
      */
-    void LibPqConnection::startTransaction()
+    void LibPqConnection::start_transaction()
     {
         exec(BEGIN_QUERY);
         clear();
@@ -33,7 +33,7 @@ namespace springtail {
     /**
      * @brief End a transaction
      */
-    void LibPqConnection::endTransaction()
+    void LibPqConnection::end_transaction()
     {
         exec(END_QUERY);
         clear();
@@ -199,7 +199,7 @@ namespace springtail {
      * @throws std::invalid_argument
      * @throws std::out_of_range
      */
-    int32_t LibPqConnection::getInt32(int row, int col)
+    int32_t LibPqConnection::get_int32(int row, int col)
     {
         char *value = PQgetvalue(_result, row, col);
         if (value == nullptr) {
@@ -217,7 +217,7 @@ namespace springtail {
      * @param col col index
      * @return string value for row/col; null is mapped to empty string
      */
-    std::string LibPqConnection::getString(int row, int col)
+    std::string LibPqConnection::get_string(int row, int col)
     {
         char *value = PQgetvalue(_result, row, col);
         if (value == nullptr) {
@@ -234,7 +234,7 @@ namespace springtail {
      * @param col col index
      * @return string value for row/col; optional is false if string is null
      */
-    std::optional<std::string> LibPqConnection::getStringOptional(int row, int col)
+    std::optional<std::string> LibPqConnection::get_string_optional(int row, int col)
     {
         char *value = PQgetvalue(_result, row, col);
         if (value == nullptr) {
@@ -258,7 +258,7 @@ namespace springtail {
      * @param col col index
      * @return boolean value for row/col; null is mapped to false
      */
-    bool LibPqConnection::getBoolean(int row, int col)
+    bool LibPqConnection::get_boolean(int row, int col)
     {
         char *value = PQgetvalue(_result, row, col);
         if (value == nullptr) {
@@ -279,7 +279,7 @@ namespace springtail {
      * @param str string to escape
      * @return safe ptr to the string, access with .get()
      */
-    std::unique_ptr<char[]> LibPqConnection::escapeString(const std::string &str)
+    std::unique_ptr<char[]> LibPqConnection::escape_string(const std::string &str)
     {
         std::unique_ptr<char[]> str_ptr(new char[str.length() * 2 + 1]);
 
@@ -316,10 +316,10 @@ namespace springtail {
 
         // create key value list for: host, port, dbname, user, password, options
         // escape options
-        std::unique_ptr<char[]> host = escapeString(db_host);
-        std::unique_ptr<char[]> name = escapeString(db_name);
-        std::unique_ptr<char[]> user = escapeString(db_user);
-        std::unique_ptr<char[]> pass = escapeString(db_pass);
+        std::unique_ptr<char[]> host = escape_string(db_host);
+        std::unique_ptr<char[]> name = escape_string(db_name);
+        std::unique_ptr<char[]> user = escape_string(db_user);
+        std::unique_ptr<char[]> pass = escape_string(db_pass);
 
         // setting client encoding to UTF8
         // setting database=replication to put connection in replication mode
@@ -369,7 +369,7 @@ namespace springtail {
         if (_in_transaction) {
             try {
                 // end transation if in one
-                endTransaction();
+                end_transaction();
             } catch (PgQueryError &e) {}
         }
 

@@ -9,6 +9,7 @@
 namespace springtail
 {
 
+    /** Stores the column schema for the table being copied */
     struct PgColumn {
         std::string name;
         std::string type;
@@ -18,6 +19,7 @@ namespace springtail
         bool is_pkey;
     };
 
+    /** Stores the table schema for table being copied */
     struct PgTableSchema {
         std::string db_name;
         std::string schema_name;
@@ -42,7 +44,7 @@ namespace springtail
         /** header of copy data signature */
         static inline constexpr char COPY_SIGNATURE[] = "PGCOPY\n\377\r\n\0";
 
-        std::unique_ptr<LibPqConnection> _connection;
+        LibPqConnection _connection;
         std::string _db_name;
         std::string _schema_name;
         std::string _table_name;
@@ -56,34 +58,34 @@ namespace springtail
 
         // helper functions
         // write to file
-        void writeInt32(const int32_t val);
-        void writeString(const std::string &str);
-        void writeString(const char *str, unsigned len);
-        void writeString(const std::optional<std::string> str);
-        void writeBool(const bool val);
+        void write_int32(const int32_t val);
+        void write_string(const std::string &str);
+        void write_string(const char *str, unsigned len);
+        void write_string(const std::optional<std::string> str);
+        void write_bool(const bool val);
 
         // read from file
-        int64_t readInt64();
-        int32_t readInt32();
-        int16_t readInt16();
-        char readChar();
-        bool readBool();
-        std::optional<std::string> readStringOptional();
-        std::string readString();
-        std::string readString(int length);
+        int64_t read_int64();
+        int32_t read_int32();
+        int16_t read_int16();
+        char read_char();
+        bool read_bool();
+        std::optional<std::string> read_string_optional();
+        std::string read_string();
+        std::string read_string(int length);
 
         // retrieve schema, write out schema and copy data
-        void getSchema();
-        void getXactXids();
-        void getTableOid();
-        void getPkeys();
-        void writeSchema();
-        void copyData();
+        void get_schema();
+        void get_xact_xids();
+        void get_table_oid();
+        void get_pkeys();
+        void write_schema();
+        void copy_data();
 
         // read in schema, copy header, copy data
-        void verifyCopyHeader();
-        void readSchema();
-        void readCopyData();
+        void verify_copy_header();
+        void read_schema();
+        void read_copy_data();
 
     public:
 
@@ -114,8 +116,8 @@ namespace springtail
 
         ~PgCopyTable()
         {
-            // release underlying connection
-            _connection.reset(nullptr);
+            // release underlying connection if connected
+            _connection.disconnect();
         }
 
         /**
@@ -143,13 +145,13 @@ namespace springtail
          *
          * @param filename name of file to write data to
          */
-        void copyToFile();
+        void copy_to_file();
 
         /**
          * @brief Decode data written to file by copyToFile()
          *
          * @param filename name of file to read data from
          */
-        void decodeFile();
+        void decode_file();
     };
 }

@@ -106,12 +106,12 @@ namespace springtail {
         /**
          * @brief Start a transaction
          */
-        void startTransaction();
+        void start_transaction();
 
         /**
          * @brief End a transaction
          */
-        void endTransaction();
+        void end_transaction();
 
         /**
          * @brief Execute libpq query helper; sets result internally
@@ -134,7 +134,7 @@ namespace springtail {
          * @param col col index
          * @return int32 value for row/col
          */
-        int32_t getInt32(int row, int col);
+        int32_t get_int32(int row, int col);
 
         /**
          * @brief Retreive a string column value from a query result; maintains NULL value
@@ -143,7 +143,7 @@ namespace springtail {
          * @param col col index
          * @return string value for row/col; optional is false if string is null
          */
-        std::optional<std::string> getStringOptional(int row, int col);
+        std::optional<std::string> get_string_optional(int row, int col);
 
 
         /**
@@ -153,7 +153,7 @@ namespace springtail {
          * @param col col index
          * @return string value for row/col; null is mapped to empty string
          */
-        std::string getString(int row, int col);
+        std::string get_string(int row, int col);
 
         /**
          * @brief Get boolean value from query result
@@ -162,7 +162,7 @@ namespace springtail {
          * @param col col index
          * @return boolean value for row/col; null is mapped to false
          */
-        bool getBoolean(int row, int col);
+        bool get_boolean(int row, int col);
 
         /**
          * @brief escape a string
@@ -170,7 +170,7 @@ namespace springtail {
          * @param str string to escape
          * @return safe ptr to the string, access with .get()
          */
-        std::unique_ptr<char[]> escapeString(const std::string &str);
+        std::unique_ptr<char[]> escape_string(const std::string &str);
 
         /**
          * @brief Connection libpq helper; generate connection info string

@@ -79,10 +79,10 @@ int main(int argc, char* argv[])
         }
 
         // iterate through the messages
-        msg.setBuffer((const char *)buffer, len);
-        while (msg.hasNextMsg()) {
-            const springtail::PgReplMsgDecoded &decoded_msg = msg.decodeNextMsg();
-            std::string s = msg.dumpMsg(decoded_msg);
+        msg.set_buffer((const char *)buffer, len);
+        while (msg.has_next_msg()) {
+            const springtail::PgReplMsgDecoded &decoded_msg = msg.decode_next_msg();
+            std::string s = msg.dump_msg(decoded_msg);
             std::cout << s;
         }
 

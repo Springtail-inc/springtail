@@ -137,6 +137,7 @@ namespace springtail
         std::string column_name;
         std::string udt_type;
         std::optional<std::string> default_value;
+        int position;        // position is maintained if column is renamed
         bool is_nullable;
         bool is_pkey;        // is primary key
     };
@@ -245,40 +246,40 @@ namespace springtail
         /**
          * @brief Initialize message to empty/invalid message
          */
-        inline void initMsg() {
+        inline void init_msg() {
             _decoded_msg.msg_type = PgReplMsgType::INVALID;
             _decoded_msg.proto_version = _proto_version;
         }
 
         // v1 messages
-        int decodeBegin();
-        int decodeCommit();
-        int decodeRelation();
-        int decodeInsert();
-        int decodeUpdate();
-        int decodeDelete();
-        int decodeTruncate();
-        int decodeOrigin();
-        int decodeMessage();
-        int decodeType();
+        int decode_begin();
+        int decode_commit();
+        int decode_relation();
+        int decode_insert();
+        int decode_update();
+        int decode_delete();
+        int decode_truncate();
+        int decode_origin();
+        int decode_message();
+        int decode_type();
 
         // v2 messages
-        int decodeStreamStart();
-        int decodeStreamStop();
-        int decodeStreamCommit();
-        int decodeStreamAbort();
+        int decode_stream_start();
+        int decode_stream_stop();
+        int decode_stream_commit();
+        int decode_stream_abort();
 
         // decoded messages
-        bool decodeCreateTable(MsgMessage &message);
-        bool decodeAlterTable(MsgMessage &message);
-        bool decodeDropTable(MsgMessage &message);
-        void decodeSchemaColumns(nlohmann::json &json, std::vector<MsgSchemaColumn> &columns);
+        bool decode_create_table(MsgMessage &message);
+        bool decode_alter_table(MsgMessage &message);
+        bool decode_drop_table(MsgMessage &message);
+        void decode_schema_columns(nlohmann::json &json, std::vector<MsgSchemaColumn> &columns);
 
         // helpers
-        static int decodeTuple(const char *buffer, int length, MsgTupleData &tuple);
-        static int decodeString(const char *buffer, int length, const char** str_out);
+        static int decode_tuple(const char *buffer, int length, MsgTupleData &tuple);
+        static int decode_string(const char *buffer, int length, const char** str_out);
 
-        static void dumpTuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
+        static void dump_tuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
 
     public:
         /**
@@ -294,14 +295,14 @@ namespace springtail
          * @param buffer pointer to buffer containing undecoded msg data
          * @param length length of buffer
          */
-        void setBuffer(const char *buffer, int length) noexcept;
+        void set_buffer(const char *buffer, int length) noexcept;
 
         /**
          * @brief Is there additional data that can be decoded
          *        within internal buffer
          * @return true if additional data exists; false otherwise
          */
-        bool hasNextMsg() noexcept;
+        bool has_next_msg() noexcept;
 
         /**
          * @brief Retrieve next message from internal buffer
@@ -310,7 +311,7 @@ namespace springtail
          * @throws PgUnexpectedDataError
          * @throws PgUnknownMessageError
          */
-        const PgReplMsgDecoded &decodeNextMsg();
+        const PgReplMsgDecoded &decode_next_msg();
 
         /**
          * @brief convert a message to a printable string
@@ -318,7 +319,7 @@ namespace springtail
          * @param msg refernece to message to convert
          * @return readable string of msg
          */
-        std::string dumpMsg(const PgReplMsgDecoded &msg);
+        std::string dump_msg(const PgReplMsgDecoded &msg);
 
         /**
          * @brief Convert LSN to string of format XXX/XXX
@@ -326,7 +327,7 @@ namespace springtail
          * @param lsn LSN to convert
          * @return string of LSN in format: "XXX/XXX"
          */
-        static std::string lsnToStr(LSN_t lsn) noexcept;
+        static std::string lsn_to_str(LSN_t lsn) noexcept;
 
         /**
          * @brief Convert LSN in string format XXX/XXX to LSN_t (uint64_t)
@@ -334,6 +335,6 @@ namespace springtail
          * @param lsn_str string of LSN in format XXX/XXX
          * @return LSN_t
          */
-        static LSN_t strToLSN(const char *lsn_str) noexcept;
+        static LSN_t str_to_LSN(const char *lsn_str) noexcept;
     };
 }

@@ -152,7 +152,7 @@ namespace springtail
      * @brief Get number milliseconds since 01/01/2000 00:00
      * @return number of milliseconds
      */
-    static inline int64_t getPgTimeInMillis()
+    static inline int64_t get_pgtime_in_millis()
     {
         struct timeval t;
         gettimeofday(&t, nullptr);
