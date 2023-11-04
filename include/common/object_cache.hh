@@ -1,0 +1,160 @@
+#pragma once
+
+#include <unordered_map>
+#include <functional>
+#include <mutex>
+#include <boost/container_hash/hash.hpp>
+
+namespace springtail {
+    /** The template interface for a cache of object pointers that ensures size limit based on provided object sizes. */
+    template <class IdType, class EntryType>
+    class ObjectCache
+    {
+    public:
+        virtual ~ObjectCache() { }
+
+        virtual void insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size) = 0;
+
+        virtual std::shared_ptr<EntryType> get(const IdType &id) = 0;
+    };
+
+
+    /** A least-recently-used policy object cache. */
+    template <class IdType, class EntryType, class Hash=boost::hash<IdType>>
+    class LruObjectCache : public ObjectCache<IdType, EntryType>
+    {
+    private:
+        typedef std::tuple<IdType, std::shared_ptr<EntryType>, uint64_t> CacheEntry;
+
+        std::unordered_map<IdType, typename std::list<CacheEntry>::iterator, Hash> _lookup; ///< A map that holds the entries.
+        std::list<CacheEntry> _cache; ///< An ordered list of objects for priority removal
+
+        uint64_t _cache_size; ///< The current size of the cache.
+        uint64_t _cache_max; ///< The maximum allowed size of the cache.
+
+        std::function<bool, const EntryType &> _callback; ///< callback function, optional
+
+        std::mutex _mutex; ///< mutex for locking
+
+
+        /**
+         * @brief Helper to remove entry
+         * @param entry Entry to remove
+         */
+        inline void
+        _remove_entry(CacheEntry &entry)
+        {
+            // remove from hashmap
+            _lookup.erase(std::get<0>(entry));
+
+            // update the size of the cache
+            _cache_size -= std::get<2>(entry);
+        }
+
+
+    protected:
+
+        /**
+         * @brief Evict least used item (back of _cache list); if callback is set, check callback first
+         * to make sure it is evictable (callback returns true)
+         */
+        void
+        _evict_next() {
+            // remove the item from the cache
+            CacheEntry &entry;
+
+            if (!_callback) {
+                // no callback function, easy
+                entry = _cache.back();
+                _cache.pop_back();
+                _remove_entry(entry);
+                return;
+            }
+
+            // with callback, we need to check if entry is evictable
+            // reverse iterate through until we find an evictable entry
+            // this is O(n) which isn't great since the lock is held
+            std::list<CacheEntry>::iterator current;
+
+            for (current = --_cache.end(); curent != _cache.begin(); current--) {
+                entry = *current;
+                if (_callback(std::get<0>(entry)) == true) {
+                    // callback returned true so we can evict item
+                    _cache.erase(current);
+                    _remove_entry(entry);
+                    return;
+                }
+            }
+        }
+
+    public:
+        /**
+         * @brief Construct LRU cache
+         * @param max max size of cache, size is based on entry size at insert
+         * @param callback optional callback for eviction, return true/false if eviction ok
+         */
+        LruObjectCache(uint64_t max, std::function<bool, const EntryType &> callback)
+            : _cache_max(max), _callback(callback)
+        { }
+
+        ~LruObjectCache()
+        {
+            // lock everything
+            std::scoped_lock<std::mutex> lock(_mutex);
+
+            // evict all of the entries before destruction
+            while (!_cache.empty()) {
+                _evict_next();
+            }
+        }
+
+        /**
+         * @brief Insert entry
+         *
+         * @param id     key for entry
+         * @param entry  value for entry
+         * @param size   optional size for each entry; a size=1 will use # entries for eviction
+         */
+        void
+        insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size=1)
+        {
+            // lock everything
+            std::scoped_lock<std::mutex> lock(_mutex);
+
+            // if we need more space, evict entries until we have enough space
+            while (_cache_size + size > _cache_max) {
+                _evict_next();
+            }
+
+            // push onto the front of the LRU queue
+            _cache.push_front({id, entry, size});
+            _lookup.insert_or_assign(id, _cache.begin());
+            _cache_size += size;
+        }
+
+        /**
+         * @brief Get entry from cache based on key ID
+         *
+         * @param id key to lookup entry
+         * @return entry (value)
+         */
+        std::shared_ptr<EntryType>
+        get(const IdType &id)
+        {
+            // lock everything
+            std::scoped_lock<std::mutex> lock(_mutex);
+
+            // find the entry if it exists
+            auto &&i = _lookup.find(id);
+            if (i == _lookup.end()) {
+                return nullptr;
+            }
+
+            // move the entry to the end of the LRU cache
+            _cache.splice(_cache.end(), _cache, i->second);
+
+            // return the data
+            return std::get<1>(*(i->second));
+        }
+    };
+}
