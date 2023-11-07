@@ -1,89 +1,45 @@
 #pragma once
 
 #include <string>
-#include <memory>
 #include <vector>
 #include <functional>
 #include <filesystem>
-#include <cstdio>
 
-#include <storage/compressors.hh>
+#include <storage/io_request.hh>
 
 namespace springtail {
 
-    class IOMgr;
-
     class IOHandle {
     private:
-        std::unique_ptr<Compressor> compressor;
-        std::unique_ptr<Decompressor> decompressor;
-
         std::filesystem::path _path;
-        std::FILE *_file;
         int _mode;
-        bool _is_dirty;
+        bool _is_compressed;
 
     public:
-        enum IOStatus {SUCCESS, ERR_NOENT, ERR_BADFD, ERR_ACCESS, ERR_ARGS, ERR_DECODE, ERR_FATAL};
+        IOHandle(std::filesystem::path path, int mode, bool is_compressed) :
+            _path(path), _mode(mode), _is_compressed(is_compressed) {};
 
-        IOHandle(std::FILE *file, std::filesystem::path path, int mode);
-
-        IOHandle(std::filesystem::path path, int mode);
-
-        // delete operator closes the underlying file handle
-        ~IOHandle() {
-            fclose(_file);
-        };
+        ~IOHandle() {};
 
         int get_mode() { return _mode; }
 
         std::string get_path() { return _path.string(); }
 
-        // synchronous operations; blocks calling thread
-        std::shared_ptr<std::vector<char>> read(uint64_t pos);
-
-        uint64_t append(const char *buffer, int length);
-
-        uint64_t append(const std::vector<char> &data);
-
-        uint64_t append(std::vector<char> data[], uint8_t count);
-
-        void sync();
-
         // async operations; calls callback
+        void read(uint64_t pos, io_read_callback_fn callback);
 
-        // helper types for callbacks; to improve readability
-        typedef std::function<void(const std::vector<char> data, const IOStatus &status)> read_callback_fn;
-        typedef std::function<void(uint64_t offset, const IOHandle::IOStatus &status)> write_callback_fn;
-        typedef std::function<void(const IOStatus &status)> status_callback_fn;
+        void append(const char *buffer, int length, io_write_callback_fn callback);
 
-        void read(uint64_t pos, read_callback_fn callback);
+        void append(const std::vector<char> &data, io_write_callback_fn callback);
 
-        void append(const char *buffer, int length, write_callback_fn callback);
+        void append(const std::vector<char> data[], uint8_t count, io_write_callback_fn callback);
 
-        void append(const std::vector<char> &data, write_callback_fn callback);
+        void append(const std::vector<std::vector<char>> data, io_write_callback_fn callback);
 
-        void append(const std::vector<char> data[], uint8_t count, write_callback_fn callback);
+        void write(uint64_t offset, const std::vector<char> &data, io_write_callback_fn callback);
 
-        void sync(status_callback_fn callback);
-    };
+        void sync(io_status_callback_fn callback);
 
-
-    class IOMgr {
-    public:
-        static const int IO_MODE_READ = 1;
-        static const int IO_MODE_APPEND = 2;
-        static const int IO_MODE_WRITE = 4;
-
-        IOMgr() {};
-        ~IOMgr(){};
-
-        std::shared_ptr<IOHandle> open(std::string &path, int mode);
-        std::shared_ptr<IOHandle> open(std::filesystem::path &path, int mode);
-
-        std::shared_ptr<IOHandle> create(std::filesystem::path &path, int mode);
-        std::shared_ptr<IOHandle> create(std::string &path, int mode);
-
-        void remove(std::string &path);
+        // no close, delete FH
     };
 }

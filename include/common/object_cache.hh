@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <functional>
+#include <list>
 #include <mutex>
 #include <boost/container_hash/hash.hpp>
 
@@ -32,7 +33,7 @@ namespace springtail {
         uint64_t _cache_size; ///< The current size of the cache.
         uint64_t _cache_max; ///< The maximum allowed size of the cache.
 
-        std::function<bool, const EntryType &> _callback; ///< callback function, optional
+        std::function<bool(std::shared_ptr<EntryType>)> _callback; ///< callback function, optional
 
         std::mutex _mutex; ///< mutex for locking
 
@@ -53,7 +54,6 @@ namespace springtail {
 
 
     protected:
-
         /**
          * @brief Evict least used item (back of _cache list); if callback is set, check callback first
          * to make sure it is evictable (callback returns true)
@@ -61,11 +61,9 @@ namespace springtail {
         void
         _evict_next() {
             // remove the item from the cache
-            CacheEntry &entry;
-
             if (!_callback) {
                 // no callback function, easy
-                entry = _cache.back();
+                CacheEntry &entry = _cache.back();
                 _cache.pop_back();
                 _remove_entry(entry);
                 return;
@@ -74,11 +72,11 @@ namespace springtail {
             // with callback, we need to check if entry is evictable
             // reverse iterate through until we find an evictable entry
             // this is O(n) which isn't great since the lock is held
-            std::list<CacheEntry>::iterator current;
+            typename std::list<CacheEntry>::iterator current;
 
-            for (current = --_cache.end(); curent != _cache.begin(); current--) {
-                entry = *current;
-                if (_callback(std::get<0>(entry)) == true) {
+            for (current = --_cache.end(); current != _cache.begin(); current--) {
+                CacheEntry &entry = *current;
+                if (_callback(std::get<1>(entry)) == true) {
                     // callback returned true so we can evict item
                     _cache.erase(current);
                     _remove_entry(entry);
@@ -93,8 +91,11 @@ namespace springtail {
          * @param max max size of cache, size is based on entry size at insert
          * @param callback optional callback for eviction, return true/false if eviction ok
          */
-        LruObjectCache(uint64_t max, std::function<bool, const EntryType &> callback)
+        LruObjectCache(uint64_t max, std::function<bool(std::shared_ptr<EntryType>)> callback)
             : _cache_max(max), _callback(callback)
+        { }
+
+        LruObjectCache(uint64_t max) : _cache_max(max)
         { }
 
         ~LruObjectCache()
