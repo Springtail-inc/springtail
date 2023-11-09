@@ -20,40 +20,17 @@
 
 namespace springtail {
 
-
-    struct IOSysFH {
-        std::filesystem::path _path;
-        std::FILE *_file;
-        bool _is_dirty;
-        bool _is_busy;
-        bool _is_readonly;
-    };
-
-    class IOFile {
-    public:
-        IOFile(const std::filesystem::path &path)
-            : _path(path), _in_use(false) {}
-
-        inline bool in_use() { return _in_use; }
-
-    private:
-        std::filesystem::path _path;
-        std::atomic<bool> _in_use;
-        std::mutex _mutex;
-        std::vector<IOSysFH> _in_use_fhs;
-        std::vector<IOSysFH> _free_fhs;
-    };
+    // forward references to avoid include loops
+    class IOFile;
+    class IOSysFH;
 
 
     class IOWorker {
     private:
-        std::unique_ptr<Compressor> _compressor;
-        std::unique_ptr<Decompressor> _decompressor;
+        std::shared_ptr<Compressor> _compressor;
+        std::shared_ptr<Decompressor> _decompressor;
 
-        void read(const IORequest &request);
-        void write(const IORequest &request);
-        void append(const IORequest &request);
-        void sync(const IORequest &request);
+        void _issue_request(const IORequest &request, std::shared_ptr<IOSysFH> fh);
 
     public:
         IOWorker()
@@ -67,18 +44,21 @@ namespace springtail {
     };
 
     class IORequestQueue {
-    public:
-        void push(const IORequest &request);
-        const IORequest &pop();
-
     private:
         std::queue<IORequest> _queue;
         std::condition_variable _cv;
         std::mutex _mutex;
+    public:
+        void push(const IORequest &request);
+        const IORequest &pop();
     };
 
 
     class IOPool {
+    private:
+        IORequestQueue _queue;
+        std::vector<std::thread> _threads;
+        std::vector<IOWorker *> _workers;
     public:
         IOPool(int threads);
         ~IOPool();
@@ -86,30 +66,23 @@ namespace springtail {
         inline void queue(const IORequest &request) {
             _queue.push(request);
         }
-
-    private:
-        IORequestQueue _queue;
-        std::vector<std::thread> _threads;
-        std::vector<IOWorker *> _workers;
     };
 
-
     /**
-     * @brief Singleton IOMgr; used to retrieve IOHandles
+     * @brief Singleton IOMgr; used to retrieve IOSysFHs
      */
     class IOMgr {
     public:
-        static const int IO_MODE_READ = 1;
-        static const int IO_MODE_APPEND = 2;
-        static const int IO_MODE_WRITE = 4;
+        enum IO_MODE { READ, APPEND, WRITE };
 
         static const int NUM_THREADS = 16; // XXX need way to set dynamically
-        static const int MAX_FILEHANDLES = 32;
+        static const int MAX_FILE_OBJECTS = 32;
+        static const int MAX_FILE_HANDLES_PER_FILE=4;
 
         static IOMgr *getInstance();
 
         // no create call, first write, after open for write, will do the create
-        std::shared_ptr<IOHandle> open(const std::filesystem::path &path, int mode, bool compressed);
+        std::shared_ptr<IOHandle> open(const std::filesystem::path &path, IO_MODE &mode, bool compressed);
 
         void remove(const std::filesystem::path &path);
 
@@ -117,9 +90,12 @@ namespace springtail {
             _thread_pool.queue(request);
         }
 
+        std::shared_ptr<IOFile> lookup(const std::filesystem::path &path,
+                                       bool compressed);
+
     protected:
         static IOMgr *_instance;
-        static std::mutex _mutex;
+        static std::mutex _instance_mutex;
 
         IOMgr(int num_threads, int max_filehandles)
             : _thread_pool(num_threads),
@@ -132,6 +108,8 @@ namespace springtail {
         IOPool _thread_pool;
 
         LruObjectCache<std::filesystem::path, IOFile> _file_cache;
+
+        std::mutex _cache_mutex;
 
         // delete copy constructor
         IOMgr(const IOMgr &)          = delete;

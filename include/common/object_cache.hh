@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <functional>
 #include <list>
-#include <mutex>
 #include <boost/container_hash/hash.hpp>
 
 namespace springtail {
@@ -34,9 +33,6 @@ namespace springtail {
         uint64_t _cache_max; ///< The maximum allowed size of the cache.
 
         std::function<bool(std::shared_ptr<EntryType>)> _callback; ///< callback function, optional
-
-        std::mutex _mutex; ///< mutex for locking
-
 
         /**
          * @brief Helper to remove entry
@@ -100,9 +96,6 @@ namespace springtail {
 
         ~LruObjectCache()
         {
-            // lock everything
-            std::scoped_lock<std::mutex> lock(_mutex);
-
             // evict all of the entries before destruction
             while (!_cache.empty()) {
                 _evict_next();
@@ -119,9 +112,6 @@ namespace springtail {
         void
         insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size=1)
         {
-            // lock everything
-            std::scoped_lock<std::mutex> lock(_mutex);
-
             // if we need more space, evict entries until we have enough space
             while (_cache_size + size > _cache_max) {
                 _evict_next();
@@ -142,9 +132,6 @@ namespace springtail {
         std::shared_ptr<EntryType>
         get(const IdType &id)
         {
-            // lock everything
-            std::scoped_lock<std::mutex> lock(_mutex);
-
             // find the entry if it exists
             auto &&i = _lookup.find(id);
             if (i == _lookup.end()) {

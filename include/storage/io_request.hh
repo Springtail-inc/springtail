@@ -12,7 +12,6 @@ namespace springtail {
     typedef std::function<void(uint64_t offset, const IOStatus &status)> io_write_callback_fn;
     typedef std::function<void(const IOStatus &status)> io_status_callback_fn;
 
-
     struct IORequestRead {
         uint64_t offset;
         io_read_callback_fn callback;
