@@ -14,7 +14,7 @@ namespace springtail {
     {
         IORequestRead req(pos, callback);
         IOMgr *mgr = IOMgr::getInstance();
-        mgr->queue_request(IORequest(req, _path, _is_compressed));
+        mgr->queue_request(std::make_shared<IORequest>(req, _path, _is_compressed));
     }
     
 
@@ -31,7 +31,7 @@ namespace springtail {
     {
         IORequestAppend req(data, callback);
         IOMgr *mgr = IOMgr::getInstance();
-        mgr->queue_request(IORequest(req, _path, _is_compressed));
+        mgr->queue_request(std::make_shared<IORequest>(req, _path, _is_compressed));
     }
 
 
@@ -48,7 +48,7 @@ namespace springtail {
     {
         IORequestAppend req(data, callback);
         IOMgr *mgr = IOMgr::getInstance();
-        mgr->queue_request(IORequest(req, _path, _is_compressed));
+        mgr->queue_request(std::make_shared<IORequest>(req, _path, _is_compressed));
     }
 
 
@@ -61,7 +61,7 @@ namespace springtail {
 
         IORequestWrite req(offset, data, callback);
         IOMgr *mgr = IOMgr::getInstance();
-        mgr->queue_request(IORequest(req, _path, _is_compressed));
+        mgr->queue_request(std::make_shared<IORequest>(req, _path, _is_compressed));
     }
     
     
@@ -70,7 +70,7 @@ namespace springtail {
     {
         IORequestSync req(callback);
         IOMgr *mgr = IOMgr::getInstance();
-        mgr->queue_request(IORequest(req, _path));
+        mgr->queue_request(std::make_shared<IORequest>(req, _path));
     }
 
 }

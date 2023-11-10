@@ -18,11 +18,11 @@
 namespace springtail {
 
     static void
-    worker_fn(IOWorker *worker, IORequestQueue &queue)
+    worker_fn(std::shared_ptr<IOWorker> worker, IORequestQueue &queue)
     {
         while (true) {
-            const IORequest request = queue.pop();
-            if (request.type == IORequest::OpType::SHUTDOWN) {
+            std::shared_ptr<IORequest> request = queue.pop();
+            if (request->type == IORequest::OpType::SHUTDOWN) {
                 return;
             }
             worker->process_request(request);
@@ -32,7 +32,7 @@ namespace springtail {
     IOPool::IOPool(int threads)
     {
         for (int i = 0; i < threads; i++) {
-            IOWorker *worker = new IOWorker();
+            std::shared_ptr<IOWorker> worker = std::make_shared<IOWorker>();
             _workers.push_back(worker);
             _threads.push_back(std::thread(worker_fn, worker, std::ref(_queue)));
         }
@@ -41,16 +41,12 @@ namespace springtail {
     IOPool::~IOPool()
     {
         for (int i = 0; i < _threads.size(); i++) {
-            IORequest req = {};
+            std::shared_ptr<IORequest> req = std::make_shared<IORequest>();
             _queue.push(req);
         }
 
         for (auto &&t : _threads) {
             t.join();
-        }
-
-        for (IOWorker *w: _workers) {
-            delete w;
         }
     }
 
@@ -154,7 +150,7 @@ namespace springtail {
 
 
     void
-    IORequestQueue::push(const IORequest &request)
+    IORequestQueue::push(std::shared_ptr<IORequest> request)
     {
         // lock queue lock
         std::scoped_lock<std::mutex> queue_lock(_mutex);
@@ -165,7 +161,7 @@ namespace springtail {
     }
 
 
-    const IORequest &
+    std::shared_ptr<IORequest>
     IORequestQueue::pop()
     {
         // lock queue lock
@@ -174,7 +170,7 @@ namespace springtail {
         _cv.wait(queue_lock, [&]{ return !_queue.empty();});
 
         // extract first element from queue and return it
-        const IORequest &val = _queue.front();
+        std::shared_ptr<IORequest> val = _queue.front();
         _queue.pop();
 
         return val;
@@ -182,18 +178,19 @@ namespace springtail {
 
 
     void
-    IOWorker::_issue_request(const IORequest &request, std::shared_ptr<IOSysFH> fh)
+    IOWorker::_issue_request(std::shared_ptr<IORequest> request,
+                             std::shared_ptr<IOSysFH> fh)
     {
         // handle request
-        switch (request.type) {
+        switch (request->type) {
             case IORequest::OpType::READ: {
-                IORequestRead req = std::get<IORequestRead>(request.args);
+                IORequestRead req = std::get<IORequestRead>(request->args);
                 fh->read(req.offset, _decompressor, req.callback);
                 break;
             }
 
             case IORequest::OpType::APPEND: {
-                IORequestAppend req = std::get<IORequestAppend>(request.args);
+                IORequestAppend req = std::get<IORequestAppend>(request->args);
                 if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
                     fh->append(std::get<std::shared_ptr<std::vector<char>>>(req.data), _compressor, req.callback);
                 } else {
@@ -203,7 +200,7 @@ namespace springtail {
             }
 
             case IORequest::OpType::WRITE: {
-                IORequestWrite req = std::get<IORequestWrite>(request.args);
+                IORequestWrite req = std::get<IORequestWrite>(request->args);
                 if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
                     fh->write(req.offset, std::get<std::shared_ptr<std::vector<char>>>(req.data), req.callback);
                 } else {
@@ -213,7 +210,7 @@ namespace springtail {
             }
 
             case IORequest::OpType::SYNC: {
-                IORequestSync req = std::get<IORequestSync>(request.args);
+                IORequestSync req = std::get<IORequestSync>(request->args);
                 fh->sync(req.callback);
                 break;
             }
@@ -225,10 +222,10 @@ namespace springtail {
 
 
     void
-    IOWorker::process_request(const IORequest &request)
+    IOWorker::process_request(std::shared_ptr<IORequest> request)
     {
         // on shutdown return immediately
-        if (IORequest::OpType::SHUTDOWN == request.type) {
+        if (IORequest::OpType::SHUTDOWN == request->type) {
             return;
         }
 
@@ -237,12 +234,13 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
-        std::shared_ptr<IOFile> io_file = mgr->lookup(request.path, request.compressed);
+        std::shared_ptr<IOFile> io_file = mgr->lookup(request->path, request->compressed);
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
-        std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::OpType::READ == request.type) ?
-                                                          IOMgr::IO_MODE::READ : IOMgr::IO_MODE::WRITE);
+        std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::OpType::READ == request->type) ?
+                                                           IOMgr::IO_MODE::READ : 
+                                                           IOMgr::IO_MODE::WRITE);
 
         try {
             _issue_request(request, fh);
@@ -255,7 +253,8 @@ namespace springtail {
 
         // release file object
         io_file->decr_in_use();
-
+        
+        return;
     }
 }
 

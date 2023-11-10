@@ -30,7 +30,8 @@ namespace springtail {
         std::shared_ptr<Compressor> _compressor;
         std::shared_ptr<Decompressor> _decompressor;
 
-        void _issue_request(const IORequest &request, std::shared_ptr<IOSysFH> fh);
+        void _issue_request(std::shared_ptr<IORequest> request, 
+                            std::shared_ptr<IOSysFH> fh);
 
     public:
         IOWorker()
@@ -40,17 +41,17 @@ namespace springtail {
 
         ~IOWorker() { }
 
-        void process_request(const IORequest &request);
+        void process_request(std::shared_ptr<IORequest> request);
     };
 
     class IORequestQueue {
     private:
-        std::queue<IORequest> _queue;
+        std::queue<std::shared_ptr<IORequest>> _queue;
         std::condition_variable _cv;
         std::mutex _mutex;
     public:
-        void push(const IORequest &request);
-        const IORequest &pop();
+        void push(std::shared_ptr<IORequest> request);
+        std::shared_ptr<IORequest> pop();
     };
 
 
@@ -58,12 +59,12 @@ namespace springtail {
     private:
         IORequestQueue _queue;
         std::vector<std::thread> _threads;
-        std::vector<IOWorker *> _workers;
+        std::vector<std::shared_ptr<IOWorker>> _workers;
     public:
         IOPool(int threads);
         ~IOPool();
 
-        inline void queue(const IORequest &request) {
+        inline void queue(std::shared_ptr<IORequest> request) {
             _queue.push(request);
         }
     };
@@ -86,7 +87,7 @@ namespace springtail {
 
         void remove(const std::filesystem::path &path);
 
-        inline void queue_request(const IORequest &request) {
+        inline void queue_request(std::shared_ptr<IORequest> request) {
             _thread_pool.queue(request);
         }
 
