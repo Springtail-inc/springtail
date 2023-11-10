@@ -21,13 +21,13 @@ namespace springtail {
     void 
     IOHandle::append(const char *buffer, int length, io_write_callback_fn callback)
     {
-        std::vector<char> data(buffer, buffer + length);
+        std::shared_ptr<std::vector<char>> data = std::make_shared<std::vector<char>>(buffer, buffer + length);
         append(data, callback);
     }
     
 
     void 
-    IOHandle::append(const std::vector<char> &data, io_write_callback_fn callback)
+    IOHandle::append(std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback)
     {
         IORequestAppend req(data, callback);
         IOMgr *mgr = IOMgr::getInstance();
@@ -36,15 +36,15 @@ namespace springtail {
 
 
     void 
-    IOHandle::append(const std::vector<char> data[], uint8_t count, io_write_callback_fn callback)
+    IOHandle::append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_write_callback_fn callback)
     {
-        std::vector<std::vector<char>> vec(data, data + count);
+        std::vector<std::shared_ptr<std::vector<char>>> vec(data, data + count);
         append(vec, callback);
     }
     
 
     void
-    IOHandle::append(const std::vector<std::vector<char>> data, io_write_callback_fn callback)
+    IOHandle::append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_write_callback_fn callback)
     {
         IORequestAppend req(data, callback);
         IOMgr *mgr = IOMgr::getInstance();
@@ -53,7 +53,7 @@ namespace springtail {
 
 
     void 
-    IOHandle::write(uint64_t offset, const std::vector<char> &data, io_write_callback_fn callback)
+    IOHandle::write(uint64_t offset, std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback)
     {
         if (_is_compressed == false) {
             throw StorageError();

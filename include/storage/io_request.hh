@@ -8,7 +8,7 @@ namespace springtail {
     enum IOStatus {SUCCESS, ERR_NOENT, ERR_BADFD, ERR_ACCESS, ERR_ARGS, ERR_DECODE, ERR_FATAL};
 
     // helper types for callbacks; to improve readability
-    typedef std::function<void(const std::vector<char> data, const IOStatus &status)> io_read_callback_fn;
+    typedef std::function<void(const std::vector<std::shared_ptr<std::vector<char>>> data, const IOStatus &status)> io_read_callback_fn;
     typedef std::function<void(uint64_t offset, const IOStatus &status)> io_write_callback_fn;
     typedef std::function<void(const IOStatus &status)> io_status_callback_fn;
 
@@ -24,44 +24,44 @@ namespace springtail {
         uint64_t offset;
 
         std::variant<
-            std::vector<char>,
-            std::vector<std::vector<char>>
+            std::shared_ptr<std::vector<char>>,
+            std::vector<std::shared_ptr<std::vector<char>>>
         > data;
 
         io_write_callback_fn callback;
 
         IORequestWrite(uint64_t boffset,
-                       const std::vector<char> &datavec,
+                       std::shared_ptr<std::vector<char>> datavec,
                        io_write_callback_fn callbackfn)
             : offset(boffset), callback(callbackfn) {
-            data.emplace<std::vector<char>>(datavec);
+            data.emplace<std::shared_ptr<std::vector<char>>>(datavec);
         }
 
         IORequestWrite(uint64_t boffset,
-                       const std::vector<std::vector<char>> &datavecs,
+                       const std::vector<std::shared_ptr<std::vector<char>>> &datavecs,
                        io_write_callback_fn callbackfn)
             : offset(boffset), callback(callbackfn) {
-            data.emplace<std::vector<std::vector<char>>>(datavecs);
+            data.emplace<std::vector<std::shared_ptr<std::vector<char>>>>(datavecs);
         }
     };
 
     struct IORequestAppend {
         std::variant<
-            std::vector<char>,
-            std::vector<std::vector<char>>
+            std::shared_ptr<std::vector<char>>,
+            std::vector<std::shared_ptr<std::vector<char>>>
         > data;
 
         io_write_callback_fn callback;
 
-        IORequestAppend(const std::vector<char> &datavec, io_write_callback_fn callbackfn)
+        IORequestAppend(std::shared_ptr<std::vector<char>> datavec, io_write_callback_fn callbackfn)
             : callback(callbackfn) {
-            data.emplace<std::vector<char>>(datavec);
+            data.emplace<std::shared_ptr<std::vector<char>>>(datavec);
         }
 
-        IORequestAppend(const std::vector<std::vector<char>> &datavecs,
+        IORequestAppend(const std::vector<std::shared_ptr<std::vector<char>>> &datavecs,
                         io_write_callback_fn callbackfn)
             : callback(callbackfn) {
-            data.emplace<std::vector<std::vector<char>>>(datavecs);
+            data.emplace<std::vector<std::shared_ptr<std::vector<char>>>>(datavecs);
         }
     };
 

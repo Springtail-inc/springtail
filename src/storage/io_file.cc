@@ -127,6 +127,7 @@ namespace springtail {
         std::unique_lock<std::mutex> lock(_mutex, std::defer_lock);
         if (!lock.try_lock()) {
             // not locked
+            assert(0); // should not happen
             return false;
         }
 
@@ -197,9 +198,9 @@ namespace springtail {
      *     Header 8 Bytes:
      *       0-2  (3B) Magic number (CXT for compressed, or UXT for uncompressed)
      *       3    (1B) Vector count (number of vectors that make up this block)
-     *       4-7  (4B) Total uncompressed size of all vectors in block
      *     Data Vector:
-     *       0-3  (4B) Size of vector (compressed size if compressed)
+     *       0-3  (4B) Size of vector uncompressed
+     *       4-8  (4B) Size of vector (compressed size if compressed)
      *       ...       Data of size mentioned above
      *
      * @param pos          offset to read from
@@ -242,31 +243,35 @@ namespace springtail {
         // vector count
         count = hdr[3];
 
-        // total uncompressed size
-        std::copy_n(&hdr[4], sizeof(uint32_t), reinterpret_cast<char *>(&size));
-
-        // output buffer
-        std::shared_ptr<std::vector<char>> data_ptr = std::make_shared<std::vector<char>>(size);
+        // output vector
+        std::vector<std::shared_ptr<std::vector<char>>> data(count);
 
         // temp buffer
         std::vector<char> compressed_data;
 
         uint32_t csize;
-        int offset = 0;
         for (int i = 0; i < count; i++) {
+            // read uncompressed size
+            std::fread(reinterpret_cast<char *>(&size), 1, sizeof(uint32_t), _file);
+
             // read vector size (compressed size if compressed)
             std::fread(reinterpret_cast<char *>(&csize), 1, sizeof(uint32_t), _file);
 
+            // output buffer
+            std::shared_ptr<std::vector<char>> data_ptr = std::make_shared<std::vector<char>>(size);
+            
             if (is_compressed) {
                 // resize temp buffer
                 compressed_data.resize(csize);
 
                 // read compressed data and decompress
                 std::fread(compressed_data.data(), 1, csize, _file);
-                offset += decompressor->decompress_raw(compressed_data, *data_ptr, offset);
+                decompressor->decompress_raw(compressed_data, data_ptr, 0);
             } else {
-                offset += std::fread(data_ptr->data() + offset, 1, csize, _file);
+                std::fread(data_ptr->data(), 1, size, _file);
             }
+
+            data.push_back(data_ptr);
         }
 
         return;
@@ -281,7 +286,7 @@ namespace springtail {
      * @param callback   callback for completion
      */
     void
-    IOSysFH::append(const std::vector<char> &data,
+    IOSysFH::append(std::shared_ptr<std::vector<char>> data,
                     std::shared_ptr<Compressor> compressor,
                     io_write_callback_fn callback)
     {
@@ -291,11 +296,11 @@ namespace springtail {
 
         //uint64_t offset = std::ftell(_file);
 
-        if (data.size() == 0) {
+        if (data->size() == 0) {
             return;
         }
 
-        uint32_t size = data.size();
+        uint32_t size = data->size();
         uint32_t csize = size;
         std::vector<char> compressed_data;
 
@@ -321,7 +326,7 @@ namespace springtail {
         if (_is_compressed) {
             std::fwrite(compressed_data.data(), 1, csize, _file);
         } else {
-            std::fwrite(data.data(), 1, csize, _file);
+            std::fwrite(data->data(), 1, csize, _file);
         }
 
         std::fflush(_file);
@@ -340,7 +345,7 @@ namespace springtail {
      * @param callback   callback for completion
      */
     void
-    IOSysFH::append(const std::vector<std::vector<char>> &data,
+    IOSysFH::append(const std::vector<std::shared_ptr<std::vector<char>>> &data,
                     std::shared_ptr<Compressor> compressor,
                     io_write_callback_fn callback)
     {
@@ -355,41 +360,40 @@ namespace springtail {
 
         // do it in two passes to avoid partial writes
         // first, compress data and compute total uncompressed size
-        uint32_t size = 0;
+        
         std::vector<char> compressed_data[data.size()];
+        for (int i = 0; i < data.size(); i++) {
+            compressor->compress_raw(data[i], compressed_data[i]);
+        }
 
         if (_is_compressed) {
             compressor->reset_stream();
         }
 
-        // compute uncompressed data size and compress data vectors
-        for (int i=0; i < data.size(); i++) {
-            size += data[i].size();
-
-            if (_is_compressed) {
-                compressor->compress_raw(data[i], compressed_data[i]);
-            }
-        }
-
         // write out data
         char hdr[8];
+
         // header and number of vectors
         std::copy_n((_is_compressed) ? HDR_MAGIC_COMPRESSED : HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
         hdr[3] = data.size();
-        // total size of uncompressed data 4B
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
-        std::fwrite(hdr, 1, 8, _file);
+        std::fwrite(hdr, 1, 4, _file);
 
         // write out compressed data
         for (int i = 0; i < data.size(); i++) {
+            // size of uncompressed data 4B            
+            uint32_t size = data[i]->size();
+            std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[0]);
+
             if (_is_compressed) {
                 uint32_t csize = compressed_data[i].size();
                 std::copy_n(reinterpret_cast<char *>(&csize), sizeof(int32_t), &hdr[4]);
+                std::fwrite(&hdr[0], 1, 8, _file);
                 std::fwrite(compressed_data[i].data(), 1, csize, _file);
             } else {
-                uint32_t csize = data[i].size();
-                std::copy_n(reinterpret_cast<char *>(&csize), sizeof(int32_t), &hdr[4]);
-                std::fwrite(data[i].data(), 1, csize, _file);
+                // uncompressed
+                std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
+                std::fwrite(&hdr[0], 1, 8, _file);                
+                std::fwrite(data[i]->data(), 1, size, _file);
             }
         }
 
@@ -410,12 +414,12 @@ namespace springtail {
      */
     void
     IOSysFH::write(uint64_t pos,
-                   const std::vector<char> &data,
+                   std::shared_ptr<std::vector<char>> data,
                    io_write_callback_fn callback)
     {
         assert(_is_compressed == false);
 
-        if (data.size() == 0) {
+        if (data->size() == 0) {
             return;
         }
 
@@ -432,12 +436,12 @@ namespace springtail {
         hdr[3] = 1;
 
         // total size of uncompressed data 4B
-        uint32_t size = data.size();
+        uint32_t size = data->size();
         std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
         std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[8]);
         std::fwrite(hdr, 1, 12, _file);
 
-        std::fwrite(data.data(), 1, size, _file);
+        std::fwrite(data->data(), 1, size, _file);
 
         std::fflush(_file);
 
@@ -456,7 +460,7 @@ namespace springtail {
      */
     void
     IOSysFH::write(uint64_t offset,
-                   const std::vector<std::vector<char>> &data,
+                   const std::vector<std::shared_ptr<std::vector<char>>> &data,
                    io_write_callback_fn callback)
     {
         assert(_is_compressed == false);
@@ -470,25 +474,20 @@ namespace springtail {
         }
 
         // write out header
-        // 3B Magic + 1B vector count + 4B total size + 4B vector size + data
-        char hdr[12];
+        // 3B Magic + 1B vector count + Per vector: 4B total size + 4B vector size + data
+        char hdr[8];
 
         // header and number of vectors; map to a single vector
         std::copy_n(HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
-        hdr[3] = 1;
-
-        // total size of uncompressed data 4B
-        uint32_t size = 0;
-        for (int i = 0; i < data.size(); i++) {
-            size += data[i].size();
-        }
-
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[8]);
-        std::fwrite(hdr, 1, 12, _file);
+        hdr[3] = data.size();
+        std::fwrite(hdr, 1, 4, _file);
 
         for (int i = 0; i < data.size(); i++) {
-            std::fwrite(data[i].data(), 1, data[i].size(), _file);
+            uint32_t size = data[i]->size();
+            std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[0]);
+            std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
+            std::fwrite(hdr, 1, 8, _file);
+            std::fwrite(data[i]->data(), 1, data[i]->size(), _file);
         }
 
         std::fflush(_file);

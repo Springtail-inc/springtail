@@ -30,13 +30,13 @@ namespace springtail {
 
         void append(const char *buffer, int length, io_write_callback_fn callback);
 
-        void append(const std::vector<char> &data, io_write_callback_fn callback);
+        void append(std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback);
 
-        void append(const std::vector<char> data[], uint8_t count, io_write_callback_fn callback);
+        void append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_write_callback_fn callback);
 
-        void append(const std::vector<std::vector<char>> data, io_write_callback_fn callback);
+        void append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_write_callback_fn callback);
 
-        void write(uint64_t offset, const std::vector<char> &data, io_write_callback_fn callback);
+        void write(uint64_t offset, std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback);
 
         void sync(io_status_callback_fn callback);
 

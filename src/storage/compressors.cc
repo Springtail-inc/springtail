@@ -19,10 +19,10 @@ namespace springtail {
     }
 
     uint32_t
-    Lz4Compressor::compress_raw(const std::vector<char> &src, std::vector<char> &dst)
+    Lz4Compressor::compress_raw(std::shared_ptr<std::vector<char>> src, std::vector<char> &dst)
     {
         // determine the max compression size
-        int target_size = LZ4_compressBound(src.size());
+        int target_size = LZ4_compressBound(src->size());
 
         dst.resize(target_size);
 
@@ -30,8 +30,8 @@ namespace springtail {
         // NOTE: be careful with this as it requires the last 64KB of data from the stream
         // to still be in memory and accessible...
         int32_t dst_size = LZ4_compress_fast_continue(_lz4_stream,
-                                                      src.data(), dst.data(),
-                                                      src.size(), target_size, 1);
+                                                      src->data(), dst.data(),
+                                                      src->size(), target_size, 1);
         if (dst_size <= 0) {
             throw ValidationError("Error compressing data");
         }
@@ -102,16 +102,16 @@ namespace springtail {
      * @return size of uncompressed data
      */
     uint32_t
-    Lz4Decompressor::decompress_raw(const std::vector<char> &src, std::vector<char> &dst, int offset)
+    Lz4Decompressor::decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset)
     {
         // decompress the block
         int size = LZ4_decompress_safe_continue(_lz4_stream, src.data(),
-                                                dst.data()+offset, src.size(),
-                                                dst.size()-offset);
+                                                dst->data()+offset, src.size(),
+                                                dst->size()-offset);
         if (size <= 0) {
             throw ValidationError("Error decompressing data");
         }
-        if (size != dst.size()) {
+        if (size != dst->size()) {
             throw ValidationError("Unexpected decompression size while decompressing data");
         }
 

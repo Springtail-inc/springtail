@@ -194,20 +194,20 @@ namespace springtail {
 
             case IORequest::OpType::APPEND: {
                 IORequestAppend req = std::get<IORequestAppend>(request.args);
-                if (std::holds_alternative<std::vector<char>>(req.data)) {
-                    fh->append(std::get<std::vector<char>>(req.data), _compressor, req.callback);
+                if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
+                    fh->append(std::get<std::shared_ptr<std::vector<char>>>(req.data), _compressor, req.callback);
                 } else {
-                    fh->append(std::get<std::vector<std::vector<char>>>(req.data), _compressor, req.callback);
+                    fh->append(std::get<std::vector<std::shared_ptr<std::vector<char>>>>(req.data), _compressor, req.callback);
                 }
                 break;
             }
 
             case IORequest::OpType::WRITE: {
                 IORequestWrite req = std::get<IORequestWrite>(request.args);
-                if (std::holds_alternative<std::vector<char>>(req.data)) {
-                    fh->write(req.offset, std::get<std::vector<char>>(req.data), req.callback);
+                if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
+                    fh->write(req.offset, std::get<std::shared_ptr<std::vector<char>>>(req.data), req.callback);
                 } else {
-                    fh->write(req.offset, std::get<std::vector<std::vector<char>>>(req.data), req.callback);
+                    fh->write(req.offset, std::get<std::vector<std::shared_ptr<std::vector<char>>>>(req.data), req.callback);
                 }
                 break;
             }
