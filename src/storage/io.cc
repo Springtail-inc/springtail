@@ -24,7 +24,7 @@ namespace springtail {
     
 
     std::future<std::shared_ptr<IOResponseAppend>>
-    IOHandle::append(const char *buffer, int length, io_write_callback_fn callback)
+    IOHandle::append(const char *buffer, int length, io_append_callback_fn callback)
     {
         std::shared_ptr<std::vector<char>> data = std::make_shared<std::vector<char>>(buffer, buffer + length);
         return append(data, callback);
@@ -32,7 +32,7 @@ namespace springtail {
     
 
     std::future<std::shared_ptr<IOResponseAppend>>
-    IOHandle::append(std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback)
+    IOHandle::append(std::shared_ptr<std::vector<char>> data, io_append_callback_fn callback)
     {
         std::shared_ptr<IORequestAppend> req = std::make_shared<IORequestAppend>(_path, _is_compressed, data, callback);
         std::future<std::shared_ptr<IOResponseAppend>> future = req->promise.get_future();
@@ -43,7 +43,7 @@ namespace springtail {
 
 
     std::future<std::shared_ptr<IOResponseAppend>>
-    IOHandle::append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_write_callback_fn callback)
+    IOHandle::append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_append_callback_fn callback)
     {
         std::vector<std::shared_ptr<std::vector<char>>> vec(data, data + count);
         return append(vec, callback);
@@ -51,7 +51,7 @@ namespace springtail {
 
 
     std::future<std::shared_ptr<IOResponseAppend>>
-    IOHandle::append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_write_callback_fn callback)
+    IOHandle::append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_append_callback_fn callback)
     {
         std::shared_ptr<IORequestAppend> req = std::make_shared<IORequestAppend>(_path, _is_compressed, data, callback);
         std::future<std::shared_ptr<IOResponseAppend>> future = req->promise.get_future();

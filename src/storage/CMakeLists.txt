@@ -7,6 +7,6 @@ add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_storage PUBLIC springtail_common PRIVATE lz4::lz4)
 
-add_executable(io_test io.cc io_pool.cc io_file.cc)
+add_executable(io_test io_test.cc)
 target_include_directories(io_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(io_test PRIVATE springtail_storage PUBLIC springtail_common)

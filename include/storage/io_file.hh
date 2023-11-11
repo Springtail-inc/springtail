@@ -29,13 +29,13 @@ namespace springtail {
         IOSysFH(const std::filesystem::path &path, const IOMgr::IO_MODE &mode, bool is_compressed);
         ~IOSysFH();
 
-        void read(uint64_t offset, std::shared_ptr<Decompressor> decompressor, io_read_callback_fn callback);
+        void read(std::shared_ptr<IORequestRead> request, std::shared_ptr<Decompressor> decompressor);
 
-        void write(uint64_t offset, const std::vector<std::shared_ptr<std::vector<char>>> &data, io_write_callback_fn callback);
+        void write(std::shared_ptr<IORequestWrite> request);
 
-        void append(const std::vector<std::shared_ptr<std::vector<char>>> &data, std::shared_ptr<Compressor> compressor, io_write_callback_fn callback);
+        void append(std::shared_ptr<IORequestAppend> request, std::shared_ptr<Compressor> compressor);
 
-        void sync(io_status_callback_fn callback);
+        void sync(std::shared_ptr<IORequestSync> request);
 
         void close();
 

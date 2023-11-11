@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdio>
 #include <cassert>
+#include <cerrno>
 
 #include <storage/io_file.hh>
 #include <storage/exception.hh>
@@ -208,48 +209,59 @@ namespace springtail {
      * @param callback     callback for completion
      */
     void
-    IOSysFH::read(uint64_t pos,
-                  std::shared_ptr<Decompressor> decompressor,
-                  io_read_callback_fn callback)
-    {
+    IOSysFH::read(std::shared_ptr<IORequestRead> request,
+                  std::shared_ptr<Decompressor> decompressor)
+    {    
         char hdr[8];
-        uint8_t count;
-        uint32_t size;
 
-        if (std::fseek(_file, pos, SEEK_SET) != 0) {
-            throw StorageError();
+        // default error response
+        std::shared_ptr<IOResponseRead> response = std::make_shared<IOResponseRead>(request->path);
+
+        if (std::fseek(_file, request->offset, SEEK_SET) != 0) {
+            request->complete(response, errno);
+            return;
         }
 
         if (std::fread(hdr, 1, 8, _file) != 8) {
-            throw StorageError();
+            request->complete(response, errno);
+            return;
         }
 
         bool is_compressed = false;
         if (hdr[0] == HDR_MAGIC_COMPRESSED[0]) {
             if (hdr[1] != HDR_MAGIC_COMPRESSED[1] || hdr[2] != HDR_MAGIC_COMPRESSED[2]) {
-                throw StorageError();
+                response->set_status(IOStatus::ERR_DECODE);
+                request->complete(response);
+                return;
             }
             is_compressed = true;
         } else if (hdr[0] == HDR_MAGIC_UNCOMPRESSED[0]) {
             if (hdr[1] != HDR_MAGIC_UNCOMPRESSED[1] || hdr[2] != HDR_MAGIC_UNCOMPRESSED[2]) {
-                throw StorageError();
+                response->set_status(IOStatus::ERR_DECODE);
+                request->complete(response);
+                return;
             }
         } else {
-            throw StorageError();
+            response->set_status(IOStatus::ERR_DECODE);
+            request->complete(response);
+            return;
         }
 
         assert(_is_compressed == is_compressed);
 
         // vector count
-        count = hdr[3];
+        uint8_t count = hdr[3];
 
         // output vector
-        std::vector<std::shared_ptr<std::vector<char>>> data(count);
+        response->data.resize(count);
 
         // temp buffer
         std::vector<char> compressed_data;
 
+        // loop through reading buffers 
+        uint32_t size;
         uint32_t csize;
+
         for (int i = 0; i < count; i++) {
             // read uncompressed size
             std::fread(reinterpret_cast<char *>(&size), 1, sizeof(uint32_t), _file);
@@ -271,8 +283,11 @@ namespace springtail {
                 std::fread(data_ptr->data(), 1, size, _file);
             }
 
-            data.push_back(data_ptr);
+            response->data.push_back(data_ptr);
         }
+
+        response->offset = std::ftell(_file);
+        request->complete(response, 0);
 
         return;
     }
@@ -286,25 +301,31 @@ namespace springtail {
      * @param callback   callback for completion
      */
     void
-    IOSysFH::append(const std::vector<std::shared_ptr<std::vector<char>>> &data,
-                    std::shared_ptr<Compressor> compressor,
-                    io_write_callback_fn callback)
+    IOSysFH::append(std::shared_ptr<IORequestAppend> request, 
+                    std::shared_ptr<Compressor> compressor) 
     {
+        // default error response
+        std::shared_ptr<IOResponseAppend> response = std::make_shared<IOResponseAppend>(request->path);
+        
         if (std::fseek(_file, 0, SEEK_END) != 0) {
-            throw StorageError();
-        }
-
-        //uint64_t offset = std::ftell(_file);
-        if (data.size() == 0) {
+            request->complete(response, errno);
             return;
         }
 
+        uint64_t offset = std::ftell(_file);
+        response->offset = offset;
+
+        if (request->data.size() == 0) {
+            request->complete(response, IOStatus::SUCCESS);
+        }
+
+        int count = request->data.size();
+
         // do it in two passes to avoid partial writes
         // first, compress data and compute total uncompressed size
-        
-        std::vector<char> compressed_data[data.size()];
-        for (int i = 0; i < data.size(); i++) {
-            compressor->compress_raw(data[i], compressed_data[i]);
+        std::vector<char> compressed_data[count];
+        for (int i = 0; i < count; i++) {
+            compressor->compress_raw(request->data[i], compressed_data[i]);
         }
 
         if (_is_compressed) {
@@ -316,13 +337,13 @@ namespace springtail {
 
         // header and number of vectors
         std::copy_n((_is_compressed) ? HDR_MAGIC_COMPRESSED : HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
-        hdr[3] = data.size();
+        hdr[3] = count;
         std::fwrite(hdr, 1, 4, _file);
 
         // write out compressed data
-        for (int i = 0; i < data.size(); i++) {
+        for (int i = 0; i < count; i++) {
             // size of uncompressed data 4B            
-            uint32_t size = data[i]->size();
+            uint32_t size = request->data[i]->size();
             std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[0]);
 
             if (_is_compressed) {
@@ -334,7 +355,7 @@ namespace springtail {
                 // uncompressed
                 std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
                 std::fwrite(&hdr[0], 1, 8, _file);                
-                std::fwrite(data[i]->data(), 1, size, _file);
+                std::fwrite(request->data[i]->data(), 1, size, _file);
             }
         }
 
@@ -343,6 +364,7 @@ namespace springtail {
 
         _is_dirty = true;
 
+        request->complete(response, IOStatus::SUCCESS);
         return;
     }
 
@@ -355,17 +377,23 @@ namespace springtail {
      * @param callback   callback for completion
      */
     void
-    IOSysFH::write(uint64_t offset,
-                   const std::vector<std::shared_ptr<std::vector<char>>> &data,
-                   io_write_callback_fn callback)
+    IOSysFH::write(std::shared_ptr<IORequestWrite> request)
     {
         assert(_is_compressed == false);
+        
+        // default error response
+        std::shared_ptr<IOResponseWrite> response = std::make_shared<IOResponseWrite>(request->path);
 
-        if (std::fseek(_file, offset, SEEK_SET) != 0) {
-            throw StorageError();
+        if (std::fseek(_file, request->offset, SEEK_SET) != 0) {
+            request->complete(response, errno);
+            return;
         }
 
-        if (data.size() == 0) {
+        uint64_t offset = std::ftell(_file);
+        request->offset = offset;
+        
+        if (request->data.size() == 0) {
+            request->complete(response, IOStatus::SUCCESS);
             return;
         }
 
@@ -375,20 +403,22 @@ namespace springtail {
 
         // header and number of vectors; map to a single vector
         std::copy_n(HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
-        hdr[3] = data.size();
+        hdr[3] = request->data.size();
         std::fwrite(hdr, 1, 4, _file);
 
-        for (int i = 0; i < data.size(); i++) {
-            uint32_t size = data[i]->size();
+        for (int i = 0; i < request->data.size(); i++) {
+            uint32_t size = request->data[i]->size();
             std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[0]);
             std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
             std::fwrite(hdr, 1, 8, _file);
-            std::fwrite(data[i]->data(), 1, data[i]->size(), _file);
+            std::fwrite(request->data[i]->data(), 1, request->data[i]->size(), _file);
         }
 
         std::fflush(_file);
 
         _is_dirty = true;
+
+        request->complete(response, IOStatus::SUCCESS);
 
         return;
     }
@@ -399,23 +429,31 @@ namespace springtail {
      *
      * @param callback callback for completion
      */
-    void IOSysFH::sync(io_status_callback_fn callback)
+    void IOSysFH::sync(std::shared_ptr<IORequestSync> request)
     {
+        // default success response
+        std::shared_ptr<IOResponse> response = 
+            std::make_shared<IOResponse>(IORequest::IOType::SYNC, request->path);
+        
         if (!_is_dirty) {
+            request->complete(response, IOStatus::SUCCESS);
             return;
         }
 
         if (std::fflush(_file) != 0) {
-            throw StorageError();
+            request->complete(response, errno);
+            return;
         }
 
         int fd = ::fileno(_file);
         if (fd < 0) {
-            throw StorageError();
+            request->complete(response, errno);
+            return;
         }
 
         ::fsync(fd);
-        callback(IOStatus::SUCCESS);
+
+        request->complete(response, IOStatus::SUCCESS);
 
         return;
     }

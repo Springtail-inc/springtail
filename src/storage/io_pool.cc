@@ -185,25 +185,25 @@ namespace springtail {
         switch (request->type) {
             case IORequest::IOType::READ: {
                 std::shared_ptr<IORequestRead> req = std::dynamic_pointer_cast<IORequestRead>(request);
-                fh->read(req->offset, _decompressor, req->callback);
+                fh->read(req, _decompressor);
                 break;
             }
 
             case IORequest::IOType::APPEND: {
                 std::shared_ptr<IORequestAppend> req = std::dynamic_pointer_cast<IORequestAppend>(request);
-                fh->append(req->data, _compressor, req->callback);
+                fh->append(req, _compressor);
                 break;
             }
 
             case IORequest::IOType::WRITE: {
                 std::shared_ptr<IORequestWrite> req = std::dynamic_pointer_cast<IORequestWrite>(request);
-                fh->write(req->offset, req->data, req->callback);
+                fh->write(req);
                 break;
             }
 
             case IORequest::IOType::SYNC: {
                 std::shared_ptr<IORequestSync> req = std::dynamic_pointer_cast<IORequestSync>(request);
-                fh->sync(req->callback);
+                fh->sync(req);
                 break;
             }
 
@@ -248,10 +248,4 @@ namespace springtail {
         
         return;
     }
-}
-
-
-int main(void)
-{
-    return 0;
 }
