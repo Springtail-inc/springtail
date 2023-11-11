@@ -3,102 +3,148 @@
 #include <vector>
 #include <functional>
 #include <filesystem>
+#include <future>
+#include <memory>
 
 namespace springtail {
+
     enum IOStatus {SUCCESS, ERR_NOENT, ERR_BADFD, ERR_ACCESS, ERR_ARGS, ERR_DECODE, ERR_FATAL};
 
-    // helper types for callbacks; to improve readability
+        // helper types for callbacks; to improve readability
     typedef std::function<void(const std::vector<std::shared_ptr<std::vector<char>>> data, const IOStatus &status)> io_read_callback_fn;
     typedef std::function<void(uint64_t offset, const IOStatus &status)> io_write_callback_fn;
     typedef std::function<void(const IOStatus &status)> io_status_callback_fn;
 
-    struct IORequestRead {
-        uint64_t offset;
-        io_read_callback_fn callback;
-
-        IORequestRead(uint64_t boffset, io_read_callback_fn callbackfn)
-            : offset(boffset), callback(callbackfn) {}
-    };
-
-    struct IORequestWrite {
-        uint64_t offset;
-
-        std::variant<
-            std::shared_ptr<std::vector<char>>,
-            std::vector<std::shared_ptr<std::vector<char>>>
-        > data;
-
-        io_write_callback_fn callback;
-
-        IORequestWrite(uint64_t boffset,
-                       std::shared_ptr<std::vector<char>> datavec,
-                       io_write_callback_fn callbackfn)
-            : offset(boffset), callback(callbackfn) {
-            data.emplace<std::shared_ptr<std::vector<char>>>(datavec);
-        }
-
-        IORequestWrite(uint64_t boffset,
-                       const std::vector<std::shared_ptr<std::vector<char>>> &datavecs,
-                       io_write_callback_fn callbackfn)
-            : offset(boffset), callback(callbackfn) {
-            data.emplace<std::vector<std::shared_ptr<std::vector<char>>>>(datavecs);
-        }
-    };
-
-    struct IORequestAppend {
-        std::variant<
-            std::shared_ptr<std::vector<char>>,
-            std::vector<std::shared_ptr<std::vector<char>>>
-        > data;
-
-        io_write_callback_fn callback;
-
-        IORequestAppend(std::shared_ptr<std::vector<char>> datavec, io_write_callback_fn callbackfn)
-            : callback(callbackfn) {
-            data.emplace<std::shared_ptr<std::vector<char>>>(datavec);
-        }
-
-        IORequestAppend(const std::vector<std::shared_ptr<std::vector<char>>> &datavecs,
-                        io_write_callback_fn callbackfn)
-            : callback(callbackfn) {
-            data.emplace<std::vector<std::shared_ptr<std::vector<char>>>>(datavecs);
-        }
-    };
-
-    struct IORequestSync {
-        io_status_callback_fn callback;
-
-        IORequestSync(io_status_callback_fn callbackfn) : callback(callbackfn) {}
-    };
-
     class IORequest {
     public:
-        enum OpType {READ, APPEND, WRITE, SYNC, SHUTDOWN};
+        enum IOType {READ, APPEND, WRITE, SYNC, SHUTDOWN};
 
-        OpType  type;
+        IOType                type;
         std::filesystem::path path;
-        bool    compressed;
+        bool                  compressed;
 
-        std::variant<
-            IORequestAppend,
-            IORequestWrite,
-            IORequestRead,
-            IORequestSync,
-            void *
-        > args;
+        IORequest(IOType type, std::filesystem::path &path, bool is_compressed)
+            : type(type), path(path), compressed(is_compressed) {}
 
-        IORequest() : type(SHUTDOWN), args(nullptr) {}
+        IORequest() : type(IOType::SHUTDOWN) {}
 
-        IORequest(const IORequestAppend &request, const std::filesystem::path &fspath, bool is_compressed)
-            : type(APPEND), path(fspath), compressed(is_compressed), args(request) {}
+        virtual ~IORequest() = default;
+    };
 
-        IORequest(const IORequestWrite &request, const std::filesystem::path &fspath, bool is_compressed)
-            : type(WRITE), path(fspath), compressed(is_compressed), args(request) {}
+    class IOResponse {
+    public:
+        IORequest::IOType     type;
+        std::filesystem::path path;
+        IOStatus              status;
 
-        IORequest(const IORequestRead &request, const std::filesystem::path &fspath, bool is_compressed)
-            : type(READ), compressed(is_compressed), args(request) {}
+        IOResponse(IORequest::IOType &type, std::filesystem::path &path, IOStatus &status)
+            : type(type), path(path), status(status) {}
 
-        IORequest(const IORequestSync &request, const std::filesystem::path &fspath)
-            : type(READ), path(fspath), args(request) {}
+        bool is_success() { return status == IOStatus::SUCCESS; }
+    };
+
+    class IOResponseWrite : public IOResponse {
+    public: 
+        uint64_t offset;
+    };
+
+    class IORequestWrite : public IORequest {
+    public:
+        uint64_t                      offset;
+
+        std::vector<std::shared_ptr<std::vector<char>>> data;
+        std::promise<std::shared_ptr<IOResponseWrite>> promise;
+        io_write_callback_fn          callback;
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
+                       uint64_t offset, std::shared_ptr<std::vector<char>> datavec, 
+                       io_write_callback_fn cb) 
+            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
+              offset(offset), callback(cb) { data.push_back(datavec); }
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
+                uint64_t offset, std::shared_ptr<std::vector<char>> datavec) 
+            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
+              offset(offset) { data.push_back(datavec); }
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
+                       io_write_callback_fn cb) 
+            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
+              offset(offset), data(data), callback(cb) {}
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data) 
+            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
+              offset(offset), data(data) {}
+    };
+
+    class IOResponseAppend : public IOResponse {
+    public:
+        uint64_t offset;
+    };
+
+    class IORequestAppend : public IORequest {
+    public:
+        std::vector<std::shared_ptr<std::vector<char>>> data;
+        std::promise<std::shared_ptr<IOResponseAppend>> promise;
+        io_write_callback_fn callback;
+
+        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+                        std::shared_ptr<std::vector<char>> datavec, 
+                        io_write_callback_fn cb) 
+            : IORequest(IORequest::IOType::APPEND, path, is_compressed),
+              callback(cb) { data.push_back(datavec); }
+
+        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+                        std::shared_ptr<std::vector<char>> datavec) 
+            : IORequest(IORequest::IOType::APPEND, path, is_compressed)
+        { data.push_back(datavec); }
+
+        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
+                       io_write_callback_fn cb) 
+            : IORequest(IORequest::IOType::APPEND, path, is_compressed),
+              data(data), callback(cb) {}
+
+        IORequestAppend(std::filesystem::path &path, bool is_compressed,
+                        const std::vector<std::shared_ptr<std::vector<char>>> &data) 
+            : IORequest(IORequest::IOType::APPEND, path, is_compressed), data(data) {}
+    };
+
+    class IOResponseRead : public IOResponse {
+    public:
+        uint64_t offset;
+        std::vector<std::shared_ptr<std::vector<char>>> data;
+    };
+
+    class IORequestRead : public IORequest {
+    public:
+        uint64_t offset;
+        std::promise<std::shared_ptr<IOResponseRead>> promise;
+        io_read_callback_fn callback;
+
+        IORequestRead(std::filesystem::path &path, bool is_compressed, 
+                      uint64_t offset, io_read_callback_fn cb)
+            : IORequest(IORequest::IOType::READ, path, is_compressed),
+              offset(offset), callback(cb) {}
+
+        IORequestRead(std::filesystem::path &path, bool is_compressed, 
+                      uint64_t offset)
+            : IORequest(IORequest::IOType::READ, path, is_compressed), offset(offset) {}
+    };
+
+    class IORequestSync : public IORequest {
+    public:
+        std::promise<std::shared_ptr<IOResponse>> promise;
+        io_status_callback_fn callback;
+
+        IORequestSync(std::filesystem::path &path, bool is_compressed, 
+                      io_status_callback_fn cb)
+            : IORequest(IORequest::IOType::SYNC, path, is_compressed),
+              callback(cb) {}
+
+        IORequestSync(std::filesystem::path &path, bool is_compressed)
+            : IORequest(IORequest::IOType::SYNC, path, is_compressed) {}
     };
 }

@@ -31,11 +31,7 @@ namespace springtail {
 
         void read(uint64_t offset, std::shared_ptr<Decompressor> decompressor, io_read_callback_fn callback);
 
-        void write(uint64_t offset, std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback);
-
         void write(uint64_t offset, const std::vector<std::shared_ptr<std::vector<char>>> &data, io_write_callback_fn callback);
-
-        void append(std::shared_ptr<std::vector<char>> data, std::shared_ptr<Compressor> compressor, io_write_callback_fn callback);
 
         void append(const std::vector<std::shared_ptr<std::vector<char>>> &data, std::shared_ptr<Compressor> compressor, io_write_callback_fn callback);
 

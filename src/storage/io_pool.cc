@@ -22,7 +22,7 @@ namespace springtail {
     {
         while (true) {
             std::shared_ptr<IORequest> request = queue.pop();
-            if (request->type == IORequest::OpType::SHUTDOWN) {
+            if (request->type == IORequest::IOType::SHUTDOWN) {
                 return;
             }
             worker->process_request(request);
@@ -183,35 +183,27 @@ namespace springtail {
     {
         // handle request
         switch (request->type) {
-            case IORequest::OpType::READ: {
-                IORequestRead req = std::get<IORequestRead>(request->args);
-                fh->read(req.offset, _decompressor, req.callback);
+            case IORequest::IOType::READ: {
+                std::shared_ptr<IORequestRead> req = std::dynamic_pointer_cast<IORequestRead>(request);
+                fh->read(req->offset, _decompressor, req->callback);
                 break;
             }
 
-            case IORequest::OpType::APPEND: {
-                IORequestAppend req = std::get<IORequestAppend>(request->args);
-                if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
-                    fh->append(std::get<std::shared_ptr<std::vector<char>>>(req.data), _compressor, req.callback);
-                } else {
-                    fh->append(std::get<std::vector<std::shared_ptr<std::vector<char>>>>(req.data), _compressor, req.callback);
-                }
+            case IORequest::IOType::APPEND: {
+                std::shared_ptr<IORequestAppend> req = std::dynamic_pointer_cast<IORequestAppend>(request);
+                fh->append(req->data, _compressor, req->callback);
                 break;
             }
 
-            case IORequest::OpType::WRITE: {
-                IORequestWrite req = std::get<IORequestWrite>(request->args);
-                if (std::holds_alternative<std::shared_ptr<std::vector<char>>>(req.data)) {
-                    fh->write(req.offset, std::get<std::shared_ptr<std::vector<char>>>(req.data), req.callback);
-                } else {
-                    fh->write(req.offset, std::get<std::vector<std::shared_ptr<std::vector<char>>>>(req.data), req.callback);
-                }
+            case IORequest::IOType::WRITE: {
+                std::shared_ptr<IORequestWrite> req = std::dynamic_pointer_cast<IORequestWrite>(request);
+                fh->write(req->offset, req->data, req->callback);
                 break;
             }
 
-            case IORequest::OpType::SYNC: {
-                IORequestSync req = std::get<IORequestSync>(request->args);
-                fh->sync(req.callback);
+            case IORequest::IOType::SYNC: {
+                std::shared_ptr<IORequestSync> req = std::dynamic_pointer_cast<IORequestSync>(request);
+                fh->sync(req->callback);
                 break;
             }
 
@@ -225,7 +217,7 @@ namespace springtail {
     IOWorker::process_request(std::shared_ptr<IORequest> request)
     {
         // on shutdown return immediately
-        if (IORequest::OpType::SHUTDOWN == request->type) {
+        if (IORequest::IOType::SHUTDOWN == request->type) {
             return;
         }
 
@@ -238,7 +230,7 @@ namespace springtail {
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
-        std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::OpType::READ == request->type) ?
+        std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::IOType::READ == request->type) ?
                                                            IOMgr::IO_MODE::READ : 
                                                            IOMgr::IO_MODE::WRITE);
 

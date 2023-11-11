@@ -281,65 +281,6 @@ namespace springtail {
     /**
      * @brief Append data to end of file, file may be compressed or not
      *
-     * @param data       data vector to write out
-     * @param compressor Compressor class to compress file
-     * @param callback   callback for completion
-     */
-    void
-    IOSysFH::append(std::shared_ptr<std::vector<char>> data,
-                    std::shared_ptr<Compressor> compressor,
-                    io_write_callback_fn callback)
-    {
-        if (std::fseek(_file, 0, SEEK_END) != 0) {
-            throw StorageError();
-        }
-
-        //uint64_t offset = std::ftell(_file);
-
-        if (data->size() == 0) {
-            return;
-        }
-
-        uint32_t size = data->size();
-        uint32_t csize = size;
-        std::vector<char> compressed_data;
-
-        // compress data
-        if (_is_compressed) {
-            compressor->reset_stream();
-            csize = compressor->compress_raw(data, compressed_data);
-        }
-
-        // Header magic 3B 'UXT' (uncompressed) or 'CXT' (compressed)
-        // number of vectors 1B
-        // size of uncompressed data size 4B
-        // size of compressed data size 4B
-        char hdr[12];
-        std::copy_n((_is_compressed) ? HDR_MAGIC_COMPRESSED : HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
-        hdr[3] = 1; // number of compressed vectors
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
-        std::copy_n(reinterpret_cast<char *>(&csize), sizeof(int32_t), &hdr[8]);
-
-        std::fwrite(hdr, 1, 12, _file);
-
-        // write out data
-        if (_is_compressed) {
-            std::fwrite(compressed_data.data(), 1, csize, _file);
-        } else {
-            std::fwrite(data->data(), 1, csize, _file);
-        }
-
-        std::fflush(_file);
-
-        _is_dirty = true;
-
-        return;
-    }
-
-
-    /**
-     * @brief Append data to end of file, file may be compressed or not
-     *
      * @param data       vector of data vectors to write out
      * @param compressor Compressor class to compress file
      * @param callback   callback for completion
@@ -398,51 +339,6 @@ namespace springtail {
         }
 
         // flush to kernel (this does not do a sync)
-        std::fflush(_file);
-
-        _is_dirty = true;
-
-        return;
-    }
-
-    /**
-     * @brief Overwrite data within a file, file MUST NOT be compressed
-     *
-     * @param offset     offset at which to write data
-     * @param data       data vector to write out
-     * @param callback   callback for completion
-     */
-    void
-    IOSysFH::write(uint64_t pos,
-                   std::shared_ptr<std::vector<char>> data,
-                   io_write_callback_fn callback)
-    {
-        assert(_is_compressed == false);
-
-        if (data->size() == 0) {
-            return;
-        }
-
-        if (std::fseek(_file, pos, SEEK_SET) != 0) {
-            throw StorageError();
-        }
-
-        // write out header
-        // 3B Magic + 1B vector count + 4B total size + 4B vector size + data
-        char hdr[12];
-
-        // header and number of vectors
-        std::copy_n(HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
-        hdr[3] = 1;
-
-        // total size of uncompressed data 4B
-        uint32_t size = data->size();
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
-        std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[8]);
-        std::fwrite(hdr, 1, 12, _file);
-
-        std::fwrite(data->data(), 1, size, _file);
-
         std::fflush(_file);
 
         _is_dirty = true;
