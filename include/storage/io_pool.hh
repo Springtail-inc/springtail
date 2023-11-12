@@ -83,7 +83,8 @@ namespace springtail {
         static IOMgr *getInstance();
 
         // no create call, first write, after open for write, will do the create
-        std::shared_ptr<IOHandle> open(const std::filesystem::path &path, IO_MODE &mode, bool compressed);
+        std::shared_ptr<IOHandle> open(const std::filesystem::path &path, IO_MODE mode, bool compressed);
+        std::shared_ptr<IOHandle> open(const char *path, IO_MODE mode, bool compressed);        
 
         void remove(const std::filesystem::path &path);
 

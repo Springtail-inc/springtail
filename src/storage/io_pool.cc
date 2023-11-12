@@ -70,9 +70,16 @@ namespace springtail {
         return _instance;
     }
 
+     std::shared_ptr<IOHandle> 
+     IOMgr::open(const char *path, IO_MODE mode, bool compressed)
+     {
+        std::filesystem::path fspath(path);
+        return open(fspath, mode, compressed);
+     }
+
 
     std::shared_ptr<IOHandle>
-    IOMgr::open(const std::filesystem::path &path, IO_MODE &mode, bool compressed)
+    IOMgr::open(const std::filesystem::path &path, IO_MODE mode, bool compressed)
     {
         if (mode != IO_MODE::READ && mode != IO_MODE::WRITE && mode != IO_MODE::APPEND) {
             throw StorageError();
@@ -181,6 +188,8 @@ namespace springtail {
     IOWorker::_issue_request(std::shared_ptr<IORequest> request,
                              std::shared_ptr<IOSysFH> fh)
     {
+        std::cout << "IOWorker: _issue_request: type=" << request->type << std::endl;;
+
         // handle request
         switch (request->type) {
             case IORequest::IOType::READ: {
@@ -226,13 +235,18 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
+        std::cout << "IOWorker::process_request lookup path: " << request->path << std::endl;
+
         std::shared_ptr<IOFile> io_file = mgr->lookup(request->path, request->compressed);
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
+        std::cout << "IOWorker::process_request get fh\n";
         std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::IOType::READ == request->type) ?
                                                            IOMgr::IO_MODE::READ : 
                                                            IOMgr::IO_MODE::WRITE);
+
+        std::cout << "IOWorker::process_request got fh\n";
 
         try {
             _issue_request(request, fh);

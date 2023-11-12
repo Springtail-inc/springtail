@@ -32,9 +32,10 @@ namespace springtail {
 
         // nothing free, see if we can allocate new FH
         if (_read_fhs.size() < IOMgr::MAX_FILE_HANDLES_PER_FILE) {
-            std::shared_ptr<IOSysFH> file = std::make_shared<IOSysFH>(_path, mode, _is_compressed);
-            _read_fhs.push_back(file);
-            return file;
+            std::shared_ptr<IOSysFH> fh = std::make_shared<IOSysFH>(_path, mode, _is_compressed);
+            _read_fhs.push_back(fh);
+            fh->is_busy = true;
+            return fh;
         }
 
         return nullptr;
@@ -53,6 +54,7 @@ namespace springtail {
         if (_write_fh == nullptr) {
             // allocate write fh
             _write_fh = std::make_shared<IOSysFH>(_path, mode, _is_compressed);
+            _write_fh->is_busy = true;
             return _write_fh;
         }
 
@@ -193,6 +195,16 @@ namespace springtail {
     }
 
 
+    void dump_hdr(char *hdr, int len)
+    {
+        std::cout << "HDR: [ ";
+        for (int i=0; i < len; i++) {
+            std::cout << hdr[i] << "|" << std::hex << (0xFF & (uint8_t)hdr[i]) << " ";
+        }
+        std::cout << "]";
+    }
+
+
     /**
      * @brief Read data from offset pos
      * @details Data stored in following format:
@@ -217,15 +229,19 @@ namespace springtail {
         // default error response
         std::shared_ptr<IOResponseRead> response = std::make_shared<IOResponseRead>(request->path);
 
+        std::cout << "IOSysFH::read offset=" << request->offset << std::endl;
+
         if (std::fseek(_file, request->offset, SEEK_SET) != 0) {
             request->complete(response, errno);
             return;
         }
 
-        if (std::fread(hdr, 1, 8, _file) != 8) {
+        if (std::fread(hdr, 1, 4, _file) != 4) {
             request->complete(response, errno);
             return;
         }
+
+        dump_hdr(hdr, 4);
 
         bool is_compressed = false;
         if (hdr[0] == HDR_MAGIC_COMPRESSED[0]) {
@@ -252,6 +268,8 @@ namespace springtail {
         // vector count
         uint8_t count = hdr[3];
 
+        std::cout << "IOSysFH::read vector count=" << (0xFF & count) << std::endl;
+
         // output vector
         response->data.resize(count);
 
@@ -269,6 +287,8 @@ namespace springtail {
             // read vector size (compressed size if compressed)
             std::fread(reinterpret_cast<char *>(&csize), 1, sizeof(uint32_t), _file);
 
+            std::cout << "IOSysFH::read size=" << size << ", csize=" << csize << std::endl;
+
             // output buffer
             std::shared_ptr<std::vector<char>> data_ptr = std::make_shared<std::vector<char>>(size);
             
@@ -282,9 +302,11 @@ namespace springtail {
             } else {
                 std::fread(data_ptr->data(), 1, size, _file);
             }
-
-            response->data.push_back(data_ptr);
+            std::cout << "Doing pushback\n";
+            response->data[i] = data_ptr;
         }
+
+        std::cout << "Wrote " << response->data.size() << " vectors\n";
 
         response->offset = std::ftell(_file);
         request->complete(response, 0);
@@ -319,7 +341,7 @@ namespace springtail {
             request->complete(response, IOStatus::SUCCESS);
         }
 
-        int count = request->data.size();
+        uint8_t count = request->data.size();
 
         // do it in two passes to avoid partial writes
         // first, compress data and compute total uncompressed size
@@ -339,6 +361,7 @@ namespace springtail {
         std::copy_n((_is_compressed) ? HDR_MAGIC_COMPRESSED : HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
         hdr[3] = count;
         std::fwrite(hdr, 1, 4, _file);
+        dump_hdr(hdr, 4);
 
         // write out compressed data
         for (int i = 0; i < count; i++) {
@@ -348,15 +371,21 @@ namespace springtail {
 
             if (_is_compressed) {
                 uint32_t csize = compressed_data[i].size();
+                
+                std::cout << "IOSysFH::append (compressed) size=" << size << ", csize=" << csize << std::endl;
+
                 std::copy_n(reinterpret_cast<char *>(&csize), sizeof(int32_t), &hdr[4]);
                 std::fwrite(&hdr[0], 1, 8, _file);
                 std::fwrite(compressed_data[i].data(), 1, csize, _file);
             } else {
                 // uncompressed
+                std::cout << "IOFile::append (uncompressed) size=" << size << std::endl;
+
                 std::copy_n(reinterpret_cast<char *>(&size), sizeof(int32_t), &hdr[4]);
                 std::fwrite(&hdr[0], 1, 8, _file);                
                 std::fwrite(request->data[i]->data(), 1, size, _file);
             }
+            dump_hdr(hdr, 8);
         }
 
         // flush to kernel (this does not do a sync)
