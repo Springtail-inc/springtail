@@ -76,7 +76,7 @@ namespace springtail {
     public:
         enum IO_MODE { READ, APPEND, WRITE };
 
-        static const int NUM_THREADS = 16; // XXX need way to set dynamically
+        static const int NUM_THREADS = 1; // XXX need way to set dynamically
         static const int MAX_FILE_OBJECTS = 32;
         static const int MAX_FILE_HANDLES_PER_FILE=4;
 

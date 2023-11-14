@@ -23,6 +23,9 @@ namespace springtail {
 
         ~IOHandle() {};
 
+        /** maximum number of vectors per call */
+        static const int MAX_VECTORS=8;
+
         int get_mode() { return _mode; }
 
         std::string get_path() { return _path.string(); }

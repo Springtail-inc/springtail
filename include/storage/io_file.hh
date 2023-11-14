@@ -18,10 +18,14 @@ namespace springtail {
     class IOSysFH {
     private:
         std::filesystem::path _path;
-        std::FILE *_file;
+        int   _fd;
         bool _is_compressed;
         bool _is_dirty;
         bool _is_readonly;
+
+        int internal_write(std::vector<std::shared_ptr<std::vector<char>>> &data,
+                           std::shared_ptr<Compressor> compressor,
+                           uint64_t offset, bool is_compressed);
 
     public:
         std::atomic<bool> is_busy;

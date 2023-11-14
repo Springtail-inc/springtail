@@ -145,6 +145,9 @@ namespace springtail {
     std::shared_ptr<IOResponseAppend>
     IOHandle::append(const std::vector<std::shared_ptr<std::vector<char>>> &data)
     {
+        if (data.size() > MAX_VECTORS) {
+            throw StorageError("Too many vectors for write");
+        }        
         std::shared_ptr<IORequestAppend> req = std::make_shared<IORequestAppend>(_path, _is_compressed, data);
         std::future<std::shared_ptr<IOResponseAppend>> future = req->promise.get_future();
         IOMgr *mgr = IOMgr::getInstance();
@@ -157,8 +160,8 @@ namespace springtail {
     std::shared_ptr<IOResponseWrite>
     IOHandle::write(uint64_t offset, std::shared_ptr<std::vector<char>> data)
     {
-        if (_is_compressed == false) {
-            throw StorageError();
+        if (_is_compressed == true) {
+            throw StorageError("File opened with compression enabled for write");
         }
         std::shared_ptr<IORequestWrite> req = std::make_shared<IORequestWrite>(_path, _is_compressed, offset, data);
         std::future<std::shared_ptr<IOResponseWrite>> future = req->promise.get_future();        
@@ -172,8 +175,11 @@ namespace springtail {
     std::shared_ptr<IOResponseWrite>
     IOHandle::write(uint64_t offset, std::vector<std::shared_ptr<std::vector<char>>> data)
     {
-        if (_is_compressed == false) {
-            throw StorageError();
+        if (_is_compressed == true) {
+            throw StorageError("File opened with compression enabled for write");
+        }
+        if (data.size() > MAX_VECTORS) {
+            throw StorageError("Too many vectors for write");
         }
         std::shared_ptr<IORequestWrite> req = std::make_shared<IORequestWrite>(_path, _is_compressed, offset, data);
         std::future<std::shared_ptr<IOResponseWrite>> future = req->promise.get_future();        

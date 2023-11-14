@@ -68,10 +68,14 @@ namespace springtail {
 
     class IOResponseWrite : public IOResponse {
     public: 
+        /** offset of this write */
         uint64_t offset;
 
-        IOResponseWrite(std::filesystem::path &path, uint64_t offset, IOStatus status=IOStatus::SUCCESS)
-            : IOResponse(IORequest::IOType::WRITE, path, status), offset(offset) {}
+        /** next offset after this write (length of write data + hdr) */
+        uint64_t next_offset;
+
+        IOResponseWrite(std::filesystem::path &path, uint64_t offset, uint64_t next_offset, IOStatus status=IOStatus::SUCCESS)
+            : IOResponse(IORequest::IOType::WRITE, path, status), offset(offset), next_offset(next_offset) {}
 
         IOResponseWrite(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
             : IOResponse(IORequest::IOType::WRITE, path, status) {}
@@ -118,12 +122,16 @@ namespace springtail {
 
     class IOResponseAppend : public IOResponse {
     public:
+        /** offset of the append */
         uint64_t offset;
 
-         IOResponseAppend(std::filesystem::path &path, uint64_t offset, IOStatus status=IOStatus::SUCCESS)
-            : IOResponse(IORequest::IOType::APPEND, path, status), offset(offset) {}
+        /** next offset -- also EOF marker */
+        uint64_t next_offset;
 
-         IOResponseAppend(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
+        IOResponseAppend(std::filesystem::path &path, uint64_t offset, uint64_t next_offset, IOStatus status=IOStatus::SUCCESS)
+            : IOResponse(IORequest::IOType::APPEND, path, status), offset(offset), next_offset(next_offset) {}
+
+        IOResponseAppend(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
             : IOResponse(IORequest::IOType::APPEND, path, status) {}
     };
 
@@ -166,7 +174,12 @@ namespace springtail {
 
     class IOResponseRead : public IOResponse {
     public:
+        /** current offset for read */
         uint64_t offset;
+        
+        /** next valid offset after this read */
+        uint64_t next_offset;
+
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
         IOResponseRead(std::filesystem::path &path, IOStatus status, uint64_t offset,

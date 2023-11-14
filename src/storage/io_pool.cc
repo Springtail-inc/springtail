@@ -188,7 +188,7 @@ namespace springtail {
     IOWorker::_issue_request(std::shared_ptr<IORequest> request,
                              std::shared_ptr<IOSysFH> fh)
     {
-        std::cout << "IOWorker: _issue_request: type=" << request->type << std::endl;;
+        //std::cout << "IOWorker: _issue_request: type=" << request->type << std::endl;;
 
         // handle request
         switch (request->type) {
@@ -235,18 +235,19 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
-        std::cout << "IOWorker::process_request lookup path: " << request->path << std::endl;
+        //std::cout << "IOWorker::process_request lookup path: " << request->path << std::endl;
 
         std::shared_ptr<IOFile> io_file = mgr->lookup(request->path, request->compressed);
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
-        std::cout << "IOWorker::process_request get fh\n";
+        //std::cout << "IOWorker::process_request get fh\n";
+
         std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::IOType::READ == request->type) ?
                                                            IOMgr::IO_MODE::READ : 
                                                            IOMgr::IO_MODE::WRITE);
 
-        std::cout << "IOWorker::process_request got fh\n";
+        //std::cout << "IOWorker::process_request got fh\n";
 
         try {
             _issue_request(request, fh);
