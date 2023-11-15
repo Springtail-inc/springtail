@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <functional>
 #include <list>
+#include <iostream>
 #include <boost/container_hash/hash.hpp>
 
 namespace springtail {
@@ -54,7 +55,7 @@ namespace springtail {
          * @brief Evict least used item (back of _cache list); if callback is set, check callback first
          * to make sure it is evictable (callback returns true)
          */
-        void
+        bool
         _evict_next() {
             // remove the item from the cache
             if (!_callback) {
@@ -62,23 +63,24 @@ namespace springtail {
                 CacheEntry &entry = _cache.back();
                 _cache.pop_back();
                 _remove_entry(entry);
-                return;
+                return true;
             }
 
             // with callback, we need to check if entry is evictable
             // reverse iterate through until we find an evictable entry
-            // this is O(n) which isn't great since the lock is held
-            typename std::list<CacheEntry>::iterator current;
-
-            for (current = --_cache.end(); current != _cache.begin(); current--) {
+            // this is O(n) which isn't great since the lock is held           
+            for (auto current = _cache.rbegin(); current != _cache.rend(); current++) {
                 CacheEntry &entry = *current;
                 if (_callback(std::get<1>(entry)) == true) {
                     // callback returned true so we can evict item
-                    _cache.erase(current);
+                    // reverse iterator is pointing behind of where we want it
+                    _cache.erase(std::next(current).base()); 
                     _remove_entry(entry);
-                    return;
+                    return true;
                 }
             }
+
+            return false; // nothing evictable
         }
 
     public:
@@ -114,7 +116,9 @@ namespace springtail {
         {
             // if we need more space, evict entries until we have enough space
             while (_cache_size + size > _cache_max) {
-                _evict_next();
+                if (!_evict_next()) {
+                    break; // nothing evictable
+                }
             }
 
             // push onto the front of the LRU queue
