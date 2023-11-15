@@ -42,12 +42,18 @@ compare_data(std::shared_ptr<std::vector<char>> data1,
 std::shared_ptr<springtail::IOResponseAppend>
 sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
             std::shared_ptr<springtail::IOHandle> fh_read,
-            int len)
+            int len, int count=1)
 {
-    std::cout << "\nTesting Sync Append: len=" << len << std::endl;
+    std::cout << "\nTesting Sync Append: len=" << len << ", count=" << count << std::endl;
 
-    std::shared_ptr<std::vector<char>> data = gen_data(len);
-    std::shared_ptr<springtail::IOResponseAppend> write_response = fh_write->append(data);
+    std::vector<std::shared_ptr<std::vector<char>>> datavec(count);
+
+    for (int i = 0; i < count; i++) {
+        std::shared_ptr<std::vector<char>> data = gen_data(len);
+        datavec[i] = data;
+    }
+    
+    std::shared_ptr<springtail::IOResponseAppend> write_response = fh_write->append(datavec);
     assert(write_response->is_success());
 
     std::shared_ptr<springtail::IOResponse> sync_response = fh_write->sync();
@@ -55,12 +61,13 @@ sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
 
     std::shared_ptr<springtail::IOResponseRead> read_response = fh_read->read(write_response->offset);
     assert(read_response->is_success());
-    assert(read_response->data.size() == 1);
+    assert(read_response->data.size() == count);
 
     assert(read_response->next_offset == write_response->next_offset);
 
-    std::shared_ptr<std::vector<char>> read_data = read_response->data[0];
-    assert(compare_data(data, read_data));
+    for (int i = 0; i < count; i++) {
+        assert(compare_data(datavec[i], read_response->data[i]));
+    }
 
     return write_response;
 }
@@ -68,12 +75,17 @@ sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
 std::shared_ptr<springtail::IOResponseWrite>
 sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
            std::shared_ptr<springtail::IOHandle> fh_read,
-           int len, uint64_t offset)
+           int len, uint64_t offset, int count=1)
 {
-    std::cout << "\nTesting Sync Write: len=" << len << ", offset=" << offset << std::endl;
+    std::cout << "\nTesting Sync Write: len=" << len << ", offset=" << offset << ", count=" << count << std::endl;
 
-    std::shared_ptr<std::vector<char>> data = gen_data(len);
-    std::vector<std::shared_ptr<std::vector<char>>> datavec = { data };
+    std::vector<std::shared_ptr<std::vector<char>>> datavec(count);
+
+    for (int i = 0; i < count; i++) {
+        std::shared_ptr<std::vector<char>> data = gen_data(len);
+        datavec[i] = data;
+    }
+
     std::shared_ptr<springtail::IOResponseWrite> write_response = fh_write->write(offset, datavec);
     assert(write_response->is_success());
     assert(write_response->offset == offset);
@@ -86,11 +98,12 @@ sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
 
     std::shared_ptr<springtail::IOResponseRead> read_response = fh_read->read(offset);
     assert(read_response->is_success());
-    assert(read_response->data.size() == 1);
+    assert(read_response->data.size() == count);
     assert(read_response->next_offset == write_response->next_offset);    
 
-    std::shared_ptr<std::vector<char>> read_data = read_response->data[0];
-    assert(compare_data(data, read_data));
+    for (int i = 0; i < count; i++) {
+        assert(compare_data(datavec[i], read_response->data[i]));        
+    }
 
     return write_response;
 }
@@ -113,6 +126,11 @@ int main(void)
 
     append_response = sync_append(fh_append, fh_read, 15);       
 
+    append_response = sync_append(fh_append, fh_read, 8192, 3);   
+
+    append_response = sync_append(fh_append, fh_read, 15, 3);  
+
+
     std::shared_ptr<springtail::IOHandle> fh_write = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::WRITE, false);
     fh_read = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::READ, false);
     
@@ -129,8 +147,11 @@ int main(void)
     std::cout << " **resp next offset=" << write_response->next_offset << std::endl;
 
     write_response = sync_write(fh_write, fh_read, 15, write_response->next_offset);
+    uint64_t end_offset = write_response->next_offset;
 
     write_response = sync_write(fh_write, fh_read, 1024, owrite_offset);    
+
+    write_response = sync_write(fh_write, fh_read, 256, end_offset, 3);    
 
     std::cout << "All tests passed\n";
 
