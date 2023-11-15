@@ -70,19 +70,20 @@ namespace springtail {
         std::shared_ptr<IOSysFH> file = nullptr;
 
         while (true) {
+            // get fh based on mode
             if (mode == IOMgr::IO_MODE::READ) {
                 file = _get_read_fh(mode);
             } else {
                 file = _get_write_fh(mode);
             }
 
-            // wasn't able to get the file handle, block
+            // got the file, incr use count and return
             if (file != nullptr) {
                 _in_use_count++;
                 return file;
             }
 
-            // block on cv
+            // wasn't able to get the file handle, block on cv
             if (mode == IOMgr::IO_MODE::READ) {
                 _cv_read.wait(lock);
             } else {

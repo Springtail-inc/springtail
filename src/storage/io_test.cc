@@ -155,5 +155,7 @@ int main(void)
 
     std::cout << "All tests passed\n";
 
+    IOMgr->shutdown(); // don't use IOMgr past this point
+
     return 0;
 }

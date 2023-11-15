@@ -28,6 +28,7 @@ namespace springtail {
         virtual ~Decompressor()
         { }
 
+        // block interface is deprecated
         virtual uint32_t decompress_block(const char *src, std::vector<char> &dst) = 0;
         virtual uint32_t decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset) = 0;
     };
@@ -41,6 +42,7 @@ namespace springtail {
         Lz4Compressor();
         ~Lz4Compressor();
 
+        // block interface is deprecated
         uint32_t compress_block(const std::vector<char> &src, std::vector<char> &dst);
         uint32_t compress_raw(std::shared_ptr<std::vector<char>> src, std::vector<char> &dst);
         void reset_stream();
@@ -55,6 +57,7 @@ namespace springtail {
         Lz4Decompressor();
         ~Lz4Decompressor();
 
+        // block interface is deprecated
         uint32_t decompress_block(const char *src, std::vector<char> &dst);
         uint32_t decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset);
     };

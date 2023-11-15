@@ -31,7 +31,7 @@ namespace springtail {
         std::filesystem::path path;
         bool                  compressed;
 
-        IORequest(IOType type, std::filesystem::path &path, bool is_compressed)
+        IORequest(IOType type, const std::filesystem::path &path, bool is_compressed)
             : type(type), path(path), compressed(is_compressed) {}
 
         IORequest() : type(IOType::SHUTDOWN) {}
@@ -45,7 +45,7 @@ namespace springtail {
         std::filesystem::path path;
         IOStatus              status;
 
-        IOResponse(IORequest::IOType type, std::filesystem::path &path, 
+        IOResponse(IORequest::IOType type, const std::filesystem::path &path, 
                    IOStatus status=IOStatus::SUCCESS)
             : type(type), path(path), status(status) {}
 

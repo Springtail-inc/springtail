@@ -95,6 +95,13 @@ namespace springtail {
         std::shared_ptr<IOFile> lookup(const std::filesystem::path &path,
                                        bool compressed);
 
+        /**
+         * @brief Shuts down the IOMgr instance by deleting _instance.  It causes the thread pool and LRU cache
+         * destructors to run.  The thread pool will cleanly shutdown all worker threads by enqueing a shutdown
+         * message and waiting for it to complete in all threads.
+         */
+        void shutdown();
+
     protected:
         static IOMgr *_instance;
         static std::mutex _instance_mutex;

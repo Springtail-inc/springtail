@@ -70,6 +70,17 @@ namespace springtail {
         return _instance;
     }
 
+    void
+    IOMgr::shutdown()
+    {
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
      std::shared_ptr<IOHandle> 
      IOMgr::open(const char *path, IO_MODE mode, bool compressed)
      {
@@ -183,7 +194,12 @@ namespace springtail {
         return val;
     }
 
-
+    /**
+     * @brief Worker thread internal issue_request call
+     * 
+     * @param request IORequest to process
+     * @param fh      File handle for request
+     */
     void
     IOWorker::_issue_request(std::shared_ptr<IORequest> request,
                              std::shared_ptr<IOSysFH> fh)
@@ -216,7 +232,12 @@ namespace springtail {
                 break;
             }
 
+            case IORequest::IOType::SHUTDOWN:
+                break;
+
             default:
+                // log error
+                std::cerr << "IOWorker::_issue_request unknown request type: " << request->type << std::endl;
                 break;
         }
     }
