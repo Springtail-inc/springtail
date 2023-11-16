@@ -12,6 +12,7 @@
 #include <storage/compressors.hh>
 #include <storage/io_pool.hh>
 #include <storage/io_file.hh>
+#include <storage/io.hh>
 #include <storage/exception.hh>
 
 
@@ -47,18 +48,13 @@ namespace springtail {
         }
     }
 
-    /**
-     * @brief Construct a new IOPool::IOPool object; initialize the workers
-     * @param threads Number of initial workers
-     */
+
     IOPool::IOPool(int threads)
     {
         resize(threads);
     }
 
-    /**
-     * @brief Destroy the IOPool::IOPool object; queue a SHUTDOWN IO request for each worker.
-     */
+
     IOPool::~IOPool()
     {
         for (int i = 0; i < _threads.size(); i++) {
@@ -71,10 +67,7 @@ namespace springtail {
         }
     }
 
-    /**
-     * @brief Grow or shrink the pool; will block if downsizing until
-     * threads are done
-     */
+
     void
     IOPool::resize(int size)
     {
@@ -129,10 +122,7 @@ namespace springtail {
     IOMgr* IOMgr::_instance {nullptr};
     std::mutex IOMgr::_instance_mutex;
 
-    /**
-     * @brief getInstance() of singleton IOMgr; create if it doesn't exist.
-     * @return instance of IOMgr
-     */
+
     IOMgr *
     IOMgr::get_instance()
     {
@@ -145,11 +135,7 @@ namespace springtail {
         return _instance;
     }
 
-    /**
-     * @brief Shutdown IOMgr instance.  Delete internal instance.
-     *        Shuts down worker pool and FH cache (by calling their destructors).
-     *        Worker pool will drain before shutting down each thread.
-     */
+
     void
     IOMgr::shutdown()
     {
@@ -161,14 +147,7 @@ namespace springtail {
         }
     }
 
-     /**
-     * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
-     * 
-     * @param path        Path of file to open
-     * @param mode        Mode of file (read, write, append)
-     * @param compressed  Is this a compressed file (boolean)
-     * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
-     */
+
      std::shared_ptr<IOHandle> 
      IOMgr::open(const char *path, IO_MODE mode, bool compressed)
      {
@@ -177,14 +156,6 @@ namespace springtail {
      }
 
 
-    /**
-     * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
-     * 
-     * @param path        Path of file to open
-     * @param mode        Mode of file (read, write, append)
-     * @param compressed  Is this a compressed file (boolean)
-     * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
-     */
     std::shared_ptr<IOHandle>
     IOMgr::open(const std::filesystem::path &path, IO_MODE mode, bool compressed)
     {
@@ -198,17 +169,7 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Lookup file object in LRU cache based on path name
-     * @details Lookup file object in LRU cache;
-     *          if not found a new file object is created and added to the cache.
-     *          May trigger eviction of another object.
-     *
-     * @param path ID for LRU cache lookup
-     * @param is_compressed is file compressed, used in new file object creation
-     *
-     * @return file object ptr
-     */
+
     std::shared_ptr<IOFile>
     IOMgr::lookup(const std::filesystem::path &path,
                   bool is_compressed)
@@ -233,11 +194,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Remove file at path; 
-     * NOTE: currently no checking for ongoing IO or locking
-     * @param path Path to remove
-     */
     void
     IOMgr::remove(const std::filesystem::path &path)
     {
@@ -245,13 +201,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Callback from LRU cache, called in the context of a get/lookup with
-     *        _cache_mutex locked.  Callback should be non-blocking
-     *
-     * @param file object for eviction
-     * @return true if evictable, false otherwise
-     */
     bool
     IOMgr::_evict_callback(std::shared_ptr<IOFile> file)
     {
@@ -268,10 +217,7 @@ namespace springtail {
         return false;
     }
 
-    /**
-     * @brief Push an IO request onto the worker pool queue
-     * @param request IO request to enqueue
-     */
+
     void
     IORequestQueue::push(std::shared_ptr<IORequest> request)
     {
@@ -283,11 +229,7 @@ namespace springtail {
         _cv.notify_one();
     }
 
-    /**
-     * @brief Pop an IO request off the worker pool queue; or block if empty
-     * 
-     * @return std::shared_ptr<IORequest> ptr to the IORequest
-     */
+
     std::shared_ptr<IORequest>
     IORequestQueue::pop()
     {
@@ -309,12 +251,7 @@ namespace springtail {
         return val;
     }
 
-    /**
-     * @brief Worker thread internal issue_request call
-     * 
-     * @param request IORequest to process
-     * @param fh      File handle for request
-     */
+
     void
     IOWorker::_issue_request(std::shared_ptr<IORequest> request,
                              std::shared_ptr<IOSysFH> fh)
@@ -357,11 +294,7 @@ namespace springtail {
         }
     }
 
-    /**
-     * @brief Process the IO request.  Lookup file in cache, get FH, issue the request
-     * 
-     * @param request IO request to process
-     */
+
     void
     IOWorker::process_request(std::shared_ptr<IORequest> request)
     {

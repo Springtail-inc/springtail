@@ -10,6 +10,7 @@
 #include <sys/uio.h>
 
 #include <storage/io_file.hh>
+#include <storage/io.hh>
 #include <storage/exception.hh>
 #include <storage/compressors.hh>
 
@@ -19,11 +20,7 @@ namespace springtail {
     static const char HDR_MAGIC_COMPRESSED[3] = { 'C', 'X', 'T'};
     static const char HDR_MAGIC_UNCOMPRESSED[3] = { 'U', 'X', 'T'};
 
-    /**
-     * @brief Get read fh, creates file handle if it doesn't exist
-     * @param mode Mode read (used for FH creation)
-     * @return std::shared_ptr<IOSysFH> System filehandle or nullptr if none available
-     */
+
     std::shared_ptr<IOSysFH>
     IOFile::_get_read_fh(const IOMgr::IO_MODE &mode)
     {
@@ -46,11 +43,7 @@ namespace springtail {
         return nullptr;
     }
 
-    /**
-     * @brief Get write filehandle, creates it if it doesn't exist
-     * @param mode Mode write or append (used for FH creation)
-     * @return std::shared_ptr<IOSysFH> System filehandle or nullptr if busy
-     */
+
     std::shared_ptr<IOSysFH>
     IOFile::_get_write_fh(const IOMgr::IO_MODE &mode)
     {
@@ -70,11 +63,7 @@ namespace springtail {
         return nullptr;
     }
 
-    /**
-     * @brief Get FH based on mode; blocks if none available
-     * @param mode Open mode for FH (read/write/append)
-     * @return std::shared_ptr<IOSysFH> System filehandle (either read or write)
-     */
+
     std::shared_ptr<IOSysFH>
     IOFile::get_fh(const IOMgr::IO_MODE &mode)
     {
@@ -106,10 +95,7 @@ namespace springtail {
         }
     }
 
-    /**
-     * @brief Release system FH; notifies anyone blocked waiting
-     * @param fh System FH to release
-     */
+
     void
     IOFile::put_fh(std::shared_ptr<IOSysFH> fh)
     {
@@ -130,11 +116,8 @@ namespace springtail {
         }
     }
 
-
-    /**
-     * @brief Try to close all open fhs; called from IOMgr evict callback
-     *        with IOMgr::_cache_mutex locked.
-     * @return true on success, false otherwise
+    /*
+     * Called with IOMgr::_cache_mutex locked
      */
     bool
     IOFile::try_close_all()
@@ -171,13 +154,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Construct a new IOSysFH::IOSysFH object based on path, mode and whether
-     *        file is compressable
-     * @param path  Path to open
-     * @param mode  Open mode, read/write/append
-     * @param is_compressed Is file compressable
-     */
     IOSysFH::IOSysFH(const std::filesystem::path &path, const IOMgr::IO_MODE &mode, bool is_compressed) :
         _path(path),
         _fd(-1),
@@ -204,17 +180,12 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Destroy the IOSysFH::IOSysFH object
-     */
     IOSysFH::~IOSysFH()
     {
         close();
     }
 
-    /**
-     * @brief Close underlying system file handle
-     */
+
     void
     IOSysFH::close()
     {
@@ -246,9 +217,8 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Read data from offset pos
-     * @details Data stored in following format:
+    /*
+     * Data stored in following format:
      *     Header 8 Bytes:
      *       0-2  (3B) Magic number (CXT for compressed, or UXT for uncompressed)
      *       3    (1B) Vector count (number of vectors that make up this block)
@@ -257,10 +227,6 @@ namespace springtail {
      *       4-8  (4B) Size of vector (compressed size if compressed)
      *     Data:
      *       ...       Data of size mentioned above
-     *
-     * @param pos          offset to read from
-     * @param decompressor Decompressor class for decompression
-     * @param callback     callback for completion
      */
     void
     IOSysFH::read(std::shared_ptr<IORequestRead> request,
@@ -387,14 +353,7 @@ namespace springtail {
         return;
     }
 
-    /**
-     * @brief Internal write used by write (overwrite) and append
-     * @param data           Vector containing pointers to data vectors
-     * @param compressor     Compressor if compression is going to be used
-     * @param offset         Offset to write at (either EOF for append or other for write)
-     * @param is_compressed  Should compression be attempted
-     * @return int           Number of bytes written (hdr + data)
-     */
+
     int
     IOSysFH::internal_write(std::vector<std::shared_ptr<std::vector<char>>> &data,
                             std::shared_ptr<Compressor> compressor,
@@ -479,13 +438,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Append data to end of file, file may be compressed or not
-     *
-     * @param data       vector of data vectors to write out
-     * @param compressor Compressor class to compress file
-     * @param callback   callback for completion
-     */
     void
     IOSysFH::append(std::shared_ptr<IORequestAppend> request, 
                     std::shared_ptr<Compressor> compressor) 
@@ -521,13 +473,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Overwrite data within a file, file MUST NOT be compressed
-     *
-     * @param offset     offset at which to write data
-     * @param data       vector of data vectors to write out (written out as one block)
-     * @param callback   callback for completion
-     */
     void
     IOSysFH::write(std::shared_ptr<IORequestWrite> request)
     {
@@ -558,10 +503,6 @@ namespace springtail {
     }
 
 
-    /**
-     * @brief Sync data to disk
-     * @param callback callback for completion
-     */
     void IOSysFH::sync(std::shared_ptr<IORequestSync> request)
     {
         // default success response
