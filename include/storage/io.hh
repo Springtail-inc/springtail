@@ -12,11 +12,16 @@
 
 namespace springtail {
 
+    /**
+     * @brief External IO interface.  IOHandle is a virtual FH, it may have no
+     * real (system FH) backing it.  Late binding to system FH done when IO call 
+     * is made.  Retrieved via IOMgr::open()
+     */
     class IOHandle {
     private:
-        std::filesystem::path _path;  // underlying file path
-        IOMgr::IO_MODE _mode;         // open mode (read/write/append)
-        bool _is_compressed;          // is the file compressable (append)
+        std::filesystem::path _path;  //!< underlying file path
+        IOMgr::IO_MODE _mode;         //!< open mode (read/write/append)
+        bool _is_compressed;          //!< is the file compressable (append)
 
     public:
         /**

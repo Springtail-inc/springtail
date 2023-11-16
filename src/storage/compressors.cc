@@ -12,23 +12,14 @@ namespace springtail {
         LZ4_freeStream(_lz4_stream);
     }
 
-    /**
-     * @brief Reset the compression stream; needs to be done for new blocks, otherwise
-     * it assumes previous 64KB is still in memory
-     */
+
     void
     Lz4Compressor::reset_stream()
     {
         LZ4_resetStream_fast(_lz4_stream);
     }
 
-    /**
-     * @brief Compress a source data vector into a destination vector
-     * 
-     * @param src  Source data vector
-     * @param dst  Destination data vector
-     * @return uint32_t Compressed size in bytes
-     */
+
     uint32_t
     Lz4Compressor::compress_raw(std::shared_ptr<std::vector<char>> src, std::vector<char> &dst)
     {
@@ -53,9 +44,7 @@ namespace springtail {
         return dst_size;
     }
 
-    /**
-     * @brief Deprecated; do not use
-     */
+
     uint32_t
     Lz4Compressor::compress_block(const std::vector<char> &src, std::vector<char> &dst)
     {
@@ -106,14 +95,7 @@ namespace springtail {
         LZ4_freeStreamDecode(_lz4_stream);
     }
 
-    /**
-     * @brief Decompress block, assume vectors are correct size
-     * @param src    src buffer holding compressed data
-     * @param dst    dst buffer empty, sized to full uncompressed size
-     * @param offset offset within dst buffer for this data
-     *
-     * @return size of uncompressed data
-     */
+
     uint32_t
     Lz4Decompressor::decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset)
     {
@@ -132,9 +114,6 @@ namespace springtail {
         return size;
     }
 
-    /**
-     * @brief Deprecated do not use
-     */
     uint32_t
     Lz4Decompressor::decompress_block(const char *src, std::vector<char> &dst)
     {

@@ -15,13 +15,17 @@
 #include <storage/compressors.hh>
 
 namespace springtail {
+
+    /**
+     * @brief System file handle; holds underlying file descriptor
+     */
     class IOSysFH {
     private:
-        std::filesystem::path _path;  // underlying file
-        int  _fd;            // underlying file descriptor
-        bool _is_compressed; // is underlying file compressable (append)
-        bool _is_dirty;      // is fh dirty (unsynced writes)
-        bool _is_readonly;   // is fh opened read-only
+        std::filesystem::path _path;  //!< underlying filename
+        int  _fd;                     //!< underlying file descriptor
+        bool _is_compressed;          //!< is underlying file compressable (append)
+        bool _is_dirty;               //!< is fh dirty (unsynced writes)
+        bool _is_readonly;            //!< is fh opened read-only
 
         /**
          * @brief Internal write used by write (overwrite) and append
@@ -36,7 +40,7 @@ namespace springtail {
                            uint64_t offset, bool is_compressed);
 
     public:
-        std::atomic<bool> is_busy;
+        std::atomic<bool> is_busy;  //!< indicates fh is busy with io for a worker
 
         /**
          * @brief Construct a new IOSysFH::IOSysFH object based on path, mode and whether
@@ -99,6 +103,11 @@ namespace springtail {
     };
 
 
+    /**
+     * @brief Cacheable file object, references a single file.  Holds multiple system
+     *        file handles for read, and a single fh for write.  Provides access to the
+     *        underlying file handles.
+     */
     class IOFile {
     private:
         /** file path for underlying file */
@@ -150,11 +159,24 @@ namespace springtail {
             : _path(path), _is_compressed(is_compressed), _in_use_count(0)
         {}
 
-        // in use count protected by IOMgr::_cache_mutex
-        // incremented in IOMgr::lookup
-        // decremented in IOMgr::release
+        /**
+         * @brief Indicates file object is in use by at least one worker
+         * 
+         * @return true  file object is in use (at least one FH in use)
+         * @return false file object is not in use
+         */
         inline bool in_use() { return _in_use_count > 0; }
+
+        /**
+         * @brief Atomically increment in use counter indicating a FH is in use
+         *        Incremented by IOMgr::lookup
+         */
         inline void incr_in_use() { _in_use_count++; }
+        
+        /**
+         * @brief Atomically decrement in use counter; Decremented by IOMgr::release
+         * 
+         */
         inline void decr_in_use() { _in_use_count--; assert(_in_use_count >= 0); }
 
         /**

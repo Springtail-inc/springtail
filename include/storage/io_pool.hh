@@ -24,12 +24,15 @@ namespace springtail {
     class IOSysFH;
     class IOHandle;
 
+    /**
+     * @brief Worker thread
+     */
     class IOWorker {
     private:
-        std::shared_ptr<Compressor> _compressor;       // compressor object
-        std::shared_ptr<Decompressor> _decompressor;   // decompressor object
+        std::shared_ptr<Compressor> _compressor;       //!< compressor object
+        std::shared_ptr<Decompressor> _decompressor;   //!< decompressor object
 
-        bool _shutdown = false;   // shutdown flag for worker
+        bool _shutdown = false;   //!< shutdown flag for worker
 
         /**
          * @brief Worker thread internal issue_request call
@@ -72,11 +75,14 @@ namespace springtail {
         void process_request(std::shared_ptr<IORequest> request);
     };
 
+    /**
+     * @brief Request queue; worker blocks on queue pop; IOMgr enqueues IORequest
+     */
     class IORequestQueue {
     private:
-        std::queue<std::shared_ptr<IORequest>> _queue;  // underlying request queue
-        std::condition_variable _cv;                    // condition variable workers block on
-        std::mutex _mutex;                              // mutex protecting condition variable & queue
+        std::queue<std::shared_ptr<IORequest>> _queue;  //!< underlying request queue
+        std::condition_variable _cv;                    //!< condition variable workers block on
+        std::mutex _mutex;                              //!< mutex protecting condition variable & queue
     public:
         /**
          * @brief Push an IO request onto the worker pool queue
@@ -96,12 +102,14 @@ namespace springtail {
         void signal_all() { _cv.notify_all(); };
     };
 
-
+    /**
+     * @brief IO Pool; pool of workers and threads; contains request queue
+     */
     class IOPool {
     private:
-        IORequestQueue _queue;               // Request queue
-        std::vector<std::thread> _threads;   // List of worker threads
-        std::vector<std::shared_ptr<IOWorker>> _workers;  // List of workers
+        IORequestQueue _queue;               //!< Request queue
+        std::vector<std::thread> _threads;   //!< List of worker threads
+        std::vector<std::shared_ptr<IOWorker>> _workers;  //!< List of workers
     public:
 
         /**
@@ -140,9 +148,9 @@ namespace springtail {
         /** IO Mode for opening a file; APPEND appends to end of file; WRITE allows overwrite */
         enum IO_MODE { READ, APPEND, WRITE };
 
-        static const int NUM_THREADS = 1;             // initial thread count, use resize to change
-        static const int MAX_FILE_OBJECTS = 32;       // initial file object in file cache, use resize to change
-        static const int MAX_FILE_HANDLES_PER_FILE=4; // number of read file handles per file object
+        static const int NUM_THREADS = 1;             //!< initial thread count, use resize to change
+        static const int MAX_FILE_OBJECTS = 32;       //!< initial file object in file cache, use resize to change
+        static const int MAX_FILE_HANDLES_PER_FILE=4; //!< number of read file handles per file object
 
         /**
          * @brief getInstance() of singleton IOMgr; create if it doesn't exist.
@@ -219,8 +227,8 @@ namespace springtail {
         void resize_cache(int size) { _file_cache.resize(size); };
 
     protected:
-        static IOMgr *_instance;             // static instance (singleton)
-        static std::mutex _instance_mutex;   // protects lookup/creation of singleton _instance
+        static IOMgr *_instance;             //!< static instance (singleton)
+        static std::mutex _instance_mutex;   //!< protects lookup/creation of singleton _instance
 
         /**
          * @brief Construct a new IOMgr object
@@ -239,9 +247,9 @@ namespace springtail {
         ~IOMgr(){};
 
     private:
-        IOPool _thread_pool;  // worker thread pool
+        IOPool _thread_pool;  //!< worker thread pool
 
-        LruObjectCache<std::filesystem::path, IOFile> _file_cache; // file object cache
+        LruObjectCache<std::filesystem::path, IOFile> _file_cache; //!< file object cache
 
         std::mutex _cache_mutex;  // mutex to protect file object cache lookups/inserts
 
