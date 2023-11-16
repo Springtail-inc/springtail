@@ -105,6 +105,17 @@ namespace springtail {
         }
 
         /**
+         * @brief Resize the cache, doesn't evict if too many entries.  
+         *        Eviction will happen on next insert.
+         * @param size new max size of cache
+         */
+        void
+        resize(int size)
+        {
+            _cache_max = size;
+        }
+
+        /**
          * @brief Insert entry
          *
          * @param id     key for entry

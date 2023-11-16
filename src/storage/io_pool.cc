@@ -17,27 +17,48 @@
 
 namespace springtail {
 
+    /**
+     * @brief Worker thread main loop; wait on queue, process request
+     * @param worker Worker pointer
+     * @param queue IOQueue reference
+     */
     static void
     worker_fn(std::shared_ptr<IOWorker> worker, IORequestQueue &queue)
     {
         while (true) {
+            // before blocking check if worker should shutdown
+            if (worker->is_shutdown()) {
+                return;
+            }
+
             std::shared_ptr<IORequest> request = queue.pop();
+            if (request == nullptr) {
+                // just a wakeup so we can check if we should shutdown
+                continue;
+            }
+
+            // shutdown message, shutdown
             if (request->type == IORequest::IOType::SHUTDOWN) {
                 return;
             }
+
+            // process request
             worker->process_request(request);
         }
     }
 
+    /**
+     * @brief Construct a new IOPool::IOPool object; initialize the workers
+     * @param threads Number of initial workers
+     */
     IOPool::IOPool(int threads)
     {
-        for (int i = 0; i < threads; i++) {
-            std::shared_ptr<IOWorker> worker = std::make_shared<IOWorker>();
-            _workers.push_back(worker);
-            _threads.push_back(std::thread(worker_fn, worker, std::ref(_queue)));
-        }
+        resize(threads);
     }
 
+    /**
+     * @brief Destroy the IOPool::IOPool object; queue a SHUTDOWN IO request for each worker.
+     */
     IOPool::~IOPool()
     {
         for (int i = 0; i < _threads.size(); i++) {
@@ -50,6 +71,60 @@ namespace springtail {
         }
     }
 
+    /**
+     * @brief Grow or shrink the pool; will block if downsizing until
+     * threads are done
+     */
+    void
+    IOPool::resize(int size)
+    {
+        std::scoped_lock<std::mutex> lock(_resize_mutex);
+
+        int old_size = _threads.size();
+        
+        if (old_size == size) {
+            return;
+        }
+
+        if (old_size > size) {
+            // shutdown some workers
+            std::vector<std::thread> shutdown_threads;
+
+            // pop workers off pool vectors
+            std::move(_threads.begin(), _threads.begin() + old_size-size,
+                      std::back_inserter(shutdown_threads));
+
+            for (int i = 0; i < old_size - size; i++) {
+                std::shared_ptr<IOWorker> w = _workers.back();
+                _workers.pop_back();
+
+                w->set_shutdown(); // set shutdown flag
+            }
+
+            // send an interrupt message to all workers
+            // can't interrupt just a single targetted worker
+            _queue.signal_all();
+
+            // wait for specific threads to exit
+            for (auto &&t: shutdown_threads) {
+                t.join();
+            }
+
+            return;
+        }
+
+        if (size > old_size) {
+            // startup some workers
+            for (int i = old_size; i < size; i++) {
+                std::shared_ptr<IOWorker> worker = std::make_shared<IOWorker>();
+                _workers.push_back(worker);
+                _threads.push_back(std::thread(worker_fn, worker, std::ref(_queue)));
+            }
+            
+            return;
+        }
+    }
+
     /* static member initialization must happen outside of class */
     IOMgr* IOMgr::_instance {nullptr};
     std::mutex IOMgr::_instance_mutex;
@@ -59,7 +134,7 @@ namespace springtail {
      * @return instance of IOMgr
      */
     IOMgr *
-    IOMgr::getInstance()
+    IOMgr::get_instance()
     {
         std::scoped_lock<std::mutex> lock(_instance_mutex);
 
@@ -70,6 +145,11 @@ namespace springtail {
         return _instance;
     }
 
+    /**
+     * @brief Shutdown IOMgr instance.  Delete internal instance.
+     *        Shuts down worker pool and FH cache (by calling their destructors).
+     *        Worker pool will drain before shutting down each thread.
+     */
     void
     IOMgr::shutdown()
     {
@@ -81,6 +161,14 @@ namespace springtail {
         }
     }
 
+     /**
+     * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
+     * 
+     * @param path        Path of file to open
+     * @param mode        Mode of file (read, write, append)
+     * @param compressed  Is this a compressed file (boolean)
+     * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
+     */
      std::shared_ptr<IOHandle> 
      IOMgr::open(const char *path, IO_MODE mode, bool compressed)
      {
@@ -89,6 +177,14 @@ namespace springtail {
      }
 
 
+    /**
+     * @brief Open a file, retrieve virtual FH from IOMgr singleton instance
+     * 
+     * @param path        Path of file to open
+     * @param mode        Mode of file (read, write, append)
+     * @param compressed  Is this a compressed file (boolean)
+     * @return std::shared_ptr<IOHandle> Ptr to IOHandle representing file
+     */
     std::shared_ptr<IOHandle>
     IOMgr::open(const std::filesystem::path &path, IO_MODE mode, bool compressed)
     {
@@ -96,7 +192,8 @@ namespace springtail {
             throw StorageError();
         }
 
-        // XXX need to figure out how we know a file is compressed
+        // XXX need to figure out how we know a file is compressable
+        // right now it is based on caller passing flag in.
         return std::make_shared<IOHandle>(path, mode, compressed);
     }
 
@@ -136,10 +233,15 @@ namespace springtail {
     }
 
 
+    /**
+     * @brief Remove file at path; 
+     * NOTE: currently no checking for ongoing IO or locking
+     * @param path Path to remove
+     */
     void
     IOMgr::remove(const std::filesystem::path &path)
     {
-        // TBD
+        std::filesystem::remove(path);
     }
 
 
@@ -166,7 +268,10 @@ namespace springtail {
         return false;
     }
 
-
+    /**
+     * @brief Push an IO request onto the worker pool queue
+     * @param request IO request to enqueue
+     */
     void
     IORequestQueue::push(std::shared_ptr<IORequest> request)
     {
@@ -178,16 +283,26 @@ namespace springtail {
         _cv.notify_one();
     }
 
-
+    /**
+     * @brief Pop an IO request off the worker pool queue; or block if empty
+     * 
+     * @return std::shared_ptr<IORequest> ptr to the IORequest
+     */
     std::shared_ptr<IORequest>
     IORequestQueue::pop()
     {
         // lock queue lock
         std::unique_lock<std::mutex> queue_lock(_mutex);
+        
         // block until queue is not empty
-        _cv.wait(queue_lock, [&]{ return !_queue.empty();});
+        // or until queue is signalled to wake all
+        _cv.wait(queue_lock);
 
         // extract first element from queue and return it
+        if (_queue.empty()) {
+            return nullptr;
+        }
+
         std::shared_ptr<IORequest> val = _queue.front();
         _queue.pop();
 
@@ -242,7 +357,11 @@ namespace springtail {
         }
     }
 
-
+    /**
+     * @brief Process the IO request.  Lookup file in cache, get FH, issue the request
+     * 
+     * @param request IO request to process
+     */
     void
     IOWorker::process_request(std::shared_ptr<IORequest> request)
     {
@@ -252,7 +371,7 @@ namespace springtail {
         }
 
         // get IOFile
-        IOMgr *mgr = IOMgr::getInstance();
+        IOMgr *mgr = IOMgr::get_instance();
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use

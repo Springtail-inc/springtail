@@ -25,7 +25,7 @@ namespace springtail {
 
     class IORequest {
     public:
-        enum IOType {READ, APPEND, WRITE, SYNC, SHUTDOWN};
+        enum IOType { READ, APPEND, WRITE, SYNC, SHUTDOWN };
 
         IOType                type;
         std::filesystem::path path;
@@ -34,7 +34,7 @@ namespace springtail {
         IORequest(IOType type, const std::filesystem::path &path, bool is_compressed)
             : type(type), path(path), compressed(is_compressed) {}
 
-        IORequest() : type(IOType::SHUTDOWN) {}
+        IORequest(IOType type=IOType::SHUTDOWN) : type (type) {}
 
         virtual ~IORequest() = default;
     };

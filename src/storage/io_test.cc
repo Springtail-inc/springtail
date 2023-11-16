@@ -8,10 +8,17 @@
 #include <storage/io_request.hh>
 #include <storage/io_pool.hh>
 
+/**
+ * @brief Helper to generate random data
+ * 
+ * @param len  size of generated data
+ * @return std::shared_ptr<std::vector<char>>  Ptr to vector of random data
+ */
 std::shared_ptr<std::vector<char>>
 gen_data(int len)
 {
-    std::string chars = "ABC"; //"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    // set of chars to pick from; too many and data is not compressable
+    std::string chars = "ABC0123"; 
     std::mt19937 generator{std::random_device{}()};
     std::uniform_int_distribution<> dist(0, chars.size()-1);
 
@@ -24,6 +31,14 @@ gen_data(int len)
     return std::make_shared<std::vector<char>>(data);
 }
 
+/**
+ * @brief Compare two data vectors
+ * 
+ * @param data1 First data vector
+ * @param data2 Second data vector
+ * @return true if vectors contain same data
+ * @return false if vectors do not contain same data
+ */
 bool
 compare_data(std::shared_ptr<std::vector<char>> data1,
              std::shared_ptr<std::vector<char>> data2) 
@@ -38,7 +53,15 @@ compare_data(std::shared_ptr<std::vector<char>> data1,
     return true;
 }
 
-
+/**
+ * @brief Append data to fh synchronously, then read it back and compare results
+ * 
+ * @param fh_write FH for writing (append)
+ * @param fh_read  FH for reading
+ * @param len      Length of random data to generate
+ * @param count    Number of vectors to generate
+ * @return std::shared_ptr<springtail::IOResponseAppend> IOResponseAppend ptr
+ */
 std::shared_ptr<springtail::IOResponseAppend>
 sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
             std::shared_ptr<springtail::IOHandle> fh_read,
@@ -72,6 +95,15 @@ sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
     return write_response;
 }
 
+/**
+ * @brief Write (overwrite) data to fh synchronously, then read it back and compare results
+ * 
+ * @param fh_write FH for writing (write)
+ * @param fh_read  FH for reading
+ * @param len      Length of random data to generate
+ * @param count    Number of vectors to generate
+ * @return std::shared_ptr<springtail::IOResponseAppend> IOResponseWrite ptr
+ */
 std::shared_ptr<springtail::IOResponseWrite>
 sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
            std::shared_ptr<springtail::IOHandle> fh_read,
@@ -116,7 +148,9 @@ int main(void)
     std::filesystem::remove(FILE1);
     std::filesystem::remove(FILE2);
 
-    springtail::IOMgr *IOMgr = springtail::IOMgr::getInstance();
+    springtail::IOMgr *IOMgr = springtail::IOMgr::get_instance();
+    
+    // open first file for append
     std::shared_ptr<springtail::IOHandle> fh_append = IOMgr->open(FILE1, springtail::IOMgr::IO_MODE::APPEND, true);
     std::shared_ptr<springtail::IOHandle> fh_read = IOMgr->open(FILE1, springtail::IOMgr::IO_MODE::READ, true);    
 
@@ -130,7 +164,7 @@ int main(void)
 
     append_response = sync_append(fh_append, fh_read, 15, 3);  
 
-
+    // open second file for write (overwrite)
     std::shared_ptr<springtail::IOHandle> fh_write = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::WRITE, false);
     fh_read = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::READ, false);
     
@@ -140,15 +174,12 @@ int main(void)
     std::shared_ptr<springtail::IOResponseWrite> write_response = sync_write(fh_write, fh_read, 512, 0);
     uint64_t owrite_offset = write_response->next_offset;
 
-    std::cout << " **resp next offset=" << write_response->next_offset << std::endl;
-
     write_response = sync_write(fh_write, fh_read, 1024, owrite_offset);
-
-    std::cout << " **resp next offset=" << write_response->next_offset << std::endl;
 
     write_response = sync_write(fh_write, fh_read, 15, write_response->next_offset);
     uint64_t end_offset = write_response->next_offset;
 
+    // overwrite data from previous write
     write_response = sync_write(fh_write, fh_read, 1024, owrite_offset);    
 
     write_response = sync_write(fh_write, fh_read, 256, end_offset, 3);    

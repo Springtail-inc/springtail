@@ -30,6 +30,8 @@ namespace springtail {
         std::shared_ptr<Compressor> _compressor;
         std::shared_ptr<Decompressor> _decompressor;
 
+        bool _shutdown = false;
+
         void _issue_request(std::shared_ptr<IORequest> request, 
                             std::shared_ptr<IOSysFH> fh);
 
@@ -41,6 +43,24 @@ namespace springtail {
 
         ~IOWorker() { }
 
+        /**
+         * @brief Set shutdown flag to true
+         */
+        void set_shutdown() { _shutdown = true; }
+
+        /**
+         * @brief Is shutdown set on this worker
+         * 
+         * @return true if set
+         * @return false if not set
+         */
+        bool is_shutdown() { return _shutdown; }
+
+        /**
+         * @brief Process IO request
+         * 
+         * @param request IO request to process
+         */
         void process_request(std::shared_ptr<IORequest> request);
     };
 
@@ -52,6 +72,7 @@ namespace springtail {
     public:
         void push(std::shared_ptr<IORequest> request);
         std::shared_ptr<IORequest> pop();
+        void signal_all() { _cv.notify_all(); };
     };
 
 
@@ -63,6 +84,15 @@ namespace springtail {
     public:
         IOPool(int threads);
         ~IOPool();
+
+        std::mutex _resize_mutex;
+
+        /**
+         * @brief Resize the worker pool
+         * 
+         * @param size new size
+         */
+        void resize(int size);
 
         inline void queue(std::shared_ptr<IORequest> request) {
             _queue.push(request);
@@ -80,7 +110,7 @@ namespace springtail {
         static const int MAX_FILE_OBJECTS = 32;
         static const int MAX_FILE_HANDLES_PER_FILE=4;
 
-        static IOMgr *getInstance();
+        static IOMgr *get_instance();
 
         // no create call, first write, after open for write, will do the create
         std::shared_ptr<IOHandle> open(const std::filesystem::path &path, IO_MODE mode, bool compressed);
@@ -101,6 +131,18 @@ namespace springtail {
          * message and waiting for it to complete in all threads.
          */
         void shutdown();
+
+        /**
+         * @brief Grow or shrink the pool
+         * @param size new size
+         */
+        void resize_pool(int size) { _thread_pool.resize(size); }
+
+        /**
+         * @brief Resize filehandle cache
+         * @param size new size
+         */
+        void resize_cache(int size) { _file_cache.resize(size); };
 
     protected:
         static IOMgr *_instance;
