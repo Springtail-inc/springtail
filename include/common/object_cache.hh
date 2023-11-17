@@ -7,24 +7,42 @@
 #include <boost/container_hash/hash.hpp>
 
 namespace springtail {
-    /** The template interface for a cache of object pointers that ensures size limit based on provided object sizes. */
+    /** 
+     * @brief LRU object cache
+     * @details The template interface for a cache of object pointers that ensures size 
+     *          limit based on provided object sizes.
+     */
     template <class IdType, class EntryType>
     class ObjectCache
     {
     public:
         virtual ~ObjectCache() { }
 
-        virtual void insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size) = 0;
+        /**
+         * @brief Insert method
+         * @param id     ID (key)
+         * @param entry  Value
+         * @param size   Size of value (default of 1 to count entries)
+         */
+        virtual void insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size=1) = 0;
 
+        /**
+         * @brief Lookup by ID (key)
+         * @param id ID (key)
+         * @return std::shared_ptr<EntryType> value result or nullptr if not found
+         */
         virtual std::shared_ptr<EntryType> get(const IdType &id) = 0;
     };
 
 
-    /** A least-recently-used policy object cache. */
+    /** 
+     * @brief A least-recently-used policy object cache.
+     */
     template <class IdType, class EntryType, class Hash=boost::hash<IdType>>
     class LruObjectCache : public ObjectCache<IdType, EntryType>
     {
     private:
+        /** Cache entry typedef, tuple of key, value and size */
         typedef std::tuple<IdType, std::shared_ptr<EntryType>, uint64_t> CacheEntry;
 
         std::unordered_map<IdType, typename std::list<CacheEntry>::iterator, Hash> _lookup; ///< A map that holds the entries.
@@ -54,6 +72,8 @@ namespace springtail {
         /**
          * @brief Evict least used item (back of _cache list); if callback is set, check callback first
          * to make sure it is evictable (callback returns true)
+         * @return true if an evictable entry is found
+         * @return false if no evictable entry is found
          */
         bool
         _evict_next() {
@@ -85,7 +105,7 @@ namespace springtail {
 
     public:
         /**
-         * @brief Construct LRU cache
+         * @brief Construct a new Lru Object Cache object
          * @param max max size of cache, size is based on entry size at insert
          * @param callback optional callback for eviction, return true/false if eviction ok
          */
@@ -93,9 +113,16 @@ namespace springtail {
             : _cache_max(max), _callback(callback)
         { }
 
+        /**
+         * @brief Construct a new Lru Object Cache object
+         * @param max max size of cache, size is based on entry size at insert
+         */
         LruObjectCache(uint64_t max) : _cache_max(max)
         { }
 
+        /**
+         * @brief Destroy the Lru Object Cache object; evict all entries
+         */
         ~LruObjectCache()
         {
             // evict all of the entries before destruction
@@ -105,7 +132,7 @@ namespace springtail {
         }
 
         /**
-         * @brief Resize the cache, doesn't evict if too many entries.  
+         * @brief Resize the cache, doesn't evict if too many entries exist (if cache oversize) 
          *        Eviction will happen on next insert.
          * @param size new max size of cache
          */
@@ -117,7 +144,6 @@ namespace springtail {
 
         /**
          * @brief Insert entry
-         *
          * @param id     key for entry
          * @param entry  value for entry
          * @param size   optional size for each entry; a size=1 will use # entries for eviction
@@ -140,7 +166,6 @@ namespace springtail {
 
         /**
          * @brief Get entry from cache based on key ID
-         *
          * @param id key to lookup entry
          * @return entry (value)
          */

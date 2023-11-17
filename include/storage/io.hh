@@ -13,7 +13,8 @@
 namespace springtail {
 
     /**
-     * @brief External IO interface.  IOHandle is a virtual FH, it may have no
+     * @brief External IO interface.  
+     * @details IOHandle is a virtual FH, it may have no
      * real (system FH) backing it.  Late binding to system FH done when IO call 
      * is made.  Retrieved via IOMgr::open()
      */

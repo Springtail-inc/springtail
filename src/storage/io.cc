@@ -107,6 +107,7 @@ namespace springtail {
     {
         auto &&future = async_read(pos, {});
         future.wait();
+        std::cout << "did future.wait\n";        
         return future.get();
     }
 

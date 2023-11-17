@@ -21,11 +21,11 @@ namespace springtail {
      */
     class IOSysFH {
     private:
-        std::filesystem::path _path;  //!< underlying filename
-        int  _fd;                     //!< underlying file descriptor
-        bool _is_compressed;          //!< is underlying file compressable (append)
-        bool _is_dirty;               //!< is fh dirty (unsynced writes)
-        bool _is_readonly;            //!< is fh opened read-only
+        std::filesystem::path _path;  ///< underlying filename
+        int  _fd;                     ///< underlying file descriptor
+        bool _is_compressed;          ///< is underlying file compressable (append)
+        bool _is_dirty;               ///< is fh dirty (unsynced writes)
+        bool _is_readonly;            ///< is fh opened read-only
 
         /**
          * @brief Internal write used by write (overwrite) and append
@@ -33,14 +33,22 @@ namespace springtail {
          * @param compressor     Compressor if compression is going to be used
          * @param offset         Offset to write at (either EOF for append or other for write)
          * @param is_compressed  Should compression be attempted
-         * @return int           Number of bytes written (hdr + data)
+         * @return int           Number of bytes written (hdr + data);
+         *                       > 0 success, -1 io error with errno set, -2 decode error
          */
-        int internal_write(std::vector<std::shared_ptr<std::vector<char>>> &data,
-                           std::shared_ptr<Compressor> compressor,
-                           uint64_t offset, bool is_compressed);
+        int _internal_write(std::vector<std::shared_ptr<std::vector<char>>> &data,
+                            std::shared_ptr<Compressor> compressor,
+                            uint64_t offset, bool is_compressed);
+
+        /**
+         * @brief Compute hash over vector of vector (hash of hashes)
+         * @param data vector of data vectors
+         * @return uint64_t hash (computed as hash of hashes)
+         */
+        uint64_t _compute_hash(std::vector<std::shared_ptr<std::vector<char>>> data);
 
     public:
-        std::atomic<bool> is_busy;  //!< indicates fh is busy with io for a worker
+        std::atomic<bool> is_busy;  ///< indicates fh is busy with io for a worker
 
         /**
          * @brief Construct a new IOSysFH::IOSysFH object based on path, mode and whether
@@ -66,7 +74,6 @@ namespace springtail {
 
         /**
          * @brief Overwrite data within a file, file MUST NOT be compressed
-         *
          * @param offset     offset at which to write data
          * @param data       vector of data vectors to write out (written out as one block)
          * @param callback   callback for completion
@@ -75,7 +82,6 @@ namespace springtail {
 
         /**
          * @brief Append data to end of file, file may be compressed or not
-         *
          * @param data       vector of data vectors to write out
          * @param compressor Compressor class to compress file
          * @param callback   callback for completion
@@ -95,7 +101,6 @@ namespace springtail {
 
         /**
          * @brief Is FH opened read-only
-         * 
          * @return true if FH is readonly
          * @return false if FH is writeable
          */
@@ -151,7 +156,6 @@ namespace springtail {
     public:
         /**
          * @brief Construct a new IOFile object
-         * 
          * @param path          Path for underlying file
          * @param is_compressed Is file compressable
          */
@@ -161,7 +165,6 @@ namespace springtail {
 
         /**
          * @brief Indicates file object is in use by at least one worker
-         * 
          * @return true  file object is in use (at least one FH in use)
          * @return false file object is not in use
          */

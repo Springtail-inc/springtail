@@ -5,14 +5,17 @@
 #include <filesystem>
 #include <future>
 #include <memory>
+#include <iostream>
 #include <cerrno>
 
 namespace springtail {
 
     /** IO Status set in response; important keep success == 0 */
-    enum IOStatus {SUCCESS=0, ERROR, ERR_SEEK, ERR_NOENT, ERR_BADFD, ERR_ACCESS, ERR_ARGS, ERR_DECODE};
+    enum IOStatus { SUCCESS=0, ERROR, 
+                    ERR_NOENT, ERR_ACCESS, ERR_ARGS,
+                    ERR_NOSPC, ERR_BADFD, ERR_DECODE, ERR_CKSUM };
 
-    // helper types for callbacks; to improve readability
+    // forward definitions of response types for callbacks; to improve readability
     class IOResponseWrite;
     class IOResponseAppend;
     class IOResponseRead;
@@ -36,13 +39,12 @@ namespace springtail {
         /** Type of IO request, SHUTDOWN has no data, indicates worker should shutdown */
         enum IOType { READ, APPEND, WRITE, SYNC, SHUTDOWN };
 
-        IOType                type;         //!< type of IO
-        std::filesystem::path path;         //!< underlying filename
-        bool                  compressed;   //!< whether file is compressable or not
+        IOType                type;         ///< type of IO
+        std::filesystem::path path;         ///< underlying filename
+        bool                  compressed;   ///< whether file is compressable or not
 
         /**
          * @brief Construct a new IORequest object
-         * 
          * @param type IO type
          * @param path file name
          * @param is_compressed whether file is compressable or not
@@ -52,7 +54,6 @@ namespace springtail {
 
         /**
          * @brief Construct a new IORequest object
-         * 
          * @param type IO type (optional, default is SHUTDOWN type)
          */
         IORequest(IOType type=IOType::SHUTDOWN) : type (type) {}
@@ -65,39 +66,51 @@ namespace springtail {
      */
     class IOResponse {
     public:
-        IORequest::IOType     type;    //!< IO type
-        std::filesystem::path path;    //!< underlying filename
-        IOStatus              status;  //!< status of request
+        IORequest::IOType     type;    ///< IO type
+        std::filesystem::path path;    ///< underlying filename
+        IOStatus              status;  ///< status of request
 
+        std::shared_ptr<IORequest> request; ///< Ptr to request, keeps promise in scope
+        
         /**
          * @brief Construct a new IOResponse object
-         * 
-         * @param type   type of IO
-         * @param path   underlying file path
-         * @param status status (default=SUCCESS)
+         * @param request ptr to IORequest object; extract type and path from it
+         * @param status status (default=IOStatus::Error)
          */
-        IOResponse(IORequest::IOType type, const std::filesystem::path &path, 
-                   IOStatus status=IOStatus::SUCCESS)
-            : type(type), path(path), status(status) {}
+        IOResponse(std::shared_ptr<IORequest> request, IOStatus status=IOStatus::ERROR)
+            : type(request->type), path(request->path), status(status), request(request) {}
 
         /**
          * @brief Set the status object
-         * 
          * @param iostatus new status
          */
         inline void set_status(IOStatus iostatus) { status = iostatus; }
 
         /**
          * @brief Set the status object based on errno.
-         * 
          * @param fh_errno errno as reported by system call
          */
         inline void set_status(int fh_errno) 
         {
             if (fh_errno == -1) { return; }
-            switch (fh_errno) {  // XXX need to add additional mappings
+            switch (fh_errno) {
                 case 0:
                     status = IOStatus::SUCCESS;
+                    break;
+                case EBADF:  // invalid file descriptor
+                    status = IOStatus::ERR_BADFD;
+                    break;
+                case EINVAL: // invalid arguments
+                    status = IOStatus::ERR_ARGS;
+                    break;
+                case EPERM:  // no permission
+                    status = IOStatus::ERR_ACCESS;
+                    break;
+                case ENOSPC: // ran out of space
+                    status = IOStatus::ERR_NOSPC;
+                    break;
+                case ENOENT: // no file exists
+                    status = IOStatus::ERR_NOENT;
                     break;
                 default:
                     status = IOStatus::ERROR;
@@ -106,13 +119,77 @@ namespace springtail {
 
         /**
          * @brief Is status success
-         * 
          * @return true   if success
          * @return false  if failure
          */
         inline bool is_success() { return status == IOStatus::SUCCESS; }
     };
 
+    /**
+     * @brief Template to help store the promise and callback and handle the response completion;
+     *        Inherits from IORequest
+     * @tparam T IOResponse type
+     */
+    template <typename T>
+    class IORequestTemplate : public IORequest {
+    public:
+        std::promise<std::shared_ptr<T>> promise;  ///< promise for async completion
+        std::function<void(std::shared_ptr<T> response)> callback; ///< callback (optional)
+
+        IORequestTemplate(IOType type, const std::filesystem::path &path, bool is_compressed,
+                          std::function<void(std::shared_ptr<T> response)> callback)
+            : IORequest(type, path, is_compressed), callback(callback) {}
+
+        /**
+         * @brief Complete the request, issue the callback if exists, set the value of the promise
+         * @param res       Ptr to result response
+         * @param fh_errno  system call errno (or -1 if no error)
+         */
+        void complete(std::shared_ptr<T> res, int fh_errno=-1) { 
+            res->set_status(fh_errno);
+            promise.set_value(res);
+            if (callback) {
+                callback(res);
+            }
+        }
+
+        /**
+         * @brief Complete the request, issue the callback if exists, set value of the promise
+         * @param res      Ptr to result response
+         * @param status   IOStatus status
+         */
+        void complete(std::shared_ptr<T> res, IOStatus status) { 
+            res->set_status(status); 
+            promise.set_value(res);
+            if (callback) {
+                callback(res);
+            }
+        }
+    };
+
+    /**
+     * @brief Write request
+     */
+    class IORequestWrite : public IORequestTemplate<IOResponseWrite> {
+    public:
+        /** offset of this write */
+        uint64_t                                        offset;
+
+        /** data vectors */
+        std::vector<std::shared_ptr<std::vector<char>>> data;
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
+                       uint64_t offset, std::shared_ptr<std::vector<char>> datavec, 
+                       io_write_callback_fn cb) 
+            : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
+              offset(offset) { data.push_back(datavec); }
+
+        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
+                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
+                       io_write_callback_fn cb) 
+            : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
+              offset(offset), data(data) {}
+    };
 
     /**
      * @brief Write response
@@ -125,59 +202,33 @@ namespace springtail {
         /** next offset after this write (length of write data + hdr) */
         uint64_t next_offset;
 
-        IOResponseWrite(std::filesystem::path &path, uint64_t offset, uint64_t next_offset, IOStatus status=IOStatus::SUCCESS)
-            : IOResponse(IORequest::IOType::WRITE, path, status), offset(offset), next_offset(next_offset) {}
-
-        IOResponseWrite(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
-            : IOResponse(IORequest::IOType::WRITE, path, status) {}
+        /**
+         * @brief Construct a new IOResponseWrite object
+         * @param request IORequestWrite to be used in callback or future
+         * @param status  optional status, default=IOStatus::ERROR
+         */
+        IOResponseWrite(std::shared_ptr<IORequestWrite> request, IOStatus status=IOStatus::ERROR)
+            : IOResponse(request, status), offset(request->offset) {}
     };
 
     /**
-     * @brief Write request
+     * @brief Append request
      */
-    class IORequestWrite : public IORequest {
+    class IORequestAppend : public IORequestTemplate<IOResponseAppend> {
     public:
-        uint64_t                                        offset;   //!< offset of this write
-        std::vector<std::shared_ptr<std::vector<char>>> data;     //!< data vectors
-        std::promise<std::shared_ptr<IOResponseWrite>>  promise;  //!< promise for async completion
-        io_write_callback_fn                            callback; //!< callback (optional)
+        /** Data vectors */
+        std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
-                       uint64_t offset, std::shared_ptr<std::vector<char>> datavec, 
-                       io_write_callback_fn cb) 
-            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
-              offset(offset), callback(cb) { data.push_back(datavec); }
+        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+                        std::shared_ptr<std::vector<char>> datavec, 
+                        io_append_callback_fn cb) 
+            : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb)
+              { data.push_back(datavec); }
 
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
-                uint64_t offset, std::shared_ptr<std::vector<char>> datavec) 
-            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
-              offset(offset) { data.push_back(datavec); }
-
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
+        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
                        const std::vector<std::shared_ptr<std::vector<char>>> &data, 
-                       io_write_callback_fn cb) 
-            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
-              offset(offset), data(data), callback(cb) {}
-
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
-                       const std::vector<std::shared_ptr<std::vector<char>>> &data) 
-            : IORequest(IORequest::IOType::WRITE, path, is_compressed),
-              offset(offset), data(data) {}
-
-        /**
-         * @brief Complete the request, issue the callback if exists, set the value of the promise
-         * 
-         * @param res       Ptr to result response
-         * @param fh_errno  system call errno (or -1 if no error)
-         */
-        inline void complete(std::shared_ptr<IOResponseWrite> res, int fh_errno=-1)
-        {
-            res->set_status(fh_errno);
-            promise.set_value(res);
-            if (callback) {
-                callback(res);
-            }
-        }
+                       io_append_callback_fn cb) 
+            : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb), data(data) {}
     };
 
     /**
@@ -191,57 +242,27 @@ namespace springtail {
         /** next offset -- also EOF marker */
         uint64_t next_offset;
 
-        IOResponseAppend(std::filesystem::path &path, uint64_t offset, uint64_t next_offset, IOStatus status=IOStatus::SUCCESS)
-            : IOResponse(IORequest::IOType::APPEND, path, status), offset(offset), next_offset(next_offset) {}
-
-        IOResponseAppend(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
-            : IOResponse(IORequest::IOType::APPEND, path, status) {}
+        /**
+         * @brief Construct a new IOResponseAppend object
+         * @param request IORequestAppend to be used in callback or future
+         * @param status  optional status, default=IOStatus::ERROR
+         */
+        IOResponseAppend(std::shared_ptr<IORequestAppend> request, IOStatus status=IOStatus::ERROR)
+            : IOResponse(request, status) {}
     };
 
     /**
-     * @brief Append request
+     * @brief Read request
      */
-    class IORequestAppend : public IORequest {
+    class IORequestRead : public IORequestTemplate<IOResponseRead> {
     public:
-        std::vector<std::shared_ptr<std::vector<char>>> data;     //!< data vectors
-        std::promise<std::shared_ptr<IOResponseAppend>> promise;  //!< promise for async completion
-        io_append_callback_fn callback;                           //!< callback (optional)
+        /** offset of this read */
+        uint64_t offset; 
 
-        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
-                        std::shared_ptr<std::vector<char>> datavec, 
-                        io_append_callback_fn cb) 
-            : IORequest(IORequest::IOType::APPEND, path, is_compressed),
-              callback(cb) { data.push_back(datavec); }
-
-        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
-                        std::shared_ptr<std::vector<char>> datavec) 
-            : IORequest(IORequest::IOType::APPEND, path, is_compressed)
-        { data.push_back(datavec); }
-
-        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
-                       const std::vector<std::shared_ptr<std::vector<char>>> &data, 
-                       io_append_callback_fn cb) 
-            : IORequest(IORequest::IOType::APPEND, path, is_compressed),
-              data(data), callback(cb) {}
-
-        IORequestAppend(std::filesystem::path &path, bool is_compressed,
-                        const std::vector<std::shared_ptr<std::vector<char>>> &data) 
-            : IORequest(IORequest::IOType::APPEND, path, is_compressed), data(data) {}
-
-        /**
-         * @brief Complete the request, issue the callback if exists, set the value of the promise
-         * 
-         * @param res       Ptr to result response
-         * @param fh_errno  system call errno (or -1 if no error)
-         */
-        inline void complete(std::shared_ptr<IOResponseAppend> res, int fh_errno=-1) 
-        {
-            res->set_status(fh_errno);
-            promise.set_value(res);
-            if (callback) {
-                callback(res);
-            }
-        }
+        IORequestRead(std::filesystem::path &path, bool is_compressed, 
+                      uint64_t offset, io_read_callback_fn cb)
+            : IORequestTemplate(IORequest::IOType::READ, path, is_compressed, cb),
+              offset(offset) {}
     };
 
     /**
@@ -258,78 +279,22 @@ namespace springtail {
         /** Data response vector */
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IOResponseRead(std::filesystem::path &path, IOStatus status, uint64_t offset,
-                       std::vector<std::shared_ptr<std::vector<char>>> &data)
-            : IOResponse(IORequest::IOType::READ, path, status),
-              offset(offset), data(data) {}
-
-        IOResponseRead(std::filesystem::path &path, IOStatus status=IOStatus::ERROR)
-            : IOResponse(IORequest::IOType::READ, path, status) {}
-    };
-
-    /**
-     * @brief Read request
-     */
-    class IORequestRead : public IORequest {
-    public:
-        uint64_t offset;                                        //!< offset of this read
-        std::promise<std::shared_ptr<IOResponseRead>> promise;  //!< promise for async completion
-        io_read_callback_fn callback;                           //!< callback (optional)
-
-        IORequestRead(std::filesystem::path &path, bool is_compressed, 
-                      uint64_t offset, io_read_callback_fn cb)
-            : IORequest(IORequest::IOType::READ, path, is_compressed),
-              offset(offset), callback(cb) {}
-
-        IORequestRead(std::filesystem::path &path, bool is_compressed, 
-                      uint64_t offset)
-            : IORequest(IORequest::IOType::READ, path, is_compressed), offset(offset) {}
-
         /**
-         * @brief Complete the request, issue the callback if exists, set the value of the promise
-         * 
-         * @param res       Ptr to result response
-         * @param fh_errno  system call errno (or -1 if no error)
+         * @brief Construct a new IOResponseRead object
+         * @param request IORequestRead to be used in callback or future
+         * @param status  optional status, default=IOStatus::ERROR
          */
-        inline void complete(std::shared_ptr<IOResponseRead> res, int fh_errno=-1) 
-        {
-            res->set_status(fh_errno);
-            promise.set_value(res);
-            if (callback) {
-                callback(res);
-            }
-        }
+        IOResponseRead(std::shared_ptr<IORequestRead> request, IOStatus status=IOStatus::ERROR)
+            : IOResponse(request, status), offset(request->offset) {}
     };
 
     /**
      * @brief Sync request
      */
-    class IORequestSync : public IORequest {
+    class IORequestSync : public IORequestTemplate<IOResponse> {
     public:
-        std::promise<std::shared_ptr<IOResponse>> promise;  //!< promise for async completion
-        io_status_callback_fn callback;                     //!< status callback (optional)
-
         IORequestSync(std::filesystem::path &path, bool is_compressed, 
                       io_status_callback_fn cb)
-            : IORequest(IORequest::IOType::SYNC, path, is_compressed),
-              callback(cb) {}
-
-        IORequestSync(std::filesystem::path &path, bool is_compressed)
-            : IORequest(IORequest::IOType::SYNC, path, is_compressed) {}
-
-        /**
-         * @brief Complete the request, issue the callback if exists, set the value of the promise
-         * 
-         * @param res       Ptr to result response
-         * @param fh_errno  system call errno (or -1 if no error)
-         */
-        inline void complete(std::shared_ptr<IOResponse> res, int fh_errno=-1) 
-        {
-            res->set_status(fh_errno);
-            promise.set_value(res);
-            if (callback) {
-                callback(res);
-            }
-        }
+            : IORequestTemplate(IORequest::IOType::SYNC, path, is_compressed, cb) {}
     };
 }

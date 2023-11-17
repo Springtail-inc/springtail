@@ -324,8 +324,12 @@ namespace springtail {
 
         try {
             _issue_request(request, fh);
-        } catch (...) {
+        } catch (const std::exception &exc) {
             // log exception
+            std::cerr << "Caught exception for IO type=" << request->type << std::endl;
+            std::cerr << exc.what() << std::endl;
+            
+            _handle_error(request, exc);
         }
 
         // work is complete, release fh
@@ -335,5 +339,43 @@ namespace springtail {
         io_file->decr_in_use();
         
         return;
+    }
+
+
+    void
+    IOWorker::_handle_error(std::shared_ptr<IORequest> request, const std::exception &exc)
+    {
+         switch (request->type) {
+            case IORequest::IOType::READ: {
+                std::shared_ptr<IORequestRead> req = std::dynamic_pointer_cast<IORequestRead>(request);
+                std::shared_ptr<IOResponseRead> res = std::make_shared<IOResponseRead>(req, IOStatus::ERROR);
+                req->complete(res);
+                break;
+            }
+
+            case IORequest::IOType::APPEND: {
+                std::shared_ptr<IORequestAppend> req = std::dynamic_pointer_cast<IORequestAppend>(request);
+                std::shared_ptr<IOResponseAppend> res = std::make_shared<IOResponseAppend>(req, IOStatus::ERROR);
+                req->complete(res);
+                break;
+            }
+
+            case IORequest::IOType::WRITE: {
+                std::shared_ptr<IORequestWrite> req = std::dynamic_pointer_cast<IORequestWrite>(request);
+                std::shared_ptr<IOResponseWrite> res = std::make_shared<IOResponseWrite>(req, IOStatus::ERROR);
+                req->complete(res);
+                break;
+            }
+
+            case IORequest::IOType::SYNC: {
+                std::shared_ptr<IORequestSync> req = std::dynamic_pointer_cast<IORequestSync>(request);
+                std::shared_ptr<IOResponse> res = std::make_shared<IOResponse>(req, IOStatus::ERROR);
+                req->complete(res);
+                break;
+            }
+
+            default:
+                break;
+        }
     }
 }

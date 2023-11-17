@@ -4,7 +4,10 @@
 #include <vector>
 
 namespace springtail {
-    /** Interface for compression objects. */
+
+    /**
+     * @brief Interface for compression objects.
+     */
     class Compressor {
     public:
         virtual ~Compressor()
@@ -29,10 +32,12 @@ namespace springtail {
         /**
          * @brief  Reset the stream; call prior to compressing a new stream using same compressor
          */
-        virtual void reset_stream() = 0;
+        virtual void reset_stream() = 0;    
     };
 
-    /** Interface for decompression objects. */
+    /** 
+     * @brief Interface for decompression objects.
+     */
     class Decompressor {
     public:
         virtual ~Decompressor()
@@ -48,13 +53,14 @@ namespace springtail {
          * @param src    src buffer holding compressed data
          * @param dst    dst buffer empty, sized to full uncompressed size
          * @param offset offset within dst buffer for this data
-         *
          * @return size of uncompressed data
          */
         virtual uint32_t decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset) = 0;
     };
 
-    /** Compressor implementation for Lz4. */
+    /** 
+     * @brief Compressor implementation for Lz4.
+     */
     class Lz4Compressor : public Compressor {
     private:
         LZ4_stream_t *_lz4_stream; //!< underlying lz4 compression stream
@@ -82,7 +88,9 @@ namespace springtail {
         void reset_stream();
     };
 
-    /** Decompressor implementation for Lz4. */
+    /** 
+     * @brief Decompressor implementation for Lz4.
+     */
     class Lz4Decompressor : public Decompressor {
     private:
         LZ4_streamDecode_t *_lz4_stream;  //!< underlying compression stream
@@ -104,5 +112,6 @@ namespace springtail {
          * @return size of uncompressed data
          */
         uint32_t decompress_raw(const std::vector<char> &src, std::shared_ptr<std::vector<char>> dst, int offset);
+
     };
 }

@@ -6,7 +6,7 @@
         "boost-container-hash",
         "fmt",
         "backward-cpp",
-        "cityhash",
+        "xxhash",
         "spdlog",
         "nlohmann-json",
         "lz4"
