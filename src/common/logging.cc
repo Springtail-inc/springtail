@@ -18,7 +18,7 @@ namespace springtail {
 
         auto logger = std::make_shared<spdlog::logger>("springtail", console_sink);
         logger->set_level(spdlog::level::debug);
-        logger->set_pattern("%@:%! [%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
+        logger->set_pattern("[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
         spdlog::set_default_logger(logger);
 

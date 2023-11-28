@@ -8,6 +8,8 @@
 #include <storage/io_request.hh>
 #include <storage/io_pool.hh>
 
+#include <common/common.hh>
+
 /**
  * @brief Helper to generate random data
  * 
@@ -145,6 +147,8 @@ const char *FILE2 = "/tmp/testfile2";
 
 int main(void)
 {
+    springtail::springtail_init();
+
     std::filesystem::remove(FILE1);
     std::filesystem::remove(FILE2);
 
@@ -160,7 +164,7 @@ int main(void)
 
     append_response = sync_append(fh_append, fh_read, 15);       
 
-    append_response = sync_append(fh_append, fh_read, 8192, 3);   
+    append_response = sync_append(fh_append, fh_read, 8192, 3);
 
     append_response = sync_append(fh_append, fh_read, 15, 3);  
 
