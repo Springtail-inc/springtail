@@ -12,6 +12,37 @@ namespace springtail {
         LZ4_freeStream(_lz4_stream);
     }
 
+    /** Note: use if using any of the LZ4_*_continue methods */
+    void
+    Lz4Compressor::reset_stream()
+    {
+        LZ4_resetStream_fast(_lz4_stream);
+    }
+
+    uint32_t
+    Lz4Compressor::compress_raw(std::shared_ptr<std::vector<char>> src, 
+                                std::vector<char> &dst)
+    {
+        // determine the max compression size
+        int target_size = LZ4_compressBound(src->size());
+
+        dst.resize(target_size);
+
+        // compress the data -- internally resets the stream
+        int32_t dst_size = LZ4_compress_fast_extState(_lz4_stream, src->data(), 
+                                                      dst.data(), src->size(), target_size, 1);
+
+        if (dst_size <= 0) {
+            throw ValidationError("Error compressing data");
+        }
+
+        // trim excess
+        dst.resize(dst_size);
+
+        return dst_size;
+    }
+
+
     uint32_t
     Lz4Compressor::compress_block(const std::vector<char> &src, std::vector<char> &dst)
     {
@@ -32,6 +63,8 @@ namespace springtail {
         dst.resize(offset + 8 + target_size);
 
         // compress the data
+        // NOTE: be careful with this as it requires the last 64KB of data from the stream
+        // to still be in memory and accessible...
         int32_t dst_size = LZ4_compress_fast_continue(_lz4_stream,
                                                       src.data(), dst.data() + offset + 8,
                                                       src.size(), target_size, 1);
@@ -61,6 +94,28 @@ namespace springtail {
     }
 
     uint32_t
+    Lz4Decompressor::decompress_raw(const std::vector<char> &src, 
+                                    std::shared_ptr<std::vector<char>> dst, 
+                                    int offset)
+    {
+        // decompress the block -- internally resets the stream
+        int32_t size = LZ4_decompress_safe(src.data(), dst->data() + offset, 
+                                           src.size(), dst->size() - offset);
+
+        if (size <= 0) {
+            std::cerr << "Error decompressing: err=" << size << std::endl;
+            throw ValidationError("Error decompressing data");
+        }
+
+        if (size != dst->size()) {
+            throw ValidationError("Unexpected decompression size while decompressing data");
+        }
+
+        // read the full compressed data and 2 4-byte sizes
+        return size;
+    }
+
+    uint32_t
     Lz4Decompressor::decompress_block(const char *src, std::vector<char> &dst)
     {
         // get the compressed size of the block
@@ -78,7 +133,7 @@ namespace springtail {
         // resize to fit the decompressed data
         dst.resize(dst_size);
 
-        // decompress the block
+        // decompress the block: be careful with these calls
         int size = LZ4_decompress_safe_continue(_lz4_stream, src, dst.data(), src_size, dst_size);
         if (size <= 0) {
             throw ValidationError("Error decompressing data");

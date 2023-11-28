@@ -1,4 +1,6 @@
 // #include <common/logging.hh>
+#include <xxhash.h>
+
 #include <storage/compressors.hh>
 #include <storage/extent.hh>
 
@@ -22,7 +24,7 @@ namespace springtail {
         compressed_data.resize(offset + 4);
 
         // generate a checksum of the data and store it at the end
-        uint32_t checksum = CityHash32(reinterpret_cast<char *>(compressed_data.data()), compressed_data.size() - 4);
+        uint32_t checksum = XXH32(reinterpret_cast<char *>(compressed_data.data()), compressed_data.size() - 4, 0);
         std::copy_n(reinterpret_cast<char *>(&checksum), sizeof(uint32_t), compressed_data.data() + offset);
 
         std::cerr << "compress()" << std::endl
@@ -43,7 +45,7 @@ namespace springtail {
         std::copy_n(_data.data() + _data.size() - 4, sizeof(uint32_t),
                     reinterpret_cast<char *>(&checksum));
         if (verify_checksum) {
-            uint32_t c = CityHash32(reinterpret_cast<char *>(_data.data()), _data.size() - 4);
+            uint32_t c = XXH32(reinterpret_cast<char *>(_data.data()), _data.size() - 4, 0);
             if (c != checksum) {
                 std::cerr << "Checksum mis-match" << std::endl;
                 throw ValidationError("Checksum mismatch");

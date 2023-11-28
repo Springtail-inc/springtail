@@ -3,9 +3,12 @@
         "minio-cpp",
         "libpq",
         "boost-program-options",
+        "boost-container-hash",
         "fmt",
         "backward-cpp",
-        "cityhash",
-        "spdlog"
+        "xxhash",
+        "spdlog",
+        "nlohmann-json",
+        "lz4"
     ]
 }

@@ -4,7 +4,8 @@
 #include <memory>
 #include <vector>
 #include <cassert>
-#include <city.h>
+
+#include <xxhash.h>
 
 #include <storage/schema.hh>
 #include <storage/compressors.hh>
@@ -294,7 +295,7 @@ namespace springtail {
         uint32_t add_variable(const char *buffer, uint32_t size)
         {
             // hash the string value
-            uint64_t hash = CityHash64(reinterpret_cast<const char *>(buffer), size);
+            uint64_t hash = XXH64(buffer, size, 0);
 
             // check if the value already exists
             auto i = _variable_hash.find(hash);
