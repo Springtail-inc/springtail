@@ -242,7 +242,9 @@ namespace springtail {
         
         // block until queue is not empty
         // or until queue is signalled to wake all
-        _cv.wait(queue_lock);
+        if (_queue.empty()) {
+            _cv.wait(queue_lock);
+        }
 
         // extract first element from queue and return it
         if (_queue.empty()) {
