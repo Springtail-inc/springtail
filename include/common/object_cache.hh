@@ -5,6 +5,7 @@
 #include <list>
 #include <iostream>
 #include <boost/container_hash/hash.hpp>
+#include <common/logging.hh>
 
 namespace springtail {
     /** 
@@ -154,6 +155,7 @@ namespace springtail {
             // if we need more space, evict entries until we have enough space
             while (_cache_size + size > _cache_max) {
                 if (!_evict_next()) {
+                    SPDLOG_WARN("Object cache eviction, nothing evictable");
                     break; // nothing evictable
                 }
             }

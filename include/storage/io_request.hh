@@ -59,6 +59,26 @@ namespace springtail {
         IORequest(IOType type=IOType::SHUTDOWN) : type (type) {}
 
         virtual ~IORequest() = default;
+
+        /**
+         * @brief Get the type as a string
+         * @return std::string 
+         */
+        std::string get_type()
+        {
+            switch (type) {
+                case IOType::READ:
+                    return "read";
+                case IOType::APPEND:
+                    return "append";
+                case IOType::SYNC:
+                    return "sync";
+                case IOType::WRITE:
+                    return "write";
+                case IOType::SHUTDOWN:
+                    return "shutdown";
+            }
+        }
     };
 
     /**

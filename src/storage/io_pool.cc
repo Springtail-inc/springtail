@@ -9,11 +9,15 @@
 #include <mutex>
 #include <condition_variable>
 
+#include <fmt/core.h>
+
 #include <storage/compressors.hh>
 #include <storage/io_pool.hh>
 #include <storage/io_file.hh>
 #include <storage/io.hh>
 #include <storage/exception.hh>
+
+#include <common/logging.hh>
 
 
 namespace springtail {
@@ -289,7 +293,7 @@ namespace springtail {
 
             default:
                 // log error
-                std::cerr << "IOWorker::_issue_request unknown request type: " << request->type << std::endl;
+                SPDLOG_ERROR("IOWorker::_issue_request unknown request type: {}", request->get_type());
                 break;
         }
     }
@@ -308,26 +312,21 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
-        //std::cout << "IOWorker::process_request lookup path: " << request->path << std::endl;
+        SPDLOG_INFO("IOWorker got request for path: {}", request->path.c_str());
 
         std::shared_ptr<IOFile> io_file = mgr->lookup(request->path, request->compressed);
 
         // get a free handle based on IO mode; may block
         // marks file handle as in use
-        //std::cout << "IOWorker::process_request get fh\n";
-
         std::shared_ptr<IOSysFH> fh = io_file->get_fh((IORequest::IOType::READ == request->type) ?
                                                            IOMgr::IO_MODE::READ : 
                                                            IOMgr::IO_MODE::WRITE);
-
-        //std::cout << "IOWorker::process_request got fh\n";
-
         try {
             _issue_request(request, fh);
         } catch (const std::exception &exc) {
             // log exception
-            std::cerr << "Caught exception for IO type=" << request->type << std::endl;
-            std::cerr << exc.what() << std::endl;
+            SPDLOG_ERROR("Caught exception for IO type={}", request->get_type());
+            SPDLOG_ERROR("Exception: {}", exc.what());
             
             _handle_error(request, exc);
         }
