@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
 
@@ -22,7 +24,7 @@ namespace springtail {
          * @return false a value of null was stored in the json
          */
         template<typename T> static inline bool
-        get(const nlohmann::json &json, const std::string &key, T &result, const T &def_value)
+        get_to(const nlohmann::json &json, const std::string &key, T &result, const T &def_value)
         {
             if (json.is_null() || !json.contains(key)) {
                 result = def_value;
@@ -47,7 +49,7 @@ namespace springtail {
          * @return false a value of null was stored in the json; or key not found
          */
         template<typename T> static inline bool
-        get(const nlohmann::json &json, const std::string &key, T &result)
+        get_to(const nlohmann::json &json, const std::string &key, T &result)
         {
             if (json.is_null() || !json.contains(key) || json[key].is_null()) {
                 return false;
@@ -55,6 +57,45 @@ namespace springtail {
 
             json[key].get_to(result);
             return true;
+        }
+
+        /**
+         * @brief Get value from json blob, no default value
+         * @tparam T type of value
+         * @param json input json blob
+         * @param key  json key to lookup
+         * @param def_value  default value
+         * @return optional of type T
+         */
+        template<typename T> static inline std::optional<T>
+        get(const nlohmann::json &json, const std::string &key, const T &def_value)
+        {
+            if (json.is_null() || !json.contains(key)) {
+                return def_value;
+            }
+
+            if (json[key].is_null()) {
+                return {};
+            }
+
+            return json[key];
+        }
+
+        /**
+         * @brief Get value from json blob, no default value
+         * @tparam T type of value
+         * @param json input json blob
+         * @param key  json key to lookup
+         * @return optional of type T
+         */
+        template<typename T> static inline std::optional<T>
+        get(const nlohmann::json &json, const std::string &key)
+        {
+            if (json.is_null() || !json.contains(key) || json[key].is_null()) {
+                return {};
+            }
+
+            return json[key];
         }
     };
 }

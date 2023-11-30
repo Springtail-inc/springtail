@@ -34,28 +34,28 @@ namespace springtail {
 
         int keep_alive_secs;
 
-        Json::get<std::string>(json, "host", connect_options.host, "localhost");
-        Json::get<std::string>(json, "user", connect_options.user, "user");
-        Json::get<std::string>(json, "password", connect_options.password);
-        Json::get<int>(json, "port", connect_options.port, 6379);
-        Json::get<int>(json, "db", connect_options.db, 0);
-        Json::get<int>(json, "keep_alive_sec", keep_alive_secs, 30);
+        Json::get_to<std::string>(json, "host", connect_options.host, "localhost");
+        Json::get_to<std::string>(json, "user", connect_options.user, "user");
+        Json::get_to<std::string>(json, "password", connect_options.password);
+        Json::get_to<int>(json, "port", connect_options.port, 6379);
+        Json::get_to<int>(json, "db", connect_options.db, 0);
+        Json::get_to<int>(json, "keep_alive_sec", keep_alive_secs, 30);
 
         connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
         connect_options.keep_alive = true;
         connect_options.resp = 3;
 
         nlohmann::json pool_json;
-        if (!Json::get(json, "pool", pool_json)) {
+        if (!Json::get_to(json, "pool", pool_json)) {
             throw Error("Redis connection pool settings not found");
         }
 
         int pool_size;
         int max_idle_secs;
         int max_connection_lifetime_secs;
-        Json::get(pool_json, "connections", pool_size, 30);
-        Json::get(pool_json, "max_idle_secs", max_idle_secs, 0);
-        Json::get(pool_json, "max_connection_lifetime_secs", max_connection_lifetime_secs, 0);
+        Json::get_to(pool_json, "connections", pool_size, 30);
+        Json::get_to(pool_json, "max_idle_secs", max_idle_secs, 0);
+        Json::get_to(pool_json, "max_connection_lifetime_secs", max_connection_lifetime_secs, 0);
 
         pool_options.size = pool_size;
         pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
