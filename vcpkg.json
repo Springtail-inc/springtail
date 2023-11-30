@@ -9,6 +9,7 @@
         "xxhash",
         "spdlog",
         "nlohmann-json",
-        "lz4"
+        "lz4",
+        "redis-plus-plus"
     ]
 }
