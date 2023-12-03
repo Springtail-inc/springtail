@@ -74,7 +74,7 @@ namespace springtail {
         ~RedisMgr() {}
 
     private:
-        // delete copy construct 
+        // delete copy constructor
         RedisMgr(const RedisMgr &)       = delete;
         void operator=(const RedisMgr &) = delete;
     };

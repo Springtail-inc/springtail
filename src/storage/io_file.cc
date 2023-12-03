@@ -261,7 +261,7 @@ namespace springtail {
      *       ...       Data of size mentioned above
      */
     void
-    IOSysFH::read(std::shared_ptr<IORequestRead> request,
+    IOSysFH::read(IORequestRead *request,
                   std::shared_ptr<Decompressor> decompressor)
     {    
         // 4B HDR + 8B hash +  8B per vector * 8 (prefetch)
@@ -508,7 +508,7 @@ namespace springtail {
 
 
     void
-    IOSysFH::append(std::shared_ptr<IORequestAppend> request, 
+    IOSysFH::append(IORequestAppend *request,
                     std::shared_ptr<Compressor> compressor) 
     {
         // default error response
@@ -550,7 +550,7 @@ namespace springtail {
 
 
     void
-    IOSysFH::write(std::shared_ptr<IORequestWrite> request)
+    IOSysFH::write(IORequestWrite *request)
     {
         assert(_is_compressed == false);
         
@@ -579,7 +579,7 @@ namespace springtail {
     }
 
 
-    void IOSysFH::sync(std::shared_ptr<IORequestSync> request)
+    void IOSysFH::sync(IORequestSync *request)
     {
         // default success response
         std::shared_ptr<IOResponse> response = std::make_shared<IOResponse>(request);

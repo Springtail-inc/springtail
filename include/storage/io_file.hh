@@ -10,7 +10,7 @@
 #include <cassert>
 
 #include <storage/io_request.hh>
-#include <storage/io_pool.hh>
+#include <storage/io_mgr.hh>
 #include <storage/exception.hh>
 #include <storage/compressors.hh>
 
@@ -70,7 +70,7 @@ namespace springtail {
          * @param decompressor Decompressor class for decompression
          * @param callback     callback for completion
          */
-        void read(std::shared_ptr<IORequestRead> request, std::shared_ptr<Decompressor> decompressor);
+        void read(IORequestRead *request, std::shared_ptr<Decompressor> decompressor);
 
         /**
          * @brief Overwrite data within a file, file MUST NOT be compressed
@@ -78,7 +78,7 @@ namespace springtail {
          * @param data       vector of data vectors to write out (written out as one block)
          * @param callback   callback for completion
          */
-        void write(std::shared_ptr<IORequestWrite> request);
+        void write(IORequestWrite *request);
 
         /**
          * @brief Append data to end of file, file may be compressed or not
@@ -86,13 +86,13 @@ namespace springtail {
          * @param compressor Compressor class to compress file
          * @param callback   callback for completion
          */
-        void append(std::shared_ptr<IORequestAppend> request, std::shared_ptr<Compressor> compressor);
+        void append(IORequestAppend *request, std::shared_ptr<Compressor> compressor);
 
         /**
          * @brief Sync data to disk
          * @param callback callback for completion
          */
-        void sync(std::shared_ptr<IORequestSync> request);
+        void sync(IORequestSync *request);
 
         /**
          * @brief Close underlying system file handle

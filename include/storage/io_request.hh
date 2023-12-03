@@ -8,6 +8,8 @@
 #include <iostream>
 #include <cerrno>
 
+#include <storage/compressors.hh>
+
 namespace springtail {
 
     /** IO Status set in response; important keep success == 0 */
@@ -21,6 +23,8 @@ namespace springtail {
     class IOResponseRead;
     class IOResponse;
     
+    class IOSysFH;
+
     /** Read callback typedef */
     typedef std::function<void(std::shared_ptr<IOResponseRead> response)> io_read_callback_fn;
     /** Write callback typedef */
@@ -58,27 +62,44 @@ namespace springtail {
          */
         IORequest(IOType type=IOType::SHUTDOWN) : type (type) {}
 
+        /** virtual destructor for clean inheritence destruction */
         virtual ~IORequest() = default;
 
         /**
          * @brief Get the type as a string
          * @return std::string 
          */
-        std::string get_type()
-        {
-            switch (type) {
-                case IOType::READ:
-                    return "read";
-                case IOType::APPEND:
-                    return "append";
-                case IOType::SYNC:
-                    return "sync";
-                case IOType::WRITE:
-                    return "write";
-                case IOType::SHUTDOWN:
-                    return "shutdown";
-            }
+        std::string get_type();
+
+        /**
+         * @brief Overload () for execution from worker thread.
+         *        Main entry from worker thread
+         */
+        void operator()() {
+            _process_request();
         }
+
+    private:
+        /**
+         * @brief Entry from worker thread for processing io request
+         */
+        void _process_request();
+
+        /**
+         * @brief Worker thread internal issue_request call
+         * @param request IORequest to process
+         * @param fh      File handle for request
+         */
+        void _issue_request(std::shared_ptr<IOSysFH> fh,
+                            std::shared_ptr<Compressor> compressor,
+                            std::shared_ptr<Decompressor> decompressor);
+
+        /**
+         * @brief Handle caught exception
+         * @param request IORequest ptr
+         * @param exc     Exception caught
+         */
+        void _handle_error(const std::exception &exc);
     };
 
     /**
@@ -90,15 +111,17 @@ namespace springtail {
         std::filesystem::path path;    ///< underlying filename
         IOStatus              status;  ///< status of request
 
-        std::shared_ptr<IORequest> request; ///< Ptr to request, keeps promise in scope
-        
+        //std::shared_ptr<IORequest> request; ///< Ptr to request, keeps promise in scope
+        std::promise<IORequest> promise;
+
         /**
          * @brief Construct a new IOResponse object
          * @param request ptr to IORequest object; extract type and path from it
          * @param status status (default=IOStatus::Error)
          */
-        IOResponse(std::shared_ptr<IORequest> request, IOStatus status=IOStatus::ERROR)
-            : type(request->type), path(request->path), status(status), request(request) {}
+        IOResponse(IORequest *request, IOStatus status=IOStatus::ERROR)
+            : type(request->type), path(request->path), status(status)//, request(request)
+        {}
 
         /**
          * @brief Set the status object
@@ -150,14 +173,14 @@ namespace springtail {
      *        Inherits from IORequest
      * @tparam T IOResponse type
      */
-    template <typename T>
+    template <typename ResponseClass>
     class IORequestTemplate : public IORequest {
     public:
-        std::promise<std::shared_ptr<T>> promise;  ///< promise for async completion
-        std::function<void(std::shared_ptr<T> response)> callback; ///< callback (optional)
+        std::promise<std::shared_ptr<ResponseClass>> promise;  ///< promise for async completion
+        std::function<void(std::shared_ptr<ResponseClass> response)> callback; ///< callback (optional)
 
         IORequestTemplate(IOType type, const std::filesystem::path &path, bool is_compressed,
-                          std::function<void(std::shared_ptr<T> response)> callback)
+                          std::function<void(std::shared_ptr<ResponseClass> response)> callback)
             : IORequest(type, path, is_compressed), callback(callback) {}
 
         /**
@@ -165,7 +188,7 @@ namespace springtail {
          * @param res       Ptr to result response
          * @param fh_errno  system call errno (or -1 if no error)
          */
-        void complete(std::shared_ptr<T> res, int fh_errno=-1) { 
+        void complete(std::shared_ptr<ResponseClass> res, int fh_errno=-1) {
             res->set_status(fh_errno);
             promise.set_value(res);
             if (callback) {
@@ -178,7 +201,7 @@ namespace springtail {
          * @param res      Ptr to result response
          * @param status   IOStatus status
          */
-        void complete(std::shared_ptr<T> res, IOStatus status) { 
+        void complete(std::shared_ptr<ResponseClass> res, IOStatus status) {
             res->set_status(status); 
             promise.set_value(res);
             if (callback) {
@@ -227,7 +250,7 @@ namespace springtail {
          * @param request IORequestWrite to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseWrite(std::shared_ptr<IORequestWrite> request, IOStatus status=IOStatus::ERROR)
+        IOResponseWrite(IORequestWrite *request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status), offset(request->offset) {}
     };
 
@@ -267,7 +290,7 @@ namespace springtail {
          * @param request IORequestAppend to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseAppend(std::shared_ptr<IORequestAppend> request, IOStatus status=IOStatus::ERROR)
+        IOResponseAppend(IORequestAppend *request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status) {}
     };
 
@@ -304,7 +327,7 @@ namespace springtail {
          * @param request IORequestRead to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseRead(std::shared_ptr<IORequestRead> request, IOStatus status=IOStatus::ERROR)
+        IOResponseRead(IORequestRead *request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status), offset(request->offset) {}
     };
 
