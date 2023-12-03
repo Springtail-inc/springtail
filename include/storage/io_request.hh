@@ -111,9 +111,6 @@ namespace springtail {
         std::filesystem::path path;    ///< underlying filename
         IOStatus              status;  ///< status of request
 
-        //std::shared_ptr<IORequest> request; ///< Ptr to request, keeps promise in scope
-        std::promise<IORequest> promise;
-
         /**
          * @brief Construct a new IOResponse object
          * @param request ptr to IORequest object; extract type and path from it
