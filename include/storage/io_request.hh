@@ -24,6 +24,7 @@ namespace springtail {
     class IOResponse;
     
     class IOSysFH;
+    class IOMgr;
 
     /** Read callback typedef */
     typedef std::function<void(std::shared_ptr<IOResponseRead> response)> io_read_callback_fn;
@@ -69,7 +70,7 @@ namespace springtail {
          * @brief Get the type as a string
          * @return std::string 
          */
-        std::string get_type();
+        std::string get_type() const noexcept;
 
         /**
          * @brief Overload () for execution from worker thread.
@@ -86,20 +87,12 @@ namespace springtail {
         void _process_request();
 
         /**
-         * @brief Worker thread internal issue_request call
-         * @param request IORequest to process
+         * @brief Worker thread internal issue_request call; must handle failure internally
+         * @param io_mgr  IO Mgr pointer
          * @param fh      File handle for request
          */
-        void _issue_request(std::shared_ptr<IOSysFH> fh,
-                            std::shared_ptr<Compressor> compressor,
-                            std::shared_ptr<Decompressor> decompressor);
-
-        /**
-         * @brief Handle caught exception
-         * @param request IORequest ptr
-         * @param exc     Exception caught
-         */
-        void _handle_error(const std::exception &exc);
+        virtual void _issue_request(IOMgr * const io_mgr,
+                                    std::shared_ptr<IOSysFH> fh) noexcept = 0;
     };
 
     /**
@@ -116,8 +109,8 @@ namespace springtail {
          * @param request ptr to IORequest object; extract type and path from it
          * @param status status (default=IOStatus::Error)
          */
-        IOResponse(IORequest *request, IOStatus status=IOStatus::ERROR)
-            : type(request->type), path(request->path), status(status)//, request(request)
+        IOResponse(const IORequest * const request, IOStatus status=IOStatus::ERROR)
+            : type(request->type), path(request->path), status(status)
         {}
 
         /**
@@ -229,6 +222,14 @@ namespace springtail {
                        io_write_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
               offset(offset), data(data) {}
+    
+    private:
+        /**
+         * @brief Issue_request on underlying FH; must handle failure internally
+         * @param io_mgr  IO Mgr pointer
+         * @param fh      File handle for request
+         */
+        void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
     };
 
     /**
@@ -247,7 +248,7 @@ namespace springtail {
          * @param request IORequestWrite to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseWrite(IORequestWrite *request, IOStatus status=IOStatus::ERROR)
+        IOResponseWrite(const IORequestWrite * const request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status), offset(request->offset) {}
     };
 
@@ -269,6 +270,15 @@ namespace springtail {
                        const std::vector<std::shared_ptr<std::vector<char>>> &data, 
                        io_append_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb), data(data) {}
+
+    private:
+        /**
+         * @brief Issue_request on underlying FH; must handle failure internally
+         * @param io_mgr  IO Mgr pointer
+         * @param fh      File handle for request
+         */    
+        void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
+
     };
 
     /**
@@ -287,7 +297,7 @@ namespace springtail {
          * @param request IORequestAppend to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseAppend(IORequestAppend *request, IOStatus status=IOStatus::ERROR)
+        IOResponseAppend(const IORequestAppend * const request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status) {}
     };
 
@@ -303,6 +313,14 @@ namespace springtail {
                       uint64_t offset, io_read_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::READ, path, is_compressed, cb),
               offset(offset) {}
+
+    private:
+        /**
+         * @brief Issue_request on underlying FH; must handle failure internally
+         * @param io_mgr  IO Mgr pointer
+         * @param fh      File handle for request
+         */    
+        void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
     };
 
     /**
@@ -324,7 +342,7 @@ namespace springtail {
          * @param request IORequestRead to be used in callback or future
          * @param status  optional status, default=IOStatus::ERROR
          */
-        IOResponseRead(IORequestRead *request, IOStatus status=IOStatus::ERROR)
+        IOResponseRead(const IORequestRead * const request, IOStatus status=IOStatus::ERROR)
             : IOResponse(request, status), offset(request->offset) {}
     };
 
@@ -336,5 +354,13 @@ namespace springtail {
         IORequestSync(std::filesystem::path &path, bool is_compressed, 
                       io_status_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::SYNC, path, is_compressed, cb) {}
+
+    private:
+        /**
+         * @brief Issue_request on underlying FH; must handle failure internally
+         * @param io_mgr  IO Mgr pointer
+         * @param fh      File handle for request
+         */    
+        void _issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept;
     };
 }

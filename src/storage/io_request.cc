@@ -8,7 +8,7 @@
 namespace springtail {
 
     std::string 
-    IORequest::get_type()
+    IORequest::get_type() const noexcept
     {
         switch (type) {
             case IOType::READ:
@@ -25,45 +25,70 @@ namespace springtail {
     }
 
     void
-    IORequest::_issue_request(std::shared_ptr<IOSysFH> fh,
-                              std::shared_ptr<Compressor> compressor,
-                              std::shared_ptr<Decompressor> decompressor)
+    IORequestWrite::_issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept
     {
-        IORequest *request = this;
+        try {
+            fh->write(this);            
+        } catch (const std::exception &exc) {
+            // log exception
+            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
+            SPDLOG_ERROR("Exception: {}", exc.what());
+            
+            complete(std::make_shared<IOResponseWrite>(this, IOStatus::ERROR));
+        }
+    }
 
-        // handle request
-        switch (type) {
-            case IOType::READ: {
-                IORequestRead* req = dynamic_cast<IORequestRead *>(request);
-                fh->read(req, decompressor);
-                break;
-            }
+    void
+    IORequestAppend::_issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept
+    {
+        std::shared_ptr<Compressor> compressor;
+        try {
+            compressor = io_mgr->get_compressor();            
+            fh->append(this, compressor);        
+        } catch (const std::exception &exc) {
+            // log exception
+            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
+            SPDLOG_ERROR("Exception: {}", exc.what());
+            
+            complete(std::make_shared<IOResponseAppend>(this, IOStatus::ERROR));
+        }
+        
+        if (compressor) {
+            io_mgr->put_compressor(compressor);
+        }
+    }
 
-            case IOType::APPEND: {
-                IORequestAppend *req = dynamic_cast<IORequestAppend *>(request);
-                fh->append(req, compressor);
-                break;
-            }
+    void
+    IORequestRead::_issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept
+    {
+        std::shared_ptr<Decompressor> decompressor;
+        try {
+             decompressor = io_mgr->get_decompressor();
+            fh->read(this, decompressor);        
+        } catch (const std::exception &exc) {
+            // log exception
+            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
+            SPDLOG_ERROR("Exception: {}", exc.what());
+            
+            complete(std::make_shared<IOResponseRead>(this, IOStatus::ERROR));
+        }
 
-            case IOType::WRITE: {
-                IORequestWrite *req = dynamic_cast<IORequestWrite *>(request);
-                fh->write(req);
-                break;
-            }
+        if (decompressor) {
+            io_mgr->put_decompressor(decompressor);        
+        }
+    }
 
-            case IOType::SYNC: {
-                IORequestSync *req = dynamic_cast<IORequestSync *>(request);
-                fh->sync(req);
-                break;
-            }
-
-            case IOType::SHUTDOWN:
-                break;
-
-            default:
-                // log error
-                SPDLOG_ERROR("IOWorker::_issue_request unknown request type: {}", get_type());
-                break;
+    void
+    IORequestSync::_issue_request(IOMgr * const io_mgr, std::shared_ptr<IOSysFH> fh) noexcept
+    {
+        try {
+            fh->sync(this);
+        } catch (const std::exception &exc) {
+            // log exception
+            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
+            SPDLOG_ERROR("Exception: {}", exc.what());
+            
+            complete(std::make_shared<IOResponse>(this, IOStatus::ERROR));
         }
     }
 
@@ -89,26 +114,9 @@ namespace springtail {
         std::shared_ptr<IOSysFH> fh = io_file->get_fh((IOType::READ == type) ?
                                                            IOMgr::IO_MODE::READ : 
                                                            IOMgr::IO_MODE::WRITE);
-
-        // get compress/decompressor based on operation type
-        std::shared_ptr<Compressor> compressor = nullptr;
-        std::shared_ptr<Decompressor> decompressor;
-
-        if (type == IOType::READ) {
-            decompressor = mgr->get_decompressor();
-        } else {
-            compressor = mgr->get_compressor();
-        }
-
-        try {
-            _issue_request(fh, compressor, decompressor);
-        } catch (const std::exception &exc) {
-            // log exception
-            SPDLOG_ERROR("Caught exception for IO type={}", get_type());
-            SPDLOG_ERROR("Exception: {}", exc.what());
-            
-            _handle_error(exc);
-        }
+        
+        // issue request -- calls derived _issue_request method
+        _issue_request(mgr, fh);
 
         // work is complete, release fh
         io_file->put_fh(fh);
@@ -116,53 +124,6 @@ namespace springtail {
         // release file object
         io_file->decr_in_use();
 
-        // release compressor/decompressor
-        if (type == IOType::READ) {
-            mgr->put_decompressor(decompressor);
-        } else {
-            mgr->put_compressor(compressor);
-        }
-        
         return;
-    }
-
-
-    void
-    IORequest::_handle_error(const std::exception &exc)
-    {
-        IORequest *request = this;
-
-        switch (type) {
-            case IOType::READ: {
-                IORequestRead *req = dynamic_cast<IORequestRead *>(request);
-                std::shared_ptr<IOResponseRead> res = std::make_shared<IOResponseRead>(req, IOStatus::ERROR);
-                req->complete(res);
-                break;
-            }
-
-            case IOType::APPEND: {
-                IORequestAppend *req = dynamic_cast<IORequestAppend *>(request);
-                std::shared_ptr<IOResponseAppend> res = std::make_shared<IOResponseAppend>(req, IOStatus::ERROR);
-                req->complete(res);
-                break;
-            }
-
-            case IOType::WRITE: {
-                IORequestWrite *req = dynamic_cast<IORequestWrite *>(request);
-                std::shared_ptr<IOResponseWrite> res = std::make_shared<IOResponseWrite>(req, IOStatus::ERROR);
-                req->complete(res);
-                break;
-            }
-
-            case IOType::SYNC: {
-                IORequestSync *req = dynamic_cast<IORequestSync *>(request);
-                std::shared_ptr<IOResponse> res = std::make_shared<IOResponse>(req, IOStatus::ERROR);
-                req->complete(res);
-                break;
-            }
-
-            default:
-                break;
-        }
     }
 } // namespace springtail
