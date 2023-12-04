@@ -10,3 +10,7 @@ target_link_libraries(springtail_common PUBLIC Backward::Backward spdlog::spdlog
 add_executable(redis_test redis.cc)
 target_include_directories(redis_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(redis_test PRIVATE springtail_common)
+
+add_executable(thread_test thread_test.cc)
+target_include_directories(thread_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(thread_test PRIVATE springtail_common)

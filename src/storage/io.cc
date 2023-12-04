@@ -5,9 +5,9 @@
 #include <memory>
 #include <future>
 
-#include <storage/io_request.hh>
 #include <storage/io.hh>
-#include <storage/io_pool.hh>
+#include <storage/io_request.hh>
+#include <storage/io_mgr.hh>
 #include <storage/exception.hh>
 
 namespace springtail {
