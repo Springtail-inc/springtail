@@ -25,13 +25,6 @@ namespace springtail {
     {}
 
     void
-    WriteCache::insert_row(uint64_t tid, uint64_t extid, uint64_t xid, 
-                           const std::string &pkey, const std::string &data)
-    {
-        
-    }
-
-    void
     WriteCache::shutdown()
     {
         if (_instance != nullptr) {
@@ -40,5 +33,83 @@ namespace springtail {
         }
     }
 
+    void 
+    WriteCache::start_gc(uint64_t xid)
+    {
+    }
+    
+    void 
+    WriteCache::complete_gc(uint64_t xid)
+    {
+    }
 
+    void 
+    WriteCache::table_change(uint64_t tid, uint64_t xid, uint64_t LSN, TableOp op)
+    {
+    }
+
+    std::vector<WriteCache::TableChange> 
+    WriteCache::fetch_table_changes(uint64_t tid, uint64_t xid)
+    {
+        return std::vector<TableChange>();
+    }
+
+    void 
+    WriteCache::insert_row(uint64_t tid, uint64_t eid, 
+                           uint64_t xid, uint64_t LSN,
+                           const std::string_view &pkey, 
+                           const std::string_view &data)
+    {
+    }
+
+    void 
+    WriteCache::update_row(uint64_t tid, uint64_t old_eid, uint64_t new_eid,
+                           uint64_t xid, uint64_t LSN,
+                           const std::string_view &old_pkey, 
+                           const std::string_view &new_pkey, 
+                           const std::string_view &data)
+    {
+    }
+    
+    void
+    WriteCache::delete_row(uint64_t tid, uint64_t eid, 
+                           uint64_t xid, uint64_t LSN,
+                           std::string_view &pkey)
+    {
+    }
+    
+    std::vector<uint64_t>
+    WriteCache::fetch_tables(uint64_t xid, int count, int offset)
+    {
+        return std::vector<uint64_t>();
+    }
+
+    std::vector<uint64_t>
+    WriteCache::fetch_extents(uint64_t tid, uint64_t xid, int count, int offset)
+    {
+        return std::vector<uint64_t>();
+    }
+    
+    std::vector<uint64_t>
+    WriteCache::fetch_rows(uint64_t tid, uint64_t eid, uint64_t xid, int count, int offset)
+    {
+        return std::vector<uint64_t>();
+    }
+    
+    std::shared_ptr<WriteCache::RowData>
+    WriteCache::fetch_row(uint64_t tid, uint64_t uid, uint64_t rid)
+    {
+        return std::make_shared<RowData>();
+    }
+
+    void 
+    WriteCache::clean_extent(uint64_t tid, uint64_t eid, uint64_t xid)
+    {
+    }
+
+    void 
+    WriteCache::evict(uint64_t xid)
+    {
+    }
 }
+
