@@ -38,6 +38,7 @@ namespace springtail {
             RowOp op;
             const std::string_view data;
             const std::string_view pkey;
+            const std::string raw_data;
         };
         
         /**
@@ -188,11 +189,76 @@ namespace springtail {
 
         WriteCache();
 
-        ~WriteCache() {}
+        ~WriteCache() {
+            if (!_shutdown) {
+                shutdown();
+            }
+        }
 
     private:
         // delete copy constructor
         WriteCache(const WriteCache &)     = delete;
         void operator=(const WriteCache &) = delete;
+
+        bool _shutdown = false;
+
+        // redis helpers
+
+        /**
+         * @brief Fetch storted set from Redis based on XID as upper bound
+         * @param key index name
+         * @param xid XID upper bound (inclusive)
+         * @return std::vector<std::string> 
+         */
+        std::vector<std::string> _get_sorted_set_by_xid(const std::string &key, uint64_t xid);
+
+        /**
+         * @brief Add data w/ XID as score into sorted set
+         * @param key  index name
+         * @param data data to insert
+         * @param xid  XID as score
+         */
+        void _add_sorted_set_by_xid(const std::string &key, const std::string_view &data, uint64_t xid);
+
+        /**
+         * @brief Delete range of values from sorted set based on XID as upper bound
+         * @param key index name
+         * @param xid XID upper bound (inclusive)
+         */
+        void _remove_sorted_set_by_xid(const std::string &key, uint64_t xid);
+
+        // serialization helpers
+
+        /**
+         * @brief Serialize a row to a string for upload 
+         * @param pkey primary key
+         * @param data row data
+         * @param LSN  log sequence number
+         * @param Op   row operation
+         * @return std::string serialized data
+         */
+        std::string _serialize_row(const std::string &pkey, const std::string &data, uint64_t LSN, RowOp op);
+
+        /**
+         * @brief Serialize table change operation to a string for upload
+         * @param LSN log sequence number
+         * @param op  operation type
+         * @return std::string 
+         */
+        std::string _serialize_table_change(uint64_t LSN, TableOp op);
+
+        /**
+         * @brief Deserialize row data into structure (zero copy)
+         * @param data row data to deserialize
+         * @return std::shared_ptr<RowData> 
+         */
+        std::shared_ptr<RowData> _deserialize_row(const std::string &data);
+
+        /**
+         * @brief Deserialize table change data into structure
+         * @param data table change data to deserialize
+         * @return std::shared_ptr<TableOp> 
+         */
+        std::shared_ptr<TableOp> _deserialize_table_change(const std::string &data);
     };
 }

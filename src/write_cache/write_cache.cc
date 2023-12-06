@@ -111,5 +111,46 @@ namespace springtail {
     WriteCache::evict(uint64_t xid)
     {
     }
+
+    std::vector<std::string> 
+    WriteCache::_get_sorted_set_by_xid(const std::string &key, uint64_t xid)
+    {
+        return std::vector<std::string>();
+    }
+
+    void 
+    WriteCache::_add_sorted_set_by_xid(const std::string &key, const std::string_view &data, uint64_t xid)
+    {
+    }
+
+    void 
+    WriteCache::_remove_sorted_set_by_xid(const std::string &key, uint64_t xid)
+    {
+    }
+
+    std::string 
+    WriteCache::_serialize_row(const std::string &pkey, const std::string &data, uint64_t LSN, RowOp op)
+    {
+        return std::string();
+    }
+
+    std::string 
+    WriteCache::_serialize_table_change(uint64_t LSN, TableOp op)
+    {
+        return std::string();
+    }
+
+    std::shared_ptr<WriteCache::RowData>
+    WriteCache::_deserialize_row(const std::string &data)
+    {
+        return std::shared_ptr<RowData>();
+    }
+
+    std::shared_ptr<WriteCache::TableOp>
+    WriteCache::_deserialize_table_change(const std::string &data)
+    {
+        return std::shared_ptr<TableOp>();
+    }
 }
+
 
