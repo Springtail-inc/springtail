@@ -3,7 +3,10 @@
 #include <mutex>
 #include <memory>
 #include <vector>
+#include <string>
 #include <string_view>
+
+#include <fmt/core.h>
 
 namespace springtail {
     /**
@@ -15,17 +18,17 @@ namespace springtail {
         /**
          * @brief Table operation type
          */
-        enum TableOp : uint8_t {
-            TRUNCATE=1,
-            SCHEMA_CHANGE=2
+        enum TableOp : char {
+            TRUNCATE='T',
+            SCHEMA_CHANGE='S'
         };
 
         /**
          * @brief Row operation type
          */
-        enum RowOp : uint8_t {
-            INSERT=1,
-            DELETE=2
+        enum RowOp : char {
+            INSERT='I',
+            DELETE='D'
         };
 
         /**
@@ -36,9 +39,18 @@ namespace springtail {
             uint64_t LSN;         
             uint64_t RID;   
             RowOp op;
-            const std::string_view data;
             const std::string_view pkey;
+            const std::string_view data;
             const std::string raw_data;
+
+            /**
+             * @brief Construct a new Row Data object; keep a reference to orig_data since
+             * the pkey and data string_views are created from ptrs within it.
+             */
+            RowData(RowOp op, uint64_t LSN, uint64_t RID, uint64_t XID, const char * const pkey,
+                     int pkey_len, const char * const data, int data_len, const std::string &&orig_data) :
+                XID(XID), LSN(LSN), RID(RID), op(op), pkey(pkey, pkey_len), data(data, data_len), raw_data(orig_data)
+            { }
         };
         
         /**
@@ -48,6 +60,12 @@ namespace springtail {
             uint64_t XID;
             uint64_t LSN;
             TableOp  op;
+
+            /**
+             * @brief Construct a new Table Change object
+             */
+            TableChange(TableOp op, uint64_t LSN, uint64_t XID) : XID(XID), LSN(LSN), op(op)
+            { }
         };
 
         /**
@@ -59,7 +77,7 @@ namespace springtail {
         /**
          * @brief Shutdown cache
          */
-        void shutdown();
+        static void shutdown();
 
         /**
          * @brief Start new GC @ XID; updates metadata in cache for ongoing GC
@@ -88,7 +106,7 @@ namespace springtail {
          * @param xid Upper bound on XID (inclusive)
          * @return std::vector<TableChange> 
          */
-        std::vector<TableChange> fetch_table_changes(uint64_t tid, uint64_t xid);
+        std::vector<std::shared_ptr<TableChange>> fetch_table_changes(uint64_t tid, uint64_t xid);
 
         /**
          * @brief Insert row into cache
@@ -134,7 +152,7 @@ namespace springtail {
          * @param offset Optional offset to start from
          * @return std::vector<uint64_t> a list of table IDs
          */
-        std::vector<uint64_t> fetch_tables(uint64_t xid, int count, int offset=0);
+        std::vector<uint64_t> fetch_tables(uint64_t xid, int count, uint64_t offset=0);
 
         /**
          * @brief Fetch list of extent IDs that have been dirtied prior to and up to XID
@@ -144,7 +162,7 @@ namespace springtail {
          * @param offset Optional offset to start from
          * @return std::vector<uint64_t> a list of extent IDs
          */
-        std::vector<uint64_t> fetch_extents(uint64_t tid, uint64_t xid, int count, int offset=0);
+        std::vector<uint64_t> fetch_extents(uint64_t tid, uint64_t xid, int count, uint64_t offset=0);
 
         /**
          * @brief Fetch list of ALL row IDs that have been dirtied prior to and up to XID
@@ -152,7 +170,7 @@ namespace springtail {
          * @param eid Extent ID for row
          * @return std::vector<uint64_t> a list of row IDs
          */
-        std::vector<uint64_t> fetch_rows(uint64_t tid, uint64_t eid, uint64_t xid, int count, int offset=0);
+        std::vector<uint64_t> fetch_rows(uint64_t tid, uint64_t eid, uint64_t xid, int count, uint64_t offset=0);
 
         /**
          * @brief Fetch data for a row by row ID
@@ -161,7 +179,7 @@ namespace springtail {
          * @param rid Row ID (this is returned in fetch_rows(); it is a hashed value of the row pkey)
          * @return std::shared_ptr<RowData> row data includes pkey, LSN, XID, row data
          */
-        std::shared_ptr<RowData> fetch_row(uint64_t tid, uint64_t uid, uint64_t rid);
+        std::shared_ptr<RowData> fetch_row(uint64_t tid, uint64_t eid, uint64_t rid, uint64_t xid);
 
         // store RID: [ data@xid, ... ]  when fetching data only request latest data prior to xid
 
@@ -187,30 +205,45 @@ namespace springtail {
         /** Mutex protecting _instance in get_instance() */
         static std::mutex _instance_mutex;
 
-        WriteCache();
+        /**
+         * @brief Construct a new Write Cache object
+         */
+        WriteCache() {}
 
-        ~WriteCache() {
-            if (!_shutdown) {
-                shutdown();
-            }
-        }
+        /**
+         * @brief Destroy the Write Cache object; shouldn't be called directly use shutdown()
+         */
+        ~WriteCache() {}
 
     private:
         // delete copy constructor
         WriteCache(const WriteCache &)     = delete;
         void operator=(const WriteCache &) = delete;
 
-        bool _shutdown = false;
+        /** root table index name */
+        static inline constexpr char TABLE_INDEX_NAME[] = "TBLIDX";
 
         // redis helpers
 
         /**
-         * @brief Fetch storted set from Redis based on XID as upper bound
+         * @brief Helper that calls _get_sorted_set_by_xid and converts results to a list of ids
+         * @param key    string index name
+         * @param xid    XID upper bound (inclusive)
+         * @param count  max number of entries to return (-1 = no limit)
+         * @param offset starting offset (default = 0)
+         * @return std::vector<uint64_t> 
+         */
+        std::vector<uint64_t> _fetch_ids(const std::string &key, uint64_t xid, int count, uint64_t offset=0);
+
+        /**
+         * @brief Fetch storted set from Redis based on XID as upper bound; includes data and XID pair
          * @param key index name
          * @param xid XID upper bound (inclusive)
-         * @return std::vector<std::string> 
+         * @param count  max number of entries to return (-1 = no limit)
+         * @param offset starting offset (default = 0)
+         * @return std::vector<std::pair<std::string, double>> data + XID (score)
          */
-        std::vector<std::string> _get_sorted_set_by_xid(const std::string &key, uint64_t xid);
+        std::vector<std::pair<std::string, double>> _get_sorted_set_by_xid(const std::string &key, uint64_t xid, int count=-1, uint64_t offset=0);
 
         /**
          * @brief Add data w/ XID as score into sorted set
@@ -237,7 +270,7 @@ namespace springtail {
          * @param Op   row operation
          * @return std::string serialized data
          */
-        std::string _serialize_row(const std::string &pkey, const std::string &data, uint64_t LSN, RowOp op);
+        std::string _serialize_row(const std::string_view &pkey, const std::string_view &data, uint64_t LSN, RowOp op);
 
         /**
          * @brief Serialize table change operation to a string for upload
@@ -249,16 +282,46 @@ namespace springtail {
 
         /**
          * @brief Deserialize row data into structure (zero copy)
-         * @param data row data to deserialize
+         * @param data row data to deserialize -- moved into RowData
+         * @param XID XID for row
+         * @param RID row ID for row
          * @return std::shared_ptr<RowData> 
          */
-        std::shared_ptr<RowData> _deserialize_row(const std::string &data);
+        std::shared_ptr<RowData> _deserialize_row(std::string &data, uint64_t XID, uint64_t RID);
 
         /**
          * @brief Deserialize table change data into structure
          * @param data table change data to deserialize
+         * @param XID XID for table change
          * @return std::shared_ptr<TableOp> 
          */
-        std::shared_ptr<TableOp> _deserialize_table_change(const std::string &data);
+        std::shared_ptr<TableChange> _deserialize_table_change(const std::string &data, uint64_t XID);
+
+        // helpers to get table index names
+
+        /** Get table change index name */
+        inline std::string _get_table_change_index(uint64_t tid) {
+            return fmt::format("CHG:TID:{}", tid);
+        }
+
+        /** Get root table index name */
+        inline std::string _get_table_index() {
+            return TABLE_INDEX_NAME;
+        }
+        
+        /** Get table index name for specific table: TID:tid */
+        inline std::string _get_tid_index(uint64_t tid) {
+            return fmt::format("TID:{}", tid);
+        }
+
+        /** Get extent index name for specific table, extent: TID:tid:EID:eid */
+        inline std::string _get_eid_index(uint64_t tid, uint64_t eid) {
+            return fmt::format("TID:{}:EID:{}", tid, eid);
+        }
+
+        /** Get extent index name for specific table, extent, row: TID:tid:EID:eid:RID:rid */
+        inline std::string _get_rid_index(uint64_t tid, uint64_t eid, uint64_t rid) {
+            return fmt::format("TID:{}:EID:{}:RID:{}", tid, rid);
+        }
     };
 }
