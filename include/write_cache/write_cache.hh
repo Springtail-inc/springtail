@@ -98,7 +98,7 @@ namespace springtail {
          * @param xid LSN
          * @param op  Operation type (e.g., truncate)
          */
-        void table_change(uint64_t tid, uint64_t xid, uint64_t LSN, TableOp op);
+        void insert_table_change(uint64_t tid, uint64_t xid, uint64_t LSN, TableOp op);
 
         /**
          * @brief Fetch all table changes for a table up to and including XID
@@ -296,6 +296,13 @@ namespace springtail {
          * @return std::shared_ptr<TableOp> 
          */
         std::shared_ptr<TableChange> _deserialize_table_change(const std::string &data, uint64_t XID);
+
+        /**
+         * @brief Get hash of primary key to use as row ID
+         * @param pkey primary key (or full data row if no pkey)
+         * @return uint64_t resulting row ID
+         */
+        uint64_t _get_rid(const std::string_view &pkey);
 
         // helpers to get table index names
 

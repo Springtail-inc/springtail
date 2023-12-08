@@ -13,10 +13,11 @@ namespace springtail {
 
     /** 
      * Write cache Redis Indexes
-     * TableIndex: [ TID @ Xmin ] -- sorted set, list of table IDs sorted by min XID, 1 entry per TID
+     * CHG:TID: [ TableChange @ XID ] -- sorted set, list of table changes sort by XID, 1 entry per XID
+     * TBLIDX: [ TID @ Xmin ] -- sorted set, list of table IDs sorted by min XID, 1 entry per TID
      * TID: [ EID @ Xmin ] -- sorted set, list of extent IDs sorted by min XID, 1 entry per EID
      * EID: [ RID @ Xmin ] -- sorted set, list of row IDs sorted by min XID, 1 entry per RID
-     * RID: [ RowData @ XID ] -- sorted set, list of row data sorted by min XID, 1 entry per XID
+     * RID: [ RowData @ XID ] -- sorted set, list of row data sorted by XID, 1 entry per XID
      */
 
     WriteCache *
@@ -53,8 +54,10 @@ namespace springtail {
     }
 
     void 
-    WriteCache::table_change(uint64_t tid, uint64_t xid, uint64_t LSN, TableOp op)
+    WriteCache::insert_table_change(uint64_t tid, uint64_t xid, uint64_t LSN, TableOp op)
     {
+        std::string data = _serialize_table_change(LSN, op);
+        _add_sorted_set_by_xid(_get_table_change_index(tid), data, xid);
     }
 
     void 
@@ -63,6 +66,13 @@ namespace springtail {
                            const std::string_view &pkey, 
                            const std::string_view &data)
     {
+        uint64_t rid = _get_rid(pkey);
+
+        std::string row_data = _serialize_row(pkey, data, LSN, RowOp::INSERT);
+
+        _add_sorted_set_by_xid(_get_rid_index(tid, eid, rid), data, xid);
+
+        // need to fixup higher level indexes to mark them as dirty at this xid
     }
 
     void 
@@ -78,6 +88,16 @@ namespace springtail {
     WriteCache::delete_row(uint64_t tid, uint64_t eid, 
                            uint64_t xid, uint64_t LSN,
                            std::string_view &pkey)
+    {
+    }
+
+    void 
+    WriteCache::clean_extent(uint64_t tid, uint64_t eid, uint64_t xid)
+    {
+    }
+
+    void 
+    WriteCache::evict(uint64_t xid)
     {
     }
 
@@ -124,16 +144,6 @@ namespace springtail {
         assert(rows.size() == 1);
 
         return _deserialize_row(rows[0].first, xid, rid);
-    }
-
-    void 
-    WriteCache::clean_extent(uint64_t tid, uint64_t eid, uint64_t xid)
-    {
-    }
-
-    void 
-    WriteCache::evict(uint64_t xid)
-    {
     }
 
     std::vector<uint64_t>
@@ -262,6 +272,13 @@ namespace springtail {
         std::copy_n(data.c_str() + 1, 8, reinterpret_cast<char *>(&LSN));
         
         return std::make_shared<TableChange>(op, LSN, XID);
+    }
+
+    uint64_t
+    WriteCache::_get_rid(const std::string_view &pkey) 
+    {
+        uint64_t rid=0;
+        return rid;
     }
 }
 
