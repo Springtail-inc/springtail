@@ -15,5 +15,14 @@
             "max_idle_secs": 300,
             "max_connection_lifetime_secs": 0
         }
+    },
+    "write_cache": {
+        "server" : {
+            "host" : "localhost:55043",
+            "threads": 8
+        },
+        "client": {
+            "connections": 10
+        }
     }
 }

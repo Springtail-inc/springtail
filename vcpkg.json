@@ -11,6 +11,8 @@
         "nlohmann-json",
         "lz4",
         { "name": "redis-plus-plus",
-          "features": ["cxx17"] }
+          "features": ["cxx17"] },
+        "grpc",
+        "flatbuffers"
     ]
 }

@@ -1,5 +1,54 @@
-set(WRITE_CACHE_SOURCES write_cache.cc)
+find_package(gRPC CONFIG REQUIRED)
+find_package(flatbuffers CONFIG REQUIRED)
 
+# the flatbuffers compiler flatc
+find_program(
+    FLATBUFFS_COMPILER 
+    flatc
+    HINTS ${PROJECT_SOURCE_DIR}/external/vcpkg/packages/
+    REQUIRED
+)
+
+# set variables for flatbuffer schema .fbs file and generated .h
+set(FLATBUFFER_SCHEMA "write_cache_fbs.fbs")
+string(REPLACE ".fbs" "" FLATBUFFER_SCHEMA_BASE ${FLATBUFFER_SCHEMA})
+set(FLATBUFFER_SCHEMA_H "${FLATBUFFER_SCHEMA_BASE}_generated.h")
+set(FLATBUFFER_GRPC_H "${FLATBUFFER_SCHEMA_BASE}.grpc.fb.h")
+set(FLATBUFFER_GRPC_CC "${FLATBUFFER_SCHEMA_BASE}.grpc.fb.cc")
+
+set(FLATBUFFER_GEN_PATH "${CMAKE_SOURCE_DIR}/include/write_cache")
+
+set(GENERATED_FILES ${FLATBUFFER_GEN_PATH}/${FLATBUFFER_SCHEMA_H} ${FLATBUFFER_GEN_PATH}/${FLATBUFFER_GRPC_H} ${CMAKE_CURRENT_SOURCE_DIR}/${FLATBUFFER_GRPC_CC})
+
+# command to generate .h/.cc files from the .fbs file
+add_custom_command(
+    PRE_BUILD
+    OUTPUT ${GENERATED_FILES}
+    COMMAND ${FLATBUFFS_COMPILER} --grpc --cpp --cpp-std c++17 ${FLATBUFFER_SCHEMA}
+    COMMAND mv ${FLATBUFFER_GRPC_H} ${FLATBUFFER_GEN_PATH}/
+    COMMAND mv ${FLATBUFFER_SCHEMA_H} ${FLATBUFFER_GEN_PATH}/
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS ${FLATBUFFER_SCHEMA}
+    COMMENT "Generating: flatbuffers and grpc stubs:  ${FLATBUFFS_COMPILER} -o ${FLATBUFFER_GEN_PATH} --grpc --cpp --cpp-std c++17 --gen-all ${FLATBUFFER_GEN_PATH}/${FLATBUFFER_SCHEMA}"
+    VERBATIM
+)
+
+# target to ensure that all files are built prior to start of compilation
+add_custom_target(generated_fbs
+    DEPENDS ${GENERATED_FILES}
+)
+
+set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
+
+set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc ${CMAKE_CURRENT_SOURCE_DIR}/${FLATBUFFER_GRPC_CC})
+
+# add the library target
 add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})
+add_dependencies(springtail_write_cache generated_fbs)
+target_include_directories(springtail_write_cache PRIVATE ${FLATBUFFER_GEN_PATH})
+
+# add generated .cc/.h files to set of clean files
+set_target_properties(springtail_write_cache PROPERTIES ADDITIONAL_CLEAN_FILES "${FLATBUFFER_GEN_PATH}/${FLATBUFFER_SCHEMA_H};${FLATBUFFER_GEN_PATH}/${FLATBUFFER_GRPC_H};${CMAKE_CURRENT_SOURCE_DIR}/${FLATBUFFER_GRPC_CC}")
+
 target_include_directories(springtail_write_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(springtail_write_cache PUBLIC springtail_common)
+target_link_libraries(springtail_write_cache PUBLIC springtail_common PRIVATE gRPC::grpc++ flatbuffers::flatbuffers)

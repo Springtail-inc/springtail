@@ -1,0 +1,90 @@
+namespace springtail;
+
+enum RowOpType:byte { INSERT=0, UPDATE=1, DELETE=2}
+
+enum StatusCode:byte { SUCCESS=0, ERROR=1}
+
+table Row {
+    table_id:uint64;
+    extent_id:uint64;
+    primary_key:[ubyte];
+    data:[ubyte];
+}
+
+table AddRowRequest {
+    op:RowOpType;
+    xid:uint64;
+    row:[Row];
+}
+
+table GetRowRequest {
+    table_id:uint64;
+    extent_id:uint64;
+    primary_key:[ubyte];
+    start_xid:uint64;
+    end_xid:uint64;
+}
+
+table GetRowsRequest {
+    table_id:uint64;
+    extent_id:uint64;
+    start_xid:uint64;
+    end_xid:uint64;
+    cursor:uint64;
+    limit:uint32;
+}
+
+table RemoveExtentRequest {
+    table_id:uint64;
+    extent_id:uint64;
+    start_xid:uint64;
+    end_xid:uint64;
+}
+
+table ListExtentsRequest {
+    start_xid:uint64;
+    end_xid:uint64;
+    cursor:uint64;
+}
+
+table Extent {
+    table_id:uint64;
+    extent_id:uint64;
+}
+
+table ListExtentsResponse {
+    extents:[Extent];
+    start_xid:uint64;
+    end_xid:uint64;
+    cursor:uint64;
+}
+
+table EvictRequest {
+    start_xid:uint64;
+    end_xid:uint64;
+}
+
+table StatusResponse {
+    status:StatusCode;
+    message:string;
+}
+
+table RowResponse {
+    row:Row;
+    start_xid:uint64;
+    end_xid:uint64;
+}
+
+table RowsResponse {
+    rows:[RowResponse];
+    cursor:uint64;
+}
+
+rpc_service GrpcWriteCache {
+    AddRows(AddRowRequest):StatusResponse;
+    GetRow(GetRowRequest):RowResponse;
+    GetRows(GetRowsRequest):RowsResponse;
+    RemoveExtent(RemoveExtentRequest):StatusResponse;
+    Evict(EvictRequest):StatusResponse;
+    ListExtents(ListExtentsRequest):ListExtentsResponse;
+}
