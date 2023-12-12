@@ -18,13 +18,24 @@ class GrpcChannelPool {
         int _max_channels;
         bool _waiting=false;
 
+        std::shared_ptr<grpc::Channel> _create_channel(int id)
+        {
+            grpc::ChannelArguments args;
+            // Set a dummy (but distinct) channel arg on each channel so that every
+            // channel gets its own connection; see https://github.com/grpc/grpc/issues/15535
+            args.SetInt("id_key", id);
+            return grpc::CreateCustomChannel(_server_addr,
+                                             grpc::InsecureChannelCredentials(),
+                                             args);
+        }
+
     public:
         GrpcChannelPool(const std::string &server_addr, int start_channels, int max_channels)
             : _server_addr(server_addr), _max_channels(max_channels)
         {
             // initialize queue with starting set of channels
             for (int i = 0; i < start_channels; i++) {
-                _queue.push(grpc::CreateChannel(_server_addr, grpc::InsecureChannelCredentials()));
+                _queue.push(_create_channel(i));
             }
         }
 
@@ -38,10 +49,7 @@ class GrpcChannelPool {
             }
 
             if (_queue.empty() && _outstanding_channels < _max_channels) {
-                std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(
-                    _server_addr,
-                    grpc::InsecureChannelCredentials()
-                );
+                std::shared_ptr<grpc::Channel> channel = _create_channel(_outstanding_channels);
                 _outstanding_channels++;
                 return channel;
             }
@@ -61,54 +69,5 @@ class GrpcChannelPool {
                 _cv.notify_one();
             }
         }
-    };
-
-    template <class StubClass>
-    class GrpcClientContext 
-    {
-    public:
-        GrpcClientContext(std::shared_ptr<GrpcChannelPool> channel_pool) 
-            : _channel_pool(channel_pool)
-        {
-            _channel = _channel_pool->get_channel(); // may block
-            _stub = std::make_shared<StubClass>(_channel);
-        }
-
-        ~GrpcClientContext()
-        {
-            _channel_pool->put_channel(_channel);
-            _channel = nullptr;
-            _stub = nullptr;
-        }
-
-        std::shared_ptr<StubClass> stub() {
-            return _stub;
-        }    
-    
-    private:
-        std::shared_ptr<StubClass> _stub;
-        std::shared_ptr<grpc::Channel> _channel;
-        std::shared_ptr<GrpcChannelPool> _channel_pool;
-    };
-
-
-    template <class StubClass>
-    class GrpcClient
-    {
-    public:
-        GrpcClient(const std::string &server_addr, int start_channels, int max_channels) 
-        { 
-            _channel_pool = std::make_shared<GrpcChannelPool>(server_addr, start_channels, max_channels);
-        }
-    
-    
-        std::unique_ptr<GrpcClientContext<StubClass>> make_stub() {
-            return std::make_unique<GrpcClientContext<StubClass>>(_channel_pool);
-        }
-    
-    private:
-        std::shared_ptr<GrpcChannelPool> _channel_pool;
-
-        void _stub_deleter(StubClass *ptr) { delete ptr; }
     };
 }
