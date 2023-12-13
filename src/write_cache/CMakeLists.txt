@@ -13,7 +13,7 @@ message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 # set variables for thrift schema .thrift file and generated .h
 set(THRIFT_SCHEMA "write_cache.thrift")
 set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")
-set(THRIFT_CC_FILES "${THRIFT_GEN_PATH}/ThriftWriteCache.cpp;${THRIFT_GEN_PATH}/ThriftWriteCache_server.skeleton.cpp;${THRIFT_GEN_PATH}/write_cache_types.cpp")
+set(THRIFT_CC_FILES "${THRIFT_GEN_PATH}/ThriftWriteCache.cpp;${THRIFT_GEN_PATH}/write_cache_types.cpp")
 set(THRIFT_HH_FILES "${THRIFT_GEN_PATH}/ThriftWriteCache.h;${THRIFT_GEN_PATH}/write_cache_types.h")
 
 set(GENERATED_FILES ${THRIFT_CC_FILES} ${THRIFT_HH_FILES})
@@ -34,6 +34,7 @@ add_custom_target(generated_thrift
     DEPENDS ${GENERATED_FILES}
 )
 
+# set the generated property on the generate files, this ensures they are cleaned by 'make clean'
 set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 
 set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc ${THRIFT_CC_FILES})
@@ -42,16 +43,17 @@ set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc ${THRIFT_CC_
 add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})
 add_dependencies(springtail_write_cache generated_thrift)
 
-# add generated .cc/.h files to set of clean files
+# add the gen-cpp dir to the list of files to remove during 'make clean'
 set_target_properties(springtail_write_cache 
-    PROPERTIES ADDITIONAL_CLEAN_FILES ${GENERATED_FILES}
+    PROPERTIES ADDITIONAL_CLEAN_FILES ${THRIFT_GEN_PATH}
 )
 
+# include the thrift gen-cpp dir as an include path; so we don't have to move the .h files
 target_include_directories(springtail_write_cache
     PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH}
 )
 
 target_link_libraries(springtail_write_cache 
     PUBLIC springtail_common 
-    PRIVATE thrift::thrift thriftz::thriftz
+    PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
