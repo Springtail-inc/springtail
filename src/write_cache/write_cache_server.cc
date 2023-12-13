@@ -1,15 +1,24 @@
+#include <iostream>
+#include <mutex>
+#include <memory>
+
 #include <nlohmann/json.hpp>
-#include <zmq.hpp>
 
-#include <thread>
+#include <thrift/transport/TSocket.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/protocol/TCompactProtocol.h>
+#include <thrift/server/TThreadPoolServer.h>
 
+#include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
 
+#include "ThriftWriteCache.h"
+
 #include <write_cache/write_cache_server.hh>
+#include <write_cache/write_cache_service.hh>
 
 namespace springtail {
-    
 
     /* static initialization must happen outside of class */
     WriteCacheServer* WriteCacheServer::_instance {nullptr};
@@ -41,65 +50,33 @@ namespace springtail {
             throw Error("Write cache 'server.host' setting not found");
         }
 
+        Json::get_to<int>(server_json, "port", _port, 55051);
+
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
-        Json::get_to<int>(server_json, "io_threads", _io_thread_count, 2);
     }
-
-    static void
-    worker_fn(std::shared_ptr<zmq::context_t> context,
-              std::shared_ptr<WriteCacheService> service)
-    {
-        // create socket and connect to in process workers socket
-        zmq::socket_t socket(*context, ZMQ_REP);
-        socket.connect("inproc://workers");
-
-        while (true) {
-            zmq::message_t request;
-            zmq::recv_result_t res = socket.recv(request, zmq::recv_flags::none);   // data in request.data
-            if (res == -1) {
-                if (errno == ETERM) {
-                    // shutdown
-                    return;
-                }
-            }
-
-            // do work
-
-            zmq::message_t reply(6); // set reply.data()
-            socket.send(reply, zmq::send_flags::dontwait);
-        }
-    }
-
+  
     /** 
-     * Startup the zeromq server, for an explanation see: 
-     * https://thisthread.blogspot.com/2011/08/multithreading-with-zeromq.html
+     * Startup thrift threaded server
      */
     void
     WriteCacheServer::startup()
     {
-        // setup zmq context
-        _context = std::make_shared<zmq::context_t>(_io_thread_count);
-        
-        // setup a connection between client socket and workers socket
-        zmq::socket_t clients(*_context, ZMQ_ROUTER);
-        clients.bind("tcp://" + _server_host);
-        zmq::socket_t workers(*_context, ZMQ_DEALER);
-        workers.bind("inproc://workers");
+        // create a thread manager with right number of worker threads
+        std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
+          apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
 
-        // docs not clear on this, not sure if we should use this
-        // zmq_device(ZMQ_QUEUE, clients, workers); // this looks deprecated
-        // or this
-        zmq::proxy(clients, workers);
+        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
+        threadManager->start();
 
-        // create worker threads
-        for (int i = 0; i < _worker_thread_count; i++) {
-            _workers.push_back(std::thread(worker_fn, _context, _service));
-        }
+        apache::thrift::server::TThreadPoolServer server(
+            std::make_shared<ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
+            std::make_shared<apache::thrift::transport::TServerSocket>(_port),
+            std::make_shared<apache::thrift::transport::TBufferedTransportFactory>(),
+            std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
+            threadManager
+        );
 
-        // block waiting for threads to complete
-        for (int i = 0; i < _worker_thread_count; i++) {
-            _workers[i].join();
-        }
+        server.serve();
     }
 
     void
@@ -108,13 +85,10 @@ namespace springtail {
         std::scoped_lock<std::mutex> lock(_instance_mutex);
 
         if (_instance != nullptr) {
-            _instance->_context->shutdown();
             delete _instance;
             _instance = nullptr;
         }
-    }
-
-    
+    }  
 }
 
 int main (void)

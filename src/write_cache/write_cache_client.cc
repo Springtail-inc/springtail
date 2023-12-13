@@ -1,10 +1,17 @@
 #include <nlohmann/json.hpp>
 
+#include <thrift/transport/TSocket.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/protocol/TCompactProtocol.h>
+
 #include <common/properties.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
 
+#include "ThriftWriteCache.h"
+
 #include <write_cache/write_cache_client.hh>
+
 
 namespace springtail {
     /* static initialization must happen outside of class */
@@ -39,17 +46,32 @@ namespace springtail {
 
         // init channel pool
         int max_connections;
-        int io_threads;
-        std::string host;
+        int port;
+        std::string server;
         Json::get_to<int>(client_json, "connections", max_connections, 8);
-        Json::get_to<int>(client_json, "io_threads", io_threads, 1);
-        if (!Json::get_to<std::string>(server_json, "host", host)) {
+        Json::get_to<int>(server_json, "port", port, 55051);        
+
+        if (!Json::get_to<std::string>(client_json, "server", server)) {
             throw Error("Host not found in write_cache.server settings");
         }
 
-        // create zmq context and connection pool
-        _context = std::make_shared<zmq::context_t>(io_threads);
-        _socket_pool = std::make_shared<ZmqSocketPool>(_context, host, max_connections/2, max_connections);
+        // construct the thrift client pool.  
+        // First argument is a lambda that constructs a new thrift client; capturing the host and port from above
+        _thrift_client_pool = std::make_shared<ObjectPool<ThriftWriteCacheClient>>(
+            [&server,port]()->std::shared_ptr<ThriftWriteCacheClient> {
+                std::shared_ptr<apache::thrift::transport::TTransport> socket = 
+                    std::make_shared<apache::thrift::transport::TSocket>(server, port);
+                std::shared_ptr<apache::thrift::transport::TTransport> transport = 
+                    std::make_shared<apache::thrift::transport::TBufferedTransport>(socket);
+                std::shared_ptr<apache::thrift::protocol::TProtocol> protocol = 
+                    std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
+                std::shared_ptr<ThriftWriteCacheClient> client = 
+                    std::make_shared<ThriftWriteCacheClient>(protocol);
+                return client;
+            },
+            max_connections/2,
+            max_connections
+        );
     }
 
     void
@@ -72,10 +94,11 @@ namespace springtail {
     void 
     WriteCacheClient::insert_row(uint64_t tid, uint64_t eid, 
                                  uint64_t xid, uint64_t LSN,
-                                 const std::string_view &pkey, 
-                                 const std::string_view &data)
+                                 const std::string_view &pkey_data, 
+                                 const std::string_view &row_data)
     {
 
+        return;
     }
 
     void 

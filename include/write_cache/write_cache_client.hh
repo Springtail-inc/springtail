@@ -6,12 +6,12 @@
 #include <string>
 #include <string_view>
 
-#include <zmq.hpp>
-#include <common/zmq_socket_pool.hh>
 #include <common/object_pool.hh>
 #include <write_cache/common.hh>
 
 namespace springtail {
+
+    class ThriftWriteCacheClient; // forward decl to avoid messy includes
 
     class WriteCacheClient 
     {
@@ -157,11 +157,7 @@ namespace springtail {
         WriteCacheClient(const WriteCacheClient &) = delete;
         void operator=(const WriteCacheClient &)   = delete;
 
-        ObjectPool<> _thrift_client_pool;
-/*
-        std::shared_ptr<zmq::context_t> _context;
-        std::shared_ptr<ZmqSocketPool> _socket_pool;
-*/
+        std::shared_ptr<ObjectPool<ThriftWriteCacheClient>> _thrift_client_pool;
     };
 
 } // namespace springtail

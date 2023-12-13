@@ -6,8 +6,6 @@
 #include <string>
 #include <string_view>
 
-#include <zmq.hpp>
-
 namespace springtail {
 
     class WriteCacheService
@@ -60,12 +58,9 @@ namespace springtail {
         void operator=(const WriteCacheServer &)   = delete;
 
         int _worker_thread_count;
-        int _io_thread_count;
-
+        int _port;
         std::string _server_host;
         std::vector<std::thread> _workers;
-
-        std::shared_ptr<zmq::context_t> _context;
 
         std::shared_ptr<WriteCacheService> _service;
     };
