@@ -6,8 +6,9 @@
 #include <string>
 #include <string_view>
 
-#include <common/grpc_channel_pool.hh>
-
+#include <zmq.hpp>
+#include <common/zmq_socket_pool.hh>
+#include <common/object_pool.hh>
 #include <write_cache/common.hh>
 
 namespace springtail {
@@ -156,7 +157,11 @@ namespace springtail {
         WriteCacheClient(const WriteCacheClient &) = delete;
         void operator=(const WriteCacheClient &)   = delete;
 
-        std::shared_ptr<GrpcChannelPool> _channel_pool;
+        ObjectPool<> _thrift_client_pool;
+/*
+        std::shared_ptr<zmq::context_t> _context;
+        std::shared_ptr<ZmqSocketPool> _socket_pool;
+*/
     };
 
 } // namespace springtail

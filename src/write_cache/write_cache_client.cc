@@ -1,13 +1,9 @@
-#include <grpc++/grpc++.h>
-#include <flatbuffers/flatbuffers.h>
 #include <nlohmann/json.hpp>
 
 #include <common/properties.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
 
-
-#include <write_cache/write_cache_fbs.grpc.fb.h>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {
@@ -43,13 +39,17 @@ namespace springtail {
 
         // init channel pool
         int max_connections;
+        int io_threads;
         std::string host;
         Json::get_to<int>(client_json, "connections", max_connections, 8);
+        Json::get_to<int>(client_json, "io_threads", io_threads, 1);
         if (!Json::get_to<std::string>(server_json, "host", host)) {
             throw Error("Host not found in write_cache.server settings");
         }
-        
-        _channel_pool = std::make_shared<GrpcChannelPool>(host, max_connections/2, max_connections);
+
+        // create zmq context and connection pool
+        _context = std::make_shared<zmq::context_t>(io_threads);
+        _socket_pool = std::make_shared<ZmqSocketPool>(_context, host, max_connections/2, max_connections);
     }
 
     void

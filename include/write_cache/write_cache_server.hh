@@ -6,41 +6,16 @@
 #include <string>
 #include <string_view>
 
-#include <write_cache/write_cache_fbs.grpc.fb.h>
+#include <zmq.hpp>
 
 namespace springtail {
 
-    class WriteCacheService : public GrpcWriteCache::Service
+    class WriteCacheService
     {
     public:
-        /** These functions match those in the write_cache_fbs.fbs schema definition */
-
-        virtual ::grpc::Status AddRows(::grpc::ServerContext* context, 
-                                       const flatbuffers::grpc::Message<AddRowRequest>* request, 
-                                       flatbuffers::grpc::Message<StatusResponse>* response) override;
-
-        virtual ::grpc::Status GetRow(::grpc::ServerContext* context,
-                                      const flatbuffers::grpc::Message<GetRowRequest>* request,
-                                      flatbuffers::grpc::Message<RowResponse>* response) override;
-
-        virtual ::grpc::Status GetRows(::grpc::ServerContext* context,
-                                       const flatbuffers::grpc::Message<GetRowsRequest>* request,
-                                       flatbuffers::grpc::Message<RowsResponse>* response) override;
-
-        virtual ::grpc::Status RemoveExtent(::grpc::ServerContext* context, 
-                                            const flatbuffers::grpc::Message<RemoveExtentRequest>* request, 
-                                            flatbuffers::grpc::Message<StatusResponse>* response) override;
-
-        virtual ::grpc::Status Evict(::grpc::ServerContext* context,
-                                     const flatbuffers::grpc::Message<EvictRequest>* request,
-                                     flatbuffers::grpc::Message<StatusResponse>* response) override;
-
-        virtual ::grpc::Status ListExtents(::grpc::ServerContext* context,
-                                           const flatbuffers::grpc::Message<ListExtentsRequest>* request, 
-                                           flatbuffers::grpc::Message<ListExtentsResponse>* response) override;
 
     private:
-        flatbuffers::grpc::MessageBuilder _mb;
+
     };
 
     class WriteCacheServer 
@@ -77,17 +52,22 @@ namespace springtail {
         /**
          * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
          */
-         WriteCacheServer() {}
+         ~WriteCacheServer() {}
 
     private:
         // delete copy constructor
         WriteCacheServer(const WriteCacheServer &) = delete;
         void operator=(const WriteCacheServer &)   = delete;
 
+        int _worker_thread_count;
+        int _io_thread_count;
+
         std::string _server_host;
-        int _thread_count;
-        std::unique_ptr<grpc::Server> _server;
-        std::vector<std::thread> _threads;
+        std::vector<std::thread> _workers;
+
+        std::shared_ptr<zmq::context_t> _context;
+
+        std::shared_ptr<WriteCacheService> _service;
     };
 
 } // namespace springtail

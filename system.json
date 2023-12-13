@@ -19,10 +19,12 @@
     "write_cache": {
         "server" : {
             "host" : "localhost:55043",
-            "threads": 8
+            "worker_threads": 8,
+            "io_threads": 1
         },
         "client": {
-            "connections": 10
+            "connections": 8,
+            "io_threads": 1
         }
     }
 }
