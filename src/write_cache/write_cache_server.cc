@@ -9,6 +9,7 @@
 #include <thrift/protocol/TCompactProtocol.h>
 #include <thrift/server/TThreadPoolServer.h>
 
+#include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
@@ -36,7 +37,7 @@ namespace springtail {
         return _instance;
     }
 
-    WriteCacheServer::WriteCacheServer() : _service(std::make_shared<WriteCacheService>())
+    WriteCacheServer::WriteCacheServer()
     {
         nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
         nlohmann::json client_json;
@@ -69,9 +70,9 @@ namespace springtail {
         threadManager->start();
 
         apache::thrift::server::TThreadPoolServer server(
-            std::make_shared<ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
+            std::make_shared<thrift::ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
-            std::make_shared<apache::thrift::transport::TBufferedTransportFactory>(),
+            std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
             std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
             threadManager
         );
@@ -88,10 +89,12 @@ namespace springtail {
             delete _instance;
             _instance = nullptr;
         }
-    }  
+    }
 }
 
 int main (void)
 {
-
+    springtail::springtail_init();
+    springtail::WriteCacheServer *server = springtail::WriteCacheServer::get_instance();
+    server->startup();
 }

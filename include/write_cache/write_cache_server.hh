@@ -8,14 +8,6 @@
 
 namespace springtail {
 
-    class WriteCacheService
-    {
-    public:
-
-    private:
-
-    };
-
     class WriteCacheServer 
     {
     public:
@@ -60,9 +52,6 @@ namespace springtail {
         int _worker_thread_count;
         int _port;
         std::string _server_host;
-        std::vector<std::thread> _workers;
-
-        std::shared_ptr<WriteCacheService> _service;
     };
 
 } // namespace springtail

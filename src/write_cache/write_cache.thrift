@@ -1,4 +1,4 @@
-namespace cpp springtail
+namespace cpp springtail.thrift
 
 enum RowOpType 
 {
@@ -36,5 +36,6 @@ struct Status
 
 service ThriftWriteCache
 {
+    Status ping(),
     Status addRows(1: AddRowRequest request)
 }

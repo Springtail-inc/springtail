@@ -37,7 +37,7 @@ add_custom_target(generated_thrift
 # set the generated property on the generate files, this ensures they are cleaned by 'make clean'
 set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 
-set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc ${THRIFT_CC_FILES})
+set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc write_cache_service.cc ${THRIFT_CC_FILES})
 
 # add the library target
 add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})

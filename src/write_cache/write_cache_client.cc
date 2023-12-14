@@ -7,6 +7,8 @@
 #include <common/properties.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
+#include <common/object_cache.hh>
+#include <common/common.hh>
 
 #include "ThriftWriteCache.h"
 
@@ -14,6 +16,49 @@
 
 
 namespace springtail {
+
+    class ThriftObjectFactory : public ObjectPoolFactory<thrift::ThriftWriteCacheClient> 
+    {
+    public:
+        ThriftObjectFactory(const std::string &server, int port) : _server(server), _port(port) {}
+
+        std::shared_ptr<thrift::ThriftWriteCacheClient> allocate() override
+        {
+            std::shared_ptr<apache::thrift::transport::TTransport> socket = 
+                std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
+            std::shared_ptr<apache::thrift::transport::TTransport> transport = 
+                std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
+            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol = 
+                std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
+            std::shared_ptr<thrift::ThriftWriteCacheClient> client = 
+                std::make_shared<thrift::ThriftWriteCacheClient>(protocol);
+            return client;
+        }
+
+        void get_cb(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
+        {
+            // validate that the transport is connected
+            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
+            if (proto->getTransport()->isOpen()) {
+                return;
+            }
+            proto->getTransport()->open();
+        }
+
+        void deallocate(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
+        {
+            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
+            if (!proto->getTransport()->isOpen()) {
+                return;
+            }
+            proto->getTransport()->close();
+        }
+
+    private:
+        std::string _server;
+        int _port;
+    };
+
     /* static initialization must happen outside of class */
     WriteCacheClient* WriteCacheClient::_instance {nullptr};
     std::mutex WriteCacheClient::_instance_mutex;
@@ -57,18 +102,8 @@ namespace springtail {
 
         // construct the thrift client pool.  
         // First argument is a lambda that constructs a new thrift client; capturing the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<ThriftWriteCacheClient>>(
-            [&server,port]()->std::shared_ptr<ThriftWriteCacheClient> {
-                std::shared_ptr<apache::thrift::transport::TTransport> socket = 
-                    std::make_shared<apache::thrift::transport::TSocket>(server, port);
-                std::shared_ptr<apache::thrift::transport::TTransport> transport = 
-                    std::make_shared<apache::thrift::transport::TBufferedTransport>(socket);
-                std::shared_ptr<apache::thrift::protocol::TProtocol> protocol = 
-                    std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
-                std::shared_ptr<ThriftWriteCacheClient> client = 
-                    std::make_shared<ThriftWriteCacheClient>(protocol);
-                return client;
-            },
+        _thrift_client_pool = std::make_shared<ObjectPool<thrift::ThriftWriteCacheClient>>(
+            std::make_shared<ThriftObjectFactory>(server, port),
             max_connections/2,
             max_connections
         );
@@ -83,6 +118,18 @@ namespace springtail {
             delete _instance;
             _instance = nullptr;
         }
+    }
+
+    // thrift client service interface below
+
+    void
+    WriteCacheClient::ping()
+    {
+        std::shared_ptr<thrift::ThriftWriteCacheClient> client = _thrift_client_pool->get();
+        thrift::Status result;
+        client->ping(result);
+
+        std::cout << "Ping got: " << result.message << std::endl;
     }
 
     void 
@@ -168,5 +215,10 @@ namespace springtail {
 
 int main (void)
 {
+    springtail::springtail_init();
 
+    springtail::WriteCacheClient *client = springtail::WriteCacheClient::get_instance();
+    client->ping();
+
+    return 0;
 }

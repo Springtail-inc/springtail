@@ -12,23 +12,24 @@ namespace springtail {
      *        from the .thrift file.  It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftWriteCacheService : public ThriftWriteCacheIf
+    class ThriftWriteCacheService : public thrift::ThriftWriteCacheIf
     {
     public:
         ThriftWriteCacheService() = default;
 
-        void addRows(Status& _return, const AddRowRequest& request) override;
+        void addRows(thrift::Status& _return, const thrift::AddRowRequest& request) override;
+        void ping(thrift::Status& _return) override;
     };
 
     /**
      * @brief Private helper class to override handler creation;
      *        can be used to store per connection state or log incoming connections
      */
-    class ThriftWriteCacheCloneFactory : virtual public ThriftWriteCacheIfFactory {
+    class ThriftWriteCacheCloneFactory : virtual public thrift::ThriftWriteCacheIfFactory {
         public:
             ~ThriftWriteCacheCloneFactory() override = default;
             
-            ThriftWriteCacheIf* 
+            thrift::ThriftWriteCacheIf* 
             getHandler(const apache::thrift::TConnectionInfo &connInfo) override
             {
                 std::shared_ptr<apache::thrift::transport::TSocket> sock = 
@@ -44,7 +45,7 @@ namespace springtail {
             }
 
             void
-            releaseHandler(ThriftWriteCacheIf *handler) override {
+            releaseHandler(thrift::ThriftWriteCacheIf *handler) override {
                 delete handler;
             }
     };

@@ -8,6 +8,17 @@
 namespace springtail {
 
     template <class T>
+    class ObjectPoolFactory
+    {
+    public:
+        virtual ~ObjectPoolFactory() {}
+
+        virtual std::shared_ptr<T> allocate()=0;
+        virtual void deallocate(std::shared_ptr<T> obj) {};
+        virtual void get_cb(std::shared_ptr<T> obj) {};
+    };
+
+    template <class T>
     class ObjectPool {
     public:
         /**
@@ -16,32 +27,54 @@ namespace springtail {
          * @param start        Starting sockets in pool
          * @param max          Max sockets in pool
          */
-        ObjectPool(std::function<std::shared_ptr<T>()> creator_fn, int start, int max)
-            : _max(max), _outstanding(0), _creator_fn(creator_fn)
+        ObjectPool(std::shared_ptr<ObjectPoolFactory<T>> factory, int start, int max)
+            : _max(max), _outstanding(0), _factory(factory)
         {
             // initialize queue with starting set of channels
             for (int i = 0; i < start; i++) {
-                _queue.push(_creator_fn());
+                _queue.push(_factory->allocate());
             }        
         }
-       
+        /**
+         * @brief Get object from pool (queue); block if none available (if outstanding >= max)
+         * @return std::shared_ptr<T> 
+         */    
+        std::shared_ptr<T> get()
+        {
+            std::shared_ptr<T> obj = _get(); // get obj
+            _factory->get_cb(obj); // do get callback with factory, don't want to be holding lock
+            return obj;
+        }
+
+        /**
+         * @brief Release socket back to queue
+         * @param obj to release
+         */
+        void put(std::shared_ptr<T> obj)
+        {
+            if (!_put(obj)) {
+                _factory->deallocate(obj);
+            }
+        }
+
+    private:
         /**
          * @brief Get object from pool (queue); block if none available (if outstanding >= max)
          * @return std::shared_ptr<T> 
          */
-        std::shared_ptr<T> get()
+        std::shared_ptr<T> _get()
         {
             std::unique_lock<std::mutex> queue_lock(_mutex);
             
             // if queue is empty and are above or at max limit wait
-            while (_queue.empty() && (_outstanding >= _max || !_creator_fn)) {
+            while (_queue.empty() && (_outstanding >= _max)) {
                 _cv.wait(queue_lock);
             }
 
             // if queue is empty and we are below max, create socket
             if (_queue.empty() && _outstanding < _max) {
                 _outstanding++;
-                return _creator_fn();
+                return _factory->allocate();
             }
 
             // otherwise get a socket from the queue
@@ -53,29 +86,30 @@ namespace springtail {
 
         /**
          * @brief Release socket back to queue
-         * @param socket to release
+         * @param obj to release
+         * @returns true if object is requeued, false otherwise
          */
-        void put(std::shared_ptr<T> obj)
+        bool _put(std::shared_ptr<T> obj)
         {
             std::unique_lock<std::mutex> queue_lock(_mutex);
             if (_outstanding + _queue.size() <= _max) {
                 _queue.push(obj);
                 _cv.notify_one();
+                _outstanding--;
+                return true;
+            } else {
+                _outstanding--;                
+                return false;
             }
-            _outstanding--;
-            cassert(_outstanding + _queue.size() <= _max);
         }
 
-
-
-    private:
         /** max number of sockets in pool */
         int _max;
         /** number of outstanding sockets */
         int _outstanding;
 
-        /** function for creating objects */
-        std::function<std::shared_ptr<T>()> _creator_fn;
+        /** factory for creating and destroying objects in the pool */
+        std::shared_ptr<ObjectPoolFactory<T>> _factory;
       
         /** mutex protecting queue cv */
         std::mutex _mutex;

@@ -28,6 +28,11 @@ namespace springtail {
         static void shutdown();
 
         /**
+         * @brief Ping the server
+         */
+        void ping();
+
+        /**
          * @brief Marks table has having a table change that may affect data
          * @param tid Table ID
          * @param xid XID
@@ -134,7 +139,6 @@ namespace springtail {
          */
         void evict(uint64_t xid);
 
-
     protected:
         /** Singleton write cache client instance */
         static WriteCacheClient *_instance;
@@ -157,7 +161,8 @@ namespace springtail {
         WriteCacheClient(const WriteCacheClient &) = delete;
         void operator=(const WriteCacheClient &)   = delete;
 
-        std::shared_ptr<ObjectPool<ThriftWriteCacheClient>> _thrift_client_pool;
+        std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> _thrift_client_pool;
+
     };
 
 } // namespace springtail
