@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <iostream>
 
 #include <common/object_pool.hh>
 #include <write_cache/common.hh>
@@ -162,6 +163,19 @@ namespace springtail {
         void operator=(const WriteCacheClient &)   = delete;
 
         std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> _thrift_client_pool;
+
+        struct ThriftClient {
+            std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> pool;
+            std::shared_ptr<thrift::ThriftWriteCacheClient> client;
+            ~ThriftClient() { std::cout << "Releasing client to pool\n"; pool->put(client); }
+        };
+
+        inline ThriftClient _get_client()
+        {
+            std::shared_ptr<thrift::ThriftWriteCacheClient> client = _thrift_client_pool->get();
+            ThriftClient c = { _thrift_client_pool, client };
+            return c;
+        }
 
     };
 

@@ -7,6 +7,10 @@
 
 namespace springtail {
 
+    /**
+     * @brief Factory class -- provides allocator, deallocator and get callback for ObjectPool
+     * @tparam T type of object being returned by the object pool
+     */
     template <class T>
     class ObjectPoolFactory
     {
@@ -18,6 +22,10 @@ namespace springtail {
         virtual void get_cb(std::shared_ptr<T> obj) {};
     };
 
+    /**
+     * @brief Object pool; caches a set of objects that can be fetched and returned to the pool
+     * @tparam T type of object being returned by the pool
+     */
     template <class T>
     class ObjectPool {
     public:

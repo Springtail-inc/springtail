@@ -17,11 +17,18 @@
 
 namespace springtail {
 
+    /**
+     * @brief Object pool factory for thrift cache client objects
+     */
     class ThriftObjectFactory : public ObjectPoolFactory<thrift::ThriftWriteCacheClient> 
     {
     public:
         ThriftObjectFactory(const std::string &server, int port) : _server(server), _port(port) {}
 
+        /**
+         * @brief Allocate a new client; transport is not connected
+         * @return std::shared_ptr<thrift::ThriftWriteCacheClient> 
+         */
         std::shared_ptr<thrift::ThriftWriteCacheClient> allocate() override
         {
             std::shared_ptr<apache::thrift::transport::TTransport> socket = 
@@ -35,6 +42,11 @@ namespace springtail {
             return client;
         }
 
+        /**
+         * @brief The get callback from the object pool.  Check that transport is connected
+         *        before returning.
+         * @param client 
+         */
         void get_cb(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
         {
             // validate that the transport is connected
@@ -45,6 +57,10 @@ namespace springtail {
             proto->getTransport()->open();
         }
 
+        /**
+         * @brief Deallocation callback; close transport
+         * @param client 
+         */
         void deallocate(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
         {
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
@@ -125,9 +141,10 @@ namespace springtail {
     void
     WriteCacheClient::ping()
     {
-        std::shared_ptr<thrift::ThriftWriteCacheClient> client = _thrift_client_pool->get();
+        ThriftClient c = _get_client();
         thrift::Status result;
-        client->ping(result);
+
+        c.client->ping(result);
 
         std::cout << "Ping got: " << result.message << std::endl;
     }

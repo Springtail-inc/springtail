@@ -47,10 +47,6 @@ namespace springtail {
             throw Error("Write cache server settings not found");
         }
 
-        if (!Json::get_to<std::string>(server_json, "host", _server_host)) {
-            throw Error("Write cache 'server.host' setting not found");
-        }
-
         Json::get_to<int>(server_json, "port", _port, 55051);
 
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);

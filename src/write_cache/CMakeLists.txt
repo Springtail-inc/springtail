@@ -54,6 +54,13 @@ target_include_directories(springtail_write_cache
 )
 
 target_link_libraries(springtail_write_cache 
-    PUBLIC springtail_common 
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
+
+add_executable(client_test write_cache_client.cc)
+target_include_directories(client_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+target_link_libraries(client_test PRIVATE springtail_common springtail_write_cache)
+
+add_executable(server_test write_cache_server.cc)
+target_include_directories(server_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+target_link_libraries(server_test PRIVATE springtail_common springtail_write_cache)
