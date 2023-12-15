@@ -49,9 +49,10 @@ namespace springtail {
         WriteCacheServer(const WriteCacheServer &) = delete;
         void operator=(const WriteCacheServer &)   = delete;
 
+        /** number of worker threads */
         int _worker_thread_count;
+        /** server port */
         int _port;
-        std::string _server_host;
     };
 
 } // namespace springtail
