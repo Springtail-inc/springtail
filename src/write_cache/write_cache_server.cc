@@ -48,7 +48,6 @@ namespace springtail {
         }
 
         Json::get_to<int>(server_json, "port", _port, 55051);
-
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
     }
   

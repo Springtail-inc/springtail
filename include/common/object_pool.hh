@@ -1,3 +1,5 @@
+#pragma once 
+
 #include <memory>
 #include <string>
 #include <mutex>
@@ -18,7 +20,7 @@ namespace springtail {
         virtual ~ObjectPoolFactory() {}
 
         virtual std::shared_ptr<T> allocate()=0;
-        virtual void deallocate(std::shared_ptr<T> obj) {};
+        virtual void put_cb(std::shared_ptr<T> obj) {};        
         virtual void get_cb(std::shared_ptr<T> obj) {};
     };
 
@@ -60,9 +62,8 @@ namespace springtail {
          */
         void put(std::shared_ptr<T> obj)
         {
-            if (!_put(obj)) {
-                _factory->deallocate(obj);
-            }
+            _put(obj);
+            _factory->put_cb(obj);
         }
 
     private:
@@ -100,15 +101,13 @@ namespace springtail {
         bool _put(std::shared_ptr<T> obj)
         {
             std::unique_lock<std::mutex> queue_lock(_mutex);
-            if (_outstanding + _queue.size() <= _max) {
-                _queue.push(obj);
-                _cv.notify_one();
-                _outstanding--;
-                return true;
-            } else {
-                _outstanding--;                
-                return false;
-            }
+            assert(_outstanding + _queue.size() <= _max);
+            
+            _queue.push(obj);
+            _cv.notify_one();
+            _outstanding--;
+
+            return true;
         }
 
         /** max number of sockets in pool */

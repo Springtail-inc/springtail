@@ -7,6 +7,7 @@
 #include "ThriftWriteCache.h"
 
 namespace springtail {
+
     /**
      * @brief This is the implementation of the ThriftWriteCacheIf that is generated
      *        from the .thrift file.  It contains the service (handler) for actually
@@ -17,9 +18,16 @@ namespace springtail {
     public:
         ThriftWriteCacheService() = default;
 
-        void addRows(thrift::Status& _return, const thrift::AddRowRequest& request) override;
         void ping(thrift::Status& _return) override;
+        void add_rows(thrift::Status& _return, const thrift::AddRowRequest& request) override;
+        void list_extents(thrift::ListExtentsResponse& _return, const thrift::ListExtentsRequest& request) override;
+        void get_rows(thrift::GetRowsResponse& _return, const thrift::GetRowsRequest& request) override;
+        void evict_extent(thrift::Status& _return, const thrift::EvictExtentRequest& request) override;
+        void add_table_changes(thrift::Status& _return, const std::vector<thrift::TableChange> & changes) override;
+        void get_table_changes(std::vector<thrift::TableChange> & _return, const thrift::GetTableChangeRequest& request) override;
+        void list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request) override;
     };
+
 
     /**
      * @brief Private helper class to override handler creation;
@@ -29,6 +37,11 @@ namespace springtail {
         public:
             ~ThriftWriteCacheCloneFactory() override = default;
             
+            /**
+             * @brief Override the thrift getHandler call, allows for logging
+             * @param connInfo Thrift connection info object
+             * @return thrift::ThriftWriteCacheIf* 
+             */
             thrift::ThriftWriteCacheIf* 
             getHandler(const apache::thrift::TConnectionInfo &connInfo) override
             {

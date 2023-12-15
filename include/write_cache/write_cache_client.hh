@@ -8,7 +8,6 @@
 #include <iostream>
 
 #include <common/object_pool.hh>
-#include <write_cache/common.hh>
 
 namespace springtail {
 
@@ -17,7 +16,44 @@ namespace springtail {
     class WriteCacheClient 
     {
     public:
-           /**
+        /**
+         * @brief Table operation type
+         */
+        enum TableOp : char {
+            TRUNCATE='T',
+            SCHEMA_CHANGE='S'
+        };
+
+        /**
+         * @brief Row operation type
+         */
+        enum RowOp : char {
+            INSERT='I',
+            UPDATE='U',
+            DELETE='D'
+        };
+
+        /**
+         * @brief data describing a row
+         */
+        struct RowData {
+            uint64_t xid;
+            uint64_t xid_seq;         
+            std::shared_ptr<std::string_view> pkey;
+            std::shared_ptr<std::string_view> data;
+            bool delete_flag; // only used in response
+        };
+        
+        /**
+         * @brief Data returned when table changes are fetched
+         */
+        struct TableChange {
+            uint64_t xid;
+            uint64_t xid_seq;
+            TableOp  op;
+        };   
+
+        /**
          * @brief Get the singleton write cache client instance object
          * @return WriteCacheClient * 
          */
@@ -36,109 +72,70 @@ namespace springtail {
         /**
          * @brief Marks table has having a table change that may affect data
          * @param tid Table ID
-         * @param xid XID
-         * @param xid LSN
-         * @param op  Operation type (e.g., truncate)
+         * @param changes List of table changes
          */
-        void insert_table_change(uint64_t tid, uint64_t xid, uint64_t LSN, WriteCache::TableOp op);
+        void add_table_changes(uint64_t tid, std::vector<TableChange> changes);
 
         /**
          * @brief Fetch all table changes for a table up to and including XID
          * @param tid Table ID
-         * @param xid Upper bound on XID (inclusive)
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
          * @return std::vector<TableChange> 
          */
-        std::vector<std::shared_ptr<WriteCache::TableChange>> fetch_table_changes(uint64_t tid, uint64_t xid);
+        std::vector<TableChange> fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
-         * @brief Insert row into cache
-         * @param tid  Table ID
-         * @param eid  Extent ID (offset)
-         * @param xid  XID
-         * @param LSN  log seq number
-         * @param pkey Primary key
-         * @param data Row data
-         */
-        void insert_row(uint64_t tid, uint64_t eid, uint64_t xid, uint64_t LSN,
-                        const std::string_view &pkey, const std::string_view &data);
-
-        /**
-         * @brief Update a row, internally results in a delete entry for old row and insert of new row
-         * @param tid      Table ID
-         * @param old_eid  Old extent ID (one being updated)
-         * @param new_eid  New extent ID (may be same as old)
-         * @param xid      XID
-         * @param LSN      log seq number
-         * @param old_pkey Old primary key
-         * @param new_pkey New primary key (may be the same as old)
-         * @param data     Row data
-         */
-        void update_row(uint64_t tid, uint64_t old_eid, uint64_t new_eid,
-                        uint64_t xid, uint64_t LSN, const std::string_view &old_pkey,
-                        const std::string_view &new_pkey, const std::string_view &data);
-
-        /**
-         * @brief Delete row, internally marks row as deleted
+         * @brief Add one or more rows to the cache for a specific table and extent and operation type
          * @param tid  Table ID
          * @param eid  Extent ID
-         * @param xid  XID
-         * @param LSN  log seq number
-         * @param pkey Primary key
+         * @param op   Row operation type
+         * @param rows Set of rows
          */
-        void delete_row(uint64_t tid, uint64_t eid, uint64_t xid, uint64_t LSN, const std::string_view &pkey);
+        void add_rows(uint64_t tid, uint64_t eid, RowOp op, std::vector<RowData> rows);
 
         /**
          * @brief Fetch list of table IDs that have been dirtied prior to and up to XID
-         * @param xid Upper bound on XID (inclusive)
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
          * @param count Max TIDs to return (may return less)
-         * @param offset Optional offset to start from
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of table IDs
          */
-        std::vector<uint64_t> fetch_tables(uint64_t xid, int count, uint64_t offset=0);
+        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of extent IDs that have been dirtied prior to and up to XID
          * @param tid Table ID for extent
-         * @param xid Upper bound on XID (inclusive)
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
          * @param count Max EIDs to return (may return less)
-         * @param offset Optional offset to start from
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of extent IDs
          */
-        std::vector<uint64_t> fetch_extents(uint64_t tid, uint64_t xid, int count, uint64_t offset=0);
+        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, int count, uint64_t&cursor);
 
         /**
          * @brief Fetch list of ALL row IDs that have been dirtied prior to and up to XID
          * @param tid Table ID for extent
          * @param eid Extent ID for row
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of row IDs
          */
-        std::vector<uint64_t> fetch_rows(uint64_t tid, uint64_t eid, uint64_t xid, int count, uint64_t offset=0);
-
-        /**
-         * @brief Fetch data for a row by row ID
-         * @param tid Table ID
-         * @param eid Extent ID 
-         * @param rid Row ID (this is returned in fetch_rows(); it is a hashed value of the row pkey)
-         * @return std::shared_ptr<RowData> row data includes pkey, LSN, XID, row data
-         */
-        std::shared_ptr<WriteCache::RowData> fetch_row(uint64_t tid, uint64_t eid, uint64_t rid, uint64_t xid);
-
-        // store RID: [ data@xid, ... ]  when fetching data only request latest data prior to xid
+        std::vector<RowData> fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, 
+                                        uint64_t end_xid, int count, uint64_t &cursor);
 
         /**
          * @brief Mark a previously dirty extent as clean; removes all row data for that
          *        extent by XID up to and including provided XID; fixes up indexes up the chain
          * @param tid Table ID
          * @param eid Extent ID (offset)
-         * @param xid Upper bound on XID (inclusive) -- the current GC XID
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
          */
-        void clean_extent(uint64_t tid, uint64_t eid, uint64_t xid);
-
-        /**
-         * @brief Evict all data for a specific XID (XID may have aborted)
-         * @param xid XID to remove (single XID only)
-         */
-        void evict(uint64_t xid);
+        void evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
 
     protected:
         /** Singleton write cache client instance */
@@ -162,14 +159,23 @@ namespace springtail {
         WriteCacheClient(const WriteCacheClient &) = delete;
         void operator=(const WriteCacheClient &)   = delete;
 
+        // the following is for handling cached thrift clients from the object pool
+        // we wrap the client in a struct whose deallocator will release it back to the pool
+
+        /** Thrift client object pool */
         std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> _thrift_client_pool;
 
+        /** Struct to wrap the client pool and client object to ensure it gets release back */
         struct ThriftClient {
             std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> pool;
             std::shared_ptr<thrift::ThriftWriteCacheClient> client;
             ~ThriftClient() { std::cout << "Releasing client to pool\n"; pool->put(client); }
         };
 
+        /** 
+         * @brief Helper function to fetch a thrift client from the object pool wrapped in 
+         *        a struct to ensure its proper release to the pool
+         */
         inline ThriftClient _get_client()
         {
             std::shared_ptr<thrift::ThriftWriteCacheClient> client = _thrift_client_pool->get();

@@ -13,68 +13,9 @@
 #include "ThriftWriteCache.h"
 
 #include <write_cache/write_cache_client.hh>
-
+#include <write_cache/write_cache_client_factory.hh>
 
 namespace springtail {
-
-    /**
-     * @brief Object pool factory for thrift cache client objects
-     */
-    class ThriftObjectFactory : public ObjectPoolFactory<thrift::ThriftWriteCacheClient> 
-    {
-    public:
-        ThriftObjectFactory(const std::string &server, int port) : _server(server), _port(port) {}
-
-        /**
-         * @brief Allocate a new client; transport is not connected
-         * @return std::shared_ptr<thrift::ThriftWriteCacheClient> 
-         */
-        std::shared_ptr<thrift::ThriftWriteCacheClient> allocate() override
-        {
-            std::shared_ptr<apache::thrift::transport::TTransport> socket = 
-                std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
-            std::shared_ptr<apache::thrift::transport::TTransport> transport = 
-                std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
-            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol = 
-                std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
-            std::shared_ptr<thrift::ThriftWriteCacheClient> client = 
-                std::make_shared<thrift::ThriftWriteCacheClient>(protocol);
-            return client;
-        }
-
-        /**
-         * @brief The get callback from the object pool.  Check that transport is connected
-         *        before returning.
-         * @param client 
-         */
-        void get_cb(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
-        {
-            // validate that the transport is connected
-            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
-            if (proto->getTransport()->isOpen()) {
-                return;
-            }
-            proto->getTransport()->open();
-        }
-
-        /**
-         * @brief Deallocation callback; close transport
-         * @param client 
-         */
-        void deallocate(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
-        {
-            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
-            if (!proto->getTransport()->isOpen()) {
-                return;
-            }
-            proto->getTransport()->close();
-        }
-
-    private:
-        std::string _server;
-        int _port;
-    };
-
     /* static initialization must happen outside of class */
     WriteCacheClient* WriteCacheClient::_instance {nullptr};
     std::mutex WriteCacheClient::_instance_mutex;
@@ -97,6 +38,7 @@ namespace springtail {
         nlohmann::json client_json;
         nlohmann::json server_json;        
         
+        // fetch properties for the write cache client
         if (!Json::get_to(json, "client", client_json)) {
             throw Error("Write cache client settings not found");
         }
@@ -117,7 +59,8 @@ namespace springtail {
         }
 
         // construct the thrift client pool.  
-        // First argument is a lambda that constructs a new thrift client; capturing the host and port from above
+        // First argument is a factory object that constructs a thrift clients
+        // using the host and port from above
         _thrift_client_pool = std::make_shared<ObjectPool<thrift::ThriftWriteCacheClient>>(
             std::make_shared<ThriftObjectFactory>(server, port),
             max_connections/2,
@@ -136,7 +79,7 @@ namespace springtail {
         }
     }
 
-    // thrift client service interface below
+    // exposed client service interface below
 
     void
     WriteCacheClient::ping()
@@ -147,87 +90,104 @@ namespace springtail {
         c.client->ping(result);
 
         std::cout << "Ping got: " << result.message << std::endl;
+        return;
     }
 
     void 
-    WriteCacheClient::insert_table_change(uint64_t tid, uint64_t xid, uint64_t LSN, WriteCache::TableOp op)
+    WriteCacheClient::add_table_changes(uint64_t tid, std::vector<TableChange> changes)
     {      
-      
-    }
+        ThriftClient c = _get_client();
+        thrift::Status result;
 
-    void 
-    WriteCacheClient::insert_row(uint64_t tid, uint64_t eid, 
-                                 uint64_t xid, uint64_t LSN,
-                                 const std::string_view &pkey_data, 
-                                 const std::string_view &row_data)
-    {
+        std::vector<thrift::TableChange> request;
+
+        c.client->add_table_changes(result, request);
 
         return;
     }
 
     void 
-    WriteCacheClient::update_row(uint64_t tid, uint64_t old_eid, uint64_t new_eid,
-                                 uint64_t xid, uint64_t LSN,
-                                 const std::string_view &old_pkey, 
-                                 const std::string_view &new_pkey, 
-                                 const std::string_view &data)
+    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, RowOp op, std::vector<RowData> rows)
     {
+        ThriftClient c = _get_client();
+        thrift::Status result;
 
+        thrift::AddRowRequest request;
+
+        c.client->add_rows(result, request);
+
+        return;
     }
-
-    void
-    WriteCacheClient::delete_row(uint64_t tid, uint64_t eid, 
-                                 uint64_t xid, uint64_t LSN,
-                                 const std::string_view &pkey)
-    {
-    }
-
-    void 
-    WriteCacheClient::clean_extent(uint64_t tid, uint64_t eid, uint64_t xid)
-    {      
-    }
-
-    void 
-    WriteCacheClient::evict(uint64_t xid)
-    {      
-    }            
-
-    std::vector<std::shared_ptr<WriteCache::TableChange>> 
-    WriteCacheClient::fetch_table_changes(uint64_t tid, uint64_t xid)
+      
+    std::vector<WriteCacheClient::TableChange>
+    WriteCacheClient::fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {            
-        std::vector<std::shared_ptr<WriteCache::TableChange>> changes;
+        ThriftClient c = _get_client();
+        
+        thrift::GetTableChangeRequest request;
+        std::vector<thrift::TableChange> response;
+
+        c.client->get_table_changes(response, request);
+
+        std::vector<TableChange> changes;
         return changes;
     }                  
 
     std::vector<uint64_t>
-    WriteCacheClient::fetch_tables(uint64_t xid, int count, uint64_t offset)
+    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor)
     {      
+        ThriftClient c = _get_client();
         std::vector<uint64_t> tables;
+
+        thrift::ListTablesRequest request;
+        thrift::ListTablesResponse response;
+
+        c.client->list_tables(response, request);
+
         return tables;
 
     }            
 
     std::vector<uint64_t>
-    WriteCacheClient::fetch_extents(uint64_t tid, uint64_t xid, int count, uint64_t offset)
+    WriteCacheClient::list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, 
+                                   int count, uint64_t &cursor)
     {      
+        ThriftClient c = _get_client();
         std::vector<uint64_t> extents;
+        
+        thrift::ListExtentsRequest request;
+        thrift::ListExtentsResponse response;
+
+        c.client->list_extents(response, request);
+        
         return extents;        
     }
-    
-    std::vector<uint64_t>
-    WriteCacheClient::fetch_rows(uint64_t tid, uint64_t eid, uint64_t xid, int count, uint64_t offset)
+
+    std::vector<WriteCacheClient::RowData>
+    WriteCacheClient::fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, 
+                                 uint64_t end_xid, int count, uint64_t &cursor)
     {
-        std::vector<uint64_t> rows;
+        ThriftClient c = _get_client();
+        std::vector<RowData> rows;
+        
+        thrift::GetRowsRequest request;
+        thrift::GetRowsResponse response;
+
+        c.client->get_rows(response, request);
+
         return rows;
     }
 
-    std::shared_ptr<WriteCache::RowData>
-    WriteCacheClient::fetch_row(uint64_t tid, uint64_t eid, uint64_t rid, uint64_t xid)
-    {
-        return std::make_shared<WriteCache::RowData>();            
+    void 
+    WriteCacheClient::evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {   
+        ThriftClient c = _get_client();
+        thrift::Status result;
+
+        thrift::EvictExtentRequest request;
+
+        c.client->evict_extent(result, request);
     }
-
-
 }
 
 int main (void)
