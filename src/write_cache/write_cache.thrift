@@ -27,21 +27,16 @@ struct Row {
     3: i64 xid,
     4: i64 xid_seq,
     5: binary data,
-    6: optional binary primary_key,
+    6: binary primary_key,
     7: optional bool delete_flag    // only in response
 }
 
+// table change record
 struct TableChange {
     1: i64 table_id, 
     2: i64 xid,
     3: i64 xid_seq,
     4: TableChangeOpType op
-}
-
-// extent descriptor
-struct Extent {
-    1: i64 table_id,
-    2: i64 extent_id
 }
 
 // add a list of rows (or one)
@@ -80,7 +75,7 @@ struct ListExtentsRequest {
 struct ListExtentsResponse {
     1: i64 table_id,
     2: i64 cursor,
-    3: list<Extent> extents
+    3: list<i64> extent_ids;
 }
 
 struct ListTablesRequest {
@@ -111,6 +106,11 @@ struct GetTableChangeRequest {
     3: i64 end_xid
 }
 
+struct GetTableChangeResponse {
+    1: i64 table_id,
+    2: list<TableChange> changes
+}
+
 // status code and optional message
 struct Status {
     1: StatusCode status,
@@ -125,6 +125,6 @@ service ThriftWriteCache {
     GetRowsResponse get_rows(1: GetRowsRequest request),
     Status evict_extent(1: EvictExtentRequest request),
     Status add_table_changes(1: list<TableChange> changes),
-    list<TableChange> get_table_changes(1: GetTableChangeRequest request),
+    GetTableChangeResponse get_table_changes(1: GetTableChangeRequest request),
     ListTablesResponse list_tables(1: ListTablesRequest request)
 }

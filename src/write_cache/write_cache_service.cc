@@ -46,7 +46,7 @@ namespace springtail {
     }
 
     void
-    ThriftWriteCacheService::get_table_changes(std::vector<thrift::TableChange> & _return, const thrift::GetTableChangeRequest& request)
+    ThriftWriteCacheService::get_table_changes(thrift::GetTableChangeResponse& _return, const thrift::GetTableChangeRequest& request)
     {
 
     }

@@ -1,3 +1,8 @@
+#include <string>
+#include <string_view>
+#include <memory>
+#include <cassert>
+
 #include <nlohmann/json.hpp>
 
 #include <thrift/transport/TSocket.h>
@@ -9,6 +14,7 @@
 #include <common/json.hh>
 #include <common/object_cache.hh>
 #include <common/common.hh>
+#include <common/exception.hh>
 
 #include "ThriftWriteCache.h"
 
@@ -100,8 +106,23 @@ namespace springtail {
         thrift::Status result;
 
         std::vector<thrift::TableChange> request;
+        for (auto c: changes) {
+            thrift::TableChange change;
+            change.table_id = tid;
+            change.xid = c.xid;
+            change.xid_seq = c.xid_seq;
+            if (c.op == TableOp::TRUNCATE) {
+                change.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
+            } else if (c.op == TableOp::SCHEMA_CHANGE) {
+                change.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
+            }
+        }
 
         c.client->add_table_changes(result, request);
+
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
 
         return;
     }
@@ -112,9 +133,38 @@ namespace springtail {
         ThriftClient c = _get_client();
         thrift::Status result;
 
+        // marshal op
         thrift::AddRowRequest request;
+        switch (op) {
+            case RowOp::INSERT:
+                request.op = thrift::RowOpType::INSERT;
+                break;
+            case RowOp::DELETE:
+                request.op = thrift::RowOpType::DELETE;
+                break;
+            case RowOp::UPDATE:
+                request.op = thrift::RowOpType::UPDATE;
+                break;
+        }
+
+        // marshall up rows
+        for (auto &r: rows) {
+            thrift::Row row;
+            row.table_id = tid;
+            row.extent_id = eid;
+            row.xid = r.xid;
+            row.xid_seq = r.xid_seq;
+            row.data = *r.data;
+            row.primary_key = *r.pkey;
+
+            request.rows.push_back(std::move(row));
+        }
 
         c.client->add_rows(result, request);
+
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
 
         return;
     }
@@ -125,11 +175,29 @@ namespace springtail {
         ThriftClient c = _get_client();
         
         thrift::GetTableChangeRequest request;
-        std::vector<thrift::TableChange> response;
+        thrift::GetTableChangeResponse response;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
 
         c.client->get_table_changes(response, request);
 
+        assert(response.table_id == tid);
+
         std::vector<TableChange> changes;
+        for (auto c: response.changes) {
+            TableChange change;
+            change.xid = c.xid;
+            change.xid_seq = c.xid_seq;
+            if (c.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
+                change.op = TableOp::TRUNCATE;
+            } else if (c.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
+                change.op = TableOp::SCHEMA_CHANGE;
+            }
+            changes.push_back(std::move(change));
+        }
+
         return changes;
     }                  
 
@@ -137,15 +205,20 @@ namespace springtail {
     WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor)
     {      
         ThriftClient c = _get_client();
-        std::vector<uint64_t> tables;
 
         thrift::ListTablesRequest request;
         thrift::ListTablesResponse response;
 
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
         c.client->list_tables(response, request);
 
-        return tables;
+        cursor = response.cursor;
 
+        return std::vector<uint64_t>(response.table_ids.begin(), response.table_ids.end());
     }            
 
     std::vector<uint64_t>
@@ -158,9 +231,18 @@ namespace springtail {
         thrift::ListExtentsRequest request;
         thrift::ListExtentsResponse response;
 
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
         c.client->list_extents(response, request);
         
-        return extents;        
+        assert(response.table_id == tid);
+
+        cursor = response.cursor;
+
+        return std::vector<uint64_t>(response.extent_ids.begin(), response.extent_ids.end());
     }
 
     std::vector<WriteCacheClient::RowData>
@@ -168,12 +250,36 @@ namespace springtail {
                                  uint64_t end_xid, int count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
-        std::vector<RowData> rows;
         
         thrift::GetRowsRequest request;
         thrift::GetRowsResponse response;
 
+        request.table_id = tid;
+        request.extent_id = eid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
         c.client->get_rows(response, request);
+
+        cursor = request.cursor;
+
+        std::vector<RowData> rows;
+        for (auto r: response.rows) {
+            RowData row;
+
+            assert(r.table_id == tid);
+            assert(r.extent_id = eid);
+
+            row.xid = r.xid;
+            row.xid_seq = r.xid_seq;
+            row.pkey = std::make_shared<std::string_view>(std::move(r.primary_key));
+            row.data = std::make_shared<std::string_view>(std::move(r.data));
+            row.delete_flag = r.delete_flag;
+
+            rows.push_back(std::move(row));
+        }
 
         return rows;
     }
@@ -182,11 +288,21 @@ namespace springtail {
     WriteCacheClient::evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
     {   
         ThriftClient c = _get_client();
-        thrift::Status result;
 
         thrift::EvictExtentRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.extent_id = eid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
 
         c.client->evict_extent(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+        
+        return;
     }
 }
 
