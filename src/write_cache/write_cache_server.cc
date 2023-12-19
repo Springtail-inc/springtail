@@ -41,17 +41,17 @@ namespace springtail {
     {
         nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
         nlohmann::json client_json;
-        nlohmann::json server_json;        
-        
-        if (!Json::get_to(json, "server", server_json)) {
+        nlohmann::json server_json;
+
+        if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
             throw Error("Write cache server settings not found");
         }
 
         Json::get_to<int>(server_json, "port", _port, 55051);
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
     }
-  
-    /** 
+
+    /**
      * Startup thrift threaded server
      */
     void

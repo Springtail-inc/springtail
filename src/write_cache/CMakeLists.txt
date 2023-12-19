@@ -1,8 +1,9 @@
 find_package(Thrift CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 
 # the flatbuffers compiler flatc
 find_program(
-    THRIFT_COMPILER 
+    THRIFT_COMPILER
     thrift
     HINTS ${PROJECT_SOURCE_DIR}/external/vcpkg/packages/
     REQUIRED
@@ -22,7 +23,7 @@ set(GENERATED_FILES ${THRIFT_CC_FILES} ${THRIFT_HH_FILES})
 add_custom_command(
     PRE_BUILD
     OUTPUT ${GENERATED_FILES}
-    COMMAND ${THRIFT_COMPILER} -o ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums ${THRIFT_SCHEMA}
+    COMMAND ${THRIFT_COMPILER} -o ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types ${THRIFT_SCHEMA}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${THRIFT_SCHEMA}
     COMMENT "Generating: thrift rpc files: ${THRIFT_COMPILER} -o ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp ${THRIFT_SCHEMA}"
@@ -37,14 +38,19 @@ add_custom_target(generated_thrift
 # set the generated property on the generate files, this ensures they are cleaned by 'make clean'
 set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 
-set(WRITE_CACHE_SOURCES write_cache_client.cc write_cache_server.cc write_cache_service.cc ${THRIFT_CC_FILES})
+# source files
+set(WRITE_CACHE_SOURCES
+    write_cache_client.cc
+    write_cache_server.cc write_cache_service.cc write_cache_index.cc write_cache_table_set.cc
+    ${THRIFT_CC_FILES}
+)
 
 # add the library target
 add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})
 add_dependencies(springtail_write_cache generated_thrift)
 
 # add the gen-cpp dir to the list of files to remove during 'make clean'
-set_target_properties(springtail_write_cache 
+set_target_properties(springtail_write_cache
     PROPERTIES ADDITIONAL_CLEAN_FILES ${THRIFT_GEN_PATH}
 )
 
@@ -53,8 +59,9 @@ target_include_directories(springtail_write_cache
     PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH}
 )
 
-target_link_libraries(springtail_write_cache 
+target_link_libraries(springtail_write_cache
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
+    PRIVATE xxHash::xxhash
 )
 
 add_executable(client_test write_cache_client.cc)

@@ -13,7 +13,7 @@ namespace springtail {
 
     class ThriftWriteCacheClient; // forward decl to avoid messy includes
 
-    class WriteCacheClient 
+    class WriteCacheClient
     {
     public:
         /**
@@ -38,12 +38,13 @@ namespace springtail {
          */
         struct RowData {
             uint64_t xid;
-            uint64_t xid_seq;         
+            uint64_t xid_seq;
             std::shared_ptr<std::string_view> pkey;
+            std::shared_ptr<std::string_view> old_pkey; // only for update that update pkey
             std::shared_ptr<std::string_view> data;
             bool delete_flag; // only used in response
         };
-        
+
         /**
          * @brief Data returned when table changes are fetched
          */
@@ -51,11 +52,11 @@ namespace springtail {
             uint64_t xid;
             uint64_t xid_seq;
             TableOp  op;
-        };   
+        };
 
         /**
          * @brief Get the singleton write cache client instance object
-         * @return WriteCacheClient * 
+         * @return WriteCacheClient *
          */
         static WriteCacheClient *get_instance();
 
@@ -81,7 +82,7 @@ namespace springtail {
          * @param tid Table ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
-         * @return std::vector<TableChange> 
+         * @return std::vector<TableChange>
          */
         std::vector<TableChange> fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
@@ -124,7 +125,7 @@ namespace springtail {
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of row IDs
          */
-        std::vector<RowData> fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, 
+        std::vector<RowData> fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
                                         uint64_t end_xid, int count, uint64_t &cursor);
 
         /**
@@ -172,8 +173,8 @@ namespace springtail {
             ~ThriftClient() { std::cout << "Releasing client to pool\n"; pool->put(client); }
         };
 
-        /** 
-         * @brief Helper function to fetch a thrift client from the object pool wrapped in 
+        /**
+         * @brief Helper function to fetch a thrift client from the object pool wrapped in
          *        a struct to ensure its proper release to the pool
          */
         inline ThriftClient _get_client()

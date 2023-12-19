@@ -36,18 +36,18 @@ namespace springtail {
     class ThriftWriteCacheCloneFactory : virtual public thrift::ThriftWriteCacheIfFactory {
         public:
             ~ThriftWriteCacheCloneFactory() override = default;
-            
+
             /**
              * @brief Override the thrift getHandler call, allows for logging
              * @param connInfo Thrift connection info object
-             * @return thrift::ThriftWriteCacheIf* 
+             * @return thrift::ThriftWriteCacheIf*
              */
-            thrift::ThriftWriteCacheIf* 
+            thrift::ThriftWriteCacheIf*
             getHandler(const apache::thrift::TConnectionInfo &connInfo) override
             {
-                std::shared_ptr<apache::thrift::transport::TSocket> sock = 
+                std::shared_ptr<apache::thrift::transport::TSocket> sock =
                     std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
-                
+
                 std::cout << "Incoming connection\n";
                 std::cout << "\tSocketInfo: "  << sock->getSocketInfo() << "\n";
                 std::cout << "\tPeerHost: "    << sock->getPeerHost() << "\n";

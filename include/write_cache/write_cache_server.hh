@@ -6,14 +6,16 @@
 #include <string>
 #include <string_view>
 
+#include <write_cache/write_cache_index.hh>
+
 namespace springtail {
 
-    class WriteCacheServer 
+    class WriteCacheServer
     {
     public:
         /**
          * @brief Get the singleton write cache server instance object
-         * @return WriteCacheServer * 
+         * @return WriteCacheServer *
          */
         static WriteCacheServer *get_instance();
 
@@ -26,6 +28,14 @@ namespace springtail {
          * @brief Startup server; does not return
          */
         void startup();
+
+        /**
+         * @brief Get the write cache index object
+         * @return std::shared_ptr<WriteCacheIndex>
+         */
+        inline std::shared_ptr<WriteCacheIndex> get_index() {
+            return _index;
+        }
 
     protected:
         /** Singleton write cache server instance */
@@ -53,6 +63,8 @@ namespace springtail {
         int _worker_thread_count;
         /** server port */
         int _port;
+
+        std::shared_ptr<WriteCacheIndex> _index;
     };
 
 } // namespace springtail

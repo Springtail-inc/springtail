@@ -1,12 +1,5 @@
 namespace cpp springtail.thrift
 
-// row operation type
-enum RowOpType {
-    INSERT=0,
-    UPDATE=1,
-    DELETE=2
-}
-
 // table change operation type
 enum TableChangeOpType {
     TRUNCATE_TABLE=1,
@@ -22,18 +15,16 @@ enum StatusCode {
 // row object -- sorted on <xid,xid_seq>
 // updates for same xid will overwrite
 struct Row {
-    1: i64 table_id,
-    2: i64 extent_id,
-    3: i64 xid,
-    4: i64 xid_seq,
-    5: binary data,
-    6: binary primary_key,
-    7: optional bool delete_flag    // only in response
+    1: i64 xid,
+    2: i64 xid_seq,
+    3: bool delete_flag,
+    4: binary primary_key,
+    5: optional binary data  // no data for deletes
 }
 
 // table change record
 struct TableChange {
-    1: i64 table_id, 
+    1: i64 table_id,
     2: i64 xid,
     3: i64 xid_seq,
     4: TableChangeOpType op
@@ -41,7 +32,8 @@ struct TableChange {
 
 // add a list of rows (or one)
 struct AddRowRequest {
-    1: RowOpType op,
+    1: i64 table_id,
+    2: i64 extent_id,
     3: list<Row> rows
 }
 
