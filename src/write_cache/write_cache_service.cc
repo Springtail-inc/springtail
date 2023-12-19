@@ -20,7 +20,7 @@ namespace springtail {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
-        for (thrift::Row r: request.rows) {
+        for (const thrift::Row &r: request.rows) {
             std::shared_ptr<WriteCacheIndexRow> row;
             if (r.delete_flag) {
                 row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), r.xid, r.xid_seq, r.delete_flag);
