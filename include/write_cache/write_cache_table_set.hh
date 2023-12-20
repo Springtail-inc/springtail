@@ -64,7 +64,7 @@ namespace springtail {
             std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRangeComparator>> children;
 
             /**
-             * @brief Table/Extent XIDRange constructor; initialize children to an empty set
+             * Table/Extent XIDRange constructor; initialize children to an empty set
              */
             XidIdRange(uint64_t start_xid, uint64_t end_xid, IndexType type, uint64_t id, uint64_t p_id=-1)
                 : start_xid(start_xid), end_xid(end_xid), p_id(p_id), id(id), type(type),
@@ -72,16 +72,26 @@ namespace springtail {
             {}
 
             /**
-             * Row XIDRange constructor; children set are always empty since this is bottom of the tree
+             * Row XidIdRange constructor; children set are always empty since this is bottom of the tree
              */
             XidIdRange(uint64_t start_xid, uint64_t end_xid, rid_t id, uint64_t p_id=-1)
                 : start_xid(start_xid), end_xid(end_xid), p_id(p_id), id(id), type(IndexType::ROW), children({})
             {}
+
+            /**
+             * XidIdRange constructor for use in comparison, just initialize xid range
+             */
+            XidIdRange(uint64_t start_xid, uint64_t end_xid) : start_xid(start_xid), end_xid(end_xid)
+            {}
         };
+
+        WriteCacheTableSet();
 
         void add_row(uint64_t tid, uint64_t eid, std::shared_ptr<WriteCacheIndexRow> data);
 
-        void dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set);
+        void get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);//, int count);
+
+        void dump();
 
     private:
         /** root of tree, each level points to another set of ids sorted by max xid */
@@ -114,5 +124,7 @@ namespace springtail {
         void _fixup_set(uint64_t id, uint64_t xid,
                         std::shared_ptr<XidIdRange> xid_range,
                         std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set);
+
+        void _dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set);
     };
 }

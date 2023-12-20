@@ -20,11 +20,11 @@ namespace springtail {
         bool delete_flag;
 
         WriteCacheIndexRow(const std::string &&data, const std::string &&pkey,
-                           uint64_t xid, uint64_t xid_seq, bool delete_flag)
+                           uint64_t xid, uint64_t xid_seq, bool delete_flag=false)
             : xid(xid), xid_seq(xid_seq), pkey(pkey), data(data), delete_flag(delete_flag)
         {}
 
-        WriteCacheIndexRow(const std::string &&pkey, uint64_t xid, uint64_t xid_seq, bool delete_flag)
+        WriteCacheIndexRow(const std::string &&pkey, uint64_t xid, uint64_t xid_seq, bool delete_flag=true)
             : xid(xid), xid_seq(xid_seq), pkey(pkey), delete_flag(delete_flag)
         {}
     };

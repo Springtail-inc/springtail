@@ -7,11 +7,18 @@
 #include <xxhash.h>
 #include <fmt/core.h>
 
+#include <common/common.hh>
+
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_table_set.hh>
 
 namespace springtail
 {
+
+    WriteCacheTableSet::WriteCacheTableSet() :
+        _table_root(std::make_shared<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>>())
+    {}
+
     void
     WriteCacheTableSet::add_row(uint64_t tid, uint64_t eid, std::shared_ptr<WriteCacheIndexRow> data)
     {
@@ -32,6 +39,31 @@ namespace springtail
 
         // if not there, lookup xid range in tid map
         // if not there, insert into table_root, and tid map; insert into eid map
+    }
+
+    void
+    WriteCacheTableSet::get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {
+        std::string eid_key = fmt::format("{}:{}", tid, eid);
+
+        auto eid_itr = _eid_map.find(eid_key);
+        if (eid_itr == _eid_map.end()) {
+            // nothing here
+            return;
+        }
+
+        assert(eid_itr->second->type == IndexType::EXTENT);
+        assert(std::get<uint64_t>(eid_itr->second->id) == eid);
+
+        std::cout << "Searching for rows in range: " << start_xid << ":" << end_xid << std::endl;
+
+        std::shared_ptr<XidIdRange> search_range = std::make_shared<XidIdRange>(start_xid, end_xid);
+        auto search_itr = eid_itr->second->children->lower_bound(search_range);
+        while (search_itr != eid_itr->second->children->end()) {
+            assert((*search_itr)->p_id == eid);
+            std::cout << "Row ID: " << std::get<rid_t>((*search_itr)->id) << ", Xid range: " << (*search_itr)->start_xid << ":" << (*search_itr)->end_xid << std::endl;
+            search_itr++;
+        }
     }
 
     bool
@@ -79,7 +111,10 @@ namespace springtail
             tid_itr->second->children->insert(eid_xid_range);
 
             // see if we need to fixup xid range
-            _fixup_set(tid, xid, tid_itr->second, _table_root);
+            if (tid_itr->second->start_xid > xid || tid_itr->second->end_xid < xid) {
+                std::cout << "TID fixup on insert\n";
+                _fixup_set(tid, xid, tid_itr->second, _table_root);
+            }
         }
     }
 
@@ -117,8 +152,16 @@ namespace springtail
 
             // check eid max/min xid to see if they need to be fixed up.
             if (eid_itr->second->start_xid > xid || eid_itr->second->end_xid < xid) {
+                std::cout << "EID fixup\n";
                 auto tid_itr = _tid_map.find(tid);
+                assert(tid_itr != _tid_map.end());
                 _fixup_set(eid, xid, eid_itr->second, tid_itr->second->children);
+
+                // check if we need to also fixup TID map
+                if (tid_itr->second->start_xid > xid || tid_itr->second->end_xid < xid) {
+                    std::cout << "TID fixup\n";
+                    _fixup_set(tid, xid, tid_itr->second, _table_root);
+                }
             }
         }
     }
@@ -131,8 +174,12 @@ namespace springtail
         auto r = set->lower_bound(xid_range);
         assert (r != set->end());
 
+        std::cout << "searching for item to fixup: ID=" << id << ", XID=" << xid << std::endl;
+
         while (r != set->end()) {
             if ((*r)->id == xid_range->id) {
+                std::cout << "found item: XID range: " << xid_range->start_xid << ":" << xid_range->end_xid << std::endl;
+
                 // fixup element
                 if (xid_range->start_xid > xid) {
                     xid_range->start_xid = xid;
@@ -162,15 +209,75 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set)
+    WriteCacheTableSet::dump()
+    {
+        std::cout << "\nDumping table\n";
+        _dump(_table_root);
+        std::cout << std::endl;
+    }
+
+    void
+    WriteCacheTableSet::_dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set)
     {
         for (auto x = set->begin(); x != set->end(); x++) {
             auto p = *x;
-            std::cout << "Level: " << p->type << " ID: " << std::get<uint64_t>(p->id) << " P_ID: " << p->p_id << " XIDs: " << p->start_xid << ":" << p->end_xid << std::endl;
+            std::string type;
+            std::string id;
+            if (p->type == IndexType::TABLE) {
+                type = "table";
+                id = fmt::format("{}", std::get<uint64_t>(p->id));
+            } else if (p->type == IndexType::EXTENT) {
+                type = "extent";
+                id = fmt::format("{}", std::get<uint64_t>(p->id));
+            } else if (p->type == IndexType::ROW) {
+                type = "row";
+                id = std::get<rid_t>(p->id);
+            }
+
+            std::cout << "Level: " << type << " ID: " << id << " P_ID: " << p->p_id << " XIDs: " << p->start_xid << ":" << p->end_xid << std::endl;
             if (p->children) {
-                dump(p->children);
+                _dump(p->children);
             }
         }
     }
+}
 
+int main(void)
+{
+    springtail::springtail_init();
+
+    springtail::WriteCacheTableSet ts;
+
+    // row 1, xid=5, key=key1
+    std::shared_ptr<springtail::WriteCacheIndexRow> row1 =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", "key1", 5, 1);
+
+    // row 2, xid=6, key=key2
+    std::shared_ptr<springtail::WriteCacheIndexRow> row2 =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", "key2", 6, 1);
+
+    // row 3, xid=9, key=key3
+    std::shared_ptr<springtail::WriteCacheIndexRow> row3 =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", "key3", 9, 1);
+
+    // row 4, xid=7, key=key4
+    std::shared_ptr<springtail::WriteCacheIndexRow> row4 =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", "key4", 7, 1);
+
+    // row 5, xid=10, key=key5
+    std::shared_ptr<springtail::WriteCacheIndexRow> row5 =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", "key5", 10, 1);
+
+    // add tid=1, eid=1
+    ts.add_row(1, 1, row1);
+    ts.add_row(1, 1, row2);
+    ts.add_row(1, 1, row3);
+    ts.add_row(1, 1, row4);
+    ts.add_row(1, 1, row5);
+
+    ts.dump();
+
+    ts.get_rows(1, 1, 6, 9);
+
+    return 0;
 }
