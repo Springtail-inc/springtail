@@ -35,10 +35,8 @@ namespace springtail
 
         // need to add to EID map
         // lookup xid range struct in eid map and update
-        _insert_eid_map(tid, eid, rid, xid);
-
-        // if not there, lookup xid range in tid map
-        // if not there, insert into table_root, and tid map; insert into eid map
+        // if EID doesn't exist then also check table map
+        _insert_extent_index(tid, eid, rid, xid);
     }
 
     void
@@ -96,8 +94,8 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::_insert_tid_map(uint64_t tid, uint64_t xid,
-                                        std::shared_ptr<XidIdRange> eid_xid_range)
+    WriteCacheTableSet::_insert_table_index(uint64_t tid, uint64_t xid,
+                                            std::shared_ptr<XidIdRange> eid_xid_range)
     {
         // check to see if table entry exists, if not insert that as well
         auto tid_itr = _tid_map.find(tid);
@@ -127,7 +125,8 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::_insert_eid_map(uint64_t tid, uint64_t eid, rid_t rid, uint64_t xid)
+    WriteCacheTableSet::_insert_extent_index(uint64_t tid, uint64_t eid,
+                                             rid_t rid, uint64_t xid)
     {
         std::string key = fmt::format("{}:{}", tid, eid);
         auto eid_itr = _eid_map.find(key);
@@ -145,7 +144,7 @@ namespace springtail
             eid_xid_range->children->insert(rid_xid_range);
 
             // add new eid_xid range to the tid map
-            _insert_tid_map(tid, xid, eid_xid_range);
+            _insert_table_index(tid, xid, eid_xid_range);
 
             // add eid range to eid_map
             _eid_map.emplace(key, eid_xid_range);
@@ -169,6 +168,8 @@ namespace springtail
                                          std::shared_ptr<XidIdRange> xid_range)
     {
         // check eid max/min xid to see if they need to be fixed up.
+        assert(xid_range->type == IndexType::EXTENT);
+
         if (xid_range->start_xid > xid || xid_range->end_xid < xid) {
             std::cout << "EID fixup\n";
             auto tid_itr = _tid_map.find(tid);
