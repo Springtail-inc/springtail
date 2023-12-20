@@ -56,6 +56,8 @@ namespace springtail {
                     }
                     if (lhs->start_xid < rhs->start_xid) { return true; }
                     if (lhs->start_xid == rhs->start_xid && lhs->end_xid < rhs->end_xid) { return true; }
+                    if (lhs->start_xid == rhs->start_xid && lhs->end_xid == rhs->end_xid &&
+                        lhs->id < rhs->id) { return true; }
 
                     return false;
                 }
@@ -115,7 +117,7 @@ namespace springtail {
          */
         rid_t _get_rid_from_row(const std::string &pkey);
 
-        bool _insert_row_data(uint64_t tid, rid_t rid, std::shared_ptr<WriteCacheIndexRow> data);
+        bool _insert_row_data(uint64_t tid, uint64_t eid, rid_t rid, std::shared_ptr<WriteCacheIndexRow> data);
 
         void _insert_eid_map(uint64_t tid, uint64_t eid, rid_t rid, uint64_t xid);
 
@@ -124,6 +126,8 @@ namespace springtail {
         void _fixup_set(uint64_t id, uint64_t xid,
                         std::shared_ptr<XidIdRange> xid_range,
                         std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set);
+
+        void _fixup_eid_range(uint64_t tid, uint64_t eid, uint64_t xid, std::shared_ptr<XidIdRange> xid_range);
 
         void _dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set);
     };

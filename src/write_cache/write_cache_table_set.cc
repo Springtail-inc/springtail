@@ -28,7 +28,7 @@ namespace springtail
         uint64_t xid = data->xid;
 
         // add row into row data -- note: an emplace may be done on data, so not safe to access after this.
-        if (_insert_row_data(tid, rid, data)) {
+        if (_insert_row_data(tid, eid, rid, data)) {
             // data already existed at the xid, so no need to add to additional maps
             return;
         }
@@ -67,7 +67,7 @@ namespace springtail
     }
 
     bool
-    WriteCacheTableSet::_insert_row_data(uint64_t tid, rid_t rid,
+    WriteCacheTableSet::_insert_row_data(uint64_t tid, uint64_t eid, rid_t rid,
                                          std::shared_ptr<WriteCacheIndexRow> data)
     {
         // generate key
@@ -77,12 +77,20 @@ namespace springtail
         auto p = _row_data_map.insert_or_assign(key, data);
         if (!p.second) {
             // an entry already exists, so new data was not inserted
-            // p.first holds node (pair<key,value>); check seq of existing element
-            if ((*p.first).second->xid_seq < data->xid_seq) {
+            // p.first holds node (pair<key,value>)
+            // check xid seq of existing element to see if an update is needed
+            // if so, then check the xid ranges to see if they need updating
+            assert(p.first->second->xid == data->xid);
+
+            std::cout << "Insert row found entry\n";
+
+            if (p.first->second->xid_seq < data->xid_seq) {
                 _row_data_map.emplace_hint(p.first, key, data);
             }
+
             return true;
         }
+        std::cout << "Insert row no entry found\n";
 
         return false; // no data existed
     }
@@ -142,6 +150,7 @@ namespace springtail
             // add eid range to eid_map
             _eid_map.emplace(key, eid_xid_range);
         } else {
+            std::cout << "Found eid, adding row\n";
             // extent found in eid map
             // create row entry and add it to eid children
             std::shared_ptr<XidIdRange> rid_xid_range =
@@ -150,18 +159,26 @@ namespace springtail
             // add row range to eid children
             eid_itr->second->children->insert(rid_xid_range);
 
-            // check eid max/min xid to see if they need to be fixed up.
-            if (eid_itr->second->start_xid > xid || eid_itr->second->end_xid < xid) {
-                std::cout << "EID fixup\n";
-                auto tid_itr = _tid_map.find(tid);
-                assert(tid_itr != _tid_map.end());
-                _fixup_set(eid, xid, eid_itr->second, tid_itr->second->children);
+            // check eid and tid ranges to see if they need to be fixed up based on new xid
+            _fixup_eid_range(tid, eid, xid, eid_itr->second);
+        }
+    }
 
-                // check if we need to also fixup TID map
-                if (tid_itr->second->start_xid > xid || tid_itr->second->end_xid < xid) {
-                    std::cout << "TID fixup\n";
-                    _fixup_set(tid, xid, tid_itr->second, _table_root);
-                }
+    void
+    WriteCacheTableSet::_fixup_eid_range(uint64_t tid, uint64_t eid, uint64_t xid,
+                                         std::shared_ptr<XidIdRange> xid_range)
+    {
+        // check eid max/min xid to see if they need to be fixed up.
+        if (xid_range->start_xid > xid || xid_range->end_xid < xid) {
+            std::cout << "EID fixup\n";
+            auto tid_itr = _tid_map.find(tid);
+            assert(tid_itr != _tid_map.end());
+            _fixup_set(eid, xid, xid_range, tid_itr->second->children);
+
+            // check if we need to also fixup TID map
+            if (tid_itr->second->start_xid > xid || tid_itr->second->end_xid < xid) {
+                std::cout << "TID fixup\n";
+                _fixup_set(tid, xid, tid_itr->second, _table_root);
             }
         }
     }
@@ -177,20 +194,27 @@ namespace springtail
         std::cout << "searching for item to fixup: ID=" << id << ", XID=" << xid << std::endl;
 
         while (r != set->end()) {
+            std::cout << ".";
+
             if ((*r)->id == xid_range->id) {
                 std::cout << "found item: XID range: " << xid_range->start_xid << ":" << xid_range->end_xid << std::endl;
 
                 // fixup element
+                bool fixup = false;
                 if (xid_range->start_xid > xid) {
                     xid_range->start_xid = xid;
+                    fixup = true;
                 }
                 if (xid_range->end_xid < xid) {
                     xid_range->end_xid = xid;
+                    fixup = true;
                 }
 
                 // remove from set and then add back
-                set->erase(*r);
-                set->insert(xid_range);
+                if (fixup) {
+                    set->erase(*r);
+                    set->insert(xid_range);
+                }
                 return;
             }
             r++;
@@ -220,7 +244,7 @@ namespace springtail
     WriteCacheTableSet::_dump(std::shared_ptr<std::set<std::shared_ptr<XidIdRange>, XidIdRange::XidIdRangeComparator>> set)
     {
         for (auto x = set->begin(); x != set->end(); x++) {
-            auto p = *x;
+            const auto &p = *x;
             std::string type;
             std::string id;
             if (p->type == IndexType::TABLE) {
@@ -242,42 +266,54 @@ namespace springtail
     }
 }
 
+static int s_id=0;
+
+void
+add_row(springtail::WriteCacheTableSet &ts, uint64_t tid, uint64_t eid, uint64_t xid, int rid=s_id)
+{
+    std::shared_ptr<springtail::WriteCacheIndexRow> row =
+        std::make_shared<springtail::WriteCacheIndexRow>("data", fmt::format("key:{}", rid), xid, s_id);
+
+    std::cout << fmt::format("\nInserting row: tid: {}, eid: {}, rid: {}, xid: {}, xid_seq: {}, key:{}\n",
+                             tid, eid, rid, xid, s_id, rid);
+
+    ts.add_row(tid, eid, row);
+
+    if (rid == s_id) {
+        s_id++;
+    }
+}
+
 int main(void)
 {
     springtail::springtail_init();
 
     springtail::WriteCacheTableSet ts;
 
-    // row 1, xid=5, key=key1
-    std::shared_ptr<springtail::WriteCacheIndexRow> row1 =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", "key1", 5, 1);
-
-    // row 2, xid=6, key=key2
-    std::shared_ptr<springtail::WriteCacheIndexRow> row2 =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", "key2", 6, 1);
-
-    // row 3, xid=9, key=key3
-    std::shared_ptr<springtail::WriteCacheIndexRow> row3 =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", "key3", 9, 1);
-
-    // row 4, xid=7, key=key4
-    std::shared_ptr<springtail::WriteCacheIndexRow> row4 =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", "key4", 7, 1);
-
-    // row 5, xid=10, key=key5
-    std::shared_ptr<springtail::WriteCacheIndexRow> row5 =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", "key5", 10, 1);
-
-    // add tid=1, eid=1
-    ts.add_row(1, 1, row1);
-    ts.add_row(1, 1, row2);
-    ts.add_row(1, 1, row3);
-    ts.add_row(1, 1, row4);
-    ts.add_row(1, 1, row5);
+    add_row(ts, 1, 1, 5);
+    add_row(ts, 1, 1, 6);
+    add_row(ts, 1, 1, 9);
+    add_row(ts, 1, 1, 7);
+    add_row(ts, 1, 1, 10);
 
     ts.dump();
 
     ts.get_rows(1, 1, 6, 9);
+
+    add_row(ts, 1, 2, 8);
+
+    add_row(ts, 1, 2, 7);
+
+    add_row(ts, 1, 2, 15);
+
+    ts.dump();
+
+    ts.get_rows(1, 1, 6, 9);
+
+    // update key:2 with xid 10
+    add_row(ts, 1, 1, 10, 2);
+
+    ts.dump();
 
     return 0;
 }
