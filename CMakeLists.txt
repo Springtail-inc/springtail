@@ -23,6 +23,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 
+## Default location of properties file
+add_compile_definitions(SPRINGTAIL_PROPERTIES="${PROJECT_SOURCE_DIR}/system.json")
+
 ## Cmake modules in ./cmake (for finding libraries)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
@@ -40,6 +43,7 @@ add_subdirectory(src/common)
 add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
 add_subdirectory(src/psql_cdc)
+add_subdirectory(src/write_cache)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
