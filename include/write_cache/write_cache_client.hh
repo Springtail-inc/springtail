@@ -40,7 +40,7 @@ namespace springtail {
             uint64_t xid;
             uint64_t xid_seq;
             std::shared_ptr<std::string_view> pkey;
-            std::shared_ptr<std::string_view> old_pkey; // only for update that update pkey
+            std::shared_ptr<std::string_view> old_pkey; // only for update that updates pkey
             std::shared_ptr<std::string_view> data;
             bool delete_flag; // only used in response
         };
@@ -73,9 +73,9 @@ namespace springtail {
         /**
          * @brief Marks table has having a table change that may affect data
          * @param tid Table ID
-         * @param changes List of table changes
+         * @param change table change
          */
-        void add_table_changes(uint64_t tid, std::vector<TableChange> changes);
+        void add_table_change(uint64_t tid, TableChange &change);
 
         /**
          * @brief Fetch all table changes for a table up to and including XID
@@ -85,6 +85,14 @@ namespace springtail {
          * @return std::vector<TableChange>
          */
         std::vector<TableChange> fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
+        /**
+         * @brief Evict table changes between XID range
+         * @param tid table ID
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
+         */
+        void evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Add one or more rows to the cache for a specific table and extent and operation type
@@ -100,10 +108,9 @@ namespace springtail {
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          * @param count Max TIDs to return (may return less)
-         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of table IDs
          */
-        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor);
+        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, int count);
 
         /**
          * @brief Fetch list of extent IDs that have been dirtied prior to and up to XID

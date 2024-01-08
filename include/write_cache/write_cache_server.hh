@@ -6,9 +6,11 @@
 #include <string>
 #include <string_view>
 
-#include <write_cache/write_cache_index.hh>
+//#include <write_cache/write_cache_index.hh>
 
 namespace springtail {
+
+    class WriteCacheIndex;
 
     class WriteCacheServer
     {

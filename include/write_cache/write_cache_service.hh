@@ -23,9 +23,10 @@ namespace springtail {
         void list_extents(thrift::ListExtentsResponse& _return, const thrift::ListExtentsRequest& request) override;
         void get_rows(thrift::GetRowsResponse& _return, const thrift::GetRowsRequest& request) override;
         void evict_extent(thrift::Status& _return, const thrift::EvictExtentRequest& request) override;
-        void add_table_changes(thrift::Status& _return, const std::vector<thrift::TableChange> & changes) override;
+        void add_table_change(thrift::Status& _return, const thrift::TableChange &change) override;
         void get_table_changes(thrift::GetTableChangeResponse& _return, const thrift::GetTableChangeRequest& request) override;
         void list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request) override;
+        void evict_table_changes(thrift::Status& _return, const thrift::EvictTableChangesRequest& request) override;
     };
 
 

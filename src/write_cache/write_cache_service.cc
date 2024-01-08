@@ -1,6 +1,8 @@
 
 #include <write_cache/write_cache_service.hh>
 #include <write_cache/write_cache_server.hh>
+#include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 namespace springtail {
 
@@ -15,7 +17,7 @@ namespace springtail {
 
     void
     ThriftWriteCacheService::add_rows(thrift::Status& _return,
-                                      const thrift::AddRowRequest& request)
+                                     const thrift::AddRowRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
@@ -38,39 +40,119 @@ namespace springtail {
     ThriftWriteCacheService::list_extents(thrift::ListExtentsResponse& _return,
                                           const thrift::ListExtentsRequest& request)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        uint64_t cursor = request.cursor;
+        _return.extent_ids = index->get_eids(request.table_id, request.start_xid, request.end_xid,
+                                             request.count, cursor);
+
+        _return.cursor = cursor;
+        _return.table_id = request.table_id;
     }
 
     void
     ThriftWriteCacheService::get_rows(thrift::GetRowsResponse& _return,
                                       const thrift::GetRowsRequest& request)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        uint64_t cursor = request.cursor;
+        std::vector<std::shared_ptr<springtail::WriteCacheIndexRow>> rows =
+            index->get_rows(request.table_id, request.extent_id, request.start_xid, request.end_xid, request.count);
+
+        _return.cursor = cursor;
+        _return.extent_id = request.extent_id;
+        _return.table_id = request.table_id;
+
+        for (const auto &r: rows) {
+            thrift::Row row;
+            row.xid = r->xid;
+            row.xid_seq = r->xid_seq;
+            row.delete_flag = r->delete_flag;
+            row.primary_key = r->pkey;
+
+            if (!r->delete_flag) {
+                row.__set_data(r->data);
+            }
+
+            _return.rows.push_back(row);
+        }
     }
 
     void
     ThriftWriteCacheService::evict_extent(thrift::Status& _return,
                                           const thrift::EvictExtentRequest& request)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        index->evict_extent(request.table_id, request.extent_id, request.start_xid, request.end_xid);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
     }
 
     void
-    ThriftWriteCacheService::add_table_changes(thrift::Status& _return, const std::vector<thrift::TableChange> & changes)
+    ThriftWriteCacheService::add_table_change(thrift::Status& _return, const thrift::TableChange &change)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        WriteCacheIndexTableChange::TableChangeOp op;
+        if (change.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
+            op = WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE;
+        } else if (change.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
+            op = WriteCacheIndexTableChange::TableChangeOp::TRUNCATE_TABLE;
+        }
+
+        index->add_table_change(std::make_shared<WriteCacheIndexTableChange>(change.table_id, change.xid, change.xid_seq, op));
     }
 
     void
     ThriftWriteCacheService::get_table_changes(thrift::GetTableChangeResponse& _return, const thrift::GetTableChangeRequest& request)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        std::vector<std::shared_ptr<WriteCacheIndexTableChange>> changes = index->get_table_changes(request.table_id, request.start_xid, request.end_xid);
+
+        _return.table_id = request.table_id;
+
+        for (auto c: changes) {
+            thrift::TableChange change;
+            change.table_id = c->tid;
+            change.xid = c->xid;
+            change.xid_seq = c->xid_seq;
+
+            if (c->op == WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE) {
+                change.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
+            } else if (c->op == WriteCacheIndexTableChange::TableChangeOp::TRUNCATE_TABLE) {
+                change.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
+            }
+
+            _return.changes.push_back(change);
+        }
     }
 
     void
     ThriftWriteCacheService::list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request)
     {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        _return.table_ids = index->get_tids(request.start_xid, request.end_xid, request.count);
     }
 
+    void
+    ThriftWriteCacheService::evict_table_changes(thrift::Status& _return,
+                                                 const thrift::EvictTableChangesRequest& request)
+    {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+
+        index->evict_table_changes(request.table_id, request.start_xid, request.end_xid);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
 }

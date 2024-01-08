@@ -18,6 +18,8 @@
 
 #include <write_cache/write_cache_server.hh>
 #include <write_cache/write_cache_service.hh>
+#include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_table_set.hh>
 
 namespace springtail {
 

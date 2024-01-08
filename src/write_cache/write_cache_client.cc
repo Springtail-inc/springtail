@@ -100,25 +100,22 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_table_changes(uint64_t tid, std::vector<TableChange> changes)
+    WriteCacheClient::add_table_change(uint64_t tid, TableChange &change)
     {
         ThriftClient c = _get_client();
         thrift::Status result;
 
-        std::vector<thrift::TableChange> request;
-        for (const auto &chg: changes) {
-            thrift::TableChange change;
-            change.table_id = tid;
-            change.xid = chg.xid;
-            change.xid_seq = chg.xid_seq;
-            if (chg.op == TableOp::TRUNCATE) {
-                change.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
-            } else if (chg.op == TableOp::SCHEMA_CHANGE) {
-                change.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
-            }
+        thrift::TableChange request;
+        request.table_id = tid;
+        request.xid = change.xid;
+        request.xid_seq = change.xid_seq;
+        if (change.op == TableOp::TRUNCATE) {
+            request.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
+        } else if (change.op == TableOp::SCHEMA_CHANGE) {
+            request.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
         }
 
-        c.client->add_table_changes(result, request);
+        c.client->add_table_change(result, request);
 
         if (result.status != thrift::StatusCode::SUCCESS) {
             throw Error("RPC failed");
@@ -192,13 +189,13 @@ namespace springtail {
 
         // take response changes and move them into the TableChange vector to be returned
         std::vector<TableChange> changes;
-        for (const auto &c: response.changes) {
+        for (const auto &chg: response.changes) {
             TableChange change;
-            change.xid = c.xid;
-            change.xid_seq = c.xid_seq;
-            if (c.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
+            change.xid = chg.xid;
+            change.xid_seq = chg.xid_seq;
+            if (chg.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
                 change.op = TableOp::TRUNCATE;
-            } else if (c.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
+            } else if (chg.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
                 change.op = TableOp::SCHEMA_CHANGE;
             }
             changes.push_back(std::move(change));
@@ -208,7 +205,7 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor)
+    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, int count)
     {
         ThriftClient c = _get_client();
 
@@ -218,11 +215,8 @@ namespace springtail {
         request.start_xid = start_xid;
         request.end_xid = end_xid;
         request.count = count;
-        request.cursor = cursor;
 
         c.client->list_tables(response, request);
-
-        cursor = response.cursor;
 
         return std::vector<uint64_t>(response.table_ids.begin(), response.table_ids.end());
     }
@@ -301,6 +295,26 @@ namespace springtail {
         request.end_xid = end_xid;
 
         c.client->evict_extent(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::EvictTableChangesRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->evict_table_changes(result, request);
         if (result.status != thrift::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
