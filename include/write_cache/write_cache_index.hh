@@ -19,15 +19,20 @@ namespace springtail {
         uint64_t xid_seq;
         std::string pkey;
         std::string data;
-        bool delete_flag;
+
+        enum RowOp : uint8_t{
+            UPDATE=0,
+            INSERT=1,
+            DELETE=2
+        } op;
 
         WriteCacheIndexRow(const std::string &&data, const std::string &&pkey,
-                           uint64_t xid, uint64_t xid_seq, bool delete_flag=false)
-            : xid(xid), xid_seq(xid_seq), pkey(pkey), data(data), delete_flag(delete_flag)
+                           uint64_t xid, uint64_t xid_seq, RowOp op)
+            : xid(xid), xid_seq(xid_seq), pkey(pkey), data(data), op(op)
         {}
 
-        WriteCacheIndexRow(const std::string &&pkey, uint64_t xid, uint64_t xid_seq, bool delete_flag=true)
-            : xid(xid), xid_seq(xid_seq), pkey(pkey), delete_flag(delete_flag)
+        WriteCacheIndexRow(const std::string &&pkey, uint64_t xid, uint64_t xid_seq, RowOp op=RowOp::DELETE)
+            : xid(xid), xid_seq(xid_seq), pkey(pkey), op(op)
         {}
     };
     typedef std::shared_ptr<WriteCacheIndexRow> WriteCacheIndexRowPtr;
@@ -40,7 +45,7 @@ namespace springtail {
         uint64_t xid;
         uint64_t xid_seq;
 
-        enum TableChangeOp {
+        enum TableChangeOp : uint8_t {
             INVALID=0,
             TRUNCATE_TABLE = 1,
             SCHEMA_CHANGE = 2

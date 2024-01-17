@@ -42,7 +42,7 @@ namespace springtail {
             std::shared_ptr<std::string_view> pkey;
             std::shared_ptr<std::string_view> old_pkey; // only for update that updates pkey
             std::shared_ptr<std::string_view> data;
-            bool delete_flag; // only used in response
+            RowOp op;
         };
 
         /**

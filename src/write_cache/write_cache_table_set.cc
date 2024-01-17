@@ -260,7 +260,7 @@ void
 add_row(springtail::WriteCacheTableSet &ts, uint64_t tid, uint64_t eid, uint64_t xid, int rid=s_id)
 {
     springtail::WriteCacheIndexRowPtr row =
-        std::make_shared<springtail::WriteCacheIndexRow>("data", fmt::format("key:{}", rid), xid, s_id);
+        std::make_shared<springtail::WriteCacheIndexRow>("data", fmt::format("key:{}", rid), xid, s_id, springtail::WriteCacheIndexRow::RowOp::INSERT);
 
     std::cout << fmt::format("\nInserting row: tid: {}, eid: {}, rid: {}, xid: {}, xid_seq: {}, key:{}\n",
                              tid, eid, rid, xid, s_id, rid);

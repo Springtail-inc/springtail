@@ -12,12 +12,18 @@ enum StatusCode {
     ERROR=1
 }
 
+enum RowOpType {
+    UPDATE=0,
+    INSERT=1,
+    DELETE=2
+}
+
 // row object -- sorted on <xid,xid_seq>
 // updates for same xid will overwrite
 struct Row {
     1: i64 xid,
     2: i64 xid_seq,
-    3: bool delete_flag,
+    3: RowOpType op,
     4: binary primary_key,
     5: optional binary data  // no data for deletes
 }

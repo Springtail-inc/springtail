@@ -143,20 +143,28 @@ namespace springtail {
             row.primary_key = *r.pkey;
 
             if (RowOp::DELETE == op) {
-                row.delete_flag = true;
+                row.op = thrift::RowOpType::DELETE;
             } else {
+                // update or insert
                 row.__set_data(std::move(std::string(*r.data)));
             }
 
-            if (RowOp::UPDATE == op && *r.pkey != *r.old_pkey) {
-                // generate a delete for old pkey and an update for new pkey
-                thrift::Row row_del;
-                row_del.xid = r.xid;
-                row_del.xid_seq = r.xid_seq;
-                row_del.primary_key = *r.old_pkey;
-                row_del.delete_flag = true;
+            if (RowOp::INSERT == op) {
+                row.op = thrift::RowOpType::INSERT;
+            }
 
-                request.rows.push_back(std::move(row_del));
+            if (RowOp::UPDATE == op) {
+                row.op = thrift::RowOpType::UPDATE;
+                if (*r.pkey != *r.old_pkey) {
+                    // generate a delete for old pkey and an update for new pkey
+                    thrift::Row row_del;
+                    row_del.xid = r.xid;
+                    row_del.xid_seq = r.xid_seq;
+                    row_del.primary_key = *r.old_pkey;
+                    row_del.op = thrift::RowOpType::DELETE;
+
+                    request.rows.push_back(std::move(row_del));
+                }
             }
 
             request.rows.push_back(std::move(row));
@@ -273,7 +281,13 @@ namespace springtail {
             row.xid_seq = r.xid_seq;
             row.pkey = std::make_shared<std::string_view>(std::move(r.primary_key));
             row.data = std::make_shared<std::string_view>(std::move(r.data));
-            row.delete_flag = r.delete_flag;
+            if (r.op == thrift::RowOpType::UPDATE) {
+                row.op = RowOp::UPDATE;
+            } else if (r.op == thrift::RowOpType::INSERT) {
+                row.op = RowOp::INSERT;
+            } else if (r.op == thrift::RowOpType::DELETE) {
+                row.op = RowOp::DELETE;
+            }
 
             rows.push_back(std::move(row));
         }

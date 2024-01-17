@@ -17,7 +17,7 @@ namespace springtail {
 
     void
     ThriftWriteCacheService::add_rows(thrift::Status& _return,
-                                     const thrift::AddRowsRequest& request)
+                                      const thrift::AddRowsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
@@ -26,10 +26,12 @@ namespace springtail {
 
         for (const thrift::Row &r: request.rows) {
             WriteCacheIndexRowPtr row;
-            if (r.delete_flag) {
-                row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), r.xid, r.xid_seq, r.delete_flag);
+            if (r.op == thrift::RowOpType::DELETE) {
+                row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), r.xid, r.xid_seq);
             } else {
-                row = std::make_shared<WriteCacheIndexRow>(std::move(r.data), std::move(r.primary_key), r.xid, r.xid_seq, r.delete_flag);
+                row = std::make_shared<WriteCacheIndexRow>(std::move(r.data), std::move(r.primary_key), r.xid, r.xid_seq,
+                    ((r.op == thrift::RowOpType::UPDATE) ? WriteCacheIndexRow::RowOp::UPDATE :
+                                                           WriteCacheIndexRow::RowOp::INSERT));
             }
             rows.push_back(row);
         }
@@ -73,11 +75,16 @@ namespace springtail {
             thrift::Row row;
             row.xid = r->xid;
             row.xid_seq = r->xid_seq;
-            row.delete_flag = r->delete_flag;
             row.primary_key = r->pkey;
 
-            if (!r->delete_flag) {
+            if (r->op == WriteCacheIndexRow::RowOp::UPDATE) {
+                row.op = thrift::RowOpType::UPDATE;
                 row.__set_data(r->data);
+            } else if (r->op == WriteCacheIndexRow::RowOp::INSERT) {
+                row.op = thrift::RowOpType::INSERT;
+                row.__set_data(r->data);
+            } else if (r->op == WriteCacheIndexRow::RowOp::DELETE) {
+                row.op = thrift::RowOpType::DELETE;
             }
 
             _return.rows.push_back(row);
