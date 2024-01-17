@@ -25,17 +25,11 @@ namespace springtail {
 
     /* static initialization must happen outside of class */
     WriteCacheServer* WriteCacheServer::_instance {nullptr};
-    std::mutex WriteCacheServer::_instance_mutex;
 
     WriteCacheServer *
-    WriteCacheServer::get_instance()
+    WriteCacheServer::_init()
     {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new WriteCacheServer();
-        }
-
+        _instance = new WriteCacheServer();
         return _instance;
     }
 
@@ -78,10 +72,8 @@ namespace springtail {
     }
 
     void
-    WriteCacheServer::shutdown()
+    WriteCacheServer::_shutdown()
     {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
         if (_instance != nullptr) {
             delete _instance;
             _instance = nullptr;

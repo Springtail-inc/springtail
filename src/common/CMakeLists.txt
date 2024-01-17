@@ -1,7 +1,7 @@
 # Common library
 find_package(redis++ CONFIG REQUIRED)
 
-set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc)
+set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc tracking_allocator.cc)
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -14,3 +14,7 @@ target_link_libraries(redis_test PRIVATE springtail_common)
 add_executable(thread_test thread_test.cc)
 target_include_directories(thread_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(thread_test PRIVATE springtail_common)
+
+add_executable(allocator_test tracking_allocator.cc)
+target_include_directories(allocator_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(allocator_test PRIVATE springtail_common)

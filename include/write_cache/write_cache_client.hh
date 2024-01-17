@@ -121,7 +121,7 @@ namespace springtail {
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
          * @return std::vector<uint64_t> a list of extent IDs
          */
-        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, int count, uint64_t&cursor);
+        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of ALL row IDs that have been dirtied prior to and up to XID
@@ -136,14 +136,13 @@ namespace springtail {
                                         uint64_t end_xid, int count, uint64_t &cursor);
 
         /**
-         * @brief Mark a previously dirty extent as clean; removes all row data for that
-         *        extent by XID up to and including provided XID; fixes up indexes up the chain
+         * @brief Mark a previously dirty table as clean; removes all row data for that
+         *        table by XID up to and including provided XID; fixes up indexes up the chain
          * @param tid Table ID
-         * @param eid Extent ID (offset)
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          */
-        void evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+        void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
     protected:
         /** Singleton write cache client instance */

@@ -1,7 +1,7 @@
 find_package(Thrift CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 
-# the flatbuffers compiler flatc
+# the thrift rpc gen
 find_program(
     THRIFT_COMPILER
     thrift
@@ -56,7 +56,8 @@ set_target_properties(springtail_write_cache
 
 # include the thrift gen-cpp dir as an include path; so we don't have to move the .h files
 target_include_directories(springtail_write_cache
-    PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH}
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+            ${THRIFT_GEN_PATH}
 )
 
 target_link_libraries(springtail_write_cache

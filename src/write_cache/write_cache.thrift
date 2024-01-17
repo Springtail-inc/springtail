@@ -31,7 +31,7 @@ struct TableChange {
 }
 
 // add a list of rows (or one)
-struct AddRowRequest {
+struct AddRowsRequest {
     1: i64 table_id,
     2: i64 extent_id,
     3: list<Row> rows
@@ -82,9 +82,8 @@ struct ListTablesResponse {
 
 // remove an extent and its associated rows from cached
 // between start xid exclusive and end xid inclusive
-struct EvictExtentRequest {
+struct EvictTableRequest {
     1: i64 table_id,
-    2: i64 extent_id,
     3: i64 start_xid,
     4: i64 end_xid
 }
@@ -117,10 +116,10 @@ struct Status {
 // list of rpc requests and responses
 service ThriftWriteCache {
     Status ping(),
-    Status add_rows(1: AddRowRequest request),
+    Status add_rows(1: AddRowsRequest request),
     ListExtentsResponse list_extents(1: ListExtentsRequest request),
     GetRowsResponse get_rows(1: GetRowsRequest request),
-    Status evict_extent(1: EvictExtentRequest request),
+    Status evict_table(1: EvictTableRequest request),
     Status add_table_change(1: TableChange change),
     GetTableChangeResponse get_table_changes(1: GetTableChangeRequest request),
     ListTablesResponse list_tables(1: ListTablesRequest request),

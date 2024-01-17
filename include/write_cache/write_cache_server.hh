@@ -19,12 +19,16 @@ namespace springtail {
          * @brief Get the singleton write cache server instance object
          * @return WriteCacheServer *
          */
-        static WriteCacheServer *get_instance();
-
+        static WriteCacheServer *get_instance() {
+            std::call_once(_init_flag, &WriteCacheServer::_init);
+            return _instance;
+        }
         /**
          * @brief Shutdown cache
          */
-        static void shutdown();
+        static void shutdown() {
+            std::call_once(_shutdown_flag, &WriteCacheServer::_shutdown);
+        }
 
         /**
          * @brief Startup server; does not return
@@ -39,13 +43,11 @@ namespace springtail {
             return _index;
         }
 
-    protected:
-        /** Singleton write cache server instance */
-        static WriteCacheServer *_instance;
+        // delete copy constructor
+        WriteCacheServer(const WriteCacheServer &) = delete;
+        void operator=(const WriteCacheServer &)   = delete;
 
-        /** Mutex protecting _instance in get_instance() */
-        static std::mutex _instance_mutex;
-
+    private:
         /**
          * @brief Construct a new Write Cache Server object
          */
@@ -56,10 +58,19 @@ namespace springtail {
          */
          ~WriteCacheServer() {}
 
-    private:
-        // delete copy constructor
-        WriteCacheServer(const WriteCacheServer &) = delete;
-        void operator=(const WriteCacheServer &)   = delete;
+        /** init from get_instance, called once */
+        static WriteCacheServer *_init();
+
+        /** shutdown from shutdown(), called once */
+        static void _shutdown();
+
+        /** Singleton write cache server instance */
+        static WriteCacheServer *_instance;
+
+        /** init flag */
+        static std::once_flag _init_flag;
+        /** shutdown flag */
+        static std::once_flag _shutdown_flag;
 
         /** number of worker threads */
         int _worker_thread_count;

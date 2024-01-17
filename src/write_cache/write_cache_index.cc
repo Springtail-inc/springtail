@@ -7,12 +7,11 @@
 namespace springtail
 {
     void
-    WriteCacheIndex::add_row(uint64_t tid, uint64_t eid, std::shared_ptr<WriteCacheIndexRow> data)
+    WriteCacheIndex::add_rows(uint64_t tid, uint64_t eid, const std::vector<WriteCacheIndexRowPtr> &data)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
-        partition->add_row(tid, eid, data);
+        partition->add_rows(tid, eid, data);
     }
-
 
     std::vector<int64_t>
     WriteCacheIndex::get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count)
@@ -46,24 +45,24 @@ namespace springtail
     }
 
     void
-    WriteCacheIndex::evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheIndex::evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
-        partition->evict_extent(tid, eid, start_xid, end_xid);
+        partition->evict_table(tid, start_xid, end_xid);
     }
 
     void
-    WriteCacheIndex::add_table_change(std::shared_ptr<WriteCacheIndexTableChange> change)
+    WriteCacheIndex::add_table_change(WriteCacheIndexTableChangePtr change)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(change->tid);
         partition->add_table_change(change);
     }
 
-    std::vector<std::shared_ptr<WriteCacheIndexTableChange>>
+    std::vector<WriteCacheIndexTableChangePtr>
     WriteCacheIndex::get_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
-        std::vector<std::shared_ptr<WriteCacheIndexTableChange>> changes;
+        std::vector<WriteCacheIndexTableChangePtr> changes;
         partition->get_table_changes(tid, start_xid, end_xid, changes);
         return changes;
     }

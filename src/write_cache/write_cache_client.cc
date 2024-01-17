@@ -129,7 +129,7 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::AddRowRequest request;
+        thrift::AddRowsRequest request;
         thrift::Status result;
 
         request.table_id = tid;
@@ -282,19 +282,18 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
-        thrift::EvictExtentRequest request;
+        thrift::EvictTableRequest request;
         thrift::Status result;
 
         request.table_id = tid;
-        request.extent_id = eid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
 
-        c.client->evict_extent(result, request);
+        c.client->evict_table(result, request);
         if (result.status != thrift::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }

@@ -17,21 +17,24 @@ namespace springtail {
 
     void
     ThriftWriteCacheService::add_rows(thrift::Status& _return,
-                                     const thrift::AddRowRequest& request)
+                                     const thrift::AddRowsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
+        std::vector<WriteCacheIndexRowPtr> rows;
+
         for (const thrift::Row &r: request.rows) {
-            std::shared_ptr<WriteCacheIndexRow> row;
+            WriteCacheIndexRowPtr row;
             if (r.delete_flag) {
                 row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), r.xid, r.xid_seq, r.delete_flag);
             } else {
                 row = std::make_shared<WriteCacheIndexRow>(std::move(r.data), std::move(r.primary_key), r.xid, r.xid_seq, r.delete_flag);
             }
-
-            index->add_row(request.table_id, request.extent_id, row);
+            rows.push_back(row);
         }
+
+        index->add_rows(request.table_id, request.extent_id, rows);
 
         _return.status = thrift::StatusCode::SUCCESS;
     }
@@ -59,7 +62,7 @@ namespace springtail {
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
         uint64_t cursor = request.cursor;
-        std::vector<std::shared_ptr<springtail::WriteCacheIndexRow>> rows =
+        std::vector<WriteCacheIndexRowPtr> rows =
             index->get_rows(request.table_id, request.extent_id, request.start_xid, request.end_xid, request.count);
 
         _return.cursor = cursor;
@@ -82,13 +85,13 @@ namespace springtail {
     }
 
     void
-    ThriftWriteCacheService::evict_extent(thrift::Status& _return,
-                                          const thrift::EvictExtentRequest& request)
+    ThriftWriteCacheService::evict_table(thrift::Status& _return,
+                                         const thrift::EvictTableRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
-        index->evict_extent(request.table_id, request.extent_id, request.start_xid, request.end_xid);
+        index->evict_table(request.table_id, request.start_xid, request.end_xid);
 
         _return.__set_status(thrift::StatusCode::SUCCESS);
     }
@@ -115,7 +118,7 @@ namespace springtail {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
-        std::vector<std::shared_ptr<WriteCacheIndexTableChange>> changes = index->get_table_changes(request.table_id, request.start_xid, request.end_xid);
+        std::vector<WriteCacheIndexTableChangePtr> changes = index->get_table_changes(request.table_id, request.start_xid, request.end_xid);
 
         _return.table_id = request.table_id;
 

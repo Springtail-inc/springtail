@@ -30,6 +30,7 @@ namespace springtail {
             : xid(xid), xid_seq(xid_seq), pkey(pkey), delete_flag(delete_flag)
         {}
     };
+    typedef std::shared_ptr<WriteCacheIndexRow> WriteCacheIndexRowPtr;
 
     /**
      * @brief Table change operation
@@ -59,6 +60,7 @@ namespace springtail {
             : tid(tid), xid(xid), xid_seq(xid_seq), op(op)
         {}
     };
+    typedef std::shared_ptr<WriteCacheIndexTableChange> WriteCacheIndexTableChangePtr;
 
     /**
      * @brief Write Cache Index -- the core index interface; Contains a set of partitions based on Table ID
@@ -84,7 +86,7 @@ namespace springtail {
          * @param eid extent id
          * @param data row data
          */
-        void add_row(uint64_t tid, uint64_t eid, std::shared_ptr<WriteCacheIndexRow> data);
+        void add_rows(uint64_t tid, uint64_t eid, const std::vector<WriteCacheIndexRowPtr> &data);
 
         /**
          * @brief Get list of dirty table ids within xid range
@@ -115,22 +117,21 @@ namespace springtail {
          * @param count max number of items
          * @return std::vector<std::shared_ptr<WriteCacheIndexRow>>
          */
-        std::vector<std::shared_ptr<WriteCacheIndexRow>> get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, int count);
+        std::vector<WriteCacheIndexRowPtr> get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, int count);
 
         /**
          * @brief Evict extent from cache
          * @param tid table ID
-         * @param eid extent ID
          * @param start_xid start of xid range
          * @param end_xid end of xid range
          */
-        void evict_extent(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+        void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Add a table change
          * @param change ptr to change struct
          */
-        void add_table_change(std::shared_ptr<WriteCacheIndexTableChange> change);
+        void add_table_change(WriteCacheIndexTableChangePtr change);
 
         /**
          * @brief Get set of table changes for a table
