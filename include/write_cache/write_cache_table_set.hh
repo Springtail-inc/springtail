@@ -141,20 +141,13 @@ namespace springtail {
         }
 
         /**
-         * @brief Get row id from primary key; hashes primary key or uses primary key as ID
-         * @param pkey Primary key
-         * @return std::string row id
-         */
-        std::string _get_row_key(const std::string &pkey);
-
-        /**
          * @brief Insert row IDs into table; populates XID, TID, EID, and eid_map
          * @param tid  Table ID
          * @param eid  Extent ID
          * @param xid  XID
          * @param rids list of row IDs
          */
-        void _insert_rows(uint64_t tid, uint64_t eid, uint64_t xid, const std::vector<std::string> &rids);
+        void _insert_rows(uint64_t tid, uint64_t eid, uint64_t xid);
 
         /**
          * @brief Fetch at most count unique IDs from the node passed in

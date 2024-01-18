@@ -27,9 +27,9 @@ namespace springtail {
         for (const thrift::Row &r: request.rows) {
             WriteCacheIndexRowPtr row;
             if (r.op == thrift::RowOpType::DELETE) {
-                row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), r.xid, r.xid_seq);
+                row = std::make_shared<WriteCacheIndexRow>(std::move(r.primary_key), request.extent_id, r.xid, r.xid_seq);
             } else {
-                row = std::make_shared<WriteCacheIndexRow>(std::move(r.data), std::move(r.primary_key), r.xid, r.xid_seq,
+                row = std::make_shared<WriteCacheIndexRow>(std::move(r.data), std::move(r.primary_key), request.extent_id, r.xid, r.xid_seq,
                     ((r.op == thrift::RowOpType::UPDATE) ? WriteCacheIndexRow::RowOp::UPDATE :
                                                            WriteCacheIndexRow::RowOp::INSERT));
             }

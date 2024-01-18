@@ -1,6 +1,7 @@
 #include <memory>
 #include <mutex>
 
+#include <write_cache/write_cache_table_set.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
 

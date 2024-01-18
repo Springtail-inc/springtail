@@ -128,6 +128,7 @@ namespace springtail {
                     // only get a nullptr if queue is empty, if so check for shutdown
                     if (request == nullptr) {
                         if (worker->is_shutdown()) {
+                            std::cout << "Thread exiting: " << std::this_thread::get_id() << std::endl;
                             return;
                         }
                         continue;
@@ -136,7 +137,6 @@ namespace springtail {
                     // process request
                     (*request)();
                 }
-                std::cout << "Thread exiting: " << std::this_thread::get_id() << std::endl;
             }
 
         public:

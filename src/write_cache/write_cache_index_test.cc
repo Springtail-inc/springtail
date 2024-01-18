@@ -119,17 +119,16 @@ namespace springtail {
 
     bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
     {
-        return (lhs->eid < rhs->eid ||
-            (lhs->eid == rhs->eid && lhs->xid < rhs->xid) ||
-            (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
-             lhs->xid_seq < rhs->xid_seq) ||
-            (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
-             lhs->xid_seq == rhs->xid_seq && lhs->pkey < rhs->pkey));
+        return (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
+                lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
     }
 
     bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
     {
         auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), row_cmp_fn);
+        if (!(i1 == lhs.end() && i2 == rhs.end())) {
+            std::cout << "Mismatch found: " << (*i1)->dump() << " cmp " << (*i2)->dump() << std::endl;
+        }
         return (i1 == lhs.end() && i2 == rhs.end());
     }
 
@@ -156,6 +155,7 @@ namespace springtail {
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 res = _ts->get_rows(2, 1, 1, 3, 10, rows_result); // tid=2, eid=1, xid 1:3
 
+                std::cout << "Rows result:\n";
                 for (auto r: rows_result) {
                     std::cout << r->dump() << std::endl;
                 }
@@ -168,7 +168,12 @@ namespace springtail {
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 2, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 1, 2, rows_expected);
-                _make_rows(1, 3, 1, 5, 6, rows_expected);
+                _make_rows(1, 3, 1, 5, 2, rows_expected);
+
+                std::cout << "Rows expected:\n";
+                for (auto r: rows_expected) {
+                    std::cout << r->dump() << std::endl;
+                }
 
                 assert(row_cmp(rows_expected, rows_result));
             }

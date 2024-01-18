@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-//#include <write_cache/write_cache_table_set.hh>
+#include <fmt/core.h>
 
 namespace springtail {
 
@@ -15,6 +15,7 @@ namespace springtail {
      * @brief Row data structure; contains pkey, and data for a row
      */
     struct WriteCacheIndexRow {
+        uint64_t eid;
         uint64_t xid;
         uint64_t xid_seq;
         std::string pkey;
@@ -27,13 +28,22 @@ namespace springtail {
         } op;
 
         WriteCacheIndexRow(const std::string &&data, const std::string &&pkey,
-                           uint64_t xid, uint64_t xid_seq, RowOp op)
-            : xid(xid), xid_seq(xid_seq), pkey(pkey), data(data), op(op)
+                           uint64_t eid, uint64_t xid, uint64_t xid_seq, RowOp op)
+            : eid(eid), xid(xid), xid_seq(xid_seq), pkey(pkey), data(data), op(op)
         {}
 
-        WriteCacheIndexRow(const std::string &&pkey, uint64_t xid, uint64_t xid_seq, RowOp op=RowOp::DELETE)
-            : xid(xid), xid_seq(xid_seq), pkey(pkey), op(op)
+        WriteCacheIndexRow(const std::string &&pkey, uint64_t eid, uint64_t xid,
+                           uint64_t xid_seq, RowOp op=RowOp::DELETE)
+            : eid(eid), xid(xid), xid_seq(xid_seq), pkey(pkey), op(op)
         {}
+
+        WriteCacheIndexRow(uint64_t eid, uint64_t xid)
+            : eid(eid), xid(xid), xid_seq(0), pkey({})
+        {}
+
+        std::string dump() {
+            return fmt::format("EID:{} XID:{} XID_SEQ:{} PKEY:{}", eid, xid, xid_seq, pkey);
+        }
     };
     typedef std::shared_ptr<WriteCacheIndexRow> WriteCacheIndexRowPtr;
 

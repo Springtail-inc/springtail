@@ -67,7 +67,6 @@ namespace springtail {
         pointer allocate(size_type n) {
             auto* p = std::allocator<T>::allocate(n);
             TrackingAllocatorStats::get_instance()->allocate(n * sizeof(T));
-            std::cout << "Allocating: " << typeid(T).name() << ", number: " << n << ", size: " << sizeof(T) << std::endl;
             return p;
         }
 
@@ -75,7 +74,6 @@ namespace springtail {
         void deallocate(pointer p, size_type n) noexcept {
             std::allocator<T>::deallocate(p, n);
             TrackingAllocatorStats::get_instance()->deallocate(n * sizeof(T));
-            std::cout << "Deallocating: " << (n * sizeof(T)) << std::endl;
         }
 
         /** Rebind allocator for different types */

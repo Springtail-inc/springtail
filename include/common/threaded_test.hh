@@ -28,8 +28,8 @@ namespace springtail {
      */
     template <class TestState, class TestStateRequest>
     class ThreadedTest {
-        using ThreadStatePtr = std::shared_ptr<ThreadState>;
-        using ThreadStateRequestPtr = std::shared_ptr<ThreadStateRequestPtr>;
+        using TestStatePtr = std::shared_ptr<TestState>;
+        using TestStateRequestPtr = std::shared_ptr<TestStateRequest>;
     public:
         /**
          * @brief Construct a new Threaded Test object
@@ -37,7 +37,7 @@ namespace springtail {
          */
         ThreadedTest(int num_threads) :
             _num_threads(num_threads),
-            _state_ptr(std::make_shared<ThreadState>())
+            _state_ptr(std::make_shared<TestState>())
         {
             static_assert(std::is_base_of_v<ThreadTestState<TestStateRequest>, TestState>,
                           "Template param must be derived from ThreadTestState class");
@@ -47,7 +47,7 @@ namespace springtail {
         void start()
         {
             _state_ptr->init();
-            std::vector<ThreadStateRequestPtr> requests;
+            std::vector<TestStateRequestPtr> requests;
 
             while (true) {
                 // get next set of requests
@@ -57,7 +57,7 @@ namespace springtail {
                 }
 
                 // create thread pool for this set of tests
-                _thread_pool = std::make_shared<ThreadPool<TestsStateRequest>>(_num_threads);
+                _thread_pool = std::make_shared<ThreadPool<TestStateRequest>>(_num_threads);
 
                 // issue the requests
                 _thread_pool->queue(requests);
@@ -81,6 +81,6 @@ namespace springtail {
 
         std::shared_ptr<ThreadPool<TestStateRequest>> _thread_pool{nullptr};
 
-        ThreadTestStatePtr _state_ptr;
+        TestStatePtr _state_ptr;
     };
 }

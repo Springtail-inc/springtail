@@ -1,5 +1,4 @@
 find_package(Thrift CONFIG REQUIRED)
-find_package(xxHash CONFIG REQUIRED)
 
 # the thrift rpc gen
 find_program(
@@ -42,6 +41,7 @@ set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 set(WRITE_CACHE_SOURCES
     write_cache_client.cc
     write_cache_server.cc write_cache_service.cc write_cache_index.cc write_cache_table_set.cc
+    write_cache_index_node.cc write_cache_index_test.cc
     ${THRIFT_CC_FILES}
 )
 
@@ -62,7 +62,6 @@ target_include_directories(springtail_write_cache
 
 target_link_libraries(springtail_write_cache
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
-    PRIVATE xxHash::xxhash
 )
 
 add_executable(client_test write_cache_client.cc)
@@ -76,3 +75,8 @@ target_link_libraries(client_test PRIVATE springtail_common springtail_write_cac
 add_executable(index_test write_cache_index.cc)
 target_include_directories(index_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
 target_link_libraries(index_test PRIVATE springtail_common springtail_write_cache)
+
+add_executable(threaded_test write_cache_index_test.cc)
+target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+target_link_libraries(threaded_test PRIVATE springtail_common springtail_write_cache)
+
