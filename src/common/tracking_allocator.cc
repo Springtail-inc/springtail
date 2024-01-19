@@ -4,13 +4,14 @@
 #include <common/tracking_allocator.hh>
 
 namespace springtail {
-    std::atomic<std::size_t> TrackingAllocatorStats::_allocated_bytes = 0;
-    TrackingAllocatorStats *TrackingAllocatorStats::_instance {nullptr};
-
-    std::once_flag TrackingAllocatorStats::_init_flag;
-
-    void
-    TrackingAllocatorStats::init() {
+    // Define static init function for Tracking allocator stats
+    template<const char *TAG>
+    void TrackingAllocatorStats<TAG>::init() {
         _instance = new TrackingAllocatorStats();
     }
+
+    // forward declaration of TrackingAllocatorStats using the write cache tag
+    template
+    class TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>;
 };
+

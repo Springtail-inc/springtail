@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 
 #include <common/common.hh>
+#include <common/logging.hh>
 
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_table_set.hh>
@@ -56,7 +57,7 @@ namespace springtail
                                  uint64_t end_xid, int count,
                                  std::vector<std::shared_ptr<WriteCacheIndexRow>> &result)
     {
-        std::cout << "Searching for rows in range: " << start_xid << ":" << end_xid << std::endl;
+        SPDLOG_DEBUG("Searching for rows in range: {}:{}\n", start_xid, end_xid);
         return _row_map->get(tid, eid, start_xid, end_xid, count, result);
     }
 
@@ -65,23 +66,23 @@ namespace springtail
                                  int count, std::vector<int64_t> &result)
     {
         int result_cnt = 0;
-        std::cout << "Searching for tids in range: (" << start_xid << ":" << end_xid << "]\n";
+        SPDLOG_DEBUG("Searching for tids in range: {}:{}\n", start_xid, end_xid);
 
         std::set<uint64_t> set;
 
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid && result_cnt < count; xid++) {
-            std::cout << "Finding xid: " << xid << std::endl;
+            SPDLOG_DEBUG("Finding tids in xid: {}\n", xid);
             // fetch xid node for this xid and read lock it
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                std::cout << " - not found\n";
+                SPDLOG_DEBUG("XID {} not found\n", xid);
                 continue;
             }
 
             // fetch ids into set to keep them unique
             result_cnt += _fetch_ids(xid_node, count-result_cnt, set);
-            std::cout << "Found ids, result_cnt=" << result_cnt << std::endl;
+            SPDLOG_DEBUG("Found unique tids, result_cnt={}\n", result_cnt);
         }
 
         // copy results to vector
@@ -97,7 +98,7 @@ namespace springtail
                                  int count, std::vector<int64_t> &result)
     {
         int result_cnt = 0;
-        std::cout << "Searching for eids in range: " << start_xid << ":" << end_xid << std::endl;
+        SPDLOG_DEBUG("Searching for eids in range: {}:{}\n", start_xid, end_xid);
 
         std::set<uint64_t> set;
 
@@ -156,28 +157,26 @@ namespace springtail
     {
         std::set<uint64_t> eid_set;
 
-        std::cout << fmt::format("Evicting table: TID={} XIDs=({}:{}]\n", tid, start_xid, end_xid);
+        SPDLOG_DEBUG("Evicting table: TID={} XIDs=({}:{}]\n", tid, start_xid, end_xid);
 
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid; xid++) {
             // fetch xid node for this xid if exists
-            std::cout << "Searching for XID: " << xid << std::endl;
+            SPDLOG_DEBUG("Searching for XID: {}\n", xid);
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                std::cout << "XID not found\n";
+                SPDLOG_DEBUG("XID {} not found\n", xid);
                 continue;
             }
 
-            std::cout << "Removing TID: " << tid << std::endl;
+            SPDLOG_DEBUG("Removing TID: {}\n", tid);
             WriteCacheIndexNodePtr table_node = xid_node->remove(tid);
             if (table_node != nullptr) {
                 // add eid to extent set, so we can remove row data later
                 for (auto extent_node: table_node->children) {
-                    std::cout << "Found table, adding extent eid=" << extent_node->id << std::endl;
+                    SPDLOG_DEBUG("Found table {}, adding extent eid={}\n", tid, extent_node->id);
                     eid_set.insert(extent_node->id);
                 }
-            } else {
-                std::cout << "Table not found\n";
             }
         }
 

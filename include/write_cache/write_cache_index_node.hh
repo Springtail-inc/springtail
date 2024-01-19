@@ -46,10 +46,10 @@ namespace springtail {
         mutable std::shared_mutex mutex;
 
         /** Map holding key to next level of node */
-        std::set<WriteCacheIndexNodePtr, ComparatorID, TrackingAllocator<WriteCacheIndexNodePtr>> children;
+        std::set<WriteCacheIndexNodePtr, ComparatorID, TrackingAllocator<WriteCacheIndexNodePtr, TrackingAllocatorTags::TAG_WRITE_CACHE>> children;
 
         /** Constructor for integer id */
-        WriteCacheIndexNode(uint64_t id, IndexType type=IndexType::INVALID) : id(id), type(type) {};
+        WriteCacheIndexNode(uint64_t id, IndexType type=IndexType::INVALID) : id(id), type(type) {}
 
         /** Find child node by int id, return nullptr if not exists */
         WriteCacheIndexNodePtr find(uint64_t id) const;
@@ -115,7 +115,7 @@ namespace springtail {
         /** Table map entry, holds map from RowDataKey to row data (WriteCacheIndexRow) */
         struct Entry {
             /** Set of write cache index rows */
-            std::set<WriteCacheIndexRowPtr, IndexRowComparator, TrackingAllocator<WriteCacheIndexRowPtr>> set;
+            std::set<WriteCacheIndexRowPtr, IndexRowComparator, TrackingAllocator<WriteCacheIndexRowPtr, TrackingAllocatorTags::TAG_WRITE_CACHE>> set;
             /** Set mutex */
             mutable std::shared_mutex entry_mutex;
         };

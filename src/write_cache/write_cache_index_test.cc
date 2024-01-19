@@ -1,8 +1,9 @@
 #include <fmt/core.h>
 #include <cassert>
 
-#include <common/threaded_test.hh>
 #include <common/common.hh>
+#include <common/threaded_test.hh>
+#include <common/tracking_allocator.hh>
 
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
@@ -13,21 +14,21 @@ namespace springtail {
 
     /** helper to compare plain object vectors */
     template<class T>
-    bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
+    static bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
     {
         auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
         return (i1 == lhs.end() && i2 == rhs.end());
     }
 
     /** comparator for write cache index row vectors */
-    bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
+    static bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
     {
         return (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
                 lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
     }
 
     /** helper to compare write cache index row vectors using comparator */
-    bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
+    static bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
     {
         auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), row_cmp_fn);
         if (!(i1 == lhs.end() && i2 == rhs.end())) {
@@ -35,7 +36,6 @@ namespace springtail {
         }
         return (i1 == lhs.end() && i2 == rhs.end());
     }
-
 
     void
     WriteCacheIndexTestRequest::_process_request()
@@ -50,6 +50,20 @@ namespace springtail {
                 _ts->evict_table(_tid, _start_xid, _end_xid);
                 break;
         }
+    }
+
+    void
+    WriteCacheIndexTest::init()
+    {
+        std::cout << "Init allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
+        _ts->dump();
+    }
+
+    void
+    WriteCacheIndexTest::shutdown()
+    {
+        std::cout << "Shutdown allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
+        _ts->dump();
     }
 
     void
@@ -169,6 +183,16 @@ namespace springtail {
                 return requests;
             }
 
+            case 4: {
+                // shutdown, clear everything
+                // evict tid=1, xid=(0:6]
+                requests.push_back(_make_eviction_request(1, 0, 6));
+                // evict tid=2, xid=(0:6]
+                requests.push_back(_make_eviction_request(2, 0, 6));
+
+                return requests;
+            }
+
             default:
                 std::cout << "Done with testing\n";
                 return requests; // return empty requests
@@ -204,6 +228,8 @@ namespace springtail {
                 _make_rows(1, 3, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 5, 2, rows_expected);
                 assert(row_cmp(rows_expected, rows_result));
+
+                std::cout << "Phase 1 allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
 
                 break;
             }
@@ -262,6 +288,22 @@ namespace springtail {
                 rows_expected.clear();
                 _make_rows(2, 6, 1, 5, 2, rows_expected);
                 assert(row_cmp(rows_expected, rows_result));
+
+                break;
+            }
+
+            case 4: {
+                std::cout << "Checking extent IDs\n";
+                std::vector<int64_t> eids;
+                int res = _ts->get_eids(1, 0, 6, 10, eids); // tid=1, xid (0:6]
+                assert(res == 0);
+                res = _ts->get_eids(2, 0, 6, 10, eids); // tid=2, xid (0:6]
+                assert(res == 0);
+
+                std::cout << "Checking rows\n";
+                std::vector<WriteCacheIndexRowPtr> rows_result;
+                res = _ts->get_rows(2, 1, 0, 6, 10, rows_result); // tid=2, eid=1, xid 2:5
+                assert(res == 0);
 
                 break;
             }
@@ -343,7 +385,7 @@ void manual_test()
 
     ts.dump();
 
-    std::cout << "Allocated bytes: " << springtail::TrackingAllocatorStats::get_instance()->get_allocated_bytes() << std::endl;
+    std::cout << "Allocated bytes: " << springtail::TrackingAllocatorStats<springtail::TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
 
     std::cout << "Evicting extent: tid=1, eid=2, xids: 8:15\n";
     ts.evict_table(1, 8, 15);
@@ -355,7 +397,7 @@ void manual_test()
 
     ts.dump();
 
-    std::cout << "Allocated bytes: " << springtail::TrackingAllocatorStats::get_instance()->get_allocated_bytes() << std::endl;
+    std::cout << "Allocated bytes: " << springtail::TrackingAllocatorStats<springtail::TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
 }
 
 int main(void) {

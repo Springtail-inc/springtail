@@ -57,10 +57,10 @@ namespace springtail {
     class WriteCacheIndexTest : public ThreadTestState<WriteCacheIndexTestRequest> {
     public:
         WriteCacheIndexTest() : _ts(std::make_shared<WriteCacheTableSet>()) {};
-        void init() override {}
+        void init() override;
         std::vector<WriteCacheIndexTestRequestPtr> get_requests() override;
         bool verify() override;
-        void shutdown() override {};
+        void shutdown() override;
 
     private:
         WriteCacheTableSetPtr _ts;

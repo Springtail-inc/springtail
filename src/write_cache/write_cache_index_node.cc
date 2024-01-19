@@ -1,6 +1,8 @@
 #include <memory>
 #include <mutex>
 
+#include <common/logging.hh>
+
 #include <write_cache/write_cache_table_set.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
@@ -206,7 +208,7 @@ namespace springtail {
         auto entry_itr = entry->set.lower_bound(rkey);
 
         // iterate through rows to find those within the xid range
-        //std::cout << fmt::format("row get: {}:{} {}:{}\n", tid, eid, start_xid+1, end_xid);
+        SPDLOG_DEBUG("Row get: TID:{} EID:{} XIDs:{}:{}\n", tid, eid, start_xid+1, end_xid);
         int added=0;
         while (entry_itr != entry->set.end() && (*entry_itr)->eid == eid &&
                 added < count && (*entry_itr)->xid <= end_xid) {
