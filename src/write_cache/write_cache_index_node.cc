@@ -77,8 +77,9 @@ namespace springtail {
         if (itr == children.end()) {
             return nullptr;
         }
+        WriteCacheIndexNodePtr p = (*itr);
         children.erase(itr);
-        return (*itr);
+        return p;
     }
 
     WriteCacheIndexNodePtr

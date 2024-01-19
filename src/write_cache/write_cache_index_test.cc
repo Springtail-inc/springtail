@@ -11,14 +11,42 @@
 
 namespace springtail {
 
+    /** helper to compare plain object vectors */
+    template<class T>
+    bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
+    {
+        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+        return (i1 == lhs.end() && i2 == rhs.end());
+    }
+
+    /** comparator for write cache index row vectors */
+    bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
+    {
+        return (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
+                lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
+    }
+
+    /** helper to compare write cache index row vectors using comparator */
+    bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
+    {
+        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), row_cmp_fn);
+        if (!(i1 == lhs.end() && i2 == rhs.end())) {
+            std::cout << "Mismatch found: " << (*i1)->dump() << " cmp " << (*i2)->dump() << std::endl;
+        }
+        return (i1 == lhs.end() && i2 == rhs.end());
+    }
+
+
     void
     WriteCacheIndexTestRequest::_process_request()
     {
         switch(_type) {
             case Type::ADD_ROW:
+                std::cout << "ADD ROW request\n";
                 _ts->add_rows(_tid, _eid, _data);
                 break;
             case Type::EVICT_TABLE:
+                std::cout << "EVICT TABLE request\n";
                 _ts->evict_table(_tid, _start_xid, _end_xid);
                 break;
         }
@@ -44,12 +72,18 @@ namespace springtail {
         return std::make_shared<WriteCacheIndexTestRequest>(_ts, tid, eid, rows);
     }
 
+     WriteCacheIndexTestRequestPtr
+     WriteCacheIndexTest::_make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+     {
+        return std::make_shared<WriteCacheIndexTestRequest>(_ts, start_xid, end_xid, tid);
+     }
+
     std::vector<WriteCacheIndexTestRequestPtr>
     WriteCacheIndexTest::get_requests()
     {
         std::vector<WriteCacheIndexTestRequestPtr> requests;
 
-        std::cout << "Starting test phase: " << _phase << std::endl;
+        std::cout << "\n*** Starting test phase: " << _phase << std::endl;
 
         switch(_phase) {
             case 1: {
@@ -101,6 +135,37 @@ namespace springtail {
                 // tid=2, eid=3, xid=4, rid=5,6
                 requests.push_back(_make_row_request(2, 3, 4, 1, 5, 2));
 
+                // tid=2, eid=1, xid=4, rid=7,8
+                requests.push_back(_make_row_request(2, 1, 4, 1, 7, 2));
+
+                return requests;
+            }
+
+            case 2: {
+                // evict tid=2, xid=(1:3]
+                requests.push_back(_make_eviction_request(2, 1, 3));
+
+                // add row tid=2, eid=1, xid=5, rid=1,2
+                requests.push_back(_make_row_request(2, 1, 5, 1, 1, 2));
+
+                // add row tid=2, eid=1, xid=5, rid=1 (xid_seq=2)
+                requests.push_back(_make_row_request(2, 1, 5, 2, 1, 1));
+
+                // add row tid=1, eid=1, xid=6, rid=1,2
+                requests.push_back(_make_row_request(1, 1, 6, 1, 1, 2));
+
+                // add row tid=1, eid=2, xid=6, rid=5,6
+                requests.push_back(_make_row_request(1, 2, 6, 1, 5, 2));
+
+                return requests;
+            }
+
+            case 3: {
+                // evict tid=1, xid=(1:3]
+                requests.push_back(_make_eviction_request(1, 0, 3));
+                // evict tid=2, xid=(3:5]
+                requests.push_back(_make_eviction_request(2, 3, 5));
+
                 return requests;
             }
 
@@ -110,32 +175,10 @@ namespace springtail {
         }
     }
 
-    template<class T>
-    bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
-    {
-        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
-        return (i1 == lhs.end() && i2 == rhs.end());
-    }
-
-    bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
-    {
-        return (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
-                lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
-    }
-
-    bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
-    {
-        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), row_cmp_fn);
-        if (!(i1 == lhs.end() && i2 == rhs.end())) {
-            std::cout << "Mismatch found: " << (*i1)->dump() << " cmp " << (*i2)->dump() << std::endl;
-        }
-        return (i1 == lhs.end() && i2 == rhs.end());
-    }
-
     bool
     WriteCacheIndexTest::verify()
     {
-        std::cout << "Verifying test phase: " << _phase << std::endl;
+        std::cout << "\n***Verifying test phase: " << _phase << std::endl;
 
         switch(_phase) {
             case 1: {
@@ -154,28 +197,73 @@ namespace springtail {
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 res = _ts->get_rows(2, 1, 1, 3, 10, rows_result); // tid=2, eid=1, xid 1:3
-
-                std::cout << "Rows result:\n";
-                for (auto r: rows_result) {
-                    std::cout << r->dump() << std::endl;
-                }
-
                 assert(res == 6);
-                /* Expect:
-                2,1,2,1, 1,2
-                2,1,3,1, 1,2
-                2,1,3,1, 5,6 */
+
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 2, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 5, 2, rows_expected);
-
-                std::cout << "Rows expected:\n";
-                for (auto r: rows_expected) {
-                    std::cout << r->dump() << std::endl;
-                }
-
                 assert(row_cmp(rows_expected, rows_result));
+
+                break;
+            }
+
+            case 2: {
+                std::cout << "Checking extent IDs\n";
+                std::vector<int64_t> eids;
+                int res = _ts->get_eids(2, 1, 3, 10, eids); // tid=2, xid 1:3
+                assert(res == 0);
+
+                std::cout << "Checking rows\n";
+                std::vector<WriteCacheIndexRowPtr> rows_result;
+                res = _ts->get_rows(2, 1, 2, 5, 10, rows_result); // tid=2, eid=1, xid 2:5
+                assert(res == 5);
+
+                std::vector<WriteCacheIndexRowPtr> rows_expected;
+                _make_rows(1, 4, 1, 7, 2, rows_expected);
+                _make_rows(1, 5, 1, 1, 2, rows_expected);
+                _make_rows(1, 5, 2, 1, 1, rows_expected);
+                assert(row_cmp(rows_expected, rows_result));
+
+                std::cout << "Checking rows\n";
+                rows_result.clear();
+                res = _ts->get_rows(1, 2, 2, 6, 10, rows_result); // tid=1, eid=2, xid 2:6
+                assert(res == 4);
+
+                rows_expected.clear();
+                _make_rows(2, 3, 1, 5, 2, rows_expected);
+                _make_rows(2, 6, 1, 5, 2, rows_expected);
+                assert(row_cmp(rows_expected, rows_result));
+
+                break;
+            }
+
+            case 3: {
+                std::cout << "Checking extent IDs\n";
+                std::vector<int64_t> eids;
+                int res = _ts->get_eids(1, 0, 5, 10, eids); // tid=1, xid 0:5
+                assert(res == 0);
+
+                std::cout << "Checking rows\n";
+                std::vector<WriteCacheIndexRowPtr> rows_result;
+                res = _ts->get_rows(2, 1, 0, 5, 10, rows_result); // tid=2, eid=1, xid 2:5
+                assert(res == 4);
+
+                std::vector<WriteCacheIndexRowPtr> rows_expected;
+                _make_rows(1, 1, 1, 1, 2, rows_expected);
+                _make_rows(1, 1, 1, 5, 2, rows_expected);
+                assert(row_cmp(rows_expected, rows_result));
+
+                std::cout << "Checking rows\n";
+                rows_result.clear();
+                res = _ts->get_rows(1, 2, 2, 6, 10, rows_result); // tid=1, eid=2, xid 2:6
+                assert(res == 2);
+
+                rows_expected.clear();
+                _make_rows(2, 6, 1, 5, 2, rows_expected);
+                assert(row_cmp(rows_expected, rows_result));
+
+                break;
             }
         }
         std::cout << "Verified test phase: " << _phase << " successfully\n";

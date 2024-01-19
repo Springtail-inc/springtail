@@ -156,20 +156,28 @@ namespace springtail
     {
         std::set<uint64_t> eid_set;
 
+        std::cout << fmt::format("Evicting table: TID={} XIDs=({}:{}]\n", tid, start_xid, end_xid);
+
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid; xid++) {
             // fetch xid node for this xid if exists
+            std::cout << "Searching for XID: " << xid << std::endl;
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
+                std::cout << "XID not found\n";
                 continue;
             }
 
+            std::cout << "Removing TID: " << tid << std::endl;
             WriteCacheIndexNodePtr table_node = xid_node->remove(tid);
             if (table_node != nullptr) {
                 // add eid to extent set, so we can remove row data later
                 for (auto extent_node: table_node->children) {
+                    std::cout << "Found table, adding extent eid=" << extent_node->id << std::endl;
                     eid_set.insert(extent_node->id);
                 }
+            } else {
+                std::cout << "Table not found\n";
             }
         }
 
@@ -230,6 +238,9 @@ namespace springtail
     void
     WriteCacheTableSet::_dump(WriteCacheIndexNodePtr node)
     {
+        if (node->type == springtail::WriteCacheIndexNode::IndexType::XID) {
+            std::cout << std::endl;
+        }
         std::cout << node->dump();
         for (auto x = node->children.begin(); x != node->children.end(); x++) {
             _dump(*x);

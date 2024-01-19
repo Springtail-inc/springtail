@@ -76,5 +76,8 @@ namespace springtail {
         _make_rows(uint64_t eid, uint64_t xid,
                    uint64_t xid_seq, int rid_start, int count,
                    std::vector<WriteCacheIndexRowPtr> &rows);
+
+        WriteCacheIndexTestRequestPtr
+        _make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
     };
 }
