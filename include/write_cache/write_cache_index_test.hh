@@ -15,16 +15,22 @@ namespace springtail {
     public:
         enum Type : uint8_t {
             ADD_ROW=0,
-            EVICT_TABLE=1
+            EVICT_TABLE=1,
+            ADD_TABLE_CHANGE=2,
+            EVICT_TABLE_CHANGE=3
         };
 
         /** add row constructor */
         WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t tid, uint64_t eid, const std::vector<WriteCacheIndexRowPtr> &data)
             : _ts(ts), _type(Type::ADD_ROW), _tid(tid), _eid(eid), _data(data) {}
 
-        /** evict table constructor */
-        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t start_xid, uint64_t end_xid, uint64_t tid)
-            : _ts(ts), _type(Type::EVICT_TABLE), _start_xid(start_xid), _end_xid(end_xid), _tid(tid) {}
+        /** evict table / evict table change constructor */
+        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t start_xid, uint64_t end_xid, uint64_t tid, Type type)
+            : _ts(ts), _type(type), _start_xid(start_xid), _end_xid(end_xid), _tid(tid) {}
+
+        /** add table change constructor */
+        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t start_xid, uint64_t xid_seq, uint64_t tid)
+            : _ts(ts), _type(Type::ADD_TABLE_CHANGE), _start_xid(start_xid), _xid_seq(xid_seq), _tid(tid) {}
 
        /**
          * @brief Overload () for execution from worker thread.
@@ -39,6 +45,7 @@ namespace springtail {
         Type _type;
         uint64_t _start_xid;
         uint64_t _end_xid;
+        uint64_t _xid_seq;
         uint64_t _tid;
         uint64_t _eid;
         std::vector<WriteCacheIndexRowPtr> _data;
@@ -77,7 +84,16 @@ namespace springtail {
                    uint64_t xid_seq, int rid_start, int count,
                    std::vector<WriteCacheIndexRowPtr> &rows);
 
+        /** Helper to create table eviction request */
         WriteCacheIndexTestRequestPtr
         _make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
+        /** Helper to create table change addition request */
+        WriteCacheIndexTestRequestPtr
+        _make_table_change_request(uint64_t tid, uint64_t xid, uint64_t xid_seq);
+
+        /** Helper to create table change eviction request */
+        WriteCacheIndexTestRequestPtr
+        _make_table_change_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
     };
 }

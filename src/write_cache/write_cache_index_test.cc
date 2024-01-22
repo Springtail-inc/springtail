@@ -20,11 +20,23 @@ namespace springtail {
         return (i1 == lhs.end() && i2 == rhs.end());
     }
 
+    template<class T>
+    static bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs, bool (*cmp_fn)(const T&, const T&))
+    {
+        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), cmp_fn);
+        return (i1 == lhs.end() && i2 == rhs.end());
+    }
+
     /** comparator for write cache index row vectors */
     static bool row_cmp_fn(const WriteCacheIndexRowPtr &lhs, const WriteCacheIndexRowPtr &rhs)
     {
         return (lhs->eid == rhs->eid && lhs->xid == rhs->xid &&
                 lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
+    }
+
+    static bool table_change_cmp_fn(const WriteCacheIndexTableChangePtr &lhs, const WriteCacheIndexTableChangePtr &rhs)
+    {
+        return (lhs->tid == rhs->tid && lhs->xid == rhs->xid && lhs->xid_seq == rhs->xid_seq);
     }
 
     /** helper to compare write cache index row vectors using comparator */
@@ -48,6 +60,16 @@ namespace springtail {
             case Type::EVICT_TABLE:
                 std::cout << "EVICT TABLE request\n";
                 _ts->evict_table(_tid, _start_xid, _end_xid);
+                break;
+            case Type::ADD_TABLE_CHANGE: {
+                std::cout << "ADD TABLE CHANGE request\n";
+                WriteCacheIndexTableChangePtr req = std::make_shared<WriteCacheIndexTableChange>(_tid, _start_xid, _xid_seq, WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE);
+                _ts->add_table_change(req);
+                break;
+            }
+            case Type::EVICT_TABLE_CHANGE:
+                std::cout << "EVICT TABLE CHANGE request\n";
+                _ts->evict_table_changes(_tid, _start_xid, _end_xid);
                 break;
         }
     }
@@ -86,11 +108,25 @@ namespace springtail {
         return std::make_shared<WriteCacheIndexTestRequest>(_ts, tid, eid, rows);
     }
 
-     WriteCacheIndexTestRequestPtr
-     WriteCacheIndexTest::_make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
-     {
-        return std::make_shared<WriteCacheIndexTestRequest>(_ts, start_xid, end_xid, tid);
-     }
+    WriteCacheIndexTestRequestPtr
+    WriteCacheIndexTest::_make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        return std::make_shared<WriteCacheIndexTestRequest>(_ts, start_xid, end_xid, tid,
+            WriteCacheIndexTestRequest::Type::EVICT_TABLE);
+    }
+
+    WriteCacheIndexTestRequestPtr
+    WriteCacheIndexTest::_make_table_change_request(uint64_t tid, uint64_t xid, uint64_t xid_seq)
+    {
+        return std::make_shared<WriteCacheIndexTestRequest>(_ts, xid, xid_seq, tid);
+    }
+
+    WriteCacheIndexTestRequestPtr
+    WriteCacheIndexTest::_make_table_change_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        return std::make_shared<WriteCacheIndexTestRequest>(_ts, start_xid, end_xid, tid,
+            WriteCacheIndexTestRequest::Type::EVICT_TABLE_CHANGE);
+    }
 
     std::vector<WriteCacheIndexTestRequestPtr>
     WriteCacheIndexTest::get_requests()
@@ -190,6 +226,32 @@ namespace springtail {
                 // evict tid=2, xid=(0:6]
                 requests.push_back(_make_eviction_request(2, 0, 6));
 
+                return requests;
+            }
+
+            case 5: {
+                // add table change: tid, xid, xid_seq
+                requests.push_back(_make_table_change_request(1, 1, 0));
+                requests.push_back(_make_table_change_request(1, 1, 1));
+                requests.push_back(_make_table_change_request(1, 2, 0));
+                requests.push_back(_make_table_change_request(1, 2, 1));
+                requests.push_back(_make_table_change_request(1, 3, 0));
+                requests.push_back(_make_table_change_request(1, 3, 1));
+                requests.push_back(_make_table_change_request(2, 1, 0));
+                requests.push_back(_make_table_change_request(2, 1, 1));
+                requests.push_back(_make_table_change_request(2, 2, 0));
+                return requests;
+            }
+
+            case 6: {
+                // evict table changes for tid=1, xids=1:4
+                requests.push_back(_make_table_change_eviction_request(1,1,4));
+                // add table changes: tid=3, xid, xid_seq
+                requests.push_back(_make_table_change_request(3, 2, 1));
+                requests.push_back(_make_table_change_request(3, 3, 1));
+                requests.push_back(_make_table_change_request(3, 3, 1));
+                // evict table changes for tid=2, xids=1:4
+                requests.push_back(_make_table_change_eviction_request(2,0,4));
                 return requests;
             }
 
@@ -306,6 +368,50 @@ namespace springtail {
                 assert(res == 0);
 
                 break;
+            }
+
+            case 5: {
+                std::cout << "Checking table changes\n";
+                std::vector<WriteCacheIndexTableChangePtr> changes;
+                _ts->get_table_changes(1, 1, 5, changes);
+                assert(changes.size() == 4);
+
+                std::vector<WriteCacheIndexTableChangePtr> expected;
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 2, 0,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 2, 1,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 3, 0,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 3, 1,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                assert(vec_eq(changes, expected, table_change_cmp_fn));
+                break;
+            }
+
+            case 6: {
+                std::cout << "Checking table changes\n";
+                std::vector<WriteCacheIndexTableChangePtr> changes;
+                _ts->get_table_changes(1, 0, 5, changes);
+                assert(changes.size() == 2);
+
+                std::vector<WriteCacheIndexTableChangePtr> expected;
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 1, 0,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 1, 1,
+                    WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
+                assert(vec_eq(changes, expected, table_change_cmp_fn));
+
+                changes.clear();
+                _ts->get_table_changes(2, 0, 5, changes);
+                assert(changes.size() == 0);
+
+                changes.clear();
+                _ts->get_table_changes(3, 0, 5, changes);
+                assert(changes.size() == 3);
+
+                break;
+
             }
         }
         std::cout << "Verified test phase: " << _phase << " successfully\n";

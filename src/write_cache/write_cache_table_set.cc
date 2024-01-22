@@ -214,9 +214,11 @@ namespace springtail
 
         auto key = std::make_shared<WriteCacheIndexTableChange>(tid, start_xid+1, 0);
         auto start_itr = _table_change_set.lower_bound(key); // exclusive of start
-
-        key = std::make_shared<WriteCacheIndexTableChange>(tid, end_xid, 0);
-        auto end_itr = _table_change_set.upper_bound(key);  // inclusive of end
+        auto end_itr = start_itr; // find end_itr, should be one more than actual end
+        while (end_itr != _table_change_set.end() &&
+              (*end_itr)->xid <= end_xid && (*end_itr)->tid == tid) {
+            end_itr++;
+        }
 
         // remove elements [start_itr, end_itr)
         _table_change_set.erase(start_itr, end_itr);
