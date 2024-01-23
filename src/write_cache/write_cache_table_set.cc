@@ -54,16 +54,16 @@ namespace springtail
 
     int
     WriteCacheTableSet::get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                                 uint64_t end_xid, int count,
+                                 uint64_t end_xid, uint32_t count, uint64_t &cursor,
                                  std::vector<std::shared_ptr<WriteCacheIndexRow>> &result)
     {
         SPDLOG_DEBUG("Searching for rows in range: {}:{}\n", start_xid, end_xid);
-        return _row_map->get(tid, eid, start_xid, end_xid, count, result);
+        return _row_map->get(tid, eid, start_xid, end_xid, count, cursor, result);
     }
 
     int
     WriteCacheTableSet::get_tids(uint64_t start_xid, uint64_t end_xid,
-                                 int count, std::vector<int64_t> &result)
+                                 uint32_t count, uint64_t &cursor, std::vector<int64_t> &result)
     {
         int result_cnt = 0;
         SPDLOG_DEBUG("Searching for tids in range: {}:{}\n", start_xid, end_xid);
@@ -81,7 +81,7 @@ namespace springtail
             }
 
             // fetch ids into set to keep them unique
-            result_cnt += _fetch_ids(xid_node, count-result_cnt, set);
+            result_cnt += _fetch_ids(xid_node, count-result_cnt, cursor, set);
             SPDLOG_DEBUG("Found unique tids, result_cnt={}\n", result_cnt);
         }
 
@@ -95,7 +95,7 @@ namespace springtail
 
     int
     WriteCacheTableSet::get_eids(uint64_t tid, uint64_t start_xid, uint64_t end_xid,
-                                 int count, std::vector<int64_t> &result)
+                                 uint32_t count, uint64_t &cursor, std::vector<int64_t> &result)
     {
         int result_cnt = 0;
         SPDLOG_DEBUG("Searching for eids in range: {}:{}\n", start_xid, end_xid);
@@ -117,7 +117,7 @@ namespace springtail
             }
 
             // fetch ids into set to keep them unique
-            result_cnt += _fetch_ids(tid_node, count - result_cnt, set);
+            result_cnt += _fetch_ids(tid_node, count - result_cnt, cursor, set);
         }
 
         // copy results to vector
@@ -129,9 +129,11 @@ namespace springtail
     }
 
     int
-    WriteCacheTableSet::_fetch_ids(WriteCacheIndexNodePtr node, int count, std::set<uint64_t> &result)
+    WriteCacheTableSet::_fetch_ids(WriteCacheIndexNodePtr node, uint32_t count,
+                                   uint64_t &cursor, std::set<uint64_t> &result)
     {
         int result_cnt = 0;
+        uint64_t offset = cursor;
 
         // read lock it and iterate through eids
         std::shared_lock<std::shared_mutex> read_lock{node->mutex};
@@ -139,6 +141,16 @@ namespace springtail
         // iterate through children adding to result set
         auto itr = node->children.begin();
         while (itr != node->children.end()) {
+            // check cursor offset, decr if above 0 and continue
+            if (offset > 0) {
+                offset--;
+                itr++;
+                continue;
+            }
+
+            // incr actual cursor since we have gotten past where we were
+            cursor++;
+
             auto res = result.insert((*itr)->id);
             if (res.second) {
                 result_cnt++;

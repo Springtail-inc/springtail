@@ -137,8 +137,8 @@ namespace springtail {
         void remove(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
 
         /** Retreive a set of rows for an xid range, return number of rows */
-        int get(uint64_t tid, uint64_t eid,
-                uint64_t start_xid, uint64_t end_xid, int count,
+        int get(uint64_t tid, uint64_t eid, uint64_t start_xid,
+                uint64_t end_xid, uint32_t count, uint64_t &cursor,
                 std::vector<std::shared_ptr<WriteCacheIndexRow>> &result) const;
 
         void dump() const

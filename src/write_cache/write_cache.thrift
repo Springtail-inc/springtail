@@ -79,11 +79,13 @@ struct ListExtentsResponse {
 struct ListTablesRequest {
     1: i64 start_xid,
     2: i64 end_xid,
-    3: i32 count
+    3: i64 cursor,
+    4: i32 count
 }
 
 struct ListTablesResponse {
-    1: list<i64> table_ids;
+    1: i64 cursor,
+    2: list<i64> table_ids;
 }
 
 // remove an extent and its associated rows from cached

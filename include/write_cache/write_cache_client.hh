@@ -108,9 +108,10 @@ namespace springtail {
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          * @param count Max TIDs to return (may return less)
-         * @return std::vector<uint64_t> a list of table IDs
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @return std::vector<uint64_t> a list of table IDs; if count > vector size, no more items
          */
-        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, int count);
+        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of extent IDs that have been dirtied prior to and up to XID
@@ -118,10 +119,10 @@ namespace springtail {
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          * @param count Max EIDs to return (may return less)
-         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
-         * @return std::vector<uint64_t> a list of extent IDs
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @return std::vector<uint64_t> a list of extent IDs; if count > vector size, no more items
          */
-        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, int count, uint64_t &cursor);
+        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of ALL row IDs that have been dirtied prior to and up to XID
@@ -129,11 +130,11 @@ namespace springtail {
          * @param eid Extent ID for row
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
-         * @param cursor In/Out cursor, in: set to 0 for start of range, out: set to 0 indicates no more data
-         * @return std::vector<uint64_t> a list of row IDs
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @return std::vector<uint64_t> a list of row IDs; if count > vector size, no more items
          */
         std::vector<RowData> fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                                        uint64_t end_xid, int count, uint64_t &cursor);
+                                        uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Mark a previously dirty table as clean; removes all row data for that

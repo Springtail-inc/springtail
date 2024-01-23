@@ -14,12 +14,12 @@ namespace springtail
     }
 
     std::vector<int64_t>
-    WriteCacheIndex::get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count)
+    WriteCacheIndex::get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor)
     {
         std::vector<int64_t> tids;
         uint32_t target_size = count;
         for (auto &p: _partitions) {
-            p->get_tids(start_xid, end_xid, count, tids);
+            p->get_tids(start_xid, end_xid, count, cursor, tids);
             count = target_size - tids.size();
         }
         return tids;
@@ -31,16 +31,17 @@ namespace springtail
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
         std::vector<int64_t> eids;
-        partition->get_eids(tid, start_xid, end_xid, count, eids);
+        partition->get_eids(tid, start_xid, end_xid, count, cursor, eids);
         return eids;
     }
 
     std::vector<std::shared_ptr<WriteCacheIndexRow>>
-    WriteCacheIndex::get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, int count)
+    WriteCacheIndex::get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid,
+                              uint32_t count, uint64_t &cursor)
     {
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
         std::vector<std::shared_ptr<WriteCacheIndexRow>> rows;
-        partition->get_rows(tid, eid, start_xid, end_xid, count, rows);
+        partition->get_rows(tid, eid, start_xid, end_xid, count, cursor, rows);
         return rows;
     }
 

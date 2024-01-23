@@ -265,24 +265,35 @@ namespace springtail {
     WriteCacheIndexTest::verify()
     {
         std::cout << "\n***Verifying test phase: " << _phase << std::endl;
+        uint64_t cursor=0;
 
         switch(_phase) {
             case 1: {
                 std::cout << "Checking table IDs\n";
                 std::vector<int64_t> tids;
-                int res = _ts->get_tids(0, 4, 10, tids); // xid 0:4, count=10
+                cursor = 0;
+                int res = _ts->get_tids(0, 4, 10, cursor, tids); // xid 0:4, count=10
                 assert(res == 2);
                 assert(vec_eq(tids, {1,2}));
 
                 std::cout << "Checking extent IDs\n";
                 std::vector<int64_t> eids;
-                res = _ts->get_eids(2, 2, 4, 10, eids); // tid=2, xid 2:4
+                cursor = 0;
+                res = _ts->get_eids(2, 2, 4, 10, cursor, eids); // tid=2, xid 2:4
                 assert(res == 3);
+                assert(cursor == 3);
                 assert(vec_eq(eids, {1,2,3}));
+
+                cursor = 2;
+                eids.clear();
+                res = _ts->get_eids(2, 2, 4, 10, cursor, eids);
+                assert(cursor == 3);
+                assert(res = 1);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
-                res = _ts->get_rows(2, 1, 1, 3, 10, rows_result); // tid=2, eid=1, xid 1:3
+                cursor = 0;
+                res = _ts->get_rows(2, 1, 1, 3, 10, cursor, rows_result); // tid=2, eid=1, xid 1:3
                 assert(res == 6);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
@@ -299,13 +310,16 @@ namespace springtail {
             case 2: {
                 std::cout << "Checking extent IDs\n";
                 std::vector<int64_t> eids;
-                int res = _ts->get_eids(2, 1, 3, 10, eids); // tid=2, xid 1:3
+                cursor = 0;
+                int res = _ts->get_eids(2, 1, 3, 10, cursor, eids); // tid=2, xid 1:3
                 assert(res == 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
-                res = _ts->get_rows(2, 1, 2, 5, 10, rows_result); // tid=2, eid=1, xid 2:5
+                cursor = 0;
+                res = _ts->get_rows(2, 1, 2, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
                 assert(res == 5);
+                assert(cursor == 5);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 4, 1, 7, 2, rows_expected);
@@ -313,9 +327,20 @@ namespace springtail {
                 _make_rows(1, 5, 2, 1, 1, rows_expected);
                 assert(row_cmp(rows_expected, rows_result));
 
+                std::cout << "Checking cursor for get rows\n";
+                cursor = 3;
+                rows_result.clear();
+                res = _ts->get_rows(2, 1, 2, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
+                assert(res == 2);
+                rows_expected.clear();
+                _make_rows(1, 5, 1, 2, 1, rows_expected);
+                _make_rows(1, 5, 2, 1, 1, rows_expected);
+                assert(row_cmp(rows_expected, rows_result));
+
                 std::cout << "Checking rows\n";
                 rows_result.clear();
-                res = _ts->get_rows(1, 2, 2, 6, 10, rows_result); // tid=1, eid=2, xid 2:6
+                cursor = 0;
+                res = _ts->get_rows(1, 2, 2, 6, 10, cursor, rows_result); // tid=1, eid=2, xid 2:6
                 assert(res == 4);
 
                 rows_expected.clear();
@@ -329,12 +354,14 @@ namespace springtail {
             case 3: {
                 std::cout << "Checking extent IDs\n";
                 std::vector<int64_t> eids;
-                int res = _ts->get_eids(1, 0, 5, 10, eids); // tid=1, xid 0:5
+                cursor = 0;
+                int res = _ts->get_eids(1, 0, 5, 10, cursor, eids); // tid=1, xid 0:5
                 assert(res == 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
-                res = _ts->get_rows(2, 1, 0, 5, 10, rows_result); // tid=2, eid=1, xid 2:5
+                cursor = 0;
+                res = _ts->get_rows(2, 1, 0, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
                 assert(res == 4);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
@@ -344,7 +371,8 @@ namespace springtail {
 
                 std::cout << "Checking rows\n";
                 rows_result.clear();
-                res = _ts->get_rows(1, 2, 2, 6, 10, rows_result); // tid=1, eid=2, xid 2:6
+                cursor = 0;
+                res = _ts->get_rows(1, 2, 2, 6, 10, cursor, rows_result); // tid=1, eid=2, xid 2:6
                 assert(res == 2);
 
                 rows_expected.clear();
@@ -357,14 +385,16 @@ namespace springtail {
             case 4: {
                 std::cout << "Checking extent IDs\n";
                 std::vector<int64_t> eids;
-                int res = _ts->get_eids(1, 0, 6, 10, eids); // tid=1, xid (0:6]
+                cursor = 0;
+                int res = _ts->get_eids(1, 0, 6, 10, cursor, eids); // tid=1, xid (0:6]
                 assert(res == 0);
-                res = _ts->get_eids(2, 0, 6, 10, eids); // tid=2, xid (0:6]
+                cursor = 0;
+                res = _ts->get_eids(2, 0, 6, 10, cursor, eids); // tid=2, xid (0:6]
                 assert(res == 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
-                res = _ts->get_rows(2, 1, 0, 6, 10, rows_result); // tid=2, eid=1, xid 2:5
+                res = _ts->get_rows(2, 1, 0, 6, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
                 assert(res == 0);
 
                 break;
@@ -471,8 +501,8 @@ void manual_test()
     ts.dump();
 
     std::vector<springtail::WriteCacheIndexRowPtr> rows;
-
-    ts.get_rows(1, 1, 6, 9, 10, rows);
+    uint64_t cursor = 0;
+    ts.get_rows(1, 1, 6, 9, 10, cursor, rows);
     dump_rows(rows);
     rows = {};
 
@@ -482,7 +512,8 @@ void manual_test()
 
     ts.dump();
 
-    ts.get_rows(1, 1, 6, 9, 10, rows);
+    cursor = 0;
+    ts.get_rows(1, 1, 6, 9, 10, cursor, rows);
     dump_rows(rows);
     rows = {};
 

@@ -213,7 +213,7 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, int count)
+    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
 
@@ -223,15 +223,18 @@ namespace springtail {
         request.start_xid = start_xid;
         request.end_xid = end_xid;
         request.count = count;
+        request.cursor = cursor;
 
         c.client->list_tables(response, request);
+
+        cursor = response.cursor;
 
         return std::vector<uint64_t>(response.table_ids.begin(), response.table_ids.end());
     }
 
     std::vector<uint64_t>
     WriteCacheClient::list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid,
-                                   int count, uint64_t &cursor)
+                                   uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
         std::vector<uint64_t> extents;
@@ -255,7 +258,7 @@ namespace springtail {
 
     std::vector<WriteCacheClient::RowData>
     WriteCacheClient::fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                                 uint64_t end_xid, int count, uint64_t &cursor)
+                                 uint64_t end_xid, uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
 

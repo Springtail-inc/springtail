@@ -65,7 +65,8 @@ namespace springtail {
 
         uint64_t cursor = request.cursor;
         std::vector<WriteCacheIndexRowPtr> rows =
-            index->get_rows(request.table_id, request.extent_id, request.start_xid, request.end_xid, request.count);
+            index->get_rows(request.table_id, request.extent_id, request.start_xid, request.end_xid,
+                            request.count, cursor);
 
         _return.cursor = cursor;
         _return.extent_id = request.extent_id;
@@ -146,12 +147,16 @@ namespace springtail {
     }
 
     void
-    ThriftWriteCacheService::list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request)
+    ThriftWriteCacheService::list_tables(thrift::ListTablesResponse& _return,
+                                         const thrift::ListTablesRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
-        _return.table_ids = index->get_tids(request.start_xid, request.end_xid, request.count);
+        uint64_t cursor = request.cursor;
+
+        _return.table_ids = index->get_tids(request.start_xid, request.end_xid, request.count, cursor);
+        _return.cursor = cursor;
     }
 
     void

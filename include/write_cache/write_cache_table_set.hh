@@ -44,11 +44,12 @@ namespace springtail {
          * @param start_xid starting XID (for range, exclusive)
          * @param end_xid   ending XID (for range, inclusive)
          * @param count number of items to return; may be less
+         * @param cursor current offset into result set
          * @param result reference to result vector, may be partially filled
          * @return int number of elements added
          */
-        int get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, int count,
-                     std::vector<WriteCacheIndexRowPtr> &result);
+        int get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, uint32_t count,
+                     uint64_t &cursor, std::vector<WriteCacheIndexRowPtr> &result);
 
         /**
          * @brief Get a list of table IDs
@@ -59,7 +60,7 @@ namespace springtail {
          * @return int number of elements added
          */
         int get_tids(uint64_t start_xid, uint64_t end_xid,
-                     int count, std::vector<int64_t> &result);
+                     uint32_t count, uint64_t &cursor, std::vector<int64_t> &result);
 
         /**
          * @brief Get a list of table IDs
@@ -67,11 +68,12 @@ namespace springtail {
          * @param start_xid starting XID (for range, exclusive)
          * @param end_xid   ending XID (for range, inclusive)
          * @param count number of items to return; may be less
+         * @param cursor current offset into result set
          * @param result reference to result vector (thrift only supports int64, so that is what we use)
          * @return int number of elements added
          */
         int get_eids(uint64_t tid, uint64_t start_xid, uint64_t end_xid,
-                     int count, std::vector<int64_t> &result);
+                     uint32_t count, uint64_t &cursor, std::vector<int64_t> &result);
 
         /**
          * @brief Evict all rows for table, fixup indexes
@@ -153,10 +155,11 @@ namespace springtail {
          * @brief Fetch at most count unique IDs from the node passed in
          * @param node   node to search
          * @param count  max number of entries to return
+         * @param offset in/out acts as cursor, or offset into ids stream
          * @param result set of unique entries (in/out)
          * @return int   number of entries found
          */
-        int _fetch_ids(WriteCacheIndexNodePtr node, int count, std::set<uint64_t> &result);
+        int _fetch_ids(WriteCacheIndexNodePtr node, uint32_t count, uint64_t &offset, std::set<uint64_t> &result);
 
         /**
          * @brief Utility helper to dump tree from provided root

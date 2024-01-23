@@ -108,9 +108,10 @@ namespace springtail {
          * @param start_xid start of xid range
          * @param end_xid end of xid range
          * @param count max number of items to return (may be less)
+         * @param cursor cursor indicating current position
          * @return std::vector<int64_t> list of table IDs
          */
-        std::vector<int64_t> get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count);
+        std::vector<int64_t> get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Get list of dirty extents
@@ -130,9 +131,11 @@ namespace springtail {
          * @param start_xid start of xid range
          * @param end_xid end of xid range
          * @param count max number of items
+         * @param cursor cursor indicating current position
          * @return std::vector<std::shared_ptr<WriteCacheIndexRow>>
          */
-        std::vector<WriteCacheIndexRowPtr> get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid, int count);
+        std::vector<WriteCacheIndexRowPtr> get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
+                                                    uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Evict extent from cache

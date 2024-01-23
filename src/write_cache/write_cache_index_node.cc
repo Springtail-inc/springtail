@@ -189,8 +189,8 @@ namespace springtail {
 
     /** Retreive a set of rows for an xid range, return number of rows */
     int
-    WriteCacheIndexRowMap::get(uint64_t tid, uint64_t eid,
-                               uint64_t start_xid, uint64_t end_xid, int count,
+    WriteCacheIndexRowMap::get(uint64_t tid, uint64_t eid, uint64_t start_xid,
+                               uint64_t end_xid, uint32_t count, uint64_t &cursor,
                                std::vector<std::shared_ptr<WriteCacheIndexRow>> &result) const
     {
         // lock table map
@@ -209,9 +209,22 @@ namespace springtail {
 
         // iterate through rows to find those within the xid range
         SPDLOG_DEBUG("Row get: TID:{} EID:{} XIDs:{}:{}\n", tid, eid, start_xid+1, end_xid);
-        int added=0;
+        int added = 0;
+        uint64_t offset = cursor;
         while (entry_itr != entry->set.end() && (*entry_itr)->eid == eid &&
-                added < count && (*entry_itr)->xid <= end_xid) {
+                added < count && (*entry_itr)->xid <= end_xid)
+        {
+            // check cursor offset, if > 0 decr until we get to start of cursor
+            if (offset > 0) {
+                offset--;
+                entry_itr++;
+                continue;
+            }
+
+            // incr cursor since we are beyond its starting point
+            cursor++;
+
+            // add element
             result.push_back(*entry_itr);
             added++;
             entry_itr++;
