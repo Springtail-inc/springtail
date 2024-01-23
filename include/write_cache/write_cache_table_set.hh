@@ -56,11 +56,13 @@ namespace springtail {
          * @param start_xid starting XID (for range, exclusive)
          * @param end_xid   ending XID (for range, inclusive)
          * @param count number of items to return; may be less
+         * @param start_offset offset at which to start searching, may be larger then partitions set
+         * @param end_offset in/out; for the current partition the offset obtained populating the result set
          * @param result reference to result vector (thrift only supports int64, so that is what we use)
          * @return int number of elements added
          */
-        int get_tids(uint64_t start_xid, uint64_t end_xid,
-                     uint32_t count, uint64_t &cursor, std::vector<int64_t> &result);
+        int get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t start_offset,
+                     uint64_t &end_offset, std::vector<int64_t> &result);
 
         /**
          * @brief Get a list of table IDs
@@ -159,7 +161,8 @@ namespace springtail {
          * @param result set of unique entries (in/out)
          * @return int   number of entries found
          */
-        int _fetch_ids(WriteCacheIndexNodePtr node, uint32_t count, uint64_t &offset, std::set<uint64_t> &result);
+        int _fetch_ids(WriteCacheIndexNodePtr node, uint32_t count, uint64_t &start_offset,
+                       uint64_t &end_offset, std::set<uint64_t> &result);
 
         /**
          * @brief Utility helper to dump tree from provided root

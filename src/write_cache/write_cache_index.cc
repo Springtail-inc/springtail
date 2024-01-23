@@ -18,10 +18,26 @@ namespace springtail
     {
         std::vector<int64_t> tids;
         uint32_t target_size = count;
+        uint64_t start_offset = cursor;
+        uint64_t end_offset;
+        uint64_t new_cursor = 0;
+
+        // iterate through partitions building a resultset of desired size
         for (auto &p: _partitions) {
-            p->get_tids(start_xid, end_xid, count, cursor, tids);
+            p->get_tids(start_xid, end_xid, count, start_offset, end_offset, tids);
+            // update offsets for new partition
+            start_offset -= end_offset;
+            new_cursor += end_offset;
+
+            // see where we are
             count = target_size - tids.size();
+            if (count <= 0) {
+                break;
+            }
         }
+        // set new cursor based on sum of end_offset's
+        cursor = new_cursor;
+
         return tids;
     }
 

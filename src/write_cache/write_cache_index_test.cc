@@ -271,8 +271,9 @@ namespace springtail {
             case 1: {
                 std::cout << "Checking table IDs\n";
                 std::vector<int64_t> tids;
+                uint64_t end_offset;
                 cursor = 0;
-                int res = _ts->get_tids(0, 4, 10, cursor, tids); // xid 0:4, count=10
+                int res = _ts->get_tids(0, 4, 10, cursor, end_offset, tids); // xid 0:4, count=10
                 assert(res == 2);
                 assert(vec_eq(tids, {1,2}));
 
