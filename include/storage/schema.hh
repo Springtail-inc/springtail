@@ -13,7 +13,8 @@ namespace springtail {
 
     /** The available types for fields. */
     enum class SchemaType : uint8_t {
-        ARRAY = 1,
+        // XXX clean up the enum
+        // timestsamp types -- time, date, timestamp
         TEXT = 3,
         UINT64 = 4,
         INT64 = 5,
@@ -112,7 +113,7 @@ namespace springtail {
         static const uint64_t TABLES_TID = 1;
         static const uint64_t SCHEMAS_TID = 2;
         static const uint64_t SCHEMAS_HISTORY_TID = 3;
-        static const uint64_t PRIMARY_INDEXES_TID = 4;
+        // static const uint64_t PRIMARY_INDEXES_TID = 4;
 
     private:
         /** Column definitions for the "tables" system table. */
@@ -184,7 +185,7 @@ namespace springtail {
         };
 
     private:
-        /** A map of fixed system schemas. */
+        /** A map of fixed system schemas.  Maps from System Table ID to the ExtentSchema for that table. */
         std::unordered_map<uint64_t, std::shared_ptr<ExtentSchema>> _system_cache;
 
         /** A cache of SchemaInfo objects. */
@@ -239,11 +240,17 @@ namespace springtail {
 
         /** Returns a field accessor for the requested column. */
         virtual std::shared_ptr<Field> get_field(const std::string &name) const = 0;
+
+        /** Returns a FieldTuple representing all of the columns of the schema. */
+        FieldTuple get_fields() = 0;
+
+        /** Returns a FieldTuple representing an ordered subset of the columns in the schema. */
+        FieldTuple get_fields(const std::vector<std::string> &columns) = 0;
     };
 
     /**
-     * Defines the schema for a specific table.  Creates field accessors to retrieve data at a
-     * specified target XID + LSN from an extent that was written at a potentially earlier base XID.
+     * Defines the schema for a physical extent in a table.  Creates mutable field accessors to
+     * retrieve data from the extent at a specified target XID.
      */
     class ExtentSchema : public Schema {
     private:
@@ -259,6 +266,25 @@ namespace springtail {
          * @param columns A map from column position to column definition.
          */
         void _populate(const std::map<uint32_t, SchemaColumn> columns);
+
+        template <class F>
+        std::vector<std::shared_ptr<T>>
+        _tuple_helper(const std::vector<std::string> &columns={})
+        {
+            std::vector<std::shared_ptr<F>> fields;
+
+            if (columns.empty()) {
+                for (auto &&entry : _field_map) {
+                    fields.push_back(i.second);
+                }
+            } else {
+                for (auto &&name : columns) {
+                    fields.push_back(this->get_mutable_field(name));
+                }
+            }
+
+            return fields;
+        }
 
     public:
         /**
@@ -326,6 +352,73 @@ namespace springtail {
             auto &&i = _field_map.find(name);
             return (i != _field_map.end());
         }
+
+        /**
+         * Generate a new ExtentSchema, based on a list of columns from this schema, as well as
+         * additional provided columns.  Used in the creation of schemas for BTree indexes.
+         */
+        std::shared_ptr<ExtentSchema>
+        create_schema(const std::vector<std::string> &columns,
+                      const std::vector<SchemaColumn> &new_columns)
+        {
+            // create SchemaColumn entries for the existing fields
+            std::vector<SchemaColumn> all_columns;
+            for (auto &&column : columns) {
+                auto &&i = _field_map.find(column);
+
+                all_columns.push_back({
+                        column,
+                        all_columns.size(),
+                        i.second->get_type(),
+                        i.second->is_nullable()
+                    });
+            }
+
+            // add in the new columns
+            for (auto &&column : new_columns) {
+                column.position = all_columns.size();
+                all_columns.push_back(column);
+            }
+
+            // create the new ExtentSchema
+            return std::make_shared<ExtentSchema>(all_columns);
+        }
+
+        /**
+         * Generate a list of all of the fields in the schema.
+         */
+        FieldTuple
+        get_fields()
+        {
+            return FieldTuple(_tuple_helper<Field>());
+        }
+
+        /**
+         * Generate a list of all of the fields in the schema.
+         */
+        MutableFieldTuple
+        get_mutable_fields()
+        {
+            return MutableFieldTuple(_tuple_helper<MutableField>());
+        }
+
+        /**
+         * Generate a list of fields based on an ordered list of columns.
+         */
+        FieldTuple
+        get_fields(const std::vector<std::string> &columns)
+        {
+            return FieldTuple(_tuple_helper<Field>(columns));
+        }
+
+        /**
+         * Generate a list of fields based on an ordered list of columns.
+         */
+        FieldTuple
+        get_mutable_fields(const std::vector<std::string> &columns)
+        {
+            return MutableFieldTuple(_tuple_helper<MutableField>(columns));
+        }
     };
 
     /**
@@ -387,6 +480,30 @@ namespace springtail {
             }
 
             return i.second;
+        }
+
+        FieldTuple
+        get_fields()
+        {
+            std::vector<std::shared_ptr<Field>> _fields;
+
+            for (auto &&i : _field_map) {
+                _fields.push_back(i.second);
+            }
+
+            return FieldTuple(_fields);
+        }
+
+        FieldTuple
+        get_fields(const std::vector<std::string> &columns)
+        {
+            std::vector<std::shared_ptr<Field>> _fields;
+
+            for (auto &&name : columns) {
+                _fields.push_back(this->get_field(name));
+            }
+
+            return FieldTuple(_fields);
         }
     };
 }

@@ -41,6 +41,7 @@ namespace springtail {
 
         // for each column, try to find a valid SchemaColumn for the provided xid
         for (auto &&pair : _column_map) {
+            // XXX double check lower_bound or upper_bound
             auto &&i = pair.second.lower_bound(xid);
 
             // if there's no entry for this column with end_xid > extent_xid, go to the next column
@@ -56,6 +57,8 @@ namespace springtail {
             // we found a valid entry, add it to the vector of columns
             columns[pair.first] = i.second;
         }
+
+        return columns;
     }
 
     void

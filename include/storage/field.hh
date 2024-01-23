@@ -10,33 +10,58 @@
 namespace springtail {
 
     /**
-     * The Field class is to create an accessor object for a given column of an extent.  It stores
-     * the position of the column within the extent's fixed data and then interprets it based on the
-     * type of the column.
-     *
-     * The data of a column in an extent is extracted by passing an Extent::Row to the Field's
-     * approrpiate get_* function.  Calling the wrong function for a column of a given type will
-     * result in an exception being thrown, so the caller must ensure that the type is compatible
-     * with the get_* function being called.
+     * A three-valued object that can be either TRUE, FALSE or NULL.
      */
-    class Field {
-    protected:
-        uint32_t _offset; ///< The offset into the fixed data for the row.
+    class Ternary {
+    private:
+        static const uint8_t NULL_MASK = 0x2;
+        static const uint8_t VALUE_MASK = 0x1;
 
-    protected:
-        // used by Nullable fields because of virtual inheritance
-        Field()
-        { }
+    private:
+        /** Hold's a three-way value: 0x2 as NULL, 0x1 as TRUE, 0x0 as FALSE. */
+        uint8_t _value;
 
     public:
-        Field(uint32_t offset)
-            : _offset(offset)
+        /** Copy constructor */
+        Ternary(const Ternary &result)
+            : _value(result.value)
         { }
 
-        virtual ~Field()
+        /** Default constructor creates a null result. */
+        Ternary()
+            : _value(0x2)
         { }
 
-        virtual SchemaType get_type() = 0;
+        /** Constructor to create a TRUE or FALSE result. */
+        Ternary(bool value)
+            : _value(value)
+        { }
+
+        /** Checks for NULL. */
+        bool is_null() {
+            return (_value & NULL_MASK > 0);
+        }
+
+        /** Checks for TRUE / FALSE. */
+        bool get_bool() {
+            return (_value & VALUE_MASK > 0);
+        }
+    };
+
+    /**
+     * The Field class defines the interface for a generic column value.  That value may be extracted from
+     * an extent row, it could be a constant, or it could be some operator on top of other fields.
+     */
+    class Field {
+    public:
+        virtual ~Field() { }
+
+        virtual SchemaType get_type() const = 0;
+
+        /** Returns true if the field is nullable.  By default fields are not nullable. */
+        virtual bool is_nullable() const {
+            return false;
+        }
 
         // functions to read values
 
@@ -47,6 +72,14 @@ namespace springtail {
         virtual bool get_bool(const Extent::Row &row) const {
             std::cerr << "Getting bool type unsupported for this field." << std::endl;
             throw TypeError();
+        }
+
+        /** Returns a Ternary based on the results of is_null() and get_bool(). */
+        virtual Ternary get_ternary(const Extent::Row &row) const {
+            if (this->is_null(row)) {
+                return Ternary();
+            }
+            return Ternary(this->get_bool(row));
         }
 
         virtual int8_t get_int8(const Extent::Row &row) const {
@@ -109,8 +142,39 @@ namespace springtail {
             throw TypeError();
         }
 
-        // functions to set values
+        virtual bool less_than(const Extent::Row &lhs_row,
+                               std::shared_ptr<Field> rhs,
+                               const Extent::Row &rhs_row,
+                               bool nulls_last=true) const = 0;
+    };
 
+    /**
+     * The MutableField class defines an accessor object for a given column of an extent.  It stores
+     * the position of the column within the extent's fixed data and then interprets it based on the
+     * type of the column.
+     *
+     * The data of a column in an extent is extracted by passing an Extent::Row to the
+     * MutableField's approrpiate get_* function.  Calling the wrong function for a column of a
+     * given type will result in an exception being thrown, so the caller must ensure that the type
+     * is compatible with the get_* function being called.
+     *
+     * MutableField also provies a set of set_* functions to modify the values of an extent row.
+     */
+    class MutableField : public Field {
+    protected:
+        uint32_t _offset; ///< The offset into the fixed data for the row.
+
+    protected:
+        // used by Nullable fields because of virtual inheritance
+        MutableField()
+        { }
+
+    public:
+        MutableField(uint32_t offset)
+            : _offset(offset)
+        { }
+
+        // functions to set values
         virtual void set_null(Extent::MutableRow &row, bool is_null) {
             std::cerr << "Setting null unsupported for this field." << std::endl;
             throw TypeError();
@@ -180,7 +244,7 @@ namespace springtail {
         }
     };
 
-    class NullableField : virtual public Field {
+    class NullableField : virtual public MutableField {
     private:
         uint32_t _null_offset;
         char _null_mask;
@@ -191,6 +255,11 @@ namespace springtail {
         {
             assert(null_bit < 8);
             _null_mask = static_cast<char>(1) << null_bit;
+        }
+
+        /** NullableField and its child classes are nullable. */
+        virtual bool is_nullable() const {
+            return true;
         }
 
         bool is_null(const Extent::Row &row) const {
@@ -216,19 +285,19 @@ namespace springtail {
         }
     };
 
-    class BoolField : virtual public Field {
+    class BoolField : virtual public MutableField {
     private:
         char _bit_mask; ///< The bitmask for the bit of this boolean
 
     public:
         BoolField(uint32_t offset, uint8_t bool_bit)
-            : Field(offset)
+            : MutableField(offset)
         {
             assert(bool_bit < 8);
             _bit_mask = static_cast<char>(1) << bool_bit;
         }
 
-        virtual SchemaType get_type() {
+        virtual SchemaType get_type() const {
             return SchemaType::BOOLEAN;
         }
 
@@ -253,6 +322,20 @@ namespace springtail {
         {
             this->set_bool(row, field.get_bool(input_row));
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // we know this field cannot be null
+            if (rhs->is_null(rhs_row)) {
+                return nulls_last;
+            }
+
+            // compare boolean
+            return (this->get_bool(lhs_row) < rhs->get_bool(rhs_row));
+        }
     };
 
     class NullableBoolField : public BoolField, public NullableField {
@@ -263,7 +346,7 @@ namespace springtail {
               NullableField(null_offset, null_bit)
         { }
 
-        virtual SchemaType get_type() {
+        virtual SchemaType get_type() const {
             return BoolField::get_type();
         }
 
@@ -280,11 +363,29 @@ namespace springtail {
             BoolField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // check if this is null
+            if (this->is_null(lhs_row)) {
+                if (rhs->is_null(rhs_row)) {
+                    return false; // both null
+                } else {
+                    return !nulls_last; // lhs is null, rhs is not
+                }
+            }
+
+            // compare boolean
+            return BoolField::less_than(lhs_row, rhs, rhs_row, nulls_last);
+        }
     };
 
     /** Parent field type used for all numeric types (integers and floats) */
     template <class T>
-    class NumberField : virtual public Field {
+    class NumberField : virtual public MutableField {
     protected:
         size_t _fixed_size;
 
@@ -302,15 +403,15 @@ namespace springtail {
 
     public:
         NumberField(uint32_t offset)
-            : Field(offset),
+            : MutableField(offset),
               _fixed_size(sizeof(T))
         {
             static_assert(std::is_arithmetic<T>::value,
                           "NumberField must be of an arithmetic type");
         }
 
-        SchemaType get_type() {
-            if constexpr(std::is_same<T, uint64_t>::value) {
+        SchemaType get_type() const {
+            if constexpr(std::is_same_v<T, uint64_t>) {
                 return SchemaType::UINT64;
             } else if constexpr(std::is_same_v<T, int64_t>) {
                 return SchemaType::INT64;
@@ -344,7 +445,7 @@ namespace springtail {
         }
 
         int16_t get_int16(const Extent::Row &row) const {
-            return static_cast<uint16_t>(_get_number(row));
+            return static_cast<int16_t>(_get_number(row));
         }
 
         uint16_t get_uint16(const Extent::Row &row) const {
@@ -352,7 +453,7 @@ namespace springtail {
         }
 
         int32_t get_int32(const Extent::Row &row) const {
-            return static_cast<uint32_t>(_get_number(row));
+            return static_cast<int32_t>(_get_number(row));
         }
 
         uint32_t get_uint32(const Extent::Row &row) const {
@@ -360,7 +461,7 @@ namespace springtail {
         }
 
         int64_t get_int64(const Extent::Row &row) const {
-            return static_cast<uint64_t>(_get_number(row));
+            return static_cast<int64_t>(_get_number(row));
         }
 
         uint64_t get_uint64(const Extent::Row &row) const {
@@ -443,6 +544,42 @@ namespace springtail {
                 throw TypeError("Invalid NumberField type");
             }
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // we know this field cannot be null
+            if (rhs->is_null(rhs_row)) {
+                return nulls_last;
+            }
+
+            // compare based on this field's type
+            if constexpr(std::is_same_v<T, uint64_t>) {
+                return (this->get_uint64(lhs_row) < rhs->get_uint64(rhs_row));
+            } else if constexpr(std::is_same_v<T, int64_t>) {
+                return (this->get_int64(lhs_row) < rhs->get_int64(rhs_row));
+            } else if constexpr(std::is_same_v<T, uint32_t>) {
+                return (this->get_uint32(lhs_row) < rhs->get_uint32(rhs_row));
+            } else if constexpr(std::is_same_v<T, int32_t>) {
+                return (this->get_int32(lhs_row) < rhs->get_int32(rhs_row));
+            } else if constexpr(std::is_same_v<T, uint16_t>) {
+                return (this->get_uint16(lhs_row) < rhs->get_uint16(rhs_row));
+            } else if constexpr(std::is_same_v<T, int16_t>) {
+                return (this->get_int16(lhs_row) < rhs->get_int16(rhs_row));
+            } else if constexpr(std::is_same_v<T, uint8_t>) {
+                return (this->get_uint8(lhs_row) < rhs->get_uint8(rhs_row));
+            } else if constexpr(std::is_same_v<T, int8_t>) {
+                return (this->get_int8(lhs_row) < rhs->get_int8(rhs_row));
+            } else if constexpr(std::is_same_v<T, double>) {
+                return (this->get_double(lhs_row) < rhs->get_double(rhs_row));
+            } else if constexpr(std::is_same_v<T, float>) {
+                return (this->get_float(lhs_row) < rhs->get_float(rhs_row));
+            } else {
+                throw TypeError("Invalid NumberField type");
+            }
+        }
     };
 
     template <class T>
@@ -454,7 +591,7 @@ namespace springtail {
               NullableField(null_offset, null_bit)
         { }
 
-        virtual SchemaType get_type() {
+        virtual SchemaType get_type() const {
             return NumberField<T>::get_type();
         }
 
@@ -515,15 +652,32 @@ namespace springtail {
             NumberField<T>::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // check if this is null first
+            if (this->is_null(lhs_row)) {
+                if (rhs->is_null(rhs_row)) {
+                    return false; // both null
+                } else {
+                    return !nulls_last; // lhs is null, rhs is not
+                }
+            }
+
+            return NumberField<T>::less_than(lhs_row, rhs, rhs_row, nulls_last);
+        }
     };
 
-    class TextField : virtual public Field {
+    class TextField : virtual public MutableField {
     public:
         TextField(uint32_t offset)
-            : Field(offset)
+            : MutableField(offset)
         { }
 
-        SchemaType get_type() {
+        SchemaType get_type() const {
             return SchemaType::TEXT;
         }
 
@@ -554,6 +708,20 @@ namespace springtail {
             // otherwise we can just call get_text()
             this->set_text(row, field.get_text(input_row));
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // we know this field cannot be null
+            if (rhs->is_null(rhs_row)) {
+                return nulls_last;
+            }
+
+            // compare boolean
+            return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
+        }
     };
 
     class NullableTextField : public TextField, public NullableField {
@@ -563,7 +731,7 @@ namespace springtail {
               NullableField(null_offset, null_bit)
         { }
 
-        virtual SchemaType get_type() {
+        virtual SchemaType get_type() const {
             return TextField::get_type();
         }
 
@@ -579,15 +747,33 @@ namespace springtail {
             TextField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
         }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // check if this is null
+            if (this->is_null(lhs_row)) {
+                if (rhs->is_null(rhs_row)) {
+                    return false; // both null
+                } else {
+                    return !nulls_last; // lhs is null, rhs is not
+                }
+            }
+
+            // compare text
+            return TextField::less_than(lhs_row, rhs, rhs_row, nulls_last);
+        }
     };
 
-    class BinaryField : virtual public Field {
+    class BinaryField : virtual public MutableField {
     public:
         BinaryField(uint32_t offset)
-            : Field(offset)
+            : MutableField(offset)
         { }
 
-        SchemaType get_type() {
+        SchemaType get_type() const {
             return SchemaType::BINARY;
         }
 
@@ -612,12 +798,20 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       std::shared_ptr<Field> field)
         {
             // XXX if the field is a TEXT or BINARY then we want to do a direct copy
 
             // otherwise we can just call get_binary()
             this->set_binary(row, field.get_binary(input_row));
+        }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            throw TypeError("Can't compare binary fields -- unclear how to handle");
         }
     };
 
@@ -628,7 +822,7 @@ namespace springtail {
               NullableField(null_offset, null_bit)
         { }
 
-        virtual SchemaType get_type() {
+        virtual SchemaType get_type() const {
             return BinaryField::get_type();
         }
 
@@ -643,6 +837,697 @@ namespace springtail {
         {
             BinaryField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
+        }
+    };
+
+    /**
+     * A constant value that is represented as a Field for use in conditionals and joins.
+     */
+    template <class T>
+    class ConstField : public Field {
+    private:
+        T _value;
+
+    public:
+        ConstField(T value)
+            : _value(value)
+        { }
+
+        virtual SchemaType get_type() const {
+            if constexpr(std::is_same_v<T, bool>) {
+                return SchemaType::BOOLEAN;
+            } else if constexpr(std::is_same_v<T, uint64_t>) {
+                return SchemaType::UINT64;
+            } else if constexpr(std::is_same_v<T, int64_t>) {
+                return SchemaType::INT64;
+            } else if constexpr(std::is_same_v<T, uint32_t>) {
+                return SchemaType::UINT32;
+            } else if constexpr(std::is_same_v<T, int32_t>) {
+                return SchemaType::INT32;
+            } else if constexpr(std::is_same_v<T, uint16_t>) {
+                return SchemaType::UINT16;
+            } else if constexpr(std::is_same_v<T, int16_t>) {
+                return SchemaType::INT16;
+            } else if constexpr(std::is_same_v<T, uint8_t>) {
+                return SchemaType::UINT8;
+            } else if constexpr(std::is_same_v<T, int8_t>) {
+                return SchemaType::INT8;
+            } else if constexpr(std::is_same_v<T, double>) {
+                return SchemaType::FLOAT64;
+            } else if constexpr(std::is_same_v<T, float>) {
+                return SchemaType::FLOAT32;
+            } else if constexpr(std::is_same_v<T, std::string>) {
+                return SchemaType::TEXT;
+            } else if constexpr(std::is_same_v<T, std::vector<char>>) {
+                return SchemaType::BINARY;
+            }
+
+            throw TypeError();
+        }
+
+        bool get_bool(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, bool>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int8_t get_int8(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int8_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint8_t get_uint8(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint8_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int16_t get_int16(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int16_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint16_t get_uint16(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint16_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int32_t get_int32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int32_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint32_t get_uint32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint32_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int64_t get_int64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int64_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint64_t get_uint64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint64_t>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        float get_float32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, float>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        double get_float64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, double>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        std::string get_text(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, std::string>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        const std::vector<char> get_binary(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, std::vector<char>>) {
+                return _value;
+            } else {
+                throw TypeError();
+            }
+        }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // if the rhs is null, then it is always either larger or smaller than a constant value
+            if (rhs->is_null(rhs_row)) {
+                return nulls_last;
+            }
+
+            // return based on the comparison for the type of this constant
+            if constexpr(std::is_same_v<T, bool>) {
+                return (this->get_bool(row) < rhs->get_bool(row));
+
+            } else if constexpr(std::is_same_v<T, int8_t>) {
+                return (this->get_int8(row) < rhs->get_int8(row));
+
+            } else if constexpr(std::is_same_v<T, uint8_t>) {
+                return (this->get_uint8(row) < rhs->get_uint8(row));
+
+            } else if constexpr(std::is_same_v<T, int16_t>) {
+                return (this->get_int16(row) < rhs->get_int16(row));
+
+            } else if constexpr(std::is_same_v<T, uint16_t>) {
+                return (this->get_uint16(row) < rhs->get_uint16(row));
+
+            } else if constexpr(std::is_same_v<T, int32_t>) {
+                return (this->get_int32(row) < rhs->get_int32(row));
+
+            } else if constexpr(std::is_same_v<T, uint32_t>) {
+                return (this->get_uint32(row) < rhs->get_uint32(row));
+
+            } else if constexpr(std::is_same_v<T, int64_t>) {
+                return (this->get_int64(row) < rhs->get_int64(row));
+
+            } else if constexpr(std::is_same_v<T, uint64_t>) {
+                return (this->get_uint64(row) < rhs->get_uint64(row));
+
+            } else if constexpr(std::is_same_v<T, float>) {
+                return (this->get_float32(row) < rhs->get_float32(row));
+
+            } else if constexpr(std::is_same_v<T, double>) {
+                return (this->get_float64(row) < rhs->get_float64(row));
+
+            } else if constexpr(std::is_same_v<T, std::string>) {
+                return (this->get_text(row) < rhs->get_text(row));
+
+            } else if constexpr(std::is_same_v<T, std::vector<char>>) {
+                return (this->get_binary(row) < rhs->get_binary(row));
+
+            } else {
+                throw TypeError();
+            }
+        }
+    };
+
+    /**
+     * A value that is always null represented as a Field for use in conditionals and joins.
+     */
+    class ConstNullField : public Field {
+    private:
+        SchemaType _type;
+
+    public:
+        ConstNullField(SchemaType type)
+            : _type(type)
+        { }
+
+        virtual SchemaType get_type() const {
+            return _type;
+        }
+
+        virtual bool is_nullable() const {
+            return true;
+        }
+
+        bool is_null(const Extent::Row &row) const {
+            return true;
+        }
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            if (rhs->is_null(rhs_row)) {
+                return false;
+            }
+
+            return !nulls_last;
+        }
+    };
+
+    /**
+     * A value that wraps another value to return a default value if the underlying value is null.
+     */
+    template <class T>
+    class NullWrapperField : public Field {
+    private:
+        std::shared_ptr<Value> _value;
+        T _default;
+
+    public:
+        NullWrapperField(std::shared_ptr<Value> value, const T &default_value)
+            : _value(value), _default(default_value)
+        { }
+
+        NullWrapperField(std::shared_ptr<Value> value, T &&default_value)
+            : _value(value), _default(default_value)
+        { }
+
+        virtual SchemaType get_type() const {
+            return _value->get_type();
+        }
+
+        virtual bool is_nullable() const {
+            return false;
+        }
+
+        bool is_null(const Extent::Row &row) const {
+            return false;
+        }
+
+        bool get_bool(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, bool>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_bool(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int8_t get_int8(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int8_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_int8(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint8_t get_uint8(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint8_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_uint8(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int16_t get_int16(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int16_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_int16(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint16_t get_uint16(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint16_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_uint16(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int32_t get_int32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int32_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_int32(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint32_t get_uint32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint32_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_uint32(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        int64_t get_int64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, int64_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_int64(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        uint64_t get_uint64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, uint64_t>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_uint64(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        float get_float32(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, float>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_float32(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        double get_float64(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, double>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_float64(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        std::string get_text(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, std::string>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_text(row);
+            } else {
+                throw TypeError();
+            }
+        }
+
+        const std::vector<char> get_binary(const Extent::Row &row) const {
+            if constexpr(std::is_same_v<T, std::vector<char>>) {
+                if (_value->is_null(row)) {
+                    return _default;
+                }
+                return _value->get_binary(row);
+            } else {
+                throw TypeError();
+            }
+        }        
+
+        bool less_than(const Extent::Row &lhs_row,
+                       std::shared_ptr<Field> rhs,
+                       const Extent::Row &rhs_row,
+                       bool nulls_last=true) const
+        {
+            // if the rhs is null, then it is always either larger or smaller than a constant value
+            if (rhs->is_null(rhs_row)) {
+                return nulls_last;
+            }
+
+            // return based on the comparison for the type of this constant
+            if constexpr(std::is_same_v<T, bool>) {
+                return (this->get_bool(row) < rhs->get_bool(row));
+
+            } else if constexpr(std::is_same_v<T, int8_t>) {
+                return (this->get_int8(row) < rhs->get_int8(row));
+
+            } else if constexpr(std::is_same_v<T, uint8_t>) {
+                return (this->get_uint8(row) < rhs->get_uint8(row));
+
+            } else if constexpr(std::is_same_v<T, int16_t>) {
+                return (this->get_int16(row) < rhs->get_int16(row));
+
+            } else if constexpr(std::is_same_v<T, uint16_t>) {
+                return (this->get_uint16(row) < rhs->get_uint16(row));
+
+            } else if constexpr(std::is_same_v<T, int32_t>) {
+                return (this->get_int32(row) < rhs->get_int32(row));
+
+            } else if constexpr(std::is_same_v<T, uint32_t>) {
+                return (this->get_uint32(row) < rhs->get_uint32(row));
+
+            } else if constexpr(std::is_same_v<T, int64_t>) {
+                return (this->get_int64(row) < rhs->get_int64(row));
+
+            } else if constexpr(std::is_same_v<T, uint64_t>) {
+                return (this->get_uint64(row) < rhs->get_uint64(row));
+
+            } else if constexpr(std::is_same_v<T, float>) {
+                return (this->get_float32(row) < rhs->get_float32(row));
+
+            } else if constexpr(std::is_same_v<T, double>) {
+                return (this->get_float64(row) < rhs->get_float64(row));
+
+            } else if constexpr(std::is_same_v<T, std::string>) {
+                return (this->get_text(row) < rhs->get_text(row));
+
+            } else if constexpr(std::is_same_v<T, std::vector<char>>) {
+                return (this->get_binary(row) < rhs->get_binary(row));
+
+            } else {
+                throw TypeError();
+            }
+        }
+    };
+
+    class FieldTuple {
+    private:
+        std::vector<std::shared_ptr<Field>> _fields;
+
+    public:
+        FieldTuple() = default;
+        FieldTuple(const std::vector<std::shared_ptr<Field>> &fields)
+            : _fields(fields)
+        { }
+        FieldTuple(std::vector<std::shared_ptr<Field>> &&fields)
+            : _fields(fields)
+        { }
+        FieldTuple(FieldTuple &&tuple)
+            : _fields(std::move(tuple._fields))
+        { }
+
+        Tuple bind(const Extent::Row &row) const {
+            return Tuple(*this, row);
+        }
+
+        std::shared_ptr<Field> operator[](std::size_t idx) const {
+            return _fields[idx];
+        }
+
+        uint32_t size() const {
+            return _fields.size();
+        }
+    };
+
+    class MutableFieldTuple {
+    private:
+        std::vector<std::shared_ptr<MutableField>> _fields;
+
+    public:
+        MutableFieldTuple() = default;
+        MutableFieldTuple(const std::vector<std::shared_ptr<MutableField>> &fields)
+            : _fields(fields)
+        { }
+        MutableFieldTuple(std::vector<std::shared_ptr<MutableField>> &&fields)
+            : _fields(fields)
+        { }
+        MutableFieldTuple(MutableFieldTuple &&tuple)
+            : _fields(std::move(tuple._fields))
+        { }
+
+        Tuple bind(const Extent::MutableRow &row) const {
+            return Tuple(*this, row);
+        }
+
+        std::shared_ptr<MutableField> operator[](std::size_t idx) const {
+            return _fields[idx];
+        }
+
+        uint32_t size() const {
+            return _fields.size();
+        }
+    };
+
+    class Tuple {
+    public:
+        virtual std::size_t size() const = 0;
+        virtual std::shared_ptr<Field> field(int idx) const = 0;
+        virtual Extent::Row row() const = 0;
+
+        bool less_than(const Tuple &rhs, bool nulls_last=true) const {
+            // check the tuple lengths and types using assert()
+            // we assume correct usage in production
+            assert(this->size() == rhs.size());
+            for (int i = 0; i < this->size(); i++) {
+                assert(this->field(i).get_type() == rhs.field(i).get_type());
+            }
+
+            for (int i = 0; i < this->size(); i++) {
+                if (this->field(i)->less_than(_row, rhs.field(i), rhs.row(), nulls_last)) {
+                    return true;
+                }
+            }
+
+            // all values are >=, so not less than
+            return false;
+        }
+
+        /** Default operator assumes NULLs are last. */
+        bool operator<(const Tuple &rhs) const
+        {
+            return this->less_than(rhs);
+        }
+    };
+
+    class RowTuple : public Tuple {
+        const FieldTuple &_tuple;
+        Extent::Row _row;
+
+    public:
+        RowTuple(const FieldTuple &tuple, const Extent::Row &row)
+            : _tuple(tuple), _row(row)
+        { }
+
+        std::size_t size() const {
+            return _tuple.size();
+        }
+
+        std::shared_ptr<Field> field(int idx) const {
+            return _tuple[idx];
+        }
+
+        Extent::Row row() const {
+            return _row;
+        }
+    };
+
+    class MutableTuple {
+        const MutableFieldTuple &_tuple;
+        Extent::MutableRow _row;
+
+    public:
+        MutableTuple(const MutableFieldTuple &tuple, const Extent::MutableRow &row)
+            : _tuple(tuple), _row(row)
+        { }
+
+        std::size_t size() const {
+            return _tuple.size();
+        }
+
+        std::shared_ptr<Field> field(int idx) const {
+            return _tuple[idx];
+        }
+
+        Extent::Row row() const {
+            return _row;
+        }
+
+        /** Copy the data from another Tuple into this Tuple. */
+        MutableTuple& operator=(const Tuple &other)
+        {
+            for (int i = 0; i < this->size(); i++) {
+                _tuple[i].set_field(_row, other.row(), other.field(i))
+            }
+
+            return *this;
+        }
+    };
+
+    class ConstTuple {
+        std::vector<std::shared_ptr<Field>> _fields;
+
+    public:
+        ConstTuple()
+        { }
+
+        ConstTuple(const Tuple &tuple)
+        {
+            // copy the data from the tuple into const fields
+            for (int i = 0; i < tuple.size(); i++) {
+                std::shared_ptr<Field> field = tuple.field(i);
+
+                if (field->is_null(tuple.row())) {
+                    _fields.push_back(std::make_shared<ConstNullField>(field->get_type()));
+                } else {
+                    switch(tuple.field(i)->get_type()) {
+                    case(TEXT):
+                        _fields.push_back(std::make_shared<ConstField<std::string>>(field->get_text(tuple.row())));
+                        break;
+                    case(UINT64):
+                        _fields.push_back(std::make_shared<ConstField<uint64_t>>(field->get_uint64(tuple.row())));
+                        break;
+                    case(INT64):
+                        _fields.push_back(std::make_shared<ConstField<int64_t>>(field->get_int64(tuple.row())));
+                        break;
+                    case(UINT32):
+                        _fields.push_back(std::make_shared<ConstField<uint32_t>>(field->get_uint32(tuple.row())));
+                        break;
+                    case(INT32):
+                        _fields.push_back(std::make_shared<ConstField<int32_t>>(field->get_int32(tuple.row())));
+                        break;
+                    case(UINT16):
+                        _fields.push_back(std::make_shared<ConstField<uint16_t>>(field->get_uint16(tuple.row())));
+                        break;
+                    case(INT16):
+                        _fields.push_back(std::make_shared<ConstField<int16_t>>(field->get_int16(tuple.row())));
+                        break;
+                    case(UINT8):
+                        _fields.push_back(std::make_shared<ConstField<uint8_t>>(field->get_uint8(tuple.row())));
+                        break;
+                    case(INT8):
+                        _fields.push_back(std::make_shared<ConstField<int8_t>>(field->get_int8(tuple.row())));
+                        break;
+                    case(BOOLEAN):
+                        _fields.push_back(std::make_shared<ConstField<bool>>(field->get_bool(tuple.row())));
+                        break;
+                    case(FLOAT64):
+                        _fields.push_back(std::make_shared<ConstField<double>>(field->get_double(tuple.row())));
+                        break;
+                    case(FLOAT32):
+                        _fields.push_back(std::make_shared<ConstField<float>>(field->get_float(tuple.row())));
+                        break;
+                    case(BINARY):
+                        _fields.push_back(std::make_shared<ConstField<std::vector<char>>>(field->get_binary(tuple.row())));
+                        break;
+                    default:
+                        throw FieldError();
+                    }
+                }
+            }
+        }
+
+        std::size_t size() const {
+            return _fields.size();
+        }
+
+        std::shared_ptr<Field> field(int idx) const {
+            return _fields[idx];
+        }
+
+        Extent::Row row() const {
+            // note: only usable with the ConstField objects from this ConstTuple
+            return Extent::Row(nullptr, nullptr);
         }
     };
 

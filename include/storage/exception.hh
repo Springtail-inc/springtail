@@ -38,4 +38,13 @@ namespace springtail {
             : Error(error)
         { }
     };
+
+    /** For errors with the logical block map. */
+    class LogicalBlockError : public Error {
+    public:
+        LogicalBlockError() { }
+        LogicalBlockError(const std::string &error)
+            : Error(error)
+        { }
+    }
 }
