@@ -245,6 +245,65 @@ namespace springtail
     }
 
     void
+    WriteCacheTableSet::set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {
+        // iterate through xids exclusive of start
+        for (uint64_t xid = start_xid + 1; xid <= end_xid; xid++) {
+            // fetch xid node for this xid if exists
+            WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
+            if (xid_node == nullptr) {
+                continue;
+            }
+
+            // fetch tid node if exists
+            WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
+            if (tid_node == nullptr) {
+                continue;
+            }
+
+            // fetch eid node if exists
+            WriteCacheIndexNodePtr eid_node = tid_node->find(eid);
+            if (eid_node == nullptr) {
+                continue;
+            }
+
+            // write lock it and update the flag
+            std::unique_lock<std::shared_mutex> write_lock{eid_node->mutex};
+            eid_node->is_clean = true;
+            write_lock.unlock();
+        }
+    }
+
+    void
+    WriteCacheTableSet::reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        // iterate through xids exclusive of start
+        for (uint64_t xid = start_xid + 1; xid <= end_xid; xid++) {
+            // fetch xid node for this xid if exists
+            WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
+            if (xid_node == nullptr) {
+                continue;
+            }
+
+            // fetch tid node if exists
+            WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
+            if (tid_node == nullptr) {
+                continue;
+            }
+
+            // read lock table node while iterating children
+            std::shared_lock<std::shared_mutex> read_lock{tid_node->mutex};
+            for (auto c: tid_node->children) {
+                // write lock extent node
+                std::unique_lock<std::shared_mutex> write_lock{c->mutex};
+                c->is_clean = false;
+                write_lock.unlock();
+            }
+            read_lock.unlock();
+        }
+    }
+
+    void
     WriteCacheTableSet::dump()
     {
         std::cout << "\nDumping table\n";

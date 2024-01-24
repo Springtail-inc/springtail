@@ -90,4 +90,18 @@ namespace springtail
         std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
         partition->evict_table_changes(tid, start_xid, end_xid);
     }
+
+    void
+    WriteCacheIndex::set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {
+        std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
+        partition->set_clean_flag(tid, eid, start_xid, end_xid);
+    }
+
+    void
+    WriteCacheIndex::reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        std::shared_ptr<WriteCacheTableSet> partition = _get_partition(tid);
+        partition->reset_clean_flag(tid, start_xid, end_xid);
+    }
 }

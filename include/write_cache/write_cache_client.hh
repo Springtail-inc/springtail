@@ -145,6 +145,23 @@ namespace springtail {
          */
         void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
+        /**
+         * @brief Mark an extent as clean
+         * @param tid Table ID
+         * @param eid Extent ID
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
+         */
+        void set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+
+        /**
+         * @brief Reset the extent clean flag (unset it)
+         * @param tid Table ID
+         * @param start_xid start of xid range (exclusive) (start, end]
+         * @param end_xid   end of xid range (inclusive)
+         */
+        void reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
     protected:
         /** Singleton write cache client instance */
         static WriteCacheClient *_instance;

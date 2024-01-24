@@ -170,4 +170,28 @@ namespace springtail {
 
         _return.__set_status(thrift::StatusCode::SUCCESS);
     }
+
+    void
+    ThriftWriteCacheService::set_clean_flag(thrift::Status& _return,
+                                           const thrift::SetCleanFlagRequest& request)
+    {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+
+        index->set_clean_flag(request.table_id, request.extent_id, request.start_xid, request.end_xid);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
+
+    void
+    ThriftWriteCacheService::reset_clean_flag(thrift::Status& _return,
+                                              const thrift::ResetCleanFlagRequest& request)
+    {
+        WriteCacheServer *server = WriteCacheServer::get_instance();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+
+        index->reset_clean_flag(request.table_id, request.start_xid, request.end_xid);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
 }

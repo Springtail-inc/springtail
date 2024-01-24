@@ -337,4 +337,45 @@ namespace springtail {
 
         return;
     }
-}
+
+    void
+    WriteCacheClient::set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::SetCleanFlagRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.extent_id = eid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->set_clean_flag(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::ResetCleanFlagRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->reset_clean_flag(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+} // namespace

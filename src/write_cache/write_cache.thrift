@@ -115,6 +115,19 @@ struct EvictTableChangesRequest {
     3: i64 end_xid
 }
 
+struct SetCleanFlagRequest {
+    1: i64 table_id,
+    2: i64 extent_id,
+    3: i64 start_xid,
+    4: i64 end_xid
+}
+
+struct ResetCleanFlagRequest {
+    1: i64 table_id,
+    2: i64 start_xid,
+    3: i64 end_xid
+}
+
 // status code and optional message
 struct Status {
     1: StatusCode status,
@@ -131,5 +144,7 @@ service ThriftWriteCache {
     Status add_table_change(1: TableChange change),
     GetTableChangeResponse get_table_changes(1: GetTableChangeRequest request),
     ListTablesResponse list_tables(1: ListTablesRequest request),
-    Status evict_table_changes(1: EvictTableChangesRequest request)
+    Status evict_table_changes(1: EvictTableChangesRequest request),
+    Status set_clean_flag(1: SetCleanFlagRequest request),
+    Status reset_clean_flag(1: ResetCleanFlagRequest request)
 }

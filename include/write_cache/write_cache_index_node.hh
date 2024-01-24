@@ -42,6 +42,9 @@ namespace springtail {
         /** type for sanity checking */
         IndexType type;
 
+        /** flag indicating clean (true) or dirty (false), by default everything is dirty */
+        bool is_clean;
+
         /** shared mutex to protect children set */
         mutable std::shared_mutex mutex;
 
@@ -49,7 +52,7 @@ namespace springtail {
         std::set<WriteCacheIndexNodePtr, ComparatorID, TrackingAllocator<WriteCacheIndexNodePtr, TrackingAllocatorTags::TAG_WRITE_CACHE>> children;
 
         /** Constructor for integer id */
-        WriteCacheIndexNode(uint64_t id, IndexType type=IndexType::INVALID) : id(id), type(type) {}
+        WriteCacheIndexNode(uint64_t id, IndexType type=IndexType::INVALID) : id(id), type(type), is_clean(false) {}
 
         /** Find child node by int id, return nullptr if not exists */
         WriteCacheIndexNodePtr find(uint64_t id) const;

@@ -110,6 +110,24 @@ namespace springtail {
          */
         void evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
+
+        /**
+         * @brief Set clean flag on extent under table
+         * @param tid table ID
+         * @param eid extent ID
+         * @param start_xid starting XID (exclusive)
+         * @param end_xid ending XID (inclusive)
+         */
+        void set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+
+        /**
+         * @brief Reset (unset) clean flag on all extents under table
+         * @param tid table ID
+         * @param start_xid starting XID (exclusive)
+         * @param end_xid ending XID (inclusive)
+         */
+        void reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
         /**
          * @brief Helper utility to dump from _table_root
          */

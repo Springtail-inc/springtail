@@ -105,8 +105,8 @@ namespace springtail {
 
         /**
          * @brief Get list of dirty table ids within xid range
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          * @param count max number of items to return (may be less)
          * @param cursor cursor indicating current position
          * @return std::vector<int64_t> list of table IDs
@@ -116,8 +116,8 @@ namespace springtail {
         /**
          * @brief Get list of dirty extents
          * @param tid table ID
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          * @param count max number of items to return (may be less)
          * @param cursor cursor indicating current position
          * @return std::vector<int64_t> list of extent IDs
@@ -128,8 +128,8 @@ namespace springtail {
          * @brief Get data rows
          * @param tid table ID
          * @param eid extent ID
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          * @param count max number of items
          * @param cursor cursor indicating current position
          * @return std::vector<std::shared_ptr<WriteCacheIndexRow>>
@@ -140,8 +140,8 @@ namespace springtail {
         /**
          * @brief Evict extent from cache
          * @param tid table ID
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          */
         void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
@@ -154,8 +154,8 @@ namespace springtail {
         /**
          * @brief Get set of table changes for a table
          * @param tid table ID
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          * @return std::vector<std::shared_ptr<WriteCacheIndexTableChange>>
          */
         std::vector<std::shared_ptr<WriteCacheIndexTableChange>> get_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
@@ -163,10 +163,27 @@ namespace springtail {
         /**
          * @brief Evict table changes between xid range
          * @param tid table ID
-         * @param start_xid start of xid range
-         * @param end_xid end of xid range
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
          */
         void evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
+        /**
+         * @brief Set clean flag on extent under table
+         * @param tid table ID
+         * @param eid extent ID
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
+         */
+        void set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+
+        /**
+         * @brief Reset (unset) clean flag on all extents under table
+         * @param tid table ID
+         * @param start_xid start of xid range (exclusive)
+         * @param end_xid end of xid range (inclusive)
+         */
+        void reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
     private:
         /** Set of partitions to hold table data, enables more parallelism */

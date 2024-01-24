@@ -27,6 +27,8 @@ namespace springtail {
         void get_table_changes(thrift::GetTableChangeResponse& _return, const thrift::GetTableChangeRequest& request) override;
         void list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request) override;
         void evict_table_changes(thrift::Status& _return, const thrift::EvictTableChangesRequest& request) override;
+        void set_clean_flag(thrift::Status& _return, const thrift::SetCleanFlagRequest& request) override;
+        void reset_clean_flag(thrift::Status& _return, const thrift::ResetCleanFlagRequest& request) override;
     };
 
 
