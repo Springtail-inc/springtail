@@ -277,7 +277,7 @@ namespace springtail {
         cursor = request.cursor;
 
         std::vector<RowData> rows;
-        for (auto r: response.rows) {
+        for (const auto &r: response.rows) {
             RowData row;
 
             row.xid = r.xid;
