@@ -5,26 +5,116 @@
 #include <common/threaded_test.hh>
 #include <common/tracking_allocator.hh>
 
+#include <gtest/gtest.h>
+
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
 #include <write_cache/write_cache_table_set.hh>
-#include <write_cache/write_cache_index_test.hh>
 
 namespace springtail {
 
+    /** Write cache test request object: encapsulates an add_row or an evict_table request */
+    class WriteCacheIndexTestRequest {
+    public:
+        enum Type : uint8_t {
+            ADD_ROW=0,
+            EVICT_TABLE=1,
+            ADD_TABLE_CHANGE=2,
+            EVICT_TABLE_CHANGE=3
+        };
+
+        /** add row constructor */
+        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t tid, uint64_t eid, const std::vector<WriteCacheIndexRowPtr> &data)
+            : _ts(ts), _type(Type::ADD_ROW), _tid(tid), _eid(eid), _data(data) {}
+
+        /** evict table / evict table change constructor */
+        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t start_xid, uint64_t end_xid, uint64_t tid, Type type)
+            : _ts(ts), _type(type), _start_xid(start_xid), _end_xid(end_xid), _tid(tid) {}
+
+        /** add table change constructor */
+        WriteCacheIndexTestRequest(WriteCacheTableSetPtr ts, uint64_t start_xid, uint64_t xid_seq, uint64_t tid)
+            : _ts(ts), _type(Type::ADD_TABLE_CHANGE), _start_xid(start_xid), _xid_seq(xid_seq), _tid(tid) {}
+
+       /**
+         * @brief Overload () for execution from worker thread.
+         *        Main entry from worker thread
+         */
+        void operator()() {
+            _process_request();
+        }
+
+    private:
+        WriteCacheTableSetPtr _ts;
+        Type _type;
+        uint64_t _start_xid;
+        uint64_t _end_xid;
+        uint64_t _xid_seq;
+        uint64_t _tid;
+        uint64_t _eid;
+        std::vector<WriteCacheIndexRowPtr> _data;
+
+        /** Function called from overloaded operator(); used to execute the request */
+        void _process_request();
+    };
+    typedef std::shared_ptr<WriteCacheIndexTestRequest> WriteCacheIndexTestRequestPtr;
+
+    /**
+     * @brief Write cache index test object; encapsulates the state used by the ThreadedTest
+     * Operates in phases determined by the set of requests retrieved by get_requests().
+     * Each batch of requests is processed in parallel on multiple threads and is followed
+     * by a call to verify().
+     */
+    class WriteCacheIndexTest : public ThreadTestState<WriteCacheIndexTestRequest> {
+    public:
+        WriteCacheIndexTest() : _ts(std::make_shared<WriteCacheTableSet>()) {};
+        void SetUp() override;
+        std::vector<WriteCacheIndexTestRequestPtr> get_requests() override;
+        void verify() override;
+        void TearDown() override;
+
+    private:
+        WriteCacheTableSetPtr _ts;
+        int _phase = 1;
+
+        /** Helper to construct a test request for adding new rows */
+        WriteCacheIndexTestRequestPtr
+        _make_row_request(uint64_t tid, uint64_t eid, uint64_t xid,
+                          uint64_t xid_seq, int rid_start, int count);
+
+        /** Helper to construct a vector of rows */
+        void
+        _make_rows(uint64_t eid, uint64_t xid,
+                   uint64_t xid_seq, int rid_start, int count,
+                   std::vector<WriteCacheIndexRowPtr> &rows);
+
+        /** Helper to create table eviction request */
+        WriteCacheIndexTestRequestPtr
+        _make_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+
+        /** Helper to create table change addition request */
+        WriteCacheIndexTestRequestPtr
+        _make_table_change_request(uint64_t tid, uint64_t xid, uint64_t xid_seq);
+
+        /** Helper to create table change eviction request */
+        WriteCacheIndexTestRequestPtr
+        _make_table_change_eviction_request(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+    };
+
     /** helper to compare plain object vectors */
     template<class T>
-    static bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
+    static void vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs)
     {
+        ASSERT_EQ(lhs.size(), rhs.size());
         auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
-        return (i1 == lhs.end() && i2 == rhs.end());
+        ASSERT_TRUE(i1 == lhs.end() && i2 == rhs.end());
     }
 
     template<class T>
-    static bool vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs, bool (*cmp_fn)(const T&, const T&))
+    static void vec_eq(const std::vector<T>& lhs, const std::vector<T>& rhs, bool (*cmp_fn)(const T&, const T&))
     {
+        ASSERT_EQ(lhs.size(), rhs.size());
         auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), cmp_fn);
-        return (i1 == lhs.end() && i2 == rhs.end());
+        ASSERT_TRUE(i1 == lhs.end() && i2 == rhs.end());
     }
 
     /** comparator for write cache index row vectors */
@@ -34,19 +124,10 @@ namespace springtail {
                 lhs->xid_seq == rhs->xid_seq && lhs->pkey == rhs->pkey);
     }
 
+    /** comparator for table change vectors */
     static bool table_change_cmp_fn(const WriteCacheIndexTableChangePtr &lhs, const WriteCacheIndexTableChangePtr &rhs)
     {
         return (lhs->tid == rhs->tid && lhs->xid == rhs->xid && lhs->xid_seq == rhs->xid_seq);
-    }
-
-    /** helper to compare write cache index row vectors using comparator */
-    static bool row_cmp(const std::vector<WriteCacheIndexRowPtr> &lhs, const std::vector<WriteCacheIndexRowPtr> &rhs)
-    {
-        auto [i1, i2] = std::mismatch(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), row_cmp_fn);
-        if (!(i1 == lhs.end() && i2 == rhs.end())) {
-            std::cout << "Mismatch found: " << (*i1)->dump() << " cmp " << (*i2)->dump() << std::endl;
-        }
-        return (i1 == lhs.end() && i2 == rhs.end());
     }
 
     void
@@ -75,14 +156,15 @@ namespace springtail {
     }
 
     void
-    WriteCacheIndexTest::init()
+    WriteCacheIndexTest::SetUp()
     {
+        springtail::springtail_init();
         std::cout << "Init allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
         _ts->dump();
     }
 
     void
-    WriteCacheIndexTest::shutdown()
+    WriteCacheIndexTest::TearDown()
     {
         std::cout << "Shutdown allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
         _ts->dump();
@@ -188,6 +270,13 @@ namespace springtail {
                 // tid=2, eid=1, xid=4, rid=7,8
                 requests.push_back(_make_row_request(2, 1, 4, 1, 7, 2));
 
+                // tid=2, eid=4, xid=3, rid=1
+                requests.push_back(_make_row_request(2, 4, 3, 1, 1, 1));
+                // tid=2, eid=4, xid=4, rid=1
+                requests.push_back(_make_row_request(2, 4, 4, 1, 1, 1));
+                // tid=2, eid=5, xid=3, rid=1
+                requests.push_back(_make_row_request(2, 5, 3, 1, 1, 1));
+
                 return requests;
             }
 
@@ -261,7 +350,7 @@ namespace springtail {
         }
     }
 
-    bool
+    void
     WriteCacheIndexTest::verify()
     {
         std::cout << "\n***Verifying test phase: " << _phase << std::endl;
@@ -274,34 +363,72 @@ namespace springtail {
                 uint64_t end_offset;
                 cursor = 0;
                 int res = _ts->get_tids(0, 4, 10, cursor, end_offset, tids); // xid 0:4, count=10
-                assert(res == 2);
-                assert(vec_eq(tids, {1,2}));
+                ASSERT_EQ(res, 2);
+                ASSERT_NO_FATAL_FAILURE(vec_eq(tids, {1,2}));
 
-                std::cout << "Checking extent IDs\n";
+                std::cout << "\nChecking extent IDs, count=10\n";
                 std::vector<int64_t> eids;
                 cursor = 0;
                 res = _ts->get_eids(2, 2, 4, 10, cursor, eids); // tid=2, xid 2:4
-                assert(res == 3);
-                assert(cursor == 3);
-                assert(vec_eq(eids, {1,2,3}));
+                ASSERT_EQ(res, 5);
+                ASSERT_EQ(cursor, 7);
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,2,3,4,5}));
 
-                cursor = 2;
+                // Even though we get back eids: 1,2,3,4,5, these are ordered
+                // and deduplicated.  The actual data for TID=2, looks like:
+                // XID:3 -> EIDS: {1,4,5}; XID:4 -> EIDS: {1,2,3,4}
+
+                std::cout << "\nChecking extent IDS, count=2\n";
+                cursor = 0;
                 eids.clear();
-                res = _ts->get_eids(2, 2, 4, 10, cursor, eids);
-                assert(cursor == 3);
-                assert(res = 1);
+                res = _ts->get_eids(2, 2, 4, 2, cursor, eids); // tid=2, xid 2:4, count=2
+                ASSERT_EQ(res, 2);
+                ASSERT_EQ(cursor, 2);
+                // This is returning the first two eids from XID 3 which are 1,4
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,4}));
+
+                // don't reset cursor
+                std::cout << "\nChecking extent IDs, cursor=" << cursor << " count=3\n";
+                eids.clear();
+                res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
+                ASSERT_EQ(res, 3);
+                ASSERT_EQ(cursor, 5);
+                // Cursor is at 2, so we should now get 5, 1, 2
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,2,5}));
+
+                std::cout << "\nChecking extent IDs, cursor=" << cursor << " count=3\n";
+                eids.clear();
+                res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
+                ASSERT_EQ(res, 2);
+                ASSERT_EQ(cursor, 7);
+                // Cursor is at 5, so we should now get 3,4
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {3,4}));
+
+                std::cout << "\nChecking extent IDs, cursor=0, count=3\n";
+                cursor = 0;
+                eids.clear();
+                res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
+                ASSERT_EQ(cursor, 3);
+
+                eids.clear();
+                std::cout << "\nChecking extent IDs, cursor=" << cursor << ", count=3\n";
+                res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
+                ASSERT_EQ(res, 3);
+                // Cursor is at 3, so we should now get 1,2,3
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,2,3}));
+                ASSERT_EQ(cursor, 6);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 cursor = 0;
                 res = _ts->get_rows(2, 1, 1, 3, 10, cursor, rows_result); // tid=2, eid=1, xid 1:3
-                assert(res == 6);
+                ASSERT_EQ(res, 6);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 2, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 1, 2, rows_expected);
                 _make_rows(1, 3, 1, 5, 2, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 std::cout << "Phase 1 allocated bytes=" << TrackingAllocatorStats<TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
 
@@ -313,41 +440,41 @@ namespace springtail {
                 std::vector<int64_t> eids;
                 cursor = 0;
                 int res = _ts->get_eids(2, 1, 3, 10, cursor, eids); // tid=2, xid 1:3
-                assert(res == 0);
+                ASSERT_EQ(res, 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 cursor = 0;
                 res = _ts->get_rows(2, 1, 2, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
-                assert(res == 5);
-                assert(cursor == 5);
+                ASSERT_EQ(res, 5);
+                ASSERT_EQ(cursor, 5);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 4, 1, 7, 2, rows_expected);
                 _make_rows(1, 5, 1, 1, 2, rows_expected);
                 _make_rows(1, 5, 2, 1, 1, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 std::cout << "Checking cursor for get rows\n";
                 cursor = 3;
                 rows_result.clear();
                 res = _ts->get_rows(2, 1, 2, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
-                assert(res == 2);
+                ASSERT_EQ(res, 2);
                 rows_expected.clear();
                 _make_rows(1, 5, 1, 2, 1, rows_expected);
                 _make_rows(1, 5, 2, 1, 1, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 std::cout << "Checking rows\n";
                 rows_result.clear();
                 cursor = 0;
                 res = _ts->get_rows(1, 2, 2, 6, 10, cursor, rows_result); // tid=1, eid=2, xid 2:6
-                assert(res == 4);
+                ASSERT_EQ(res, 4);
 
                 rows_expected.clear();
                 _make_rows(2, 3, 1, 5, 2, rows_expected);
                 _make_rows(2, 6, 1, 5, 2, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 break;
             }
@@ -357,28 +484,28 @@ namespace springtail {
                 std::vector<int64_t> eids;
                 cursor = 0;
                 int res = _ts->get_eids(1, 0, 5, 10, cursor, eids); // tid=1, xid 0:5
-                assert(res == 0);
+                ASSERT_EQ(res, 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 cursor = 0;
                 res = _ts->get_rows(2, 1, 0, 5, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
-                assert(res == 4);
+                ASSERT_EQ(res, 4);
 
                 std::vector<WriteCacheIndexRowPtr> rows_expected;
                 _make_rows(1, 1, 1, 1, 2, rows_expected);
                 _make_rows(1, 1, 1, 5, 2, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 std::cout << "Checking rows\n";
                 rows_result.clear();
                 cursor = 0;
                 res = _ts->get_rows(1, 2, 2, 6, 10, cursor, rows_result); // tid=1, eid=2, xid 2:6
-                assert(res == 2);
+                ASSERT_EQ(res, 2);
 
                 rows_expected.clear();
                 _make_rows(2, 6, 1, 5, 2, rows_expected);
-                assert(row_cmp(rows_expected, rows_result));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(rows_expected, rows_result, row_cmp_fn));
 
                 break;
             }
@@ -388,15 +515,15 @@ namespace springtail {
                 std::vector<int64_t> eids;
                 cursor = 0;
                 int res = _ts->get_eids(1, 0, 6, 10, cursor, eids); // tid=1, xid (0:6]
-                assert(res == 0);
+                ASSERT_EQ(res, 0);
                 cursor = 0;
                 res = _ts->get_eids(2, 0, 6, 10, cursor, eids); // tid=2, xid (0:6]
-                assert(res == 0);
+                ASSERT_EQ(res, 0);
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
                 res = _ts->get_rows(2, 1, 0, 6, 10, cursor, rows_result); // tid=2, eid=1, xid 2:5
-                assert(res == 0);
+                ASSERT_EQ(res, 0);
 
                 break;
             }
@@ -405,7 +532,7 @@ namespace springtail {
                 std::cout << "Checking table changes\n";
                 std::vector<WriteCacheIndexTableChangePtr> changes;
                 _ts->get_table_changes(1, 1, 5, changes);
-                assert(changes.size() == 4);
+                ASSERT_EQ(changes.size(), 4);
 
                 std::vector<WriteCacheIndexTableChangePtr> expected;
                 expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 2, 0,
@@ -416,7 +543,7 @@ namespace springtail {
                     WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
                 expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 3, 1,
                     WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
-                assert(vec_eq(changes, expected, table_change_cmp_fn));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(changes, expected, table_change_cmp_fn));
                 break;
             }
 
@@ -424,22 +551,22 @@ namespace springtail {
                 std::cout << "Checking table changes\n";
                 std::vector<WriteCacheIndexTableChangePtr> changes;
                 _ts->get_table_changes(1, 0, 5, changes);
-                assert(changes.size() == 2);
+                ASSERT_EQ(changes.size(), 2);
 
                 std::vector<WriteCacheIndexTableChangePtr> expected;
                 expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 1, 0,
                     WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
                 expected.push_back(std::make_shared<WriteCacheIndexTableChange>(1, 1, 1,
                     WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE));
-                assert(vec_eq(changes, expected, table_change_cmp_fn));
+                ASSERT_NO_FATAL_FAILURE(vec_eq(changes, expected, table_change_cmp_fn));
 
                 changes.clear();
                 _ts->get_table_changes(2, 0, 5, changes);
-                assert(changes.size() == 0);
+                ASSERT_EQ(changes.size(), 0);
 
                 changes.clear();
                 _ts->get_table_changes(3, 0, 5, changes);
-                assert(changes.size() == 3);
+                ASSERT_EQ(changes.size(), 3);
 
                 break;
 
@@ -450,10 +577,20 @@ namespace springtail {
         // move on to next phase
         _phase++;
 
-        return true;
+        return;
     }
-}
 
+    TEST_F(WriteCacheIndexTest, Threaded_Test)
+    {
+        // Create the thread tester
+        ThreadedTest<WriteCacheIndexTest, WriteCacheIndexTestRequest> tester(4);
+        tester.start();
+    }
+
+} // namespace springtail
+
+/** Deprecated */
+/*
 static int s_id=0;
 
 void
@@ -537,13 +674,5 @@ void manual_test()
 
     std::cout << "Allocated bytes: " << springtail::TrackingAllocatorStats<springtail::TrackingAllocatorTags::TAG_WRITE_CACHE>::get_instance()->get_allocated_bytes() << std::endl;
 }
+*/
 
-int main(void) {
-    springtail::springtail_init();
-
-    springtail::ThreadedTest<springtail::WriteCacheIndexTest, springtail::WriteCacheIndexTestRequest> tester(4);
-
-    tester.start();
-
-    return 0;
-}

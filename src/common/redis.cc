@@ -23,7 +23,7 @@ namespace springtail {
             _instance = new RedisMgr();
         }
 
-        return _instance;        
+        return _instance;
     }
 
     RedisMgr::RedisMgr()
@@ -76,13 +76,8 @@ namespace springtail {
     }
 }
 
-int main(void)
-{
-    springtail::springtail_init();
+/* Example usage:
     springtail::RedisMgr *redis_mgr = springtail::RedisMgr::get_instance();
     std::shared_ptr<springtail::RedisClient> redis_client = redis_mgr->get_client();
-
     std::cout << redis_client->ping() << std::endl;
-
-    return 0; 
-}
+*/

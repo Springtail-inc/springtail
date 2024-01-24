@@ -338,13 +338,3 @@ namespace springtail {
         return;
     }
 }
-
-int main (void)
-{
-    springtail::springtail_init();
-
-    springtail::WriteCacheClient *client = springtail::WriteCacheClient::get_instance();
-    client->ping();
-
-    return 0;
-}

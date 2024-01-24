@@ -10,6 +10,8 @@ find_program(
 
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
+find_package(GTest CONFIG REQUIRED)
+
 # set variables for thrift schema .thrift file and generated .h
 set(THRIFT_SCHEMA "write_cache.thrift")
 set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")
@@ -41,7 +43,7 @@ set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 set(WRITE_CACHE_SOURCES
     write_cache_client.cc
     write_cache_server.cc write_cache_service.cc write_cache_index.cc write_cache_table_set.cc
-    write_cache_index_node.cc write_cache_index_test.cc
+    write_cache_index_node.cc
     ${THRIFT_CC_FILES}
 )
 
@@ -64,19 +66,10 @@ target_link_libraries(springtail_write_cache
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
 
-add_executable(client_test write_cache_client.cc)
-target_include_directories(client_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(client_test PRIVATE springtail_common springtail_write_cache)
-
-#add_executable(server_test write_cache_server.cc)
-#target_include_directories(server_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-#target_link_libraries(server_test PRIVATE springtail_common springtail_write_cache)
-
-add_executable(index_test write_cache_index.cc)
-target_include_directories(index_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(index_test PRIVATE springtail_common springtail_write_cache)
-
-add_executable(threaded_test write_cache_index_test.cc)
-target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(threaded_test PRIVATE springtail_common springtail_write_cache)
+add_executable(test_threaded test/write_cache_index_test.cc)
+target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+target_link_libraries(test_threaded
+    PRIVATE springtail_common springtail_write_cache
+    GTest::gtest GTest::gtest_main
+)
 

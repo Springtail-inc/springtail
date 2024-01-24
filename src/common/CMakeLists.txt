@@ -7,14 +7,6 @@ add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_common PUBLIC Backward::Backward spdlog::spdlog fmt::fmt redis++::redis++_static)
 
-add_executable(redis_test redis.cc)
-target_include_directories(redis_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(redis_test PRIVATE springtail_common)
-
-add_executable(thread_test thread_test.cc)
-target_include_directories(thread_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(thread_test PRIVATE springtail_common)
-
-add_executable(allocator_test tracking_allocator.cc)
-target_include_directories(allocator_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(allocator_test PRIVATE springtail_common)
+add_executable(test_threadpool test/thread_test.cc)
+target_include_directories(test_threadpool PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_threadpool PRIVATE springtail_common)

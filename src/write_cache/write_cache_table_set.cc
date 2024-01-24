@@ -120,9 +120,12 @@ namespace springtail
                 continue;
             }
 
+            SPDLOG_DEBUG("Fetching eids for TID={}, XID={}, end_offset={}\n", tid, xid, end_offset);
+
             // fetch ids into set to keep them unique; start_offset is decr; end_offset is incr
             result_cnt += _fetch_ids(tid_node, count - result_cnt, start_offset, end_offset, set);
         }
+
         assert(end_offset >= cursor);
         cursor = end_offset;
 
@@ -147,7 +150,6 @@ namespace springtail
         // iterate through children adding to result set
         auto itr = node->children.begin();
         while (itr != node->children.end()) {
-            // keep track of where we are using the end_offset
             end_offset++;
 
             // check cursor offset, decr if above 0 and continue
@@ -160,8 +162,7 @@ namespace springtail
             auto res = result.insert((*itr)->id);
             // see whether we had this item in the set after the insert is done
             if (res.second) {
-                result_cnt++;
-                if (result_cnt == count) {
+                if (++result_cnt == count) {
                     return result_cnt;
                 }
             }

@@ -80,10 +80,3 @@ namespace springtail {
         }
     }
 }
-
-int main (void)
-{
-    springtail::springtail_init();
-    springtail::WriteCacheServer *server = springtail::WriteCacheServer::get_instance();
-    server->startup();
-}

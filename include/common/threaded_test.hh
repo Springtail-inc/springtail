@@ -5,19 +5,20 @@
 #include <type_traits>
 
 #include <common/thread_pool.hh>
+#include <gtest/gtest.h>
 
 namespace springtail {
 
     /** Thread test state interface for ThreadedTest */
     template <class ThreadRequest>
-    class ThreadTestState {
+    class ThreadTestState : public testing::Test {
         using ThreadRequestPtr = std::shared_ptr<ThreadRequest>;
     public:
+        // testing::Test provides SetUp() and TearDown virtual methods
         virtual ~ThreadTestState() {}
-        virtual void init() = 0;
         virtual std::vector<ThreadRequestPtr> get_requests() = 0;
-        virtual bool verify() = 0;
-        virtual void shutdown() = 0;
+        virtual void verify() = 0;
+        virtual void TestBody() {}
     };
 
     /**
@@ -36,8 +37,7 @@ namespace springtail {
          * @param num_threads number of concurrent threads
          */
         ThreadedTest(int num_threads) :
-            _num_threads(num_threads),
-            _state_ptr(std::make_shared<TestState>())
+            _num_threads(num_threads), _state()
         {
             static_assert(std::is_base_of_v<ThreadTestState<TestStateRequest>, TestState>,
                           "Template param must be derived from ThreadTestState class");
@@ -46,12 +46,11 @@ namespace springtail {
         /** Start the test; runs the main loop until no more requests exist */
         void start()
         {
-            _state_ptr->init();
             std::vector<TestStateRequestPtr> requests;
 
             while (true) {
                 // get next set of requests
-                requests = _state_ptr->get_requests();
+                requests = _state.get_requests();
                 if (requests.size() == 0) {
                     break;
                 }
@@ -67,12 +66,8 @@ namespace springtail {
                 _thread_pool = nullptr;
 
                 // verify state
-                if (!_state_ptr->verify()) {
-                    break;
-                }
+                ASSERT_NO_FATAL_FAILURE(_state.verify());
             }
-
-            _state_ptr->shutdown();
         }
 
 
@@ -81,6 +76,6 @@ namespace springtail {
 
         std::shared_ptr<ThreadPool<TestStateRequest>> _thread_pool{nullptr};
 
-        TestStatePtr _state_ptr;
+        TestState _state;
     };
 }
