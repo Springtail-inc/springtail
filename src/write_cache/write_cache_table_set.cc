@@ -207,6 +207,7 @@ namespace springtail
         }
 
         // remove row data for table for each extent and xid range
+        // if this set gets too big, may have to do partial removals inline in the loop above
         for (auto eid: eid_set) {
             _row_map->remove(tid, eid, start_xid, end_xid);
         }
