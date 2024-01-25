@@ -175,12 +175,13 @@ namespace springtail {
          * @brief Fetch at most count unique IDs from the node passed in
          * @param node   node to search
          * @param count  max number of entries to return
+         * @param skip_clean skip nodes marked as clean
          * @param offset in/out acts as cursor, or offset into ids stream
          * @param result set of unique entries (in/out)
          * @return int   number of entries found
          */
-        int _fetch_ids(WriteCacheIndexNodePtr node, uint32_t count, uint64_t &start_offset,
-                       uint64_t &end_offset, std::set<uint64_t> &result);
+        int _fetch_ids(WriteCacheIndexNodePtr node, uint32_t count, bool skip_clean,
+                       uint64_t &start_offset, uint64_t &end_offset, std::set<uint64_t> &result);
 
         /**
          * @brief Utility helper to dump tree from provided root

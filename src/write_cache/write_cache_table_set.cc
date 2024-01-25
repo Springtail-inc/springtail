@@ -83,7 +83,7 @@ namespace springtail
             }
 
             // fetch ids into set to keep them unique
-            result_cnt += _fetch_ids(xid_node, count-result_cnt, start_offset, end_offset, set);
+            result_cnt += _fetch_ids(xid_node, count-result_cnt, true, start_offset, end_offset, set);
             SPDLOG_DEBUG("Found unique tids, result_cnt={}\n", result_cnt);
         }
 
@@ -123,7 +123,7 @@ namespace springtail
             SPDLOG_DEBUG("Fetching eids for TID={}, XID={}, end_offset={}\n", tid, xid, end_offset);
 
             // fetch ids into set to keep them unique; start_offset is decr; end_offset is incr
-            result_cnt += _fetch_ids(tid_node, count - result_cnt, start_offset, end_offset, set);
+            result_cnt += _fetch_ids(tid_node, count - result_cnt, true, start_offset, end_offset, set);
         }
 
         assert(end_offset >= cursor);
@@ -139,8 +139,8 @@ namespace springtail
 
     int
     WriteCacheTableSet::_fetch_ids(WriteCacheIndexNodePtr node, uint32_t count,
-                                   uint64_t &start_offset, uint64_t &end_offset,
-                                   std::set<uint64_t> &result)
+                                   bool skip_clean, uint64_t &start_offset,
+                                   uint64_t &end_offset, std::set<uint64_t> &result)
     {
         int result_cnt = 0;
 
@@ -155,6 +155,12 @@ namespace springtail
             // check cursor offset, decr if above 0 and continue
             if (start_offset > 0) {
                 start_offset--;
+                itr++;
+                continue;
+            }
+
+            // skip clean entries
+            if (skip_clean && (*itr)->is_clean) {
                 itr++;
                 continue;
             }

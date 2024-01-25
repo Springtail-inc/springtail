@@ -393,7 +393,7 @@ namespace springtail {
                 res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
                 ASSERT_EQ(res, 3);
                 ASSERT_EQ(cursor, 5);
-                // Cursor is at 2, so we should now get 5, 1, 2
+                // Cursor was at 2, so we should now get 5, 1, 2
                 ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,2,5}));
 
                 std::cout << "\nChecking extent IDs, cursor=" << cursor << " count=3\n";
@@ -410,13 +410,25 @@ namespace springtail {
                 res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
                 ASSERT_EQ(cursor, 3);
 
-                eids.clear();
                 std::cout << "\nChecking extent IDs, cursor=" << cursor << ", count=3\n";
+                eids.clear();
                 res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
                 ASSERT_EQ(res, 3);
                 // Cursor is at 3, so we should now get 1,2,3
                 ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {1,2,3}));
                 ASSERT_EQ(cursor, 6);
+
+                // set clean flag for tid=2, eid=1 and 4, between xids 2-4
+                std::cout << "\nChecking extent IDs, cursor=2, after clean flag\n";
+                _ts->set_clean_flag(2, 1, 2, 4);
+                _ts->set_clean_flag(2, 4, 2, 4);
+                cursor = 2;
+                eids.clear();
+                res = _ts->get_eids(2, 2, 4, 3, cursor, eids);
+                ASSERT_EQ(res, 3);
+                ASSERT_EQ(cursor, 6);
+                // Cursor was at 2, so we should now get 5, 2, 3 skipping 1
+                ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {2,3,5}));
 
                 std::cout << "Checking rows\n";
                 std::vector<WriteCacheIndexRowPtr> rows_result;
