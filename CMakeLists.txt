@@ -15,6 +15,10 @@ if (NOT IS_DIRECTORY "${PROJECT_SOURCE_DIR}/external/vcpkg")
     message(FATAL_ERROR "Error: external/vcpkg does not exist, run vcpkg.sh")
 endif()
 
+## Cmake modules in ./cmake (for finding libraries)
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+include(SetSystem)
+
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
@@ -25,10 +29,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 
 ## Default location of properties file
 add_compile_definitions(SPRINGTAIL_PROPERTIES="${PROJECT_SOURCE_DIR}/system.json")
-
-## Cmake modules in ./cmake (for finding libraries)
-set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
-include(SetSystem)
 
 find_library(LIB_ELF NAMES elf PATHS /usr/local/lib)
 find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
@@ -43,7 +43,7 @@ add_subdirectory(src/common)
 add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
 add_subdirectory(src/psql_cdc)
-add_subdirectory(src/write_cache)
+#add_subdirectory(src/write_cache)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
