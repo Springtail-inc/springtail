@@ -182,7 +182,7 @@ namespace springtail {
         insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size=1)
         {
             // if we need more space, evict entries until we have enough space
-            _check_and_evict(size)
+            _check_and_evict(size);
 
             // push onto the front of the LRU queue
             _cache.push_front({id, entry, size});
@@ -232,7 +232,7 @@ namespace springtail {
 
             // check the callback if one exists
             if (_callback && _callback(value) == false) {
-                throw CacheError(); // it's an error to try and force eviction when not possible
+                return nullptr; // if we weren't able to evict, return a nullptr
             }
 
             // remove the entry from the cache

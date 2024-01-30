@@ -6,7 +6,8 @@ namespace springtail {
 
     /** The available types for fields. */
     enum class SchemaType : uint8_t {
-        ARRAY = 1,
+        // XXX clean up the enum
+        // timestsamp types -- time, date, timestamp
         TEXT = 3,
         UINT64 = 4,
         INT64 = 5,

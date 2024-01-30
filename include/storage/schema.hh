@@ -5,31 +5,18 @@
 #include <vector>
 
 #include <common/object_cache.hh>
-#include <storage/schema_column.hh>
+#include <storage/exception.hh>
+#include <storage/schema_type.hh>
+
+// #include <storage/schema_column.hh>
 
 namespace springtail {
-    // pre-declare classes
+    // pre-declare field classes
     class Field;
-
-    /** The available types for fields. */
-    enum class SchemaType : uint8_t {
-        // XXX clean up the enum
-        // timestsamp types -- time, date, timestamp
-        TEXT = 3,
-        UINT64 = 4,
-        INT64 = 5,
-        UINT32 = 6,
-        INT32 = 7,
-        UINT16 = 8,
-        INT16 = 9,
-        UINT8 = 10,
-        INT8 = 11,
-        BOOLEAN = 12,
-        DECIMAL128 = 13,
-        FLOAT64 = 14,
-        FLOAT32 = 15,
-        BINARY = 16
-    };
+    class MutableField;
+    class FieldArray;
+    class MutableFieldArray;
+    class Tuple;
 
     /** The types of schema column updates that can be applied to a schema. */
     enum class SchemaUpdateType : uint8_t {
@@ -38,6 +25,22 @@ namespace springtail {
         NAME_CHANGE = 2,
         NULLABLE_CHANGE = 3,
         TYPE_CHANGE = 4
+    };
+
+
+    /**
+     * An object that holds all of the information about a column modification in the
+     * form of the updated column information.
+     */
+    struct SchemaUpdate {
+        uint64_t xid;
+        uint64_t lsn;
+        SchemaUpdateType update_type;
+        uint32_t position;
+        std::string name;
+        SchemaType type;
+        bool nullable;
+        std::optional<std::string> default_value;
     };
 
     /**
@@ -74,7 +77,7 @@ namespace springtail {
                      bool nullable,
                      std::optional<std::string> default_value=std::optional<std::string>())
             : start_xid(0),
-              end_xid(std::numeric_limits<uint64_t>::max),
+              end_xid(std::numeric_limits<uint64_t>::max()),
               name(name),
               position(position),
               type(type),
@@ -82,150 +85,23 @@ namespace springtail {
               default_value(default_value)
         { }
 
+        /**
+         * For constructing a new column from a NEW_COLUMN update.
+         */
+        SchemaColumn(const SchemaUpdate &update)
+            : start_xid(update.xid),
+              end_xid(std::numeric_limits<uint64_t>::max()),
+              name(update.name),
+              position(update.position),
+              type(update.type),
+              nullable(update.nullable),
+              default_value(update.default_value)
+        {
+            assert(update.update_type == SchemaUpdateType::NEW_COLUMN);
+        }
+
         // default copy constructor
         SchemaColumn(const SchemaColumn &column) = default;
-    };
-
-    /**
-     * An object that holds all of the information about a column modification in the
-     * form of the updated column information.
-     */
-    struct SchemaUpdate {
-        uint64_t xid;
-        uint64_t lsn;
-        SchemaUpdateType update_type;
-        uint32_t position;
-        std::string name;
-        SchemaType type;
-        bool nullable;
-        std::optional<std::string> default_value;
-    };
-
-
-    /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
-     *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
-     *  a specific XID. */
-    class SchemaManager {
-    private:
-        static const uint64_t SYSTEM_TABLES_MAX = 256;
-
-        // IDs for system schemas
-        static const uint64_t TABLES_TID = 1;
-        static const uint64_t SCHEMAS_TID = 2;
-        static const uint64_t SCHEMAS_HISTORY_TID = 3;
-        // static const uint64_t PRIMARY_INDEXES_TID = 4;
-
-    private:
-        /** Column definitions for the "tables" system table. */
-        static const std::vector<SchemaColumn> TABLES_SCHEMA;
-
-        /** Column definitions for the "schemas" system table. */
-        static const std::vector<SchemaColumn> SCHEMAS_SCHEMA;
-
-        /** Column definitions for the "schemas_history" system table. */
-        static const std::vector<SchemaColumn> SCHEMAS_HISTORY_SCHEMA;
-
-    private:
-        /** A helper class that holds all of the information about a table schema in-memory. */
-        class SchemaInfo {
-        private:
-            /** A map from <position, end_xid> to quickly find which SchemaColumn definition should be used for a given xid. */
-            std::map<uint32_t, std::map<uint64_t, SchemaColumn>> _column_map;
-
-            /** A map from <position, xid> to quickly find the set of SchemaUpdate objects that
-                need to be applied to a Schema to get to the target_xid and lsn. */
-            std::map<uint32_t, std::map<uint64_t, std::vector<SchemaUpdate>>> _column_updates;
-
-        private:
-            /**
-             * Retrieve the set of columns that are valid at the provided XID.
-             * @param xid The XID that the schema should be generated for.
-             */
-            std::map<uint32_t, SchemaColumn> _get_columns_for_xid(uint64_t xid);
-
-            /**
-             * Read the schema metadata for the table.  Pulls the full schema history so always need
-             * to read the latest available XID.
-             * @param table_id The table to read schema information for.
-             */
-            void _read_schema_table(uint64_t table_id);
-
-
-            /**
-             * Read the schema history for the table.  Pulls the full history of changes so always
-             * need to read the latest available XID.
-             * @param table_id The table to read schema history for.
-             */
-            void _read_schema_history_table(uint64_t table_id);
-
-        public:
-            /**
-             * SchemaInfo constructor.  Reads the schema metadata from the system tables and
-             * populates its internal structures.
-             */
-            SchemaInfo(uint64_t table_id);
-
-            /**
-             * Retrieve the schema for an extent written at a specific XID.
-             * 
-             * @param extent_xid The XID of the extent being processed.
-             */
-            std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t extent_xid);
-
-            /**
-             * Construct a VirtualSchema on top of an ExtentSchema that brings the schema forward to
-             * the provided target XID and LSN so that data can be read from the extent as thought
-             * it were at the target XID.
-             *
-             * @param extent_xid The XID that the base extent was written at.
-             * @param target_xid The XID that the query is executing at.
-             * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
-             */
-            std::shared_ptr<VirtualSchema> get_virtual_schema(uint32_t extent_xid, uint64_t target_xid, uint64_t lsn=0);
-        };
-
-    private:
-        /** A map of fixed system schemas.  Maps from System Table ID to the ExtentSchema for that table. */
-        std::unordered_map<uint64_t, std::shared_ptr<ExtentSchema>> _system_cache;
-
-        /** A cache of SchemaInfo objects. */
-        LruObjectCache<uint64_t, SchemaInfo> _cache;
-
-    public:
-        /**
-         * Default construtor.  Generates the ExtentSchema objects for the system cache.
-         */
-        SchemaManager();
-
-        /**
-         * Retrieve the schema for a given table at a given point in time.
-         * @param table_id The ID of the table being requested.
-         * @param extent_xid The XID of the extent being processed.
-         * @param target_xid The XID that the query is executing at.
-         * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
-         */
-        std::shared_ptr<const Schema> get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn = 0);
-
-        /**
-         * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing / updating the extent.
-         *
-         * @param table_id The table we need the schema for.
-         * @param xid The XID that we need the schema at.
-         */
-        std::shared_ptr<const ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid);
-
-        /**
-         * Helper function to generate a SchemaUpdate that defines the change between the old and
-         * new schema.  The old and new schema must be guaranteed to be the result of only a single
-         * schema modification.
-         * @param old_schema The columns of the previous version of the schema.
-         * @param new_schema The columns of the new version of the schema.
-         * @param xid The XID that the modification occurred at.
-         * @param lsn The LSN in the PG log of the modification to ensure correct ordering when applying changes.
-         */
-        SchemaUpdate generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
-                                     const std::map<uint32_t, SchemaColumn> &new_schema,
-                                     uint64_t xid, uint64_t lsn);
     };
 
     /**
@@ -236,16 +112,16 @@ namespace springtail {
         virtual ~Schema() = default;
 
         /** Checks if a given column exists. */
-        virtual bool has_field(const std::string &name) = 0;
+        virtual bool has_field(const std::string &name) const = 0;
 
         /** Returns a field accessor for the requested column. */
         virtual std::shared_ptr<Field> get_field(const std::string &name) const = 0;
 
-        /** Returns a FieldTuple representing all of the columns of the schema. */
-        FieldTuple get_fields() = 0;
+        /** Returns a Tuple representing all of the columns of the schema. */
+        virtual std::shared_ptr<FieldArray> get_fields() const = 0;
 
-        /** Returns a FieldTuple representing an ordered subset of the columns in the schema. */
-        FieldTuple get_fields(const std::vector<std::string> &columns) = 0;
+        /** Returns a Tuple representing an ordered subset of the columns in the schema. */
+        virtual std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const = 0;
     };
 
     /**
@@ -257,8 +133,11 @@ namespace springtail {
         /** The width of fixed data for a single row. */
         uint32_t _row_size;
 
-        /** Map of column names to fields. */
-        std::map<std::string, std::shared_ptr<MutableField>> _field_map;
+        /** Map of column names to <field, order> pairs. */
+        std::map<std::string, std::pair<std::shared_ptr<MutableField>, int>> _field_map;
+
+        /** The order of the columns. */
+        std::vector<std::string> _column_order;
 
     protected:
         /**
@@ -266,25 +145,6 @@ namespace springtail {
          * @param columns A map from column position to column definition.
          */
         void _populate(const std::map<uint32_t, SchemaColumn> columns);
-
-        template <class F>
-        std::vector<std::shared_ptr<T>>
-        _tuple_helper(const std::vector<std::string> &columns={})
-        {
-            std::vector<std::shared_ptr<F>> fields;
-
-            if (columns.empty()) {
-                for (auto &&entry : _field_map) {
-                    fields.push_back(i.second);
-                }
-            } else {
-                for (auto &&name : columns) {
-                    fields.push_back(this->get_mutable_field(name));
-                }
-            }
-
-            return fields;
-        }
 
     public:
         /**
@@ -294,7 +154,7 @@ namespace springtail {
         ExtentSchema(const std::vector<SchemaColumn> &columns) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
-                column_map[column.position] = column;
+                column_map.insert({column.position, column});
             }
 
             // populate the field map using the column definitions
@@ -311,7 +171,7 @@ namespace springtail {
         }
 
         /** Copy constructor. */
-        ExtentSchema(const Schema &schema) = default;
+        ExtentSchema(const ExtentSchema &schema) = default;
 
         /** Returns the fixed width for a single row. */
         uint32_t row_size() const {
@@ -324,30 +184,26 @@ namespace springtail {
          * @return A pointer to the mutable field accessor.
          */
         std::shared_ptr<MutableField>
-        get_mutable_field(const std::string &name)
+        get_mutable_field(const std::string &name) const
         {
             auto &&i = _field_map.find(name);
             if (i == _field_map.end()) {
                 throw SchemaError("No such column");
             }
-            return i.second;
+            return i->second.first;
         }
 
         /**
          * Retrieve a non-mutable field bound to a given column for reading from extents.
          * @param name The name of the column to retrieve the field for.
          */
-        std::shared_ptr<Field>
-        get_field(const std::string &name)
-        {
-            return get_mutable_field(name);
-        }
+        std::shared_ptr<Field> get_field(const std::string &name) const override;
 
         /**
          * Check for the existence of a field.
          * @param name The name of the column to check existence.
          */
-        bool has_field(const std::string &name)
+        bool has_field(const std::string &name) const override
         {
             auto &&i = _field_map.find(name);
             return (i != _field_map.end());
@@ -359,66 +215,34 @@ namespace springtail {
          */
         std::shared_ptr<ExtentSchema>
         create_schema(const std::vector<std::string> &columns,
-                      const std::vector<SchemaColumn> &new_columns)
-        {
-            // create SchemaColumn entries for the existing fields
-            std::vector<SchemaColumn> all_columns;
-            for (auto &&column : columns) {
-                auto &&i = _field_map.find(column);
-
-                all_columns.push_back({
-                        column,
-                        all_columns.size(),
-                        i.second->get_type(),
-                        i.second->is_nullable()
-                    });
-            }
-
-            // add in the new columns
-            for (auto &&column : new_columns) {
-                column.position = all_columns.size();
-                all_columns.push_back(column);
-            }
-
-            // create the new ExtentSchema
-            return std::make_shared<ExtentSchema>(all_columns);
-        }
+                      const std::vector<SchemaColumn> &new_columns) const;
 
         /**
          * Generate a list of all of the fields in the schema.
          */
-        FieldTuple
-        get_fields()
-        {
-            return FieldTuple(_tuple_helper<Field>());
-        }
+        std::shared_ptr<FieldArray> get_fields() const override;
 
         /**
          * Generate a list of all of the fields in the schema.
          */
-        MutableFieldTuple
-        get_mutable_fields()
-        {
-            return MutableFieldTuple(_tuple_helper<MutableField>());
-        }
+        std::shared_ptr<MutableFieldArray> get_mutable_fields() const;
 
         /**
          * Generate a list of fields based on an ordered list of columns.
          */
-        FieldTuple
-        get_fields(const std::vector<std::string> &columns)
-        {
-            return FieldTuple(_tuple_helper<Field>(columns));
-        }
+        std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const override;
 
         /**
          * Generate a list of fields based on an ordered list of columns.
          */
-        FieldTuple
-        get_mutable_fields(const std::vector<std::string> &columns)
-        {
-            return MutableFieldTuple(_tuple_helper<MutableField>(columns));
-        }
+        std::shared_ptr<MutableFieldArray> get_mutable_fields(const std::vector<std::string> &columns) const;
+
+        /**
+         * Generate a subset of the provided Tuple that contains only the requested columns.  The
+         * assumption is that the provided Tuple matches the full set of schema columns.
+         */
+        std::shared_ptr<Tuple> tuple_subset(std::shared_ptr<Tuple> tuple,
+                                            const std::vector<std::string> &columns) const;
     };
 
     /**
@@ -463,7 +287,7 @@ namespace springtail {
          * Checks if the column exists within the virtual schema.
          * @param name The name of the column being requested.
          */
-        bool has_field(const std::string &name)
+        bool has_field(const std::string &name) const override
         {
             return (_field_map.find(name) != _field_map.end());
         }
@@ -472,38 +296,26 @@ namespace springtail {
          * Returns a field accessor for the column within the virtual schema.
          * @param name The name of the column being requested.
          */
-        std::shared_ptr<Field> get_field(const std::string &name) const
+        std::shared_ptr<Field> get_field(const std::string &name) const override
         {
             auto &&i = _field_map.find(name);
             if (i == _field_map.end()) {
                 throw SchemaError("Could not find requested column");
             }
 
-            return i.second;
+            return i->second;
         }
 
-        FieldTuple
-        get_fields()
-        {
-            std::vector<std::shared_ptr<Field>> _fields;
+        /**
+         * Return a ConstFieldTuple containing all of the columns in this schema.
+         */
+        std::shared_ptr<FieldArray> get_fields() const override;
 
-            for (auto &&i : _field_map) {
-                _fields.push_back(i.second);
-            }
-
-            return FieldTuple(_fields);
-        }
-
-        FieldTuple
-        get_fields(const std::vector<std::string> &columns)
-        {
-            std::vector<std::shared_ptr<Field>> _fields;
-
-            for (auto &&name : columns) {
-                _fields.push_back(this->get_field(name));
-            }
-
-            return FieldTuple(_fields);
-        }
+        /**
+         * Return a FieldTuple containing the specified columns from this schema.
+         * @param columns A list of requested columns for the returned ConstFieldTuple
+         */
+        std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const override;
     };
+
 }

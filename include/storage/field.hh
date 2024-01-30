@@ -24,7 +24,7 @@ namespace springtail {
     public:
         /** Copy constructor */
         Ternary(const Ternary &result)
-            : _value(result.value)
+            : _value(result._value)
         { }
 
         /** Default constructor creates a null result. */
@@ -39,12 +39,12 @@ namespace springtail {
 
         /** Checks for NULL. */
         bool is_null() {
-            return (_value & NULL_MASK > 0);
+            return ((_value & NULL_MASK) > 0);
         }
 
         /** Checks for TRUE / FALSE. */
         bool get_bool() {
-            return (_value & VALUE_MASK > 0);
+            return ((_value & VALUE_MASK) > 0);
         }
     };
 
@@ -148,6 +148,10 @@ namespace springtail {
                                bool nulls_last=true) const = 0;
     };
 
+    /** Pointer typedef for Field. */
+    typedef std::shared_ptr<Field> FieldPtr;
+
+
     /**
      * The MutableField class defines an accessor object for a given column of an extent.  It stores
      * the position of the column within the extent's fixed data and then interprets it based on the
@@ -238,11 +242,14 @@ namespace springtail {
         // set this field from the value of another field
         virtual void set_field(Extent::MutableRow &row,
                                const Extent::Row &input_row,
-                               const Field &field) {
+                               FieldPtr field) {
             std::cerr << "Setting from a Field unsupported for this field." << std::endl;
             throw TypeError();
         }
     };
+
+    /** Pointer typedef for MutableField. */
+    typedef std::shared_ptr<MutableField> MutableFieldPtr;
 
     class NullableField : virtual public MutableField {
     private:
@@ -279,9 +286,9 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
-            this->set_null(row, field.is_null(input_row));
+            this->set_null(row, field->is_null(input_row));
         }
     };
 
@@ -318,9 +325,9 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
-            this->set_bool(row, field.get_bool(input_row));
+            this->set_bool(row, field->get_bool(input_row));
         }
 
         bool less_than(const Extent::Row &lhs_row,
@@ -358,7 +365,7 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             BoolField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
@@ -518,28 +525,28 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             if constexpr(std::is_same<T, uint64_t>::value) {
-                this->set_uint64(row, field.get_uint64(input_row));
+                this->set_uint64(row, field->get_uint64(input_row));
             } else if constexpr(std::is_same_v<T, int64_t>) {
-                this->set_int64(row, field.get_int64(input_row));
+                this->set_int64(row, field->get_int64(input_row));
             } else if constexpr(std::is_same_v<T, uint32_t>) {
-                this->set_uint32(row, field.get_uint32(input_row));
+                this->set_uint32(row, field->get_uint32(input_row));
             } else if constexpr(std::is_same_v<T, int32_t>) {
-                this->set_int32(row, field.get_int32(input_row));
+                this->set_int32(row, field->get_int32(input_row));
             } else if constexpr(std::is_same_v<T, uint16_t>) {
-                this->set_uint16(row, field.get_uint16(input_row));
+                this->set_uint16(row, field->get_uint16(input_row));
             } else if constexpr(std::is_same_v<T, int16_t>) {
-                this->set_int16(row, field.get_int16(input_row));
+                this->set_int16(row, field->get_int16(input_row));
             } else if constexpr(std::is_same_v<T, uint8_t>) {
-                this->set_uint8(row, field.get_uint8(input_row));
+                this->set_uint8(row, field->get_uint8(input_row));
             } else if constexpr(std::is_same_v<T, int8_t>) {
-                this->set_int8(row, field.get_int8(input_row));
+                this->set_int8(row, field->get_int8(input_row));
             } else if constexpr(std::is_same_v<T, double>) {
-                this->set_float64(row, field.get_float64(input_row));
+                this->set_float64(row, field->get_float64(input_row));
             } else if constexpr(std::is_same_v<T, float>) {
-                this->set_float32(row, field.get_float32(input_row));
+                this->set_float32(row, field->get_float32(input_row));
             } else {
                 throw TypeError("Invalid NumberField type");
             }
@@ -573,9 +580,9 @@ namespace springtail {
             } else if constexpr(std::is_same_v<T, int8_t>) {
                 return (this->get_int8(lhs_row) < rhs->get_int8(rhs_row));
             } else if constexpr(std::is_same_v<T, double>) {
-                return (this->get_double(lhs_row) < rhs->get_double(rhs_row));
+                return (this->get_float64(lhs_row) < rhs->get_float64(rhs_row));
             } else if constexpr(std::is_same_v<T, float>) {
-                return (this->get_float(lhs_row) < rhs->get_float(rhs_row));
+                return (this->get_float32(lhs_row) < rhs->get_float32(rhs_row));
             } else {
                 throw TypeError("Invalid NumberField type");
             }
@@ -647,7 +654,7 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             NumberField<T>::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
@@ -701,12 +708,12 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             // XXX if the field is a TEXT or BINARY then we want to do a direct copy
 
             // otherwise we can just call get_text()
-            this->set_text(row, field.get_text(input_row));
+            this->set_text(row, field->get_text(input_row));
         }
 
         bool less_than(const Extent::Row &lhs_row,
@@ -742,7 +749,7 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             TextField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
@@ -798,12 +805,12 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       std::shared_ptr<Field> field)
+                       FieldPtr field)
         {
             // XXX if the field is a TEXT or BINARY then we want to do a direct copy
 
             // otherwise we can just call get_binary()
-            this->set_binary(row, field.get_binary(input_row));
+            this->set_binary(row, field->get_binary(input_row));
         }
 
         bool less_than(const Extent::Row &lhs_row,
@@ -833,7 +840,7 @@ namespace springtail {
 
         void set_field(Extent::MutableRow &row,
                        const Extent::Row &input_row,
-                       const Field &field)
+                       FieldPtr field)
         {
             BinaryField::set_field(row, input_row, field);
             NullableField::set_field(row, input_row, field);
@@ -1001,43 +1008,43 @@ namespace springtail {
 
             // return based on the comparison for the type of this constant
             if constexpr(std::is_same_v<T, bool>) {
-                return (this->get_bool(row) < rhs->get_bool(row));
+                return (this->get_bool(lhs_row) < rhs->get_bool(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int8_t>) {
-                return (this->get_int8(row) < rhs->get_int8(row));
+                return (this->get_int8(lhs_row) < rhs->get_int8(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint8_t>) {
-                return (this->get_uint8(row) < rhs->get_uint8(row));
+                return (this->get_uint8(lhs_row) < rhs->get_uint8(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int16_t>) {
-                return (this->get_int16(row) < rhs->get_int16(row));
+                return (this->get_int16(lhs_row) < rhs->get_int16(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint16_t>) {
-                return (this->get_uint16(row) < rhs->get_uint16(row));
+                return (this->get_uint16(lhs_row) < rhs->get_uint16(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int32_t>) {
-                return (this->get_int32(row) < rhs->get_int32(row));
+                return (this->get_int32(lhs_row) < rhs->get_int32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint32_t>) {
-                return (this->get_uint32(row) < rhs->get_uint32(row));
+                return (this->get_uint32(lhs_row) < rhs->get_uint32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int64_t>) {
-                return (this->get_int64(row) < rhs->get_int64(row));
+                return (this->get_int64(lhs_row) < rhs->get_int64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint64_t>) {
-                return (this->get_uint64(row) < rhs->get_uint64(row));
+                return (this->get_uint64(lhs_row) < rhs->get_uint64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, float>) {
-                return (this->get_float32(row) < rhs->get_float32(row));
+                return (this->get_float32(lhs_row) < rhs->get_float32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, double>) {
-                return (this->get_float64(row) < rhs->get_float64(row));
+                return (this->get_float64(lhs_row) < rhs->get_float64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, std::string>) {
-                return (this->get_text(row) < rhs->get_text(row));
+                return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
-                return (this->get_binary(row) < rhs->get_binary(row));
+                return (this->get_binary(lhs_row) < rhs->get_binary(rhs_row));
 
             } else {
                 throw TypeError();
@@ -1083,25 +1090,25 @@ namespace springtail {
     };
 
     /**
-     * A value that wraps another value to return a default value if the underlying value is null.
+     * A field that wraps another field to return a default value if the underlying value is null.
      */
     template <class T>
     class NullWrapperField : public Field {
     private:
-        std::shared_ptr<Value> _value;
+        FieldPtr _field;
         T _default;
 
     public:
-        NullWrapperField(std::shared_ptr<Value> value, const T &default_value)
-            : _value(value), _default(default_value)
+        NullWrapperField(FieldPtr field, const T &default_value)
+            : _field(field), _default(default_value)
         { }
 
-        NullWrapperField(std::shared_ptr<Value> value, T &&default_value)
-            : _value(value), _default(default_value)
+        NullWrapperField(FieldPtr field, T &&default_value)
+            : _field(field), _default(default_value)
         { }
 
         virtual SchemaType get_type() const {
-            return _value->get_type();
+            return _field->get_type();
         }
 
         virtual bool is_nullable() const {
@@ -1114,10 +1121,10 @@ namespace springtail {
 
         bool get_bool(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, bool>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_bool(row);
+                return _field->get_bool(row);
             } else {
                 throw TypeError();
             }
@@ -1125,10 +1132,10 @@ namespace springtail {
 
         int8_t get_int8(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, int8_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_int8(row);
+                return _field->get_int8(row);
             } else {
                 throw TypeError();
             }
@@ -1136,10 +1143,10 @@ namespace springtail {
 
         uint8_t get_uint8(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, uint8_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_uint8(row);
+                return _field->get_uint8(row);
             } else {
                 throw TypeError();
             }
@@ -1147,10 +1154,10 @@ namespace springtail {
 
         int16_t get_int16(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, int16_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_int16(row);
+                return _field->get_int16(row);
             } else {
                 throw TypeError();
             }
@@ -1158,10 +1165,10 @@ namespace springtail {
 
         uint16_t get_uint16(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, uint16_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_uint16(row);
+                return _field->get_uint16(row);
             } else {
                 throw TypeError();
             }
@@ -1169,10 +1176,10 @@ namespace springtail {
 
         int32_t get_int32(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, int32_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_int32(row);
+                return _field->get_int32(row);
             } else {
                 throw TypeError();
             }
@@ -1180,10 +1187,10 @@ namespace springtail {
 
         uint32_t get_uint32(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, uint32_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_uint32(row);
+                return _field->get_uint32(row);
             } else {
                 throw TypeError();
             }
@@ -1191,10 +1198,10 @@ namespace springtail {
 
         int64_t get_int64(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, int64_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_int64(row);
+                return _field->get_int64(row);
             } else {
                 throw TypeError();
             }
@@ -1202,10 +1209,10 @@ namespace springtail {
 
         uint64_t get_uint64(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, uint64_t>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_uint64(row);
+                return _field->get_uint64(row);
             } else {
                 throw TypeError();
             }
@@ -1213,10 +1220,10 @@ namespace springtail {
 
         float get_float32(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, float>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_float32(row);
+                return _field->get_float32(row);
             } else {
                 throw TypeError();
             }
@@ -1224,10 +1231,10 @@ namespace springtail {
 
         double get_float64(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, double>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_float64(row);
+                return _field->get_float64(row);
             } else {
                 throw TypeError();
             }
@@ -1235,10 +1242,10 @@ namespace springtail {
 
         std::string get_text(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, std::string>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_text(row);
+                return _field->get_text(row);
             } else {
                 throw TypeError();
             }
@@ -1246,10 +1253,10 @@ namespace springtail {
 
         const std::vector<char> get_binary(const Extent::Row &row) const {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
-                if (_value->is_null(row)) {
+                if (_field->is_null(row)) {
                     return _default;
                 }
-                return _value->get_binary(row);
+                return _field->get_binary(row);
             } else {
                 throw TypeError();
             }
@@ -1267,43 +1274,43 @@ namespace springtail {
 
             // return based on the comparison for the type of this constant
             if constexpr(std::is_same_v<T, bool>) {
-                return (this->get_bool(row) < rhs->get_bool(row));
+                return (this->get_bool(lhs_row) < rhs->get_bool(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int8_t>) {
-                return (this->get_int8(row) < rhs->get_int8(row));
+                return (this->get_int8(lhs_row) < rhs->get_int8(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint8_t>) {
-                return (this->get_uint8(row) < rhs->get_uint8(row));
+                return (this->get_uint8(lhs_row) < rhs->get_uint8(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int16_t>) {
-                return (this->get_int16(row) < rhs->get_int16(row));
+                return (this->get_int16(lhs_row) < rhs->get_int16(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint16_t>) {
-                return (this->get_uint16(row) < rhs->get_uint16(row));
+                return (this->get_uint16(lhs_row) < rhs->get_uint16(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int32_t>) {
-                return (this->get_int32(row) < rhs->get_int32(row));
+                return (this->get_int32(lhs_row) < rhs->get_int32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint32_t>) {
-                return (this->get_uint32(row) < rhs->get_uint32(row));
+                return (this->get_uint32(lhs_row) < rhs->get_uint32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, int64_t>) {
-                return (this->get_int64(row) < rhs->get_int64(row));
+                return (this->get_int64(lhs_row) < rhs->get_int64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, uint64_t>) {
-                return (this->get_uint64(row) < rhs->get_uint64(row));
+                return (this->get_uint64(lhs_row) < rhs->get_uint64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, float>) {
-                return (this->get_float32(row) < rhs->get_float32(row));
+                return (this->get_float32(lhs_row) < rhs->get_float32(rhs_row));
 
             } else if constexpr(std::is_same_v<T, double>) {
-                return (this->get_float64(row) < rhs->get_float64(row));
+                return (this->get_float64(lhs_row) < rhs->get_float64(rhs_row));
 
             } else if constexpr(std::is_same_v<T, std::string>) {
-                return (this->get_text(row) < rhs->get_text(row));
+                return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
             } else if constexpr(std::is_same_v<T, std::vector<char>>) {
-                return (this->get_binary(row) < rhs->get_binary(row));
+                return (this->get_binary(lhs_row) < rhs->get_binary(rhs_row));
 
             } else {
                 throw TypeError();
@@ -1311,80 +1318,28 @@ namespace springtail {
         }
     };
 
-    class FieldTuple {
-    private:
-        std::vector<std::shared_ptr<Field>> _fields;
-
-    public:
-        FieldTuple() = default;
-        FieldTuple(const std::vector<std::shared_ptr<Field>> &fields)
-            : _fields(fields)
-        { }
-        FieldTuple(std::vector<std::shared_ptr<Field>> &&fields)
-            : _fields(fields)
-        { }
-        FieldTuple(FieldTuple &&tuple)
-            : _fields(std::move(tuple._fields))
-        { }
-
-        Tuple bind(const Extent::Row &row) const {
-            return Tuple(*this, row);
-        }
-
-        std::shared_ptr<Field> operator[](std::size_t idx) const {
-            return _fields[idx];
-        }
-
-        uint32_t size() const {
-            return _fields.size();
-        }
-    };
-
-    class MutableFieldTuple {
-    private:
-        std::vector<std::shared_ptr<MutableField>> _fields;
-
-    public:
-        MutableFieldTuple() = default;
-        MutableFieldTuple(const std::vector<std::shared_ptr<MutableField>> &fields)
-            : _fields(fields)
-        { }
-        MutableFieldTuple(std::vector<std::shared_ptr<MutableField>> &&fields)
-            : _fields(fields)
-        { }
-        MutableFieldTuple(MutableFieldTuple &&tuple)
-            : _fields(std::move(tuple._fields))
-        { }
-
-        Tuple bind(const Extent::MutableRow &row) const {
-            return Tuple(*this, row);
-        }
-
-        std::shared_ptr<MutableField> operator[](std::size_t idx) const {
-            return _fields[idx];
-        }
-
-        uint32_t size() const {
-            return _fields.size();
-        }
-    };
-
+    /**
+     * An array of values, encapsulated such that they can be compared even when coming from
+     * different tables or different rows within a table, or are just fixed values (e.g., ValueTuple).
+     */
     class Tuple {
     public:
+        virtual ~Tuple() { }
+
         virtual std::size_t size() const = 0;
         virtual std::shared_ptr<Field> field(int idx) const = 0;
         virtual Extent::Row row() const = 0;
 
-        bool less_than(const Tuple &rhs, bool nulls_last=true) const {
+        bool less_than(std::shared_ptr<Tuple> rhs, bool nulls_last=true) const {
             // check the tuple lengths and types using assert()
             // we assume correct usage in production
-            assert(this->size() == rhs.size());
+            assert(this->size() == rhs->size());
             for (int i = 0; i < this->size(); i++) {
-                assert(this->field(i).get_type() == rhs.field(i).get_type());
+                assert(this->field(i)->get_type() == rhs->field(i)->get_type());
             }
 
             for (int i = 0; i < this->size(); i++) {
-                if (this->field(i)->less_than(_row, rhs.field(i), rhs.row(), nulls_last)) {
+                if (this->field(i)->less_than(row(), rhs->field(i), rhs->row(), nulls_last)) {
                     return true;
                 }
             }
@@ -1392,29 +1347,131 @@ namespace springtail {
             // all values are >=, so not less than
             return false;
         }
+    };
+    typedef std::shared_ptr<Tuple> TuplePtr;
 
-        /** Default operator assumes NULLs are last. */
-        bool operator<(const Tuple &rhs) const
+    /**
+     * Interface for a mutable Tuple that can have it's value set by another Tuple.
+     */
+    class MutableTuple : public Tuple {
+    public:
+        virtual MutableFieldPtr mutable_field(int idx) const = 0;
+        virtual Extent::MutableRow mutable_row() const = 0;
+
+    public:
+        /** Copy the data from another Tuple into this Tuple. */
+        void assign(TuplePtr other)
         {
-            return this->less_than(rhs);
+            for (int i = 0; i < size(); i++) {
+                Extent::MutableRow row = mutable_row();
+                mutable_field(i)->set_field(row, other->row(), other->field(i));
+            }
         }
     };
+    typedef std::shared_ptr<MutableTuple> MutableTuplePtr;
 
+    /**
+     * Represents an array of fields.  Can be bound to a row to generate a Tuple.
+     */
+    class FieldArray {
+    public:
+        virtual ~FieldArray() { }
+        virtual TuplePtr bind(const Extent::Row &row) = 0;
+        virtual FieldPtr operator[](std::size_t idx) const = 0;
+        virtual uint32_t size() const = 0;
+    };
+    typedef std::shared_ptr<FieldArray> FieldArrayPtr;
+
+    /**
+     * A read-only field array.
+     */
+    class ReadFieldArray : public FieldArray, public std::enable_shared_from_this<ReadFieldArray> {
+    private:
+        std::vector<FieldPtr> _fields;
+
+    public:
+        ReadFieldArray() = default;
+        ReadFieldArray(const std::vector<FieldPtr> &fields)
+            : _fields(fields)
+        { }
+        ReadFieldArray(std::vector<FieldPtr> &&fields)
+            : _fields(fields)
+        { }
+        ReadFieldArray(ReadFieldArray &&set)
+            : _fields(std::move(set._fields))
+        { }
+
+        TuplePtr bind(const Extent::Row &row) override;
+
+        FieldPtr operator[](std::size_t idx) const override {
+            return _fields[idx];
+        }
+
+        uint32_t size() const override {
+            return _fields.size();
+        }
+    };
+    typedef std::shared_ptr<ReadFieldArray> ReadFieldArrayPtr;
+
+    /**
+     * A specialized array of fields that can generate a MutableTuple for updating a row.
+     */
+    class MutableFieldArray : public FieldArray, public std::enable_shared_from_this<MutableFieldArray> {
+    private:
+        std::vector<MutableFieldPtr> _fields;
+
+    public:
+        MutableFieldArray() = default;
+        MutableFieldArray(const std::vector<MutableFieldPtr> &fields)
+            : _fields(fields)
+        { }
+        MutableFieldArray(std::vector<MutableFieldPtr> &&fields)
+            : _fields(fields)
+        { }
+        MutableFieldArray(MutableFieldArray &&set)
+            : _fields(std::move(set._fields))
+        { }
+
+        FieldPtr operator[](std::size_t idx) const override {
+            return _fields[idx];
+        }
+
+        uint32_t size() const override {
+            return _fields.size();
+        }
+
+        TuplePtr bind(const Extent::Row &row) override;
+
+        //// functions for mutability
+
+        MutableFieldPtr get_mutable(std::size_t idx) const {
+            return _fields[idx];
+        }
+
+        MutableTuplePtr bind(const Extent::MutableRow &row);
+    };
+    typedef std::shared_ptr<MutableFieldArray> MutableFieldArrayPtr;
+
+    /**
+     * Implements the Tuple interface using a FieldArray and a bound Extent::Row.
+     */
     class RowTuple : public Tuple {
-        const FieldTuple &_tuple;
+        FieldArrayPtr _array;
         Extent::Row _row;
 
     public:
-        RowTuple(const FieldTuple &tuple, const Extent::Row &row)
-            : _tuple(tuple), _row(row)
+        RowTuple(const RowTuple &tuple) = default;
+        RowTuple(RowTuple &&tuple) = default;
+        RowTuple(FieldArrayPtr array, const Extent::Row &row)
+            : _array(array), _row(row)
         { }
 
         std::size_t size() const {
-            return _tuple.size();
+            return _array->size();
         }
 
-        std::shared_ptr<Field> field(int idx) const {
-            return _tuple[idx];
+        FieldPtr field(int idx) const {
+            return (*_array)[idx];
         }
 
         Extent::Row row() const {
@@ -1422,96 +1479,100 @@ namespace springtail {
         }
     };
 
-    class MutableTuple {
-        const MutableFieldTuple &_tuple;
+    /**
+     * Implements the Tuple interface using a MutableFieldArray and a bound Extent::MutableRow.  Also offers 
+     */
+    class MutableRowTuple : public MutableTuple {
+        MutableFieldArrayPtr _array;
         Extent::MutableRow _row;
 
     public:
-        MutableTuple(const MutableFieldTuple &tuple, const Extent::MutableRow &row)
-            : _tuple(tuple), _row(row)
+        MutableRowTuple(const MutableRowTuple &tuple) = default;
+        MutableRowTuple(MutableRowTuple &&tuple) = default;
+        MutableRowTuple(MutableFieldArrayPtr array, const Extent::MutableRow &row)
+            : _array(array), _row(row)
         { }
 
         std::size_t size() const {
-            return _tuple.size();
+            return _array->size();
         }
 
-        std::shared_ptr<Field> field(int idx) const {
-            return _tuple[idx];
+        FieldPtr field(int idx) const {
+            return (*_array)[idx];
         }
 
         Extent::Row row() const {
             return _row;
         }
 
-        /** Copy the data from another Tuple into this Tuple. */
-        MutableTuple& operator=(const Tuple &other)
-        {
-            for (int i = 0; i < this->size(); i++) {
-                _tuple[i].set_field(_row, other.row(), other.field(i))
-            }
+        MutableFieldPtr mutable_field(int idx) const {
+            return _array->get_mutable(idx);
+        }
 
-            return *this;
+        Extent::MutableRow mutable_row() const {
+            return _row;
         }
     };
 
-    class ConstTuple {
+    class ValueTuple : public Tuple {
+        /** An array of ConstField objects. */
         std::vector<std::shared_ptr<Field>> _fields;
 
     public:
-        ConstTuple()
+        ValueTuple()
         { }
 
-        ConstTuple(const Tuple &tuple)
+        ValueTuple(TuplePtr tuple)
         {
             // copy the data from the tuple into const fields
-            for (int i = 0; i < tuple.size(); i++) {
-                std::shared_ptr<Field> field = tuple.field(i);
+            for (int i = 0; i < tuple->size(); i++) {
+                std::shared_ptr<Field> field = tuple->field(i);
 
-                if (field->is_null(tuple.row())) {
+                if (field->is_null(tuple->row())) {
                     _fields.push_back(std::make_shared<ConstNullField>(field->get_type()));
                 } else {
-                    switch(tuple.field(i)->get_type()) {
-                    case(TEXT):
-                        _fields.push_back(std::make_shared<ConstField<std::string>>(field->get_text(tuple.row())));
+                    switch(tuple->field(i)->get_type()) {
+                    case(SchemaType::TEXT):
+                        _fields.push_back(std::make_shared<ConstField<std::string>>(field->get_text(tuple->row())));
                         break;
-                    case(UINT64):
-                        _fields.push_back(std::make_shared<ConstField<uint64_t>>(field->get_uint64(tuple.row())));
+                    case(SchemaType::UINT64):
+                        _fields.push_back(std::make_shared<ConstField<uint64_t>>(field->get_uint64(tuple->row())));
                         break;
-                    case(INT64):
-                        _fields.push_back(std::make_shared<ConstField<int64_t>>(field->get_int64(tuple.row())));
+                    case(SchemaType::INT64):
+                        _fields.push_back(std::make_shared<ConstField<int64_t>>(field->get_int64(tuple->row())));
                         break;
-                    case(UINT32):
-                        _fields.push_back(std::make_shared<ConstField<uint32_t>>(field->get_uint32(tuple.row())));
+                    case(SchemaType::UINT32):
+                        _fields.push_back(std::make_shared<ConstField<uint32_t>>(field->get_uint32(tuple->row())));
                         break;
-                    case(INT32):
-                        _fields.push_back(std::make_shared<ConstField<int32_t>>(field->get_int32(tuple.row())));
+                    case(SchemaType::INT32):
+                        _fields.push_back(std::make_shared<ConstField<int32_t>>(field->get_int32(tuple->row())));
                         break;
-                    case(UINT16):
-                        _fields.push_back(std::make_shared<ConstField<uint16_t>>(field->get_uint16(tuple.row())));
+                    case(SchemaType::UINT16):
+                        _fields.push_back(std::make_shared<ConstField<uint16_t>>(field->get_uint16(tuple->row())));
                         break;
-                    case(INT16):
-                        _fields.push_back(std::make_shared<ConstField<int16_t>>(field->get_int16(tuple.row())));
+                    case(SchemaType::INT16):
+                        _fields.push_back(std::make_shared<ConstField<int16_t>>(field->get_int16(tuple->row())));
                         break;
-                    case(UINT8):
-                        _fields.push_back(std::make_shared<ConstField<uint8_t>>(field->get_uint8(tuple.row())));
+                    case(SchemaType::UINT8):
+                        _fields.push_back(std::make_shared<ConstField<uint8_t>>(field->get_uint8(tuple->row())));
                         break;
-                    case(INT8):
-                        _fields.push_back(std::make_shared<ConstField<int8_t>>(field->get_int8(tuple.row())));
+                    case(SchemaType::INT8):
+                        _fields.push_back(std::make_shared<ConstField<int8_t>>(field->get_int8(tuple->row())));
                         break;
-                    case(BOOLEAN):
-                        _fields.push_back(std::make_shared<ConstField<bool>>(field->get_bool(tuple.row())));
+                    case(SchemaType::BOOLEAN):
+                        _fields.push_back(std::make_shared<ConstField<bool>>(field->get_bool(tuple->row())));
                         break;
-                    case(FLOAT64):
-                        _fields.push_back(std::make_shared<ConstField<double>>(field->get_double(tuple.row())));
+                    case(SchemaType::FLOAT64):
+                        _fields.push_back(std::make_shared<ConstField<double>>(field->get_float64(tuple->row())));
                         break;
-                    case(FLOAT32):
-                        _fields.push_back(std::make_shared<ConstField<float>>(field->get_float(tuple.row())));
+                    case(SchemaType::FLOAT32):
+                        _fields.push_back(std::make_shared<ConstField<float>>(field->get_float32(tuple->row())));
                         break;
-                    case(BINARY):
-                        _fields.push_back(std::make_shared<ConstField<std::vector<char>>>(field->get_binary(tuple.row())));
+                    case(SchemaType::BINARY):
+                        _fields.push_back(std::make_shared<ConstField<std::vector<char>>>(field->get_binary(tuple->row())));
                         break;
                     default:
-                        throw FieldError();
+                        throw TypeError();
                     }
                 }
             }
@@ -1526,9 +1587,9 @@ namespace springtail {
         }
 
         Extent::Row row() const {
-            // note: only usable with the ConstField objects from this ConstTuple
+            // note: only usable with the ConstField objects from this ValueTuple
             return Extent::Row(nullptr, nullptr);
         }
     };
-
+    typedef std::shared_ptr<ValueTuple> ValueTuplePtr;
 }

@@ -4,22 +4,70 @@
 #include <memory>
 #include <vector>
 #include <cassert>
+#include <future>
 
 #include <xxhash.h>
 
+#include <storage/io.hh>
 #include <storage/schema.hh>
 #include <storage/compressors.hh>
 
 namespace springtail {
     // pre-declare classes to avoid circular dependencies
     class Field;
+    class MutableFieldTuple;
     class CompressedExtent;
 
-    enum class ExtentType : uint8_t {
-        LEAF = 0,
-        BRANCH = 1,
-        ROOT = 2
+    class ExtentType {
+    private:
+        uint8_t _type;
+
+        static const uint8_t LEAF = 0x00;
+        static const uint8_t BRANCH = 0x01;
+        static const uint8_t ROOT_MASK = 0x02;
+
+    public:
+        ExtentType()
+            : _type(LEAF)
+        { }
+
+        ExtentType(const ExtentType &type)
+            : _type(type._type)
+        { }
+
+        ExtentType(uint8_t type)
+            : _type(type)
+        { }
+
+        ExtentType(bool branch, bool root=false)
+            : _type(((branch) ? BRANCH : LEAF) | ((root) ? ROOT_MASK : 0))
+        { }
+
+        operator uint8_t() {
+            return _type;
+        }
+
+        bool is_root() {
+            return (_type & ROOT_MASK);
+        }
+
+        bool is_leaf() {
+            return (_type & ~ROOT_MASK) == LEAF;
+        }
+
+        bool is_branch() {
+            return (_type & ~ROOT_MASK) == BRANCH;
+        }
     };
+
+#if 0
+    enum class ExtentType : uint8_t {
+        LEAF = 0x00,
+        BRANCH = 0x01,
+        ROOT_LEAF = 0x02,
+        ROOT_
+    };
+#endif
 
     /** Definition of the extent header. */
     struct ExtentHeader {
@@ -120,7 +168,7 @@ namespace springtail {
         /** Interface to read a row in an extent. */
         class Row {
         public:
-            const Extent * const extent;
+            const Extent * extent;
             const char * data;
 
             Row(const Extent *e, const char *d)
@@ -160,7 +208,7 @@ namespace springtail {
             using reference         = const Row &;  // or also value_type&
 
             reference operator*() const { return _row; }
-            pointer operator->() { return &_row; }
+            pointer operator->() const { return &_row; }
             Iterator& operator++() { _row.data += _row.extent->row_size(); return *this; }
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
             friend bool operator==(const Iterator& a, const Iterator& b) { return a._row.data == b._row.data; }
@@ -172,16 +220,20 @@ namespace springtail {
             Iterator operator+(difference_type n) const { Iterator tmp = *this; tmp += n; return tmp; }
             friend Iterator operator+(difference_type n, const Iterator &i) { return i + n; }
             Iterator operator-(difference_type n) const { Iterator tmp = *this; tmp -= n; return tmp; }
+            friend Iterator operator-(difference_type n, const Iterator &i) { return i - n; }
+            friend difference_type operator-(const Iterator &a, const Iterator &b) {
+                return (a._row.data - b._row.data) / a._row.extent->row_size();
+            }
         };
 
         /** Returns an iterator to the first row of the extent. */
         Iterator begin() const {
-            return Iterator(this, _fixed_data.data());
+            return Iterator(this, _fixed_data->data());
         }
 
         /** Returns an iterator that matches the end of the extent. */
         Iterator end() const {
-            return Iterator(this, _fixed_data.data() + _fixed_data.size());
+            return Iterator(this, _fixed_data->data() + _fixed_data->size());
         }
 
     private: // types
@@ -202,7 +254,7 @@ namespace springtail {
         uint32_t _row_size;
 
     public:
-        Extent(std::shared_ptr<Schema> schema,
+        Extent(std::shared_ptr<ExtentSchema> schema,
                ExtentType type,
                uint64_t xid)
             : _schema(schema),
@@ -210,12 +262,11 @@ namespace springtail {
               _row_size(schema->row_size())
         {
             // empty extent
-            _fixed_data = std::maked_shared<std::vector<char>>();
-            _variable_data = std::maked_shared<std::vector<char>>();
+            _fixed_data = std::make_shared<std::vector<char>>();
+            _variable_data = std::make_shared<std::vector<char>>();
         }
 
-        Extent(std::shared_ptr<Schema> schema,
-               uint64_t extent_id,
+        Extent(std::shared_ptr<ExtentSchema> schema,
                const std::vector<std::shared_ptr<std::vector<char>>> &data)
             : _schema(schema),
               _header(data[0]),
@@ -226,7 +277,7 @@ namespace springtail {
             // fill the hash with the variable data
             uint32_t size;
             uint32_t offset = 0;
-            while (offset < _variable_data.size()) {
+            while (offset < _variable_data->size()) {
                 // retrieve the size
                 std::copy_n(reinterpret_cast<char *>(&size), sizeof(uint32_t),
                             _variable_data->data() + offset);
@@ -272,7 +323,7 @@ namespace springtail {
 
         /** Return the last row in the extent. */
         Row back() const {
-            return Row(this, _fixed_data->data() + _fixed_data.size() - _row_size);
+            return Row(this, _fixed_data->data() + _fixed_data->size() - _row_size);
         }
 
         /** Find an existing row in the extent. */
@@ -298,9 +349,9 @@ namespace springtail {
         /** Allocates space for a new row at a specific existing position in the extent, shifting
             other rows further in the extent.
             Note: Unstable Interface */
-        MutableRow insert(uint32_t index) {
-            // if the index is past the end of the extent, just append()
-            if (index * _row_size >= _fixed_data->size()) {
+        MutableRow insert(const Iterator &pos) {
+            // if the position is the end of the extent, just append()
+            if (pos == end()) {
                 return append();
             }
 
@@ -308,7 +359,7 @@ namespace springtail {
             _fixed_data->resize(_fixed_data->size() + _row_size);
 
             // shift the existing data
-            uint32_t offset = index * _row_size;
+            uint32_t offset = (pos->data - _fixed_data->data());
             std::copy_backward(_fixed_data->data() + offset,
                                _fixed_data->data() + _fixed_data->size() - _row_size,
                                _fixed_data->data() + offset + _row_size);
@@ -329,17 +380,20 @@ namespace springtail {
             // XXX how to clean up variable data from the row?
 
             // shift the existing data forward to the current position to remove the row
-            const char *start = pos->_row.data + (_row_size * count);
+            uint32_t offset = (pos->data - _fixed_data->data());
+
+            const char *start = pos->data + (_row_size * count);
             const char *end = _fixed_data->data() + _fixed_data->size();
+            char *target = _fixed_data->data() + offset;
             if (start < end) {
                 // copy the remaining data
-                std::copy(start, end, pos->_row.data);
+                std::copy(start, end, target);
 
                 // resize the data to match the updated size
                 _fixed_data->resize(_fixed_data->size() - (_row_size * count));
             } else {
                 // removed all of the rows past the iterator
-                _fixed_data->resize(pos->_row.data - _fixed_data->data());
+                _fixed_data->resize(offset);
             }
         }
 
@@ -411,40 +465,13 @@ namespace springtail {
          * Extent is the second half.  This should only be called if there are sufficient entries in
          * the extent to warrant a split.
          */
-        std::pair<std::shared_ptr<Extent>, std::shared_ptr<Extent>> split(uint64_t xid=0) const
-        {
-            // determine a half-way point
-            uint32_t half = row_count() / 2;
-
-            // create two empty extents
-            std::shared_ptr<Extent> first = std::make_shared<Extent>(_schema, _header.type, xid);
-            std::shared_ptr<Extent> second = std::make_shared<Extent>(_schema, _header.type, xid);
-
-            /* XXX it would be more efficient to direct-copy the fixed data and then check the
-                   variable-sized data pointers to determine which ones need to be copied over, but
-                   this was easier to implement. */
-
-            // copy each row by copying it into the appropriate extent
-            MutableFieldTuple tuple = _schema->get_mutable_fields();
-
-            // copy the rows from this extent to the first half extent
-            for (auto i = 0; i < half; i++) {
-                MutableRow &&insert_row = first->append();
-                tuple.copy(insert_row, tuple.bind(this->at(i)));
-            }
-
-            // copy the remaining rows from this extent to the first half extent
-            for (auto i = half; i < row_count(); i++) {
-                MutableRow &&insert_row = second->append();
-                tuple.bind(insert_row) = tuple.bind(this->at(i));
-            }
-        }
+        std::pair<std::shared_ptr<Extent>, std::shared_ptr<Extent>> split() const;
 
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_flush(IOHandle &handle)
+        async_flush(std::shared_ptr<IOHandle> handle)
         {
             std::shared_ptr<std::vector<char>> header = std::make_shared<std::vector<char>>(_header.pack());
-            return handle->async_append({header, _fixed_data, _variable_data});
+            return handle->async_append({header, _fixed_data, _variable_data}, nullptr);
         }
     };
 
