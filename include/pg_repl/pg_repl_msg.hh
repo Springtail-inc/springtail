@@ -1,66 +1,66 @@
 #pragma once
 
 #include <optional>
-#include <psql_cdc/pg_types.hh>
+#include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
 
 namespace springtail
 {
     /* Postgres message types, see decode functions in
-     * PgReplMsg.cc for formats */
-    struct MsgTupleDataColumn {
+     * PgRep PgMsg.cc for formats */
+    struct PgMsgTupleDataColumn {
         char type;  // 'n' NULL, 'u' unchanged TOAST, 't' text formatted, 'b' binary
         int32_t data_len;
         const char *data;
     };
 
-    struct MsgTupleData {
+    struct PgMsgTupleData {
         int16_t num_columns;
-        std::vector<MsgTupleDataColumn> tuple_data;
+        std::vector<PgMsgTupleDataColumn> tuple_data;
     };
 
-    struct MsgKeepAlive {
+    struct PgMsgKeepAlive {
         LSN_t wal_end;
         bool response_requested;
     };
 
-    struct MsgBegin {
+    struct PgMsgBegin {
         int32_t xid;
         LSN_t xact_lsn;
         int64_t commit_ts;
     };
 
-    struct MsgCommit {
+    struct PgMsgCommit {
         LSN_t commit_lsn;
         LSN_t xact_lsn;
         int64_t commit_ts;
     };
 
-    struct MsgOrigin {
+    struct PgMsgOrigin {
         LSN_t commit_lsn;
         const char *name_str;
     };
 
-    struct MsgCopy {
+    struct PgMsgCopy {
         LSN_t wal_start;
         LSN_t wal_end;
     };
 
-    struct MsgTruncate {
+    struct PgMsgTruncate {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t num_rels;
         int8_t options; // 1 for cascade; 2 for restart identity
         std::vector<int32_t> rel_ids;
     };
 
-    struct MsgType {
+    struct PgMsgType {
         int32_t xid;   // proto vers 2+ only if streaming
         uint32_t oid;
         const char *namespace_str;
         const char *data_type_str;
     };
 
-    struct MsgMessage {
+    struct PgMsgMessage {
         int32_t xid;   // proto vers 2+ only if streaming
         int8_t flags;
         LSN_t lsn;
@@ -69,71 +69,71 @@ namespace springtail
         const char *data;
     };
 
-    struct MsgDelete {
+    struct PgMsgDelete {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
-        MsgTupleData tuple;
+        PgMsgTupleData tuple;
     };
 
-    struct MsgInsert {
+    struct PgMsgInsert {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char new_type;
-        MsgTupleData new_tuple;
+        PgMsgTupleData new_tuple;
     };
 
-    struct MsgUpdate {
+    struct PgMsgUpdate {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
         char old_type; // 'K' tuple data is a key, 'O' tuple data is an old tuple
-        MsgTupleData old_tuple;
+        PgMsgTupleData old_tuple;
         char new_type; // 'N' tuple data is new
-        MsgTupleData new_tuple;
+        PgMsgTupleData new_tuple;
     };
 
-    struct MsgRelColumn {
+    struct PgMsgRelColumn {
         int8_t flags;  // 0 or 1 - key
         const char *column_name;
         uint32_t oid;   // oid from pg_types table
         int32_t type_modifier; // pg_attribute.atttypmod type specific data; default -1
     };
 
-    struct MsgRelation {
+    struct PgMsgRelation {
         int32_t xid;      // proto vers 2+ only if streaming
         int32_t rel_id;
         const char *namespace_str;
         const char *rel_name_str;
         int8_t identity;      // replica identit; pg_class.relreplident
         int16_t num_columns;
-        std::vector<MsgRelColumn> columns;
+        std::vector<PgMsgRelColumn> columns;
     };
 
     // stream ops in proto vers 2+ only
-    struct MsgStreamStart {
+    struct PgMsgStreamStart {
         int32_t xid;
         bool first;
     };
 
-    struct MsgStreamStop {
+    struct PgMsgStreamStop {
         // empty
     };
 
-    struct MsgStreamCommit {
+    struct PgMsgStreamCommit {
         int32_t xid;
         LSN_t commit_lsn;
         LSN_t xact_lsn;
         int64_t commit_ts;
     };
 
-    struct MsgStreamAbort {
+    struct PgMsgStreamAbort {
         int32_t xid;
         int32_t sub_xid;
         LSN_t   abort_lsn;  // proto vers 4+
         int64_t abort_ts;   // proto vers 4+
     };
 
-    struct MsgSchemaColumn {
+    struct PgMsgSchemaColumn {
         std::string column_name;
         std::string udt_type;
         std::optional<std::string> default_value;
@@ -142,16 +142,16 @@ namespace springtail
         bool is_pkey;        // is primary key
     };
 
-    struct MsgTable { // used by both create table and alter table
+    struct PgMsgTable { // used by both create table and alter table
         uint32_t oid;
         LSN_t lsn;
         int32_t xid;        // proto vers 2+ only if streaming
         std::string schema;
         std::string table;
-        std::vector<MsgSchemaColumn> columns;
+        std::vector<PgMsgSchemaColumn> columns;
     };
 
-    struct MsgDropTable {
+    struct PgMsgDropTable {
         uint32_t oid;
         LSN_t lsn;
         int32_t xid;        // proto vers 2+ only if streaming
@@ -173,28 +173,28 @@ namespace springtail
     /**
      * @brief Decoded replication message
      * @details Contains union of messages with the type
-     *          specified by the msg_type
+     *          specified by the Pgmsg_type
      */
     struct PgReplMsgDecoded {
         std::variant<
-            MsgKeepAlive,
-            MsgBegin,
-            MsgCommit,
-            MsgOrigin,
-            MsgCopy,
-            MsgMessage,
-            MsgType,
-            MsgTruncate,
-            MsgDelete,
-            MsgUpdate,
-            MsgInsert,
-            MsgRelation,
-            MsgStreamStart,
-            MsgStreamStop,
-            MsgStreamCommit,
-            MsgStreamAbort,
-            MsgTable,
-            MsgDropTable
+         PgMsgKeepAlive,
+         PgMsgBegin,
+         PgMsgCommit,
+         PgMsgOrigin,
+         PgMsgCopy,
+         PgMsgMessage,
+         PgMsgType,
+         PgMsgTruncate,
+         PgMsgDelete,
+         PgMsgUpdate,
+         PgMsgInsert,
+         PgMsgRelation,
+         PgMsgStreamStart,
+         PgMsgStreamStop,
+         PgMsgStreamCommit,
+         PgMsgStreamAbort,
+         PgMsgTable,
+         PgMsgDropTable
         > msg;
         PgReplMsgType msg_type;    // type defining union member
         int proto_version;         // which protocol version
@@ -205,8 +205,7 @@ namespace springtail
      */
     class PgReplMsg
     {
-
-    private:
+    protected:
         // Proto V1; message flags, first byte
         static inline constexpr char MSG_BEGIN    = 'B';
         static inline constexpr char MSG_COMMIT   = 'C';
@@ -270,16 +269,16 @@ namespace springtail
         int decode_stream_abort();
 
         // decoded messages
-        bool decode_create_table(MsgMessage &message);
-        bool decode_alter_table(MsgMessage &message);
-        bool decode_drop_table(MsgMessage &message);
-        void decode_schema_columns(nlohmann::json &json, std::vector<MsgSchemaColumn> &columns);
+        bool decode_create_table(PgMsgMessage &message);
+        bool decode_alter_table(PgMsgMessage &message);
+        bool decode_drop_table(PgMsgMessage &message);
+        void decode_schema_columns(nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);
 
         // helpers
-        static int decode_tuple(const char *buffer, int length, MsgTupleData &tuple);
+        static int decode_tuple(const char *buffer, int length, PgMsgTupleData &tuple);
         static int decode_string(const char *buffer, int length, const char** str_out);
 
-        static void dump_tuple(const MsgTupleData &tuple, std::stringstream &ss) noexcept;
+        static void dump_tuple(const PgMsgTupleData &tuple, std::stringstream &ss) noexcept;
 
     public:
         /**
@@ -292,7 +291,7 @@ namespace springtail
         /**
          * @brief Set the internal buffer based on buffer passed in
          *
-         * @param buffer pointer to buffer containing undecoded msg data
+         * @param buffer pointer to buffer containing undecoded Pgmsg data
          * @param length length of buffer
          */
         void set_buffer(const char *buffer, int length) noexcept;
@@ -316,8 +315,8 @@ namespace springtail
         /**
          * @brief convert a message to a printable string
          *
-         * @param msg refernece to message to convert
-         * @return readable string of msg
+         * @param Pgmsg refernece to message to convert
+         * @return readable string of Pgmsg
          */
         std::string dump_msg(const PgReplMsgDecoded &msg);
 
@@ -336,5 +335,30 @@ namespace springtail
          * @return LSN_t
          */
         static LSN_t str_to_LSN(const char *lsn_str) noexcept;
+    };
+
+    class PgReplMsgStream : public PgReplMsg {
+    public:
+        PgReplMsgStream(int protoversion) : PgReplMsg(protoversion) {}
+
+        void set_input_log(std::filesystem::path path) {
+             _stream = std::fstream(path, std::fstream::binary | std::fstream::in);
+        }
+
+        bool find_next_xact(PgReplMsgDecoded &msg);
+
+    private:
+        // Proto V1; message lengths if fixed length; excludes first byte for opcode
+        static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);
+        static inline constexpr int LEN_COMMIT   = (1 + 8 + 8 + 8);
+
+        // Proto V2
+        static inline constexpr int LEN_STREAM_START  = (4 + 1);
+        static inline constexpr int LEN_STREAM_STOP   = 0;
+        static inline constexpr int LEN_STREAM_COMMIT = (4 + 1 + 8 + 8 + 8);
+        static inline constexpr int LEN_STREAM_ABORT  = (4 + 4 + 8 + 8);
+
+        bool _is_streaming = false;
+        std::fstream _stream;
     };
 }

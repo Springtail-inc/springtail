@@ -46,8 +46,9 @@ find_package(spdlog)
 add_subdirectory(src/common)
 add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
-add_subdirectory(src/psql_cdc)
+add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
+add_subdirectory(src/pg_log_mgr)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})

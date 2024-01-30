@@ -3,9 +3,9 @@
 #include <string>
 #include <memory>
 
-#include <psql_cdc/pg_types.hh>
-#include <psql_cdc/exception.hh>
-#include <psql_cdc/libpq_connection.hh>
+#include <pg_repl/pg_types.hh>
+#include <pg_repl/exception.hh>
+#include <pg_repl/libpq_connection.hh>
 
 namespace springtail
 {
@@ -129,39 +129,39 @@ namespace springtail
         /** last time data was flushed */
         int64_t _last_flushed_time;
 
-        void send_standby_status_msg();
+        void _send_standby_status_msg();
 
-        void fast_forward_stream();
+        void _fast_forward_stream();
 
         // return true if data, false otherwise
-        bool check_data_stream(int timeout_secs);
+        bool _check_data_stream(int timeout_secs);
 
-        int process_xlog_header(const char *buffer, int length);
+        int _process_xlog_header(const char *buffer, int length);
 
-        int process_keep_alive(const char *buffer, int length);
+        int _process_keep_alive(const char *buffer, int length);
 
-        void read_msg_header();
+        void _read_msg_header();
 
-        void read_msg_data(bool async);
+        void _read_msg_data(bool async);
 
-        void read_copy_header();
+        void _read_copy_header();
 
-        void read_copy_data();
+        void _read_copy_data();
 
-        void send_copy_data(const char *buffer, int length, char cmd);
+        void _send_copy_data(const char *buffer, int length, char cmd);
 
-        int recv_copy_data(char *buffer, int length, bool async);
+        int _recv_copy_data(char *buffer, int length, bool async);
 
-        bool handle_timeout();
+        bool _handle_timeout();
 
-        void skip_message();
+        void _skip_message();
 
-        void dump_error_response();
+        void _dump_error_response();
 
-        static int encode_standby_status_msg(LSN_t last_received_lsn,
-                                             LSN_t last_flushed_lsn,
-                                             int64_t send_time,
-                                             char replybuf[34]);
+        static int _encode_standby_status_msg(LSN_t last_received_lsn,
+                                              LSN_t last_flushed_lsn,
+                                              int64_t send_time,
+                                              char replybuf[34]);
 
     public:
 

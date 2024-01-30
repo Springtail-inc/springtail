@@ -6,7 +6,7 @@
 
 // springtail includes
 #include <common/common.hh>
-#include <psql_cdc/pg_repl_msg.hh>
+#include <pg_repl/pg_repl_msg.hh>
 
 int main(int argc, char* argv[])
 {
