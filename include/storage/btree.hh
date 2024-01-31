@@ -1732,7 +1732,7 @@ namespace springtail {
          * completed.  Further operations on the BTree without setting the XID forward should result
          * in errors.
          */
-        void finalize()
+        uint64_t finalize()
         {
             // lock the tree
             std::unique_lock lock(_mutex);
@@ -1742,6 +1742,9 @@ namespace springtail {
 
             // mark the tree as finalized so that additional changes can't be made at this XID
             _finalized = true;
+
+            // return the new extent_id of the root
+            return _root->extent_id;
         }
     };
 }

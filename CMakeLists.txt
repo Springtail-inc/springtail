@@ -6,9 +6,12 @@ cmake_minimum_required(VERSION 3.22)
 
 ## project definition
 project(Springtail
-    VERSION 0.1
-    DESCRIPTION "Springtail source code"
-    LANGUAGES CXX)
+  VERSION 0.1
+  DESCRIPTION "Springtail source code"
+  LANGUAGES CXX)
+
+## add ctest framework
+include(CTest)
 
 ## check for vcpkg install
 if (NOT IS_DIRECTORY "${PROJECT_SOURCE_DIR}/external/vcpkg")
