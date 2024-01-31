@@ -106,18 +106,4 @@ namespace springtail {
             typedef TrackingAllocator<U, TAG> other;
         };
     };
-
-
-/*
-    // Equality comparison for compatibility
-    template <typename S, typename U>
-    bool operator==(const TrackingAllocator<S>&, const TrackingAllocator<U>&) {
-        return true;
-    }
-
-    template <typename S, typename U>
-    bool operator!=(const TrackingAllocator<S>&, const TrackingAllocator<U>&) {
-        return false;
-    }
-    */
 };

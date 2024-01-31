@@ -10,6 +10,7 @@
 #include <iostream>
 
 #include <common/exception.hh>
+#include <common/logging.hh>
 
 namespace springtail {
     /**
@@ -122,13 +123,13 @@ namespace springtail {
             static void worker_fn(ThreadWorkerPtr worker,
                                   ThreadQueue &queue)
             {
-                std::cout << "Thread starting: " << std::this_thread::get_id() << std::endl;
+                SPDLOG_DEBUG("Thread starting: {}\n", std::this_thread::get_id());
                 while (true) {
                     ThreadRequestPtr request = queue.pop();
                     // only get a nullptr if queue is empty, if so check for shutdown
                     if (request == nullptr) {
                         if (worker->is_shutdown()) {
-                            std::cout << "Thread exiting: " << std::this_thread::get_id() << std::endl;
+                            SPDLOG_DEBUG("Thread exiting: {}\n", std::this_thread::get_id());
                             return;
                         }
                         continue;

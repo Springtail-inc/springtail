@@ -9,6 +9,7 @@
 #include <cassert>
 
 #include <common/tracking_allocator.hh>
+#include <common/logging.hh>
 
 namespace springtail {
     class WriteCacheIndexNode;
@@ -148,10 +149,10 @@ namespace springtail {
         {
             // no locks held so may be inconsistent, use for debug only
             for (auto tid_itr = map.begin(); tid_itr != map.end(); tid_itr++) {
-                std::cout << "Table ID: " << tid_itr->first << std::endl;
+                SPDLOG_INFO("Table ID: {}\n", tid_itr->first);
                 EntryPtr entry = tid_itr->second;
                 for (auto entry_itr = entry->set.begin(); entry_itr != entry->set.end(); entry_itr++) {
-                    std::cout << (*entry_itr)->dump() << std::endl;
+                    SPDLOG_INFO("{}", (*entry_itr)->dump());
                 }
             }
         }

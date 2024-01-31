@@ -6,8 +6,6 @@
 #include <string>
 #include <string_view>
 
-//#include <write_cache/write_cache_index.hh>
-
 namespace springtail {
 
     class WriteCacheIndex;
@@ -39,7 +37,7 @@ namespace springtail {
          * @brief Get the write cache index object
          * @return std::shared_ptr<WriteCacheIndex>
          */
-        inline std::shared_ptr<WriteCacheIndex> get_index() {
+        std::shared_ptr<WriteCacheIndex> get_index() {
             return _index;
         }
 
