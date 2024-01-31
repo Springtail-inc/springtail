@@ -24,10 +24,12 @@ namespace springtail {
     /** Encapsulation of an index for a set of table partitions */
     class WriteCacheTableSet {
     public:
+        static constexpr int DEFAULT_ROW_TABLE_PARTITIONS = 8;
+
         /**
          * @brief Construct a new Write Cache Table Set object
          */
-        WriteCacheTableSet();
+        WriteCacheTableSet(int row_table_paritions=DEFAULT_ROW_TABLE_PARTITIONS);
 
         /**
          * @brief Add new row to index, updates all maps and sets
@@ -134,12 +136,6 @@ namespace springtail {
         void dump();
 
     private:
-        /**
-         * @brief Key for row data.  Ordered by tid, then eid, then xid, then rid
-         * Ordering xid before rid allows for easier eviction based on eid.
-         */
-
-
         /** root of tree, each level points to another set of ids sorted by max xid */
         WriteCacheIndexNodePtr _xid_root;
 
