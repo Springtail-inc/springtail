@@ -15,9 +15,9 @@
 namespace springtail
 {
 
-    WriteCacheTableSet::WriteCacheTableSet() :
+    WriteCacheTableSet::WriteCacheTableSet(int row_table_partitions) :
         _xid_root(std::make_shared<WriteCacheIndexNode>(-1, WriteCacheIndexNode::IndexType::ROOT)),
-        _row_map(std::make_shared<WriteCacheIndexRowMap>())
+        _row_map(std::make_shared<WriteCacheIndexRowMap>(row_table_partitions))
     {}
 
     void

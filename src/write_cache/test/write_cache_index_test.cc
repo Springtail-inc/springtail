@@ -66,14 +66,14 @@ namespace springtail {
      */
     class WriteCacheIndexTest : public ThreadTestState<WriteCacheIndexTestRequest> {
     public:
-        WriteCacheIndexTest() : _ts(std::make_shared<WriteCacheTableSet>()) {};
+        WriteCacheIndexTest() : _ts(std::make_shared<WriteCacheTableSet>(1)) {};
         void SetUp() override;
         std::vector<WriteCacheIndexTestRequestPtr> get_requests() override;
         void verify() override;
         void TearDown() override;
 
     private:
-        WriteCacheTableSetPtr _ts;
+        WriteCacheTableSetPtr _ts; // init with 1 partition so everything collides
         int _phase = 1;
 
         /** Helper to construct a test request for adding new rows */
@@ -598,7 +598,6 @@ namespace springtail {
         ThreadedTest<WriteCacheIndexTest, WriteCacheIndexTestRequest> tester(4);
         tester.start();
     }
-
 } // namespace springtail
 
 /** Deprecated */
