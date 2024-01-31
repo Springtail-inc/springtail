@@ -1,0 +1,381 @@
+#include <string>
+#include <string_view>
+#include <memory>
+#include <cassert>
+
+#include <nlohmann/json.hpp>
+
+#include <thrift/transport/TSocket.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/protocol/TCompactProtocol.h>
+
+#include <common/properties.hh>
+#include <common/logging.hh>
+#include <common/json.hh>
+#include <common/object_cache.hh>
+#include <common/common.hh>
+#include <common/exception.hh>
+
+#include "ThriftWriteCache.h"
+
+#include <write_cache/write_cache_client.hh>
+#include <write_cache/write_cache_client_factory.hh>
+
+namespace springtail {
+    /* static initialization must happen outside of class */
+    WriteCacheClient* WriteCacheClient::_instance {nullptr};
+    std::mutex WriteCacheClient::_instance_mutex;
+
+    WriteCacheClient *
+    WriteCacheClient::get_instance()
+    {
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new WriteCacheClient();
+        }
+
+        return _instance;
+    }
+
+    WriteCacheClient::WriteCacheClient()
+    {
+        nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
+        nlohmann::json client_json;
+        nlohmann::json server_json;
+
+        // fetch properties for the write cache client
+        if (!Json::get_to(json, "client", client_json)) {
+            throw Error("Write cache client settings not found");
+        }
+
+        if (!Json::get_to(json, "server", server_json)) {
+            throw Error("Write cache server settings not found");
+        }
+
+        // init channel pool
+        int max_connections;
+        int port;
+        std::string server;
+        Json::get_to<int>(client_json, "connections", max_connections, 8);
+        Json::get_to<int>(server_json, "port", port, 55051);
+
+        if (!Json::get_to<std::string>(client_json, "server", server)) {
+            throw Error("Host not found in write_cache.server settings");
+        }
+
+        // construct the thrift client pool.
+        // First argument is a factory object that constructs a thrift clients
+        // using the host and port from above
+        _thrift_client_pool = std::make_shared<ObjectPool<thrift::ThriftWriteCacheClient>>(
+            std::make_shared<ThriftObjectFactory>(server, port),
+            max_connections/2,
+            max_connections
+        );
+    }
+
+    void
+    WriteCacheClient::shutdown()
+    {
+         std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
+    // exposed client service interface below
+
+    void
+    WriteCacheClient::ping()
+    {
+        ThriftClient c = _get_client();
+        thrift::Status result;
+
+        c.client->ping(result);
+
+        std::cout << "Ping got: " << result.message << std::endl;
+        return;
+    }
+
+    void
+    WriteCacheClient::add_table_change(uint64_t tid, TableChange &change)
+    {
+        ThriftClient c = _get_client();
+        thrift::Status result;
+
+        thrift::TableChange request;
+        request.table_id = tid;
+        request.xid = change.xid;
+        request.xid_seq = change.xid_seq;
+        if (change.op == TableOp::TRUNCATE) {
+            request.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
+        } else if (change.op == TableOp::SCHEMA_CHANGE) {
+            request.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
+        }
+
+        c.client->add_table_change(result, request);
+
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, RowOp op, std::vector<RowData> rows)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::AddRowsRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.extent_id = eid;
+
+        // marshall up rows
+        for (const auto &r: rows) {
+            thrift::Row row;
+            row.xid = r.xid;
+            row.xid_seq = r.xid_seq;
+            row.primary_key = *r.pkey;
+
+            if (RowOp::DELETE == op) {
+                row.op = thrift::RowOpType::DELETE;
+            } else {
+                // update or insert
+                row.__set_data(std::move(std::string(*r.data)));
+            }
+
+            if (RowOp::INSERT == op) {
+                row.op = thrift::RowOpType::INSERT;
+            }
+
+            if (RowOp::UPDATE == op) {
+                row.op = thrift::RowOpType::UPDATE;
+                if (*r.pkey != *r.old_pkey) {
+                    // generate a delete for old pkey and an update for new pkey
+                    thrift::Row row_del;
+                    row_del.xid = r.xid;
+                    row_del.xid_seq = r.xid_seq;
+                    row_del.primary_key = *r.old_pkey;
+                    row_del.op = thrift::RowOpType::DELETE;
+
+                    request.rows.push_back(std::move(row_del));
+                }
+            }
+
+            request.rows.push_back(std::move(row));
+        }
+
+        c.client->add_rows(result, request);
+
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    std::vector<WriteCacheClient::TableChange>
+    WriteCacheClient::fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::GetTableChangeRequest request;
+        thrift::GetTableChangeResponse response;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->get_table_changes(response, request);
+
+        assert(response.table_id == tid);
+
+        // take response changes and move them into the TableChange vector to be returned
+        std::vector<TableChange> changes;
+        for (const auto &chg: response.changes) {
+            TableChange change;
+            change.xid = chg.xid;
+            change.xid_seq = chg.xid_seq;
+            if (chg.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
+                change.op = TableOp::TRUNCATE;
+            } else if (chg.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
+                change.op = TableOp::SCHEMA_CHANGE;
+            }
+            changes.push_back(std::move(change));
+        }
+
+        return changes;
+    }
+
+    std::vector<uint64_t>
+    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::ListTablesRequest request;
+        thrift::ListTablesResponse response;
+
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
+        c.client->list_tables(response, request);
+
+        cursor = response.cursor;
+
+        return std::vector<uint64_t>(response.table_ids.begin(), response.table_ids.end());
+    }
+
+    std::vector<uint64_t>
+    WriteCacheClient::list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid,
+                                   uint32_t count, uint64_t &cursor)
+    {
+        ThriftClient c = _get_client();
+        std::vector<uint64_t> extents;
+
+        thrift::ListExtentsRequest request;
+        thrift::ListExtentsResponse response;
+
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
+        c.client->list_extents(response, request);
+
+        assert(response.table_id == tid);
+
+        cursor = response.cursor;
+
+        return std::vector<uint64_t>(response.extent_ids.begin(), response.extent_ids.end());
+    }
+
+    std::vector<WriteCacheClient::RowData>
+    WriteCacheClient::fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
+                                 uint64_t end_xid, uint32_t count, uint64_t &cursor)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::GetRowsRequest request;
+        thrift::GetRowsResponse response;
+
+        request.table_id = tid;
+        request.extent_id = eid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+        request.count = count;
+        request.cursor = cursor;
+
+        c.client->get_rows(response, request);
+
+        cursor = request.cursor;
+
+        std::vector<RowData> rows;
+        for (const auto &r: response.rows) {
+            RowData row;
+
+            row.xid = r.xid;
+            row.xid_seq = r.xid_seq;
+            row.pkey = std::make_shared<std::string_view>(std::move(r.primary_key));
+            row.data = std::make_shared<std::string_view>(std::move(r.data));
+            if (r.op == thrift::RowOpType::UPDATE) {
+                row.op = RowOp::UPDATE;
+            } else if (r.op == thrift::RowOpType::INSERT) {
+                row.op = RowOp::INSERT;
+            } else if (r.op == thrift::RowOpType::DELETE) {
+                row.op = RowOp::DELETE;
+            }
+
+            rows.push_back(std::move(row));
+        }
+
+        return rows;
+    }
+
+    void
+    WriteCacheClient::evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::EvictTableRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->evict_table(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::EvictTableChangesRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->evict_table_changes(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::SetCleanFlagRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.extent_id = eid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->set_clean_flag(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+
+    void
+    WriteCacheClient::reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::ResetCleanFlagRequest request;
+        thrift::Status result;
+
+        request.table_id = tid;
+        request.start_xid = start_xid;
+        request.end_xid = end_xid;
+
+        c.client->reset_clean_flag(result, request);
+        if (result.status != thrift::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+
+        return;
+    }
+} // namespace

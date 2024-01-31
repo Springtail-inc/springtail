@@ -21,9 +21,6 @@ namespace springtail {
         logger->set_pattern("[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
         spdlog::set_default_logger(logger);
-
-        logger->error("Test");
-        SPDLOG_ERROR("Test 2");
     }
 
 }

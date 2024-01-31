@@ -10,25 +10,26 @@
 #include <iostream>
 
 #include <common/exception.hh>
+#include <common/logging.hh>
 
 namespace springtail {
     /**
      * @brief Thread pool
-     * @tparam ThreadRequest class implements the request to be queued 
+     * @tparam ThreadRequest class implements the request to be queued
      * @tparam ThreadContext class context passed into the worker (constructed per worker)
      */
     template <class ThreadRequest>
     class ThreadPool {
-    
+        using ThreadRequestPtr = std::shared_ptr<ThreadRequest>;
     private:
         /**
          * @brief Thread queue -- helper class
-         * @tparam ThreadRequest class that implements the request to be queued 
+         * @tparam ThreadRequest class that implements the request to be queued
          */
         class ThreadQueue {
         private:
             /** underlying request queue */
-            std::queue<std::shared_ptr<ThreadRequest>> _queue;
+            std::queue<ThreadRequestPtr> _queue;
             /** condition variable to block access */
             std::condition_variable _cv;
             /** mutex protecting condition variable */
@@ -38,10 +39,10 @@ namespace springtail {
 
         public:
             /**
-             * @brief Push an IO request onto the worker pool queue
-             * @param request IO request to enqueue
+             * @brief Push a request onto the worker pool queue
+             * @param request request to enqueue
              */
-            void push(std::shared_ptr<ThreadRequest> request)
+            void push(ThreadRequestPtr request)
             {
                 // lock queue lock
                 std::scoped_lock<std::mutex> queue_lock(_mutex);
@@ -52,11 +53,27 @@ namespace springtail {
             }
 
             /**
+             * @brief Push many requests onto queue at once and notify all threads
+             * @param requests requests to enqueue
+             */
+            void push(const std::vector<ThreadRequestPtr> &requests)
+            {
+                // lock queue lock
+                std::scoped_lock<std::mutex> queue_lock(_mutex);
+
+                // push requests onto queue and notify all threads
+                for (auto request: requests) {
+                    _queue.push(request);
+                }
+                _cv.notify_all();
+            }
+
+            /**
              * @brief Pop an IO request off the worker pool queue; or block if empty
              *        If shutdown is set, queue will be allowed to drain.
-             * @return std::shared_ptr<IORequest> ptr to the IORequest
-             */        
-            std::shared_ptr<ThreadRequest> pop()
+             * @return std::shared_ptr<ThreadRequest> ptr to the ThreadRequest
+             */
+            ThreadRequestPtr pop()
             {
                 // lock queue lock
                 std::unique_lock<std::mutex> queue_lock(_mutex);
@@ -72,7 +89,7 @@ namespace springtail {
                     return nullptr;
                 }
 
-                std::shared_ptr<ThreadRequest> val = _queue.front();
+                ThreadRequestPtr val = _queue.front();
                 _queue.pop();
 
                 return val;
@@ -81,35 +98,38 @@ namespace springtail {
             /**
              * @brief Set shutdown flag; wake all blocked workers
              */
-            inline void shutdown() { 
+            inline void shutdown() {
                 _shutdown = true;
                 _cv.notify_all();
             }
         };  // Class ThreadQueue
 
+        // forward decl for ptr typedef
+        class ThreadWorker;
+        using ThreadWorkerPtr = std::shared_ptr<ThreadWorker>;
+
         /**
          * @brief Worker thread helper class
-         * @tparam ThreadRequest class that implements the request to be queued 
          */
-        //template<class ThreadRequest>
-        class ThreadWorker {   
+        class ThreadWorker {
         private:
             bool _shutdown = false;   ///< shutdown flag for worker
-            
+
             /**
              * @brief Worker function; main worker thread entry
              * @param worker Worker thread
              * @param queue  Thread queue
              */
-            static void worker_fn(std::shared_ptr<ThreadWorker> worker,
-                                ThreadQueue &queue)
+            static void worker_fn(ThreadWorkerPtr worker,
+                                  ThreadQueue &queue)
             {
-                std::cout << "Thread starting: " << std::this_thread::get_id() << std::endl;
+                SPDLOG_DEBUG("Thread starting: {}\n", std::this_thread::get_id());
                 while (true) {
-                    std::shared_ptr<ThreadRequest> request = queue.pop();
+                    ThreadRequestPtr request = queue.pop();
                     // only get a nullptr if queue is empty, if so check for shutdown
                     if (request == nullptr) {
                         if (worker->is_shutdown()) {
+                            SPDLOG_DEBUG("Thread exiting: {}\n", std::this_thread::get_id());
                             return;
                         }
                         continue;
@@ -118,7 +138,6 @@ namespace springtail {
                     // process request
                     (*request)();
                 }
-                std::cout << "Thread exiting: " << std::this_thread::get_id() << std::endl;
             }
 
         public:
@@ -137,7 +156,7 @@ namespace springtail {
             /**
              * @brief Set shutdown flag to true
              */
-            inline void shutdown() { 
+            inline void shutdown() {
                 _shutdown = true;
             }
 
@@ -154,7 +173,7 @@ namespace springtail {
              * ThreadQueue<ThreadRequest> queue)> (static function)
              */
             inline
-            std::function<void(std::shared_ptr<ThreadWorker> worker,
+            std::function<void(ThreadWorkerPtr worker,
                             ThreadQueue &queue)> get_worker_fn() {
                 return this->worker_fn;
             }
@@ -168,7 +187,7 @@ namespace springtail {
         ThreadPool(int max_threads)
         {
             for (int i = 0; i < max_threads; i++) {
-                std::shared_ptr<ThreadWorker> worker = std::make_shared<ThreadWorker>();
+                ThreadWorkerPtr worker = std::make_shared<ThreadWorker>();
                 _workers.push_back(worker);
                 _threads.push_back(std::thread(worker->get_worker_fn(), worker, std::ref(_queue)));
             }
@@ -213,12 +232,24 @@ namespace springtail {
          * @brief Queue the thread request; exception if shutdown
          * @param request request to queue
          */
-        void queue(std::shared_ptr<ThreadRequest> request)
+        void queue(ThreadRequestPtr request)
         {
             if (_shutdown) {
                 throw Error("Pool has shutdown\n");
             }
             _queue.push(request);
+        }
+
+        /**
+         * @brief Queue multiple thread requests at once; exception if shutdown
+         * @param requests requests to queue
+         */
+        void queue(const std::vector<ThreadRequestPtr> &requests)
+        {
+            if (_shutdown) {
+                throw Error("Pool has shutdown\n");
+            }
+            _queue.push(requests);
         }
 
     private:
@@ -227,8 +258,8 @@ namespace springtail {
         /** list of thread */
         std::vector<std::thread> _threads;
         /** list of worker threads */
-        std::vector<std::shared_ptr<ThreadWorker>> _workers;
-        /** shutdown flag */ 
+        std::vector<ThreadWorkerPtr> _workers;
+        /** shutdown flag */
         bool _shutdown = false;
     };
 }

@@ -10,6 +10,9 @@
         "spdlog",
         "nlohmann-json",
         "lz4",
-        "redis-plus-plus"
+        { "name": "redis-plus-plus",
+          "features": ["cxx17"] },
+        "thrift",
+        "gtest"
     ]
 }
