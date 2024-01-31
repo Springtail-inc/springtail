@@ -17,6 +17,8 @@ namespace springtail {
         static inline constexpr char REDIS_CONFIG[] = "redis";
         /** IOPool config section in properties file */
         static inline constexpr char IOPOOL_CONFIG[] = "iopool";
+        /** Write cache config */
+        static inline constexpr char WRITE_CACHE_CONFIG[] = "write_cache";
 
         /** Default properties file, defined by make -D option, or macro above */
         static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;
