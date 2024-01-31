@@ -338,16 +338,33 @@ namespace springtail
     };
 
     class PgReplMsgStream : public PgReplMsg {
-    public:
+    public:      
+        struct PgTransaction {
+            std::filesystem::path begin_path;
+            std::filesystem::path commit_path;            
+            uint64_t begin_offset;         
+            uint64_t commit_offset;                     
+            LSN_t xact_lsn;
+            uint32_t xid;
+        };
+        using PgTransactionPtr = std::shared_ptr<PgTransaction>;
+        
         PgReplMsgStream(int protoversion) : PgReplMsg(protoversion) {}
 
-        void set_input_log(std::filesystem::path path) {
-             _stream = std::fstream(path, std::fstream::binary | std::fstream::in);
+        void set_log_file(std::filesystem::path path, uint64_t offset, uint64_t size) {
+            _current_path = path;
+            _current_offset = offset;
+            _end_offset = offset + size;
+            _stream = std::fstream(path, std::fstream::binary | std::fstream::in);
+            if (offset != 0) {
+                _stream.seekp(_current_offset, std::fstream::beg);
+            }
         }
 
-        bool find_next_xact(PgReplMsgDecoded &msg);
+        std::vector<PgTransactionPtr> scan_log();
 
     private:
+
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);
         static inline constexpr int LEN_COMMIT   = (1 + 8 + 8 + 8);
@@ -358,7 +375,64 @@ namespace springtail
         static inline constexpr int LEN_STREAM_COMMIT = (4 + 1 + 8 + 8 + 8);
         static inline constexpr int LEN_STREAM_ABORT  = (4 + 4 + 8 + 8);
 
-        bool _is_streaming = false;
+        void _scan_message();
+
+        void _skip_tuple();
+        void _skip_string();
+        void _skip_relation();
+        void _skip_insert();
+        void _skip_update();
+        void _skip_delete();    
+        void _skip_truncate();   
+        void _skip_type();   
+        void _skip_origin();
+        void _skip_message();              
+
+        void _seek_stream() {
+            _stream.seekg(_current_offset, std::fstream::beg);
+        }
+
+        uint32_t _recvint32() {
+            _seek_stream();
+            uint32_t res = recvint32(_stream);
+            _current_offset += 4;
+            return res;
+        }
+
+        uint64_t _recvint64() {
+            _seek_stream();
+            uint64_t res = recvint64(_stream);
+            _current_offset += 8;
+            return res;
+        }
+
+        uint16_t _recvint16() {
+            _seek_stream();
+            uint16_t res = recvint16(_stream);
+            _current_offset += 2;
+            return res;            
+        }
+
+        uint8_t _recvint8() {
+            _seek_stream();
+            uint8_t res = recvint8(_stream);
+            _current_offset++;
+            return res;
+        }
+
+        void _read_buffer(char *buffer, int size) {
+            _seek_stream();
+            _stream.read(buffer, size);
+            _current_offset += size;
+        }
+
         std::fstream _stream;
+        std::filesystem::path _current_path;
+        uint64_t _current_offset;
+        uint64_t _end_offset;
+        PgTransactionPtr _current_xact = nullptr;
+        std::map<uint64_t, PgTransactionPtr> _xact_map;
+
+        std::vector<PgTransactionPtr> _committed_xacts;
     };
 }

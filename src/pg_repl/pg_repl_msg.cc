@@ -5,6 +5,8 @@
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
+#include <common/logging.hh>
+
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_repl_msg.hh>
 
@@ -1233,6 +1235,378 @@ namespace springtail
         }
 
         return ss.str();
+    }
+
+    void
+    PgReplMsgStream::_skip_tuple()
+    {
+        int num_cols = _recvint16();
+
+        for (int i = 0; i < num_cols; i++) {
+            _seek_stream();
+            char type = _recvint8();
+            if (type == 'n' || type =='u') {
+                continue;
+            }
+            uint32_t data_len = recvint32(_stream);
+            _current_offset += (4 + data_len);
+        }
+    }
+
+    void
+    PgReplMsgStream::_skip_string()
+    {
+        // seek to current offset
+        _seek_stream();
+
+        // need to find terminating null char
+        char buffer[128];
+        uint64_t str_len = 0;
+
+        // iterate, reading in 128 characters and searching for null char
+        while (true) {
+            uint64_t length = std::min(128ull, _end_offset - _current_offset);
+            _stream.read(buffer, length);
+            uint64_t curr_len = strnlen(buffer, length);
+            str_len += curr_len;
+            // curr_len == 0 if string is null, length if no null found, or number of bytes up to null char
+            if (curr_len < length) {
+                break;
+            }
+            if (length == 0) {
+                // string not found in message block!
+                throw PgMessageTooSmallError();
+            }
+        }
+
+        _current_offset += str_len + 1; // null char is 1 more than str_len
+    }
+
+    void
+    PgReplMsgStream::_skip_relation()
+    {
+        // 4 - transaction ID if streaming
+        if (_streaming) {
+            _current_offset += 4;
+        }
+
+        // 4 - oid
+        _current_offset += 4;
+
+        _skip_string(); // namespace str
+
+        _skip_string(); // rel name str
+
+        _current_offset++;
+
+        int16_t num_columns = _recvint16();
+
+        for (int i = 0; i < num_columns; i++) {
+            _current_offset++;
+            _skip_string();  // column name
+            _current_offset += (4 + 4); // oid, type modifier
+        }
+
+        return;
+    }
+
+    void
+    PgReplMsgStream::_skip_insert()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+        _current_offset += (4 + 1); // rel id + new type flag
+        _skip_tuple();
+    }
+
+    void
+    PgReplMsgStream::_skip_update()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += 4; // rel_id
+
+        _seek_stream();
+        char type = _stream.get(); // old type
+        if (type == 'K' || type == 'O') {
+            _current_offset++;
+        }
+        _skip_tuple();
+
+        _seek_stream();
+        type = _stream.get(); // new type; should be N
+        if (type == 'N') {
+            _current_offset++;
+        }
+        _skip_tuple();
+    }
+
+    void
+    PgReplMsgStream::_skip_delete()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += 4; // rel_id
+
+        _seek_stream();
+        char type = _stream.get(); // old type
+        if (type == 'K' || type == 'O') {
+            _current_offset++;
+        }
+        _skip_tuple();
+    }
+
+    void
+    PgReplMsgStream::_skip_truncate()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        uint32_t num_rels = _recvint32();
+
+        _current_offset++; // options flag
+
+        _current_offset += (4 * num_rels); // rel ids
+    }
+
+    void
+    PgReplMsgStream::_skip_type()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += 4; // oid
+
+        _skip_string(); // namespace
+        _skip_string(); // data type
+    }
+
+    void
+    PgReplMsgStream::_skip_origin()
+    {
+        _current_offset += 8;
+        _skip_string();
+    }
+
+    void
+    PgReplMsgStream::_skip_message()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += (1 + 8); // flags + lsn
+
+        _skip_string(); // msg prefix
+
+        uint32_t len = _recvint32(); // msg len
+
+        _current_offset += len; // msg
+    }
+
+
+    /**
+     * @brief Retrieve next message from internal buffer
+     * @param msg reference to message filled in if
+     * @throws PgMessageTooSmallError
+     * @throws PgUnexpectedDataError
+     * @throws PgUnknownMessageError
+     */
+    std::vector<PgReplMsgStream::PgTransactionPtr>
+    PgReplMsgStream::scan_log()
+    {
+        if (!_stream.is_open()) {
+            throw PgIOError();
+        }
+        while (_current_offset < _end_offset) {
+            _scan_message();
+        }
+
+        return _committed_xacts;
+    }
+
+    void
+    PgReplMsgStream::_scan_message()
+    {
+        uint64_t start_offset = _current_offset;
+
+        // first byte is opcode
+        char msg_type = recvint8(_stream);
+        _current_offset++;
+
+        switch(msg_type) {
+
+            // V1 Protocol
+            case MSG_BEGIN: { // begin
+                PgTransactionPtr xact = std::make_shared<PgTransaction>();
+                xact->begin_path = _current_path;
+                xact->begin_offset = _current_offset;
+
+                char buffer[LEN_BEGIN];
+                _read_buffer(buffer, LEN_BEGIN);
+
+                set_buffer(buffer, LEN_BEGIN);
+                _current_offset += decode_begin(); // returns bytes decoded
+
+                assert(_decoded_msg.msg_type == PgReplMsgType::BEGIN);
+                PgMsgBegin &begin_msg = std::get<PgMsgBegin>(_decoded_msg.msg);
+                xact->xact_lsn = begin_msg.xact_lsn;
+                xact->xid = begin_msg.xid;
+
+                _current_xact = xact;
+                break;
+            }
+
+            case MSG_COMMIT: { // commit
+                uint64_t commit_offset = _current_offset;
+
+                char buffer[LEN_COMMIT];
+                _read_buffer(buffer, LEN_COMMIT);
+
+                set_buffer(buffer, LEN_COMMIT);
+                _current_offset += decode_commit();
+
+                PgMsgCommit &commit_msg = std::get<PgMsgCommit>(_decoded_msg.msg);
+
+                PgTransactionPtr xact = _current_xact;
+                if (_current_xact == nullptr || commit_msg.xact_lsn != _current_xact->xact_lsn) {
+                    // we don't have the start of the transaction...
+                    SPDLOG_WARN("Mismatch no xact matching commit msg");
+                    break;
+                }
+                xact->commit_path = _current_path;
+                xact->commit_offset = commit_offset;
+
+                _committed_xacts.push_back(xact);
+                _current_xact = nullptr;
+
+                break;
+            }
+
+            case MSG_RELATION: // relation
+                _skip_relation();
+                break;
+
+            case MSG_INSERT: // insert
+                _skip_insert();
+                break;
+
+            case MSG_UPDATE: // update
+                _skip_update();
+                break;
+
+            case MSG_DELETE: // delete
+                _skip_delete();
+                break;
+
+            case MSG_TRUNCATE: // truncate
+                _skip_truncate();
+                break;
+
+            case MSG_ORIGIN: // origin
+                _skip_origin();
+                break;
+
+            case MSG_MESSAGE: // message
+                _skip_message();
+                break;
+
+            case MSG_TYPE: // type
+                _skip_type();
+                break;
+
+            case MSG_STREAM_START: {
+                uint64_t start_offset = _current_offset;
+
+                _streaming = true;
+
+                char buffer[LEN_STREAM_START];
+                _read_buffer(buffer, LEN_STREAM_START);
+
+                set_buffer(buffer, LEN_STREAM_START);
+                _current_offset += decode_stream_start();
+
+                PgMsgStreamStart &start_msg = std::get<PgMsgStreamStart>(_decoded_msg.msg);
+
+                if (start_msg.first) {
+                    // new transaction
+                    PgTransactionPtr xact = std::make_shared<PgTransaction>();
+                    xact->begin_path = _current_path;
+                    xact->begin_offset = start_offset;
+                    xact->xid = start_msg.xid;
+                    _xact_map.insert({xact->xid, xact});
+                }
+                break;
+            }
+
+            case MSG_STREAM_STOP:
+                _streaming = false;
+                _current_offset += LEN_STREAM_STOP;
+                break;
+
+            case MSG_STREAM_COMMIT: {
+                uint64_t commit_offset = _current_offset;
+
+                char buffer[LEN_STREAM_COMMIT];
+                _read_buffer(buffer, LEN_STREAM_COMMIT);
+
+                set_buffer(buffer, LEN_STREAM_COMMIT);
+                _current_offset += decode_stream_commit();
+
+                PgMsgStreamCommit &commit_msg = std::get<PgMsgStreamCommit>(_decoded_msg.msg);
+
+                auto itr = _xact_map.find(commit_msg.xid);
+                if (itr == _xact_map.end()) {
+                    // no start streaming xact found...
+                    break;
+                }
+
+                PgTransactionPtr xact = itr->second;
+                xact->commit_path = _current_path;
+                xact->commit_offset = commit_offset;
+                xact->xact_lsn = commit_msg.xact_lsn;
+
+                _committed_xacts.push_back(xact);
+                break;
+            }
+
+            case MSG_STREAM_ABORT: {
+                char buffer[LEN_STREAM_ABORT];
+                _read_buffer(buffer, LEN_STREAM_ABORT);
+
+                set_buffer(buffer, LEN_STREAM_ABORT);
+                _current_offset += decode_stream_abort();
+
+                PgMsgStreamAbort &abort_msg = std::get<PgMsgStreamAbort>(_decoded_msg.msg);
+
+                _xact_map.erase(abort_msg.xid);
+
+                break;
+            }
+
+            default: // unknown/unhandled
+                std::cerr << "Unknown opcode to decode: " << msg_type << std::endl;
+                throw PgUnknownMessageError();
+        }
+
+        // sanity check
+        if (_current_offset > _end_offset) {
+            std::cerr << "Buffer overrun in decode: consumed="
+                      << (_current_offset - start_offset) << ", bytes available="
+                      << (_end_offset - start_offset) << std::endl;
+
+            /* Note: an error here will really require closing and re-opening the
+             * replication stream to try and re-read the data */
+
+            throw PgUnexpectedDataError();
+        }
     }
 
 }
