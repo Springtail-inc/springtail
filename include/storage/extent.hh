@@ -60,15 +60,6 @@ namespace springtail {
         }
     };
 
-#if 0
-    enum class ExtentType : uint8_t {
-        LEAF = 0x00,
-        BRANCH = 0x01,
-        ROOT_LEAF = 0x02,
-        ROOT_
-    };
-#endif
-
     /** Definition of the extent header. */
     struct ExtentHeader {
     public:
@@ -362,7 +353,7 @@ namespace springtail {
             uint32_t offset = (pos->data - _fixed_data->data());
             std::copy_backward(_fixed_data->data() + offset,
                                _fixed_data->data() + _fixed_data->size() - _row_size,
-                               _fixed_data->data() + offset + _row_size);
+                               _fixed_data->data() + _fixed_data->size());
             std::fill(_fixed_data->data() + offset,
                       _fixed_data->data() + offset + _row_size, char(0));
 
@@ -450,7 +441,7 @@ namespace springtail {
 
             // if doesn't exist, append and return the new location
             uint32_t new_offset = _variable_data->size();
-            _variable_data->resize(_variable_data->size() + size + 4);
+            _variable_data->resize(new_offset + size + 4);
             std::copy_n(reinterpret_cast<char *>(&size), 4, _variable_data->data() + new_offset);
             std::copy_n(buffer, size, _variable_data->data() + new_offset + 4);
 

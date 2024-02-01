@@ -10,8 +10,6 @@ find_program(
 
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
-find_package(GTest CONFIG REQUIRED)
-
 # set variables for thrift schema .thrift file and generated .h
 set(THRIFT_SCHEMA "write_cache.thrift")
 set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")

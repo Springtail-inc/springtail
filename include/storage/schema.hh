@@ -123,6 +123,7 @@ namespace springtail {
         /** Returns a Tuple representing an ordered subset of the columns in the schema. */
         virtual std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const = 0;
     };
+    typedef std::shared_ptr<Schema> SchemaPtr;
 
     /**
      * Defines the schema for a physical extent in a table.  Creates mutable field accessors to
@@ -188,7 +189,7 @@ namespace springtail {
         {
             auto &&i = _field_map.find(name);
             if (i == _field_map.end()) {
-                throw SchemaError("No such column");
+                throw SchemaError(fmt::format("No such column: {}", name));
             }
             return i->second.first;
         }
@@ -244,6 +245,7 @@ namespace springtail {
         std::shared_ptr<Tuple> tuple_subset(std::shared_ptr<Tuple> tuple,
                                             const std::vector<std::string> &columns) const;
     };
+    typedef std::shared_ptr<ExtentSchema> ExtentSchemaPtr;
 
     /**
      * Manages a virtual schema that is layered on top of the ExtentSchema.  The VirtualSchema uses
@@ -317,5 +319,6 @@ namespace springtail {
          */
         std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const override;
     };
+    typedef std::shared_ptr<VirtualSchema> VirtualSchemaPtr;
 
 }

@@ -349,7 +349,8 @@ namespace springtail {
     public:
         NullableBoolField(uint32_t offset, uint8_t bool_bit,
                           uint32_t null_offset, uint8_t null_bit)
-            : BoolField(offset, bool_bit),
+            : MutableField(offset),
+              BoolField(offset, bool_bit),
               NullableField(null_offset, null_bit)
         { }
 
@@ -594,7 +595,8 @@ namespace springtail {
     public:
         NullableNumberField(uint32_t offset,
                             uint32_t null_offset, uint8_t null_bit)
-            : NumberField<T>(offset),
+            : MutableField(offset),
+              NumberField<T>(offset),
               NullableField(null_offset, null_bit)
         { }
 
@@ -734,7 +736,8 @@ namespace springtail {
     class NullableTextField : public TextField, public NullableField {
     public:
         NullableTextField(uint32_t offset, uint32_t null_offset, uint8_t null_bit)
-            : TextField(offset),
+            : MutableField(offset),
+              TextField(offset),
               NullableField(null_offset, null_bit)
         { }
 
@@ -825,7 +828,8 @@ namespace springtail {
     class NullableBinaryField : public BinaryField, public NullableField {
     public:
         NullableBinaryField(uint32_t offset, uint32_t null_offset, uint8_t null_bit)
-            : BinaryField(offset),
+            : MutableField(offset),
+              BinaryField(offset),
               NullableField(null_offset, null_bit)
         { }
 

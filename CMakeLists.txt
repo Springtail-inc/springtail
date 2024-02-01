@@ -44,6 +44,7 @@ find_package(Psql)
 find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 # find_package(Boost REQUIRED boost-program-options)
+find_package(GTest CONFIG REQUIRED)
 
 ## source modules
 add_subdirectory(src/common)
