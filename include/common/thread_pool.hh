@@ -8,6 +8,7 @@
 #include <functional>
 #include <condition_variable>
 #include <iostream>
+#include <atomic>
 
 #include <common/exception.hh>
 #include <common/logging.hh>
@@ -35,7 +36,7 @@ namespace springtail {
             /** mutex protecting condition variable */
             std::mutex _mutex;
             /** shutdown flag */
-            bool _shutdown = false;
+            std::atomic<bool> _shutdown = false;
 
         public:
             /**

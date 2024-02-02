@@ -1,7 +1,8 @@
 # source files
 set(PG_LOG_SOURCES
     pg_log_mgr.cc
-    pg_log_file.cc
+    pg_log_writer.cc
+    pg_log_reader.cc
 )
 
 add_executable(pg_log_mgr ${PG_LOG_SOURCES})

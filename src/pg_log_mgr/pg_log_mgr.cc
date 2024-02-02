@@ -39,19 +39,21 @@ namespace springtail {
 
         // get the protocol version
         _proto_version = _pg_conn.get_protocol_version();
+
+        // create write thread
+        _writer_thread = std::thread(&PgLogMgr::log_writer, this);
+        _reader_thread = std::thread(&PgLogMgr::log_reader, this);
     }
 
     void
-    PgLogMgr::process_log()
+    PgLogMgr::log_writer()
     {
-        if (_logger == nullptr) {
-            _create_logger();
-        }
+        PgLogWriterPtr logger = this->_create_logger();
 
         PgCopyData data;
-        uint64_t start_offset = _logger->offset();
+        uint64_t start_offset = logger->offset();
 
-        while (true) {
+        while (!_shutdown) {
             _pg_conn.read_data(data);
 
             SPDLOG_DEBUG("Recevied data: length={}, msg_length={}, msg_offset={}\n",
@@ -63,16 +65,16 @@ namespace springtail {
             }
 
             // log data, if data message is complete then record start/end offsets
-            if (_logger->log_data(data)) {
-                uint64_t end_offset = _logger->offset();
+            if (logger->log_data(data)) {
+                uint64_t end_offset = logger->offset();
 
                 // record start/end offsets for this message
-                _queue.push(start_offset, end_offset, _logger->filename());
+                _queue.push(start_offset, end_offset, logger->filename());
 
                 // check to see if we should rollover log
                 if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
-                    _logger->close();
-                    _create_logger();
+                    logger->close();
+                    logger = this->_create_logger();
                     start_offset = 0;
                 } else {
                     start_offset = end_offset;
@@ -82,10 +84,26 @@ namespace springtail {
     }
 
     void
+    PgLogMgr::log_reader()
+    {
+        while (!_shutdown) {
+
+            // get log entry from queue
+            PgLogQueue::PgLogQueueEntryPtr log_entry = this->_queue.pop();
+            if (log_entry == nullptr) {
+                continue;
+            }
+
+
+
+        }
+    }
+
+    PgLogWriterPtr
     PgLogMgr::_create_logger()
     {
         std::filesystem::path file = _base_path;
         file.append(fmt::format("{}", get_time_in_millis()));
-        _logger = std::make_shared<PgLogFile>(file);
+        return std::make_shared<PgLogWriter>(file, _proto_version);
     }
 }

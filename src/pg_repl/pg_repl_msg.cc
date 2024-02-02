@@ -12,10 +12,6 @@
 
 namespace springtail
 {
-    PgReplMsg::PgReplMsg(int proto_version) noexcept
-      : _proto_version(proto_version) {}
-
-
     /**
      * @brief Initialize message to empty/invalid message
      */
@@ -1248,7 +1244,7 @@ namespace springtail
             if (type == 'n' || type =='u') {
                 continue;
             }
-            uint32_t data_len = recvint32(_stream);
+            uint32_t data_len = recvint32(*_stream);
             _current_offset += (4 + data_len);
         }
     }
@@ -1266,7 +1262,7 @@ namespace springtail
         // iterate, reading in 128 characters and searching for null char
         while (true) {
             uint64_t length = std::min(128ull, _end_offset - _current_offset);
-            _stream.read(buffer, length);
+            _stream->read(buffer, length);
             uint64_t curr_len = strnlen(buffer, length);
             str_len += curr_len;
             // curr_len == 0 if string is null, length if no null found, or number of bytes up to null char
@@ -1330,14 +1326,14 @@ namespace springtail
         _current_offset += 4; // rel_id
 
         _seek_stream();
-        char type = _stream.get(); // old type
+        char type = _stream->get(); // old type
         if (type == 'K' || type == 'O') {
             _current_offset++;
         }
         _skip_tuple();
 
         _seek_stream();
-        type = _stream.get(); // new type; should be N
+        type = _stream->get(); // new type; should be N
         if (type == 'N') {
             _current_offset++;
         }
@@ -1354,7 +1350,7 @@ namespace springtail
         _current_offset += 4; // rel_id
 
         _seek_stream();
-        char type = _stream.get(); // old type
+        char type = _stream->get(); // old type
         if (type == 'K' || type == 'O') {
             _current_offset++;
         }
@@ -1411,25 +1407,28 @@ namespace springtail
         _current_offset += len; // msg
     }
 
-    void
-    PgReplMsgStream::set_log_file(std::filesystem::path path, uint64_t offset, uint64_t size)
+
+    std::vector<PgReplMsgStream::PgTransactionPtr>
+    PgReplMsgStream::scan_log(std::shared_ptr<std::fstream> stream,
+                              const std::filesystem::path &path,
+                              uint64_t offset, uint64_t size,
+                              int proto_version)
     {
         _current_path = path;
         _current_offset = offset;
         _end_offset = offset + size;
-        _stream = std::fstream(path, std::fstream::binary | std::fstream::in);
-        if (offset != 0) {
-            _stream.seekp(_current_offset, std::fstream::beg);
-        }
-        _committed_xacts.clear();
-    }
 
-    std::vector<PgReplMsgStream::PgTransactionPtr>
-    PgReplMsgStream::scan_log()
-    {
-        if (!_stream.is_open()) {
+        set_proto_version(proto_version);
+
+        if (!_stream->is_open()) {
             throw PgIOError();
         }
+
+        if (offset != 0) {
+            _stream->seekg(_current_offset, std::fstream::beg);
+        }
+        _committed_xacts.clear();
+
         while (_current_offset < _end_offset) {
             _scan_message();
         }
@@ -1443,7 +1442,7 @@ namespace springtail
         uint64_t start_offset = _current_offset;
 
         // first byte is opcode
-        char msg_type = recvint8(_stream);
+        char msg_type = recvint8(*_stream);
         _current_offset++;
 
         switch(msg_type) {

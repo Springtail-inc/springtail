@@ -230,7 +230,7 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail DROP TABLE";
 
         /** Protocol version */
-        int _proto_version;
+        int _proto_version = 1;
 
         /** In streaming mode, set true after Stream Start, set false after Stream Stop */
         bool _streaming = false;
@@ -283,14 +283,20 @@ namespace springtail
     public:
         /**
          * @brief Constructor
-         *
          * @param proto_version Postgres replication protocol version
          */
-        PgReplMsg(int proto_version) noexcept;
+        PgReplMsg(int proto_version) noexcept : _proto_version(proto_version) {};
+
+        PgReplMsg() {}
+
+        /**
+         * @brief Set the proto version
+         * @param proto_version new version
+         */
+        void set_proto_version(int proto_version) noexcept { _proto_version = proto_version; }
 
         /**
          * @brief Set the internal buffer based on buffer passed in
-         *
          * @param buffer pointer to buffer containing undecoded Pgmsg data
          * @param length length of buffer
          */
@@ -351,23 +357,22 @@ namespace springtail
 
         /**
          * @brief Construct a new Pg Repl Msg Stream object
-         * @param protoversion version of protocol to support
          */
-        PgReplMsgStream(int protoversion) : PgReplMsg(protoversion) {}
-
-        /**
-         * @brief Set the log file, offset and size for parsing
-         * @param path path of log file
-         * @param offset offset of messages from start of file
-         * @param size size of message chunk to parse
-         */
-        void set_log_file(std::filesystem::path path, uint64_t offset, uint64_t size);
+        PgReplMsgStream() : PgReplMsg() {}
 
         /**
          * @brief Scan the log specific from previous set_log_file()
+         * @param stream file stream to open file
+         * @param path path of log file
+         * @param offset offset of messages from start of file
+         * @param size size of message chunk to parse
+         * @param proto_version protocol version of message chunk
          * @return std::vector<PgTransactionPtr> a list of transaction entries
          */
-        std::vector<PgTransactionPtr> scan_log();
+        std::vector<PgTransactionPtr> scan_log(std::shared_ptr<std::fstream> _stream,
+                                               const std::filesystem::path &path,
+                                               uint64_t offset, uint64_t size,
+                                               int proto_version);
 
     private:
 
@@ -398,13 +403,13 @@ namespace springtail
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {
-            _stream.seekg(_current_offset, std::fstream::beg);
+            _stream->seekg(_current_offset, std::fstream::beg);
         }
 
         /** Read stream at current offset, return uint32_t */
         uint32_t _recvint32() {
             _seek_stream();
-            uint32_t res = recvint32(_stream);
+            uint32_t res = recvint32(*_stream);
             _current_offset += 4;
             return res;
         }
@@ -412,7 +417,7 @@ namespace springtail
         /** Read stream at current offset, return uint64_t */
         uint64_t _recvint64() {
             _seek_stream();
-            uint64_t res = recvint64(_stream);
+            uint64_t res = recvint64(*_stream);
             _current_offset += 8;
             return res;
         }
@@ -420,7 +425,7 @@ namespace springtail
         /** Read stream at current offset, return uint16_t */
         uint16_t _recvint16() {
             _seek_stream();
-            uint16_t res = recvint16(_stream);
+            uint16_t res = recvint16(*_stream);
             _current_offset += 2;
             return res;
         }
@@ -428,7 +433,7 @@ namespace springtail
         /** Read stream at current offset, return uint8_t */
         uint8_t _recvint8() {
             _seek_stream();
-            uint8_t res = recvint8(_stream);
+            uint8_t res = recvint8(*_stream);
             _current_offset++;
             return res;
         }
@@ -436,12 +441,12 @@ namespace springtail
         /** Read stream at current offset and copy data into buffer */
         void _read_buffer(char *buffer, int size) {
             _seek_stream();
-            _stream.read(buffer, size);
+            _stream->read(buffer, size);
             _current_offset += size;
         }
 
         /** Underlying file stream */
-        std::fstream _stream;
+        std::shared_ptr<std::fstream> _stream;
         /** Underlying file path for stream */
         std::filesystem::path _current_path;
         /** Current offset within stream (from beginning) */

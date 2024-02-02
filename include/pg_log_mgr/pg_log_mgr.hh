@@ -6,8 +6,10 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <thread>
+#include <atomic>
 
-#include <pg_log_mgr/pg_log_file.hh>
+#include <pg_log_mgr/pg_log_writer.hh>
 
 namespace springtail {
     /**
@@ -16,8 +18,14 @@ namespace springtail {
      */
     class PgLogMgr {
     private:
+
+        /** Queue class between log writer and log reader */
         class PgLogQueue {
         public:
+            /**
+             * @brief Queue Entry, encodes start/end offset and filename,
+             *        plus number of messages covered by offset range
+             */
             struct PgLogQueueEntry {
                 uint64_t start_offset;
                 uint64_t end_offset;
@@ -59,32 +67,46 @@ namespace springtail {
 
             /**
              * @brief Pop entry from queue, optionally waiting for entry
-             * @param block if true then block waiting, default=true
              * @return PgLogQueueEntryPtr log queue entry
              */
-            PgLogQueueEntryPtr pop(bool block=true)
+            PgLogQueueEntryPtr pop()
             {
                 std::unique_lock<std::mutex> write_lock{_mutex};
-                if (_queue.empty()) {
-                    if (!block) {
-                        return nullptr;
-                    } else {
-                        // wait on cv until not empty
-                        _cv.wait(write_lock, [this]{ return !_queue.empty(); });
-                    }
+                while (_queue.empty() && !_shutdown) {
+                    // wait on cv until not empty
+                    _cv.wait(write_lock);
                 }
+
+                if (_queue.empty()) {
+                    return nullptr;
+                }
+
                 PgLogQueueEntryPtr &entry = _queue.front();
+
                 _queue.pop();
                 return entry;
             }
 
+            /** Shutdown queue */
+            void shutdown()
+            {
+                _shutdown = true;
+                _cv.notify_all();
+            }
+
         private:
+            /** mutex to protect queue */
             std::mutex _mutex;
+            /** condition variable for queue to wait on */
             std::condition_variable _cv;
+            /** internal queue */
             std::queue<PgLogQueueEntryPtr> _queue;
+            /** shutdown flag */
+            std::atomic<bool> _shutdown = false;
         };
 
     public:
+        /** Constructor */
         PgLogMgr(std::filesystem::path base_path,
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
@@ -102,9 +124,14 @@ namespace springtail {
         void start_streaming();
 
         /**
-         * @brief process data from replication stream in loop
+         * @brief process data from replication stream in loop, product to queue
          */
-        void process_log();
+        void log_writer();
+
+        /**
+         * @brief consume data from queue, scan log entries and notify GC
+         */
+        void log_reader();
 
     private:
         /** minimum size for log rollover */
@@ -128,12 +155,17 @@ namespace springtail {
         /** base path */
         std::filesystem::path _base_path;
 
-        /** PG log file */
-        PgLogFilePtr _logger = nullptr;
+        /** log writer thread */
+        std::thread _writer_thread;
 
+        std::thread _reader_thread;
+
+        std::atomic<bool> _shutdown = false;
+
+        /** queue shared between writer (producer) and reader (consumer threads )*/
         PgLogQueue _queue;
 
-        void _create_logger();
+        PgLogWriterPtr _create_logger();
     };
 
 } // namespace springtail

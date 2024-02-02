@@ -4,12 +4,13 @@
 #include <common/exception.hh>
 
 #include <pg_repl/pg_types.hh>
-#include <pg_log_mgr/pg_log_file.hh>
+#include <pg_log_mgr/pg_log_writer.hh>
 
 
 namespace springtail {
 
-    PgLogFile::PgLogFile(const std::filesystem::path &file) : _file(file)
+    PgLogWriter::PgLogWriter(const std::filesystem::path &file,
+                             int proto_version) : _file(file), _proto_version(proto_version)
     {
         int fmode = O_APPEND | O_CREAT;
         mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP;
@@ -22,14 +23,14 @@ namespace springtail {
     }
 
     void
-    PgLogFile::close()
+    PgLogWriter::close()
     {
         ::fsync(_fd);
         ::close(_fd);
     }
 
     bool
-    PgLogFile::log_data(const PgCopyData &data)
+    PgLogWriter::log_data(const PgCopyData &data)
     {
         if (data.length == 0) {
             return false;
@@ -37,10 +38,11 @@ namespace springtail {
 
         // write out header containing length if start of message
         if (data.msg_offset == 0) {
-            char buffer[16];
+            char buffer[PG_LOG_HDR_BYTES];
             sendint32(PG_LOG_MAGIC, buffer);
             sendint32(data.msg_length, buffer + 4);
             sendint64(data.starting_lsn, buffer + 8);
+            sendint32(_proto_version, buffer + 16);
 
             ::write(_fd, buffer, 16);
             _current_offset += 16;
