@@ -42,13 +42,15 @@ find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 # find_package(Boost REQUIRED boost-program-options)
 
+add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
+
 ## source modules
 add_subdirectory(src/common)
 add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
 add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
-# add_subdirectory(src/pg_log_mgr)
+add_subdirectory(src/pg_log_mgr)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})

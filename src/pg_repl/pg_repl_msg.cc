@@ -1411,14 +1411,19 @@ namespace springtail
         _current_offset += len; // msg
     }
 
+    void
+    PgReplMsgStream::set_log_file(std::filesystem::path path, uint64_t offset, uint64_t size)
+    {
+        _current_path = path;
+        _current_offset = offset;
+        _end_offset = offset + size;
+        _stream = std::fstream(path, std::fstream::binary | std::fstream::in);
+        if (offset != 0) {
+            _stream.seekp(_current_offset, std::fstream::beg);
+        }
+        _committed_xacts.clear();
+    }
 
-    /**
-     * @brief Retrieve next message from internal buffer
-     * @param msg reference to message filled in if
-     * @throws PgMessageTooSmallError
-     * @throws PgUnexpectedDataError
-     * @throws PgUnknownMessageError
-     */
     std::vector<PgReplMsgStream::PgTransactionPtr>
     PgReplMsgStream::scan_log()
     {
@@ -1478,7 +1483,7 @@ namespace springtail
                 PgTransactionPtr xact = _current_xact;
                 if (_current_xact == nullptr || commit_msg.xact_lsn != _current_xact->xact_lsn) {
                     // we don't have the start of the transaction...
-                    SPDLOG_WARN("Mismatch no xact matching commit msg");
+                    SPDLOG_WARN("No matching xact for commit: xact_lsn={}\n", commit_msg.xact_lsn);
                     break;
                 }
                 xact->commit_path = _current_path;
@@ -1565,6 +1570,8 @@ namespace springtail
                 auto itr = _xact_map.find(commit_msg.xid);
                 if (itr == _xact_map.end()) {
                     // no start streaming xact found...
+                    SPDLOG_WARN("No matching xact for stream commit: xid={}, xact_lsn={}",
+                                commit_msg.xid, commit_msg.xact_lsn);
                     break;
                 }
 
@@ -1572,6 +1579,8 @@ namespace springtail
                 xact->commit_path = _current_path;
                 xact->commit_offset = commit_offset;
                 xact->xact_lsn = commit_msg.xact_lsn;
+
+                _xact_map.erase(itr);
 
                 _committed_xacts.push_back(xact);
                 break;
@@ -1587,7 +1596,6 @@ namespace springtail
                 PgMsgStreamAbort &abort_msg = std::get<PgMsgStreamAbort>(_decoded_msg.msg);
 
                 _xact_map.erase(abort_msg.xid);
-
                 break;
             }
 

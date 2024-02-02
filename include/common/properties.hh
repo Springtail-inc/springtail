@@ -7,7 +7,7 @@
 #endif
 
 namespace springtail {
-    
+
     /**
      * @brief Properties singleton object, initialized in springtail_init()
      */
@@ -39,7 +39,7 @@ namespace springtail {
     private:
         /** static _instance singleton */
         static Properties *_instance;
-        
+
         /** json containing parsed settings file */
         nlohmann::json _json;
 
