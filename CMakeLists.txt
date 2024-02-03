@@ -45,6 +45,7 @@ find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 # find_package(Boost REQUIRED boost-program-options)
 find_package(GTest CONFIG REQUIRED)
+find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
 ## source modules
 add_subdirectory(src/common)

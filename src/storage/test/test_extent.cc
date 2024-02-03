@@ -32,7 +32,7 @@ namespace {
 
         void TearDown() override {
             // remove any files created during the run
-            IOMgr::get_instance()->remove("/tmp/WriteAndReadViaDisk");
+            IOMgr::get_instance()->remove("/tmp/test_extent_file");
         }
 
         ExtentSchemaPtr _schema;
@@ -152,7 +152,7 @@ namespace {
         ExtentPtr extent = _create_and_populate();
 
         // construct a file handle
-        auto handle = IOMgr::get_instance()->open("/tmp/WriteAndReadViaDisk",
+        auto handle = IOMgr::get_instance()->open("/tmp/test_extent_file",
                                                   IOMgr::IO_MODE::WRITE, true);
 
         // write it to disk

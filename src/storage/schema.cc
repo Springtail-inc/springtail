@@ -48,6 +48,9 @@ namespace springtail {
             default:
                 throw TypeError();
             }
+
+            // set the column order
+            _column_order.push_back(column.name);
         }
 
         // then construct the fields

@@ -13,6 +13,7 @@
         { "name": "redis-plus-plus",
           "features": ["cxx17"] },
         "thrift",
-        "gtest"
+        "gtest",
+        "vincentlaucsb-csv-parser"
     ]
 }

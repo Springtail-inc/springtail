@@ -43,19 +43,19 @@ namespace springtail {
             : _type(((branch) ? BRANCH : LEAF) | ((root) ? ROOT_MASK : 0))
         { }
 
-        operator uint8_t() {
+        operator uint8_t() const {
             return _type;
         }
 
-        bool is_root() {
+        bool is_root() const {
             return (_type & ROOT_MASK);
         }
 
-        bool is_leaf() {
+        bool is_leaf() const {
             return (_type & ~ROOT_MASK) == LEAF;
         }
 
-        bool is_branch() {
+        bool is_branch() const {
             return (_type & ~ROOT_MASK) == BRANCH;
         }
     };
@@ -82,22 +82,22 @@ namespace springtail {
         {
             std::copy_n(data->data(), sizeof(uint8_t),
                         reinterpret_cast<char *>(&type));
-            std::copy_n(data->data(), sizeof(uint64_t),
+            std::copy_n(data->data() + sizeof(uint8_t), sizeof(uint64_t),
                         reinterpret_cast<char *>(&xid));
-            std::copy_n(data->data(), sizeof(uint64_t),
+            std::copy_n(data->data() + sizeof(uint8_t) + sizeof(uint64_t), sizeof(uint64_t),
                         reinterpret_cast<char *>(&prev_offset));
         }
 
         /** Serialize the header. */
         std::vector<char> pack()
         {
-            std::vector<char> data(9);
-            std::copy_n(reinterpret_cast<char *>(&type),
-                        sizeof(uint8_t), data.data());
-            std::copy_n(reinterpret_cast<char *>(&xid),
-                        sizeof(uint64_t), data.data());
-            std::copy_n(reinterpret_cast<char *>(&prev_offset),
-                        sizeof(uint64_t), data.data());
+            std::vector<char> data(17);
+            std::copy_n(reinterpret_cast<char *>(&type), sizeof(uint8_t),
+                        data.data());
+            std::copy_n(reinterpret_cast<char *>(&xid), sizeof(uint64_t),
+                        data.data() + sizeof(uint8_t));
+            std::copy_n(reinterpret_cast<char *>(&prev_offset), sizeof(uint64_t),
+                        data.data() + sizeof(uint8_t) + sizeof(uint64_t));
             return data;
         }
     };
@@ -131,10 +131,10 @@ namespace springtail {
             Extent * const _extent;
 
         public:
-            char * const data;
+            uint32_t offset;
 
-            MutableRow(Extent *e, char *d)
-                : _extent(e), data(d)
+            MutableRow(Extent *e, uint32_t o)
+                : _extent(e), offset(o)
             { }
 
             virtual ~MutableRow()
@@ -154,25 +154,33 @@ namespace springtail {
             void finalize() {
                 // currently empty, could be used later for any cross-row compression techniques
             }
+
+            char * const data() const {
+                return _extent->_fixed_data->data() + offset;
+            }
         };
 
         /** Interface to read a row in an extent. */
         class Row {
         public:
             const Extent * extent;
-            const char * data;
+            uint32_t offset;
 
-            Row(const Extent *e, const char *d)
-                : extent(e), data(d)
+            Row(const Extent *e, uint32_t o)
+                : extent(e), offset(o)
             { }
 
             Row(const Row &r)
-                : extent(r.extent), data(r.data)
+                : extent(r.extent), offset(r.offset)
             { }
 
             Row(const MutableRow &r)
-                : extent(r._extent), data(r.data)
+                : extent(r._extent), offset(r.offset)
             { }
+
+            const char * const data() const {
+                return extent->_fixed_data->data() + offset;
+            }
         };
 
         /** Iterator over the rows in an extent. */
@@ -183,8 +191,8 @@ namespace springtail {
         private:
             Row _row;
 
-            Iterator(const Extent *extent, const char *data)
-                : _row(extent, data)
+            Iterator(const Extent *extent, uint32_t offset)
+                : _row(extent, offset)
             { }
 
         public:
@@ -200,34 +208,32 @@ namespace springtail {
 
             reference operator*() const { return _row; }
             pointer operator->() const { return &_row; }
-            Iterator& operator++() { _row.data += _row.extent->row_size(); return *this; }
+            Iterator& operator++() { _row.offset += _row.extent->row_size(); return *this; }
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-            friend bool operator==(const Iterator& a, const Iterator& b) { return a._row.data == b._row.data; }
-            friend bool operator!= (const Iterator& a, const Iterator& b) { return a._row.data != b._row.data; }
+            friend bool operator==(const Iterator& a, const Iterator& b) { return a._row.offset == b._row.offset; }
+            friend bool operator!= (const Iterator& a, const Iterator& b) { return a._row.offset != b._row.offset; }
             
-            Iterator &operator+=(difference_type n) { _row.data += _row.extent->row_size() * n; return *this; }
-            Iterator &operator-=(difference_type n) { _row.data -= _row.extent->row_size() * n; return *this; }
+            Iterator &operator+=(difference_type n) { _row.offset += _row.extent->row_size() * n; return *this; }
+            Iterator &operator-=(difference_type n) { _row.offset -= _row.extent->row_size() * n; return *this; }
             
             Iterator operator+(difference_type n) const { Iterator tmp = *this; tmp += n; return tmp; }
             friend Iterator operator+(difference_type n, const Iterator &i) { return i + n; }
             Iterator operator-(difference_type n) const { Iterator tmp = *this; tmp -= n; return tmp; }
             friend Iterator operator-(difference_type n, const Iterator &i) { return i - n; }
             friend difference_type operator-(const Iterator &a, const Iterator &b) {
-                return (a._row.data - b._row.data) / a._row.extent->row_size();
+                return (a._row.offset - b._row.offset) / a._row.extent->row_size();
             }
         };
 
         /** Returns an iterator to the first row of the extent. */
         Iterator begin() const {
-            return Iterator(this, _fixed_data->data());
+            return Iterator(this, 0);
         }
 
         /** Returns an iterator that matches the end of the extent. */
         Iterator end() const {
-            return Iterator(this, _fixed_data->data() + _fixed_data->size());
+            return Iterator(this, _fixed_data->size());
         }
-
-    private: // types
 
     private:
         /** Defines the schema of the table that this extent is part of. */
@@ -270,8 +276,8 @@ namespace springtail {
             uint32_t offset = 0;
             while (offset < _variable_data->size()) {
                 // retrieve the size
-                std::copy_n(reinterpret_cast<char *>(&size), sizeof(uint32_t),
-                            _variable_data->data() + offset);
+                std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
+                            reinterpret_cast<char *>(&size));
 
                 // calculate the hash
                 uint64_t hash = XXH64(_variable_data->data() + offset + sizeof(uint32_t), size, 0);
@@ -314,19 +320,19 @@ namespace springtail {
 
         /** Return the last row in the extent. */
         Row back() const {
-            return Row(this, _fixed_data->data() + _fixed_data->size() - _row_size);
+            return Row(this, _fixed_data->size() - _row_size);
         }
 
         /** Find an existing row in the extent. */
         Row at(uint32_t index) const {
             assert(index * _row_size < _fixed_data->size());
-            return Row(this, _fixed_data->data() + index * _row_size);
+            return Row(this, index * _row_size);
         }
 
         /** Find an existing row in the extent for update. */
         MutableRow at(uint32_t index) {
             assert(index * _row_size < _fixed_data->size());
-            return MutableRow(this, _fixed_data->data() + index * _row_size);
+            return MutableRow(this, index * _row_size);
         }
 
         /** Allocates space for a row to the end of the extent and returns an accessor to set the data in the row. */
@@ -334,7 +340,7 @@ namespace springtail {
             uint32_t offset = _fixed_data->size();
             _fixed_data->resize(offset + _row_size);
 
-            return MutableRow(this, _fixed_data->data() + offset);
+            return MutableRow(this, offset);
         }
 
         /** Allocates space for a new row at a specific existing position in the extent, shifting
@@ -349,15 +355,16 @@ namespace springtail {
             // resize the data for the new row
             _fixed_data->resize(_fixed_data->size() + _row_size);
 
+            assert(pos->offset < _fixed_data->size());
+
             // shift the existing data
-            uint32_t offset = (pos->data - _fixed_data->data());
-            std::copy_backward(_fixed_data->data() + offset,
+            std::copy_backward(_fixed_data->data() + pos->offset,
                                _fixed_data->data() + _fixed_data->size() - _row_size,
                                _fixed_data->data() + _fixed_data->size());
-            std::fill(_fixed_data->data() + offset,
-                      _fixed_data->data() + offset + _row_size, char(0));
+            std::fill(_fixed_data->data() + pos->offset,
+                      _fixed_data->data() + pos->offset + _row_size, char(0));
 
-            return MutableRow(this, _fixed_data->data() + offset);
+            return MutableRow(this, pos->offset);
         }
 
         /**
@@ -371,11 +378,9 @@ namespace springtail {
             // XXX how to clean up variable data from the row?
 
             // shift the existing data forward to the current position to remove the row
-            uint32_t offset = (pos->data - _fixed_data->data());
-
-            const char *start = pos->data + (_row_size * count);
+            const char *start = _fixed_data->data() + pos->offset + (_row_size * count);
             const char *end = _fixed_data->data() + _fixed_data->size();
-            char *target = _fixed_data->data() + offset;
+            char *target = _fixed_data->data() + pos->offset;
             if (start < end) {
                 // copy the remaining data
                 std::copy(start, end, target);
@@ -384,7 +389,7 @@ namespace springtail {
                 _fixed_data->resize(_fixed_data->size() - (_row_size * count));
             } else {
                 // removed all of the rows past the iterator
-                _fixed_data->resize(offset);
+                _fixed_data->resize(pos->offset);
             }
         }
 

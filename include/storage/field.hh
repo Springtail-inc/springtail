@@ -270,12 +270,12 @@ namespace springtail {
         }
 
         bool is_null(const Extent::Row &row) const {
-            const char * const fixed = row.data + _null_offset;
+            const char * const fixed = row.data() + _null_offset;
             return ((*reinterpret_cast<const uint8_t * const>(fixed) & _null_mask) > 0);
         }
 
         void set_null(Extent::MutableRow &row, bool is_null) {
-            char * const fixed = row.data + _null_offset;
+            char * const fixed = row.data() + _null_offset;
             char mask = static_cast<char>(-1) & _null_mask;
             if (is_null) {
                 *fixed |= mask;
@@ -309,12 +309,12 @@ namespace springtail {
         }
 
         bool get_bool(const Extent::Row &row) const {
-            const char * const fixed = row.data + _offset;
+            const char * const fixed = row.data() + _offset;
             return ((*reinterpret_cast<const uint8_t * const>(fixed) & _bit_mask) > 0);
         }
 
         virtual void set_bool(Extent::MutableRow &row, bool val) {
-            char *fixed = row.data + _offset;
+            char *fixed = row.data() + _offset;
             char mask = (static_cast<char>(-1) & _bit_mask);
             if (val) {
                 *fixed |= mask;
@@ -400,12 +400,12 @@ namespace springtail {
     protected:
         T _get_number(const Extent::Row &row) const {
             T data;
-            std::copy_n(row.data + _offset, _fixed_size, reinterpret_cast<char *>(&data));
+            std::copy_n(row.data() + _offset, _fixed_size, reinterpret_cast<char *>(&data));
             return data;
         }
 
         void _set_number(Extent::MutableRow &row, T val) {
-            char *fixed = row.data + _offset;
+            char *fixed = row.data() + _offset;
             std::copy_n(reinterpret_cast<char *>(&val), _fixed_size, fixed);
         }
 
@@ -693,7 +693,7 @@ namespace springtail {
         std::string get_text(const Extent::Row &row) const {
             // get the offset into the variable data
             uint32_t offset;
-            std::copy_n(row.data + _offset, sizeof(uint32_t), reinterpret_cast<char *>(&offset));
+            std::copy_n(row.data() + _offset, sizeof(uint32_t), reinterpret_cast<char *>(&offset));
 
             // retrieve the string from the variable data
             return row.extent->get_text(offset);
@@ -704,7 +704,7 @@ namespace springtail {
             uint32_t offset = row.set_text(value);
 
             // store the offset into the fixed data
-            char *fixed = row.data + _offset;
+            char *fixed = row.data() + _offset;
             std::copy_n(reinterpret_cast<char *>(&offset), sizeof(uint32_t), fixed);
         }
 
@@ -791,7 +791,7 @@ namespace springtail {
             uint32_t offset;
 
             // get the offset into the variable data
-            std::copy_n(row.data + _offset, sizeof(uint32_t), reinterpret_cast<char *>(&offset));
+            std::copy_n(row.data() + _offset, sizeof(uint32_t), reinterpret_cast<char *>(&offset));
 
             // retrieve the binary data from the variable data
             return row.extent->get_binary(offset);
@@ -802,7 +802,7 @@ namespace springtail {
             uint32_t offset = row.set_binary(val);
 
             // copy the offset into the fixed data
-            char *fixed = row.data + _offset;
+            char *fixed = row.data() + _offset;
             std::copy_n(reinterpret_cast<char *>(&offset), sizeof(uint32_t), fixed);
         }
 
@@ -1342,13 +1342,17 @@ namespace springtail {
                 assert(this->field(i)->get_type() == rhs->field(i)->get_type());
             }
 
+            // XXX switch everything to compare()?
             for (int i = 0; i < this->size(); i++) {
-                if (this->field(i)->less_than(row(), rhs->field(i), rhs->row(), nulls_last)) {
+                if (this->field(i)->less_than(this->row(), rhs->field(i), rhs->row(), nulls_last)) {
                     return true;
+                }
+                if (rhs->field(i)->less_than(rhs->row(), this->field(i), this->row(), nulls_last)) {
+                    return false;
                 }
             }
 
-            // all values are >=, so not less than
+            // all values are equal, so not less than
             return false;
         }
     };
@@ -1592,7 +1596,7 @@ namespace springtail {
 
         Extent::Row row() const {
             // note: only usable with the ConstField objects from this ValueTuple
-            return Extent::Row(nullptr, nullptr);
+            return Extent::Row(nullptr, 0);
         }
     };
     typedef std::shared_ptr<ValueTuple> ValueTuplePtr;
