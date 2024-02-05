@@ -9,7 +9,10 @@
 #include <thread>
 #include <atomic>
 
+#include <common/concurrent_queue.hh>
+
 #include <pg_log_mgr/pg_log_writer.hh>
+#include <pg_log_mgr/pg_log_reader.hh>
 
 namespace springtail {
     /**
@@ -19,25 +22,25 @@ namespace springtail {
     class PgLogMgr {
     private:
 
+        /**
+         * @brief Queue Entry, encodes start/end offset and filename,
+         *        plus number of messages covered by offset range
+         */
+        struct PgLogQueueEntry {
+            uint64_t start_offset;
+            uint64_t end_offset;
+            std::filesystem::path path;
+            int num_messages;
+
+            PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
+                : start_offset(start_offset), end_offset(end_offset), path(path), num_messages(1)
+            {}
+        };
+        using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
+
         /** Queue class between log writer and log reader */
-        class PgLogQueue {
+        class PgLogQueue : public ConcurrentQueue<PgLogQueueEntry> {
         public:
-            /**
-             * @brief Queue Entry, encodes start/end offset and filename,
-             *        plus number of messages covered by offset range
-             */
-            struct PgLogQueueEntry {
-                uint64_t start_offset;
-                uint64_t end_offset;
-                std::filesystem::path path;
-                int num_messages;
-
-                PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
-                    : start_offset(start_offset), end_offset(end_offset), path(path), num_messages(1)
-                {}
-            };
-            using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
-
             /**
              * @brief Push entry onto queue, try to merge with entry on back of queue if possible
              * @param start_offset file start offset of msg
@@ -58,51 +61,9 @@ namespace springtail {
 
                 // otherwise create and add new entry
                 PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(start_offset, end_offset, path);
-                _queue.push(entry);
-                write_lock.unlock();
 
-                // notify condition variable
-                _cv.notify_one();
+                _internal_push(new_entry, write_lock);
             }
-
-            /**
-             * @brief Pop entry from queue, optionally waiting for entry
-             * @return PgLogQueueEntryPtr log queue entry
-             */
-            PgLogQueueEntryPtr pop()
-            {
-                std::unique_lock<std::mutex> write_lock{_mutex};
-                while (_queue.empty() && !_shutdown) {
-                    // wait on cv until not empty
-                    _cv.wait(write_lock);
-                }
-
-                if (_queue.empty()) {
-                    return nullptr;
-                }
-
-                PgLogQueueEntryPtr &entry = _queue.front();
-
-                _queue.pop();
-                return entry;
-            }
-
-            /** Shutdown queue */
-            void shutdown()
-            {
-                _shutdown = true;
-                _cv.notify_all();
-            }
-
-        private:
-            /** mutex to protect queue */
-            std::mutex _mutex;
-            /** condition variable for queue to wait on */
-            std::condition_variable _cv;
-            /** internal queue */
-            std::queue<PgLogQueueEntryPtr> _queue;
-            /** shutdown flag */
-            std::atomic<bool> _shutdown = false;
         };
 
     public:
@@ -115,7 +76,7 @@ namespace springtail {
         : _host(host), _db_name(db_name), _user_name(user_name), _password(password),
           _pub_name(pub_name), _slot_name(slot_name), _port(port),
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-          _base_path(base_path)
+          _base_path(base_path), _pg_log_reader()
         {}
 
         /**
@@ -165,6 +126,10 @@ namespace springtail {
         /** queue shared between writer (producer) and reader (consumer threads )*/
         PgLogQueue _queue;
 
+        /** Log reader */
+        PgLogReader _pg_log_reader;
+
+        /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_logger();
     };
 

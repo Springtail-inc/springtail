@@ -45,6 +45,7 @@ namespace springtail {
         _reader_thread = std::thread(&PgLogMgr::log_reader, this);
     }
 
+    /** Thread for writing log data */
     void
     PgLogMgr::log_writer()
     {
@@ -83,19 +84,20 @@ namespace springtail {
         }
     }
 
+    /** Thread for reading log data */
     void
     PgLogMgr::log_reader()
     {
         while (!_shutdown) {
 
             // get log entry from queue
-            PgLogQueue::PgLogQueueEntryPtr log_entry = this->_queue.pop();
+            PgLogQueueEntryPtr log_entry = this->_queue.pop();
             if (log_entry == nullptr) {
                 continue;
             }
 
-
-
+            _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
+                                       log_entry->end_offset, log_entry->num_messages);
         }
     }
 
