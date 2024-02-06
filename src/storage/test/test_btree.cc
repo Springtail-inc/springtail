@@ -10,7 +10,7 @@ using namespace springtail;
 namespace {
 
     /**
-     * Framework for Extent testing.
+     * Framework for Basic BTree testing.
      */
     class BTree_Test : public testing::Test {
     protected:
@@ -233,6 +233,66 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 2500);
+    }
+
+    TEST_F(BTree_Test, InsertAndRemoveAll) {
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_InsertAndRemoveAll", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+        csv::CSVReader reader("test_btree_simple.csv");
+
+        for (auto &&r : reader) {
+            // insert data to the tree
+            btree->insert(std::make_shared<CSVTuple>(r, fields));
+        }
+
+        // finalize the tree
+        uint64_t offset = btree->finalize();
+
+        // set the next XID
+        btree->set_xid(2);
+
+        // now remove every row in the csv
+        reader = csv::CSVReader("test_btree_simple.csv");
+        for (auto &&r : reader) {
+            // remove data from the tree
+            btree->remove(std::make_shared<CSVTuple>(r, fields));
+        }
+
+        // finalize the tree
+        offset = btree->finalize();
+
+        // now read the tree back and make sure there are the right number of entries and that they are in-order
+        auto table_id_f = _schema->get_field("table_id");
+        auto name_f = _schema->get_field("name");
+        auto offset_f = _schema->get_field("offset");
+
+        auto tree = _get_btree("/tmp/test_btree_InsertAndRemoveAll", offset);
+
+        // check XID 1 for all entries
+        int count = 0;
+        std::string prev = "";
+        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+            if (prev != "") {
+                ASSERT_GT(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
+
+        // check XID 2 for no entries
+        count = 0;
+        for (auto &&i = tree->begin(2); i != tree->end(); ++i) {
+            ++count;
+        }
+        ASSERT_EQ(count, 0);
     }
 
 }
