@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxhash CONFIG REQUIRED)

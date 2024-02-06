@@ -1355,6 +1355,23 @@ namespace springtail {
             // all values are equal, so not less than
             return false;
         }
+
+        void
+        print() {
+            for (int i = 0; i < this->size(); i++) {
+                FieldPtr field = this->field(i);
+                switch (field->get_type()) {
+                case (SchemaType::TEXT):
+                    std::cout << field->get_text(this->row()) << std::endl;
+                    break;
+                case (SchemaType::UINT64):
+                    std::cout << field->get_uint64(this->row()) << std::endl;
+                    break;
+                default:
+                    std::cout << "Unhandled type" << std::endl;
+                }
+            }
+        }
     };
     typedef std::shared_ptr<Tuple> TuplePtr;
 

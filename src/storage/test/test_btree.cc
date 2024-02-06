@@ -3,6 +3,7 @@
 #include <common/common.hh>
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
+#include <storage/mutable_btree.hh>
 
 using namespace springtail;
 
@@ -29,7 +30,9 @@ namespace {
 
         void TearDown() override {
             // remove any files created during the run
-            IOMgr::get_instance()->remove("/tmp/test_btree_BasicInsertRemove");
+            IOMgr::get_instance()->remove("/tmp/test_btree_Insert10");
+            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAll");
+            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemove");
         }
 
         ExtentSchemaPtr _schema;
@@ -44,11 +47,11 @@ namespace {
             auto iomgr = IOMgr::get_instance();
 
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::WRITE, true);
+            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::APPEND, true);
             
             uint64_t cache_size = 1024*1024;
 
-            return std::make_shared<MutableBTree>(handle, _keys, cache_size, _schema, xid);
+            return std::make_shared<MutableBTree>(handle, _keys, cache_size, _schema);
 
         }
 
@@ -60,10 +63,10 @@ namespace {
             auto iomgr = IOMgr::get_instance();
 
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::WRITE, true);
+            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::APPEND, true);
             uint64_t cache_size = 1024*1024;
 
-            return std::make_shared<MutableBTree>(handle, _keys, cache_size, _schema, xid, extent_id);
+            return std::make_shared<MutableBTree>(handle, _keys, cache_size, _schema, extent_id);
 
         }
 
@@ -74,7 +77,7 @@ namespace {
             auto iomgr = IOMgr::get_instance();
 
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::WRITE, true);
+            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::READ, true);
             return std::make_shared<BTree>(handle, 0, _keys, _schema,
                                            _read_cache, 1, extent_id);
         }
@@ -101,18 +104,23 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        // now read the tree back
+        // now read the tree back and make sure there are the right number of entries and that they are in-order
         auto table_id_f = _schema->get_field("table_id");
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
         auto tree = _get_btree("/tmp/test_btree_Insert10", offset);
+        int count = 0;
+        std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            SPDLOG_INFO("entry: {}, {}, {}",
-                        table_id_f->get_uint64(*i),
-                        name_f->get_text(*i),
-                        offset_f->get_uint64(*i));
+            if (prev != "") {
+                ASSERT_GT(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
         }
+        ASSERT_EQ(count, 10);
     }
 
     TEST_F(BTree_Test, InsertAll) {
@@ -134,18 +142,97 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        // now read the tree back
+        // now read the tree back and make sure there are the right number of entries and that they are in-order
         auto table_id_f = _schema->get_field("table_id");
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
         auto tree = _get_btree("/tmp/test_btree_InsertAll", offset);
+        int count = 0;
+        std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            SPDLOG_INFO("entry: {}, {}, {}",
-                        table_id_f->get_uint64(*i),
-                        name_f->get_text(*i),
-                        offset_f->get_uint64(*i));
+            if (prev != "") {
+                ASSERT_GT(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
         }
+        ASSERT_EQ(count, 5000);
+    }
+
+    TEST_F(BTree_Test, InsertAndRemove) {
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_InsertAndRemove", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+        csv::CSVReader reader("test_btree_simple.csv");
+
+        for (auto &&r : reader) {
+            // insert data to the tree
+            btree->insert(std::make_shared<CSVTuple>(r, fields));
+        }
+
+        // finalize the tree
+        uint64_t offset = btree->finalize();
+
+        // set the next XID
+        btree->set_xid(2);
+
+        // now remove every other row in the csv
+        int evens = 0;
+        reader = csv::CSVReader("test_btree_simple.csv");
+        for (auto &&r : reader) {
+            // remove data to the tree
+            if (evens % 2) {
+                // auto value = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
+                // auto search_key = _schema->tuple_subset(value, _keys);
+                // btree->remove(search_key);
+
+                btree->remove(std::make_shared<CSVTuple>(r, fields));
+            }
+            ++evens;
+        }
+
+        // finalize the tree
+        offset = btree->finalize();
+
+        // now read the tree back and make sure there are the right number of entries and that they are in-order
+        auto table_id_f = _schema->get_field("table_id");
+        auto name_f = _schema->get_field("name");
+        auto offset_f = _schema->get_field("offset");
+
+        auto tree = _get_btree("/tmp/test_btree_InsertAndRemove", offset);
+
+        // check XID 1 for all entries
+        int count = 0;
+        std::string prev = "";
+        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+            if (prev != "") {
+                ASSERT_GT(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
+
+        // check XID 2 for half the entries
+        count = 0;
+        prev = "";
+        for (auto &&i = tree->begin(2); i != tree->end(); ++i) {
+            if (prev != "") {
+                ASSERT_GT(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
+        }
+        ASSERT_EQ(count, 2500);
     }
 
 }
