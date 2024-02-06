@@ -100,6 +100,47 @@ namespace springtail {
      * @brief Map of table ID to Map of row ID to WriteCacheRowMapPtr
      */
     class WriteCacheIndexRowMap {
+    public:
+        /**
+         * @brief Construct a new Write Cache Index Row Map object
+         * @param partitions Number of partitions, used to partition the table ID space
+         *                   to reduce contention with respect to locking
+         */
+        WriteCacheIndexRowMap(int partitions) : _partitions(partitions)
+        {
+            for (int i = 0; i < partitions; i++) {
+                _maps.push_back(std::make_shared<std::map<uint64_t, EntryPtr>>());
+                _map_mutexes.push_back(std::make_shared<std::shared_mutex>());
+            }
+        }
+
+        /** Add an index_node at an xid for a specific ID */
+        void add(uint64_t tid, uint64_t eid, uint64_t xid,
+                 const std::vector<WriteCacheIndexRowPtr> &rows);
+
+        /** Remove an entry for an tid for a given xid range; exclusive of start */
+        void remove(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+
+        /** Retreive a set of rows for an xid range, return number of rows */
+        int get(uint64_t tid, uint64_t eid, uint64_t start_xid,
+                uint64_t end_xid, uint32_t count, uint64_t &cursor,
+                std::vector<std::shared_ptr<WriteCacheIndexRow>> &result) const;
+
+        void dump() const
+        {
+            // no locks held so may be inconsistent, use for debug only
+            for (int i = 0; i < _partitions; i++) {
+                std::shared_ptr<std::map<uint64_t, EntryPtr>> map = _maps[i];
+                for (auto tid_itr = map->begin(); tid_itr != map->end(); tid_itr++) {
+                    SPDLOG_INFO("Table ID: {}\n", tid_itr->first);
+                    EntryPtr entry = tid_itr->second;
+                    for (auto entry_itr = entry->set.begin(); entry_itr != entry->set.end(); entry_itr++) {
+                        SPDLOG_INFO("{}", (*entry_itr)->dump());
+                    }
+                }
+            }
+        }
+
     private:
         /**
          * @brief Comparator for the WriteCacheIndexRow
@@ -125,42 +166,29 @@ namespace springtail {
         };
         typedef std::shared_ptr<Entry> EntryPtr;
 
+        /** Number of table partitions; each partition holds a map and mutex */
+        int _partitions;
+
         /** Map from TID to entry containing map<RowKey, RowData> */
-        std::map<uint64_t, EntryPtr> map;
+        std::vector<std::shared_ptr<std::map<uint64_t, EntryPtr>>> _maps;
 
         /** Map's mutex */
-        mutable std::shared_mutex map_mutex;
+        std::vector<std::shared_ptr<std::shared_mutex>> _map_mutexes;
 
-    public:
-
-        /** Add an index_node at an xid for a specific ID */
-        void add(uint64_t tid, uint64_t eid, uint64_t xid,
-                 const std::vector<WriteCacheIndexRowPtr> &rows);
-
-        /** Remove an entry for an tid for a given xid range; exclusive of start */
-        void remove(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
-
-        /** Retreive a set of rows for an xid range, return number of rows */
-        int get(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                uint64_t end_xid, uint32_t count, uint64_t &cursor,
-                std::vector<std::shared_ptr<WriteCacheIndexRow>> &result) const;
-
-        void dump() const
-        {
-            // no locks held so may be inconsistent, use for debug only
-            for (auto tid_itr = map.begin(); tid_itr != map.end(); tid_itr++) {
-                SPDLOG_INFO("Table ID: {}\n", tid_itr->first);
-                EntryPtr entry = tid_itr->second;
-                for (auto entry_itr = entry->set.begin(); entry_itr != entry->set.end(); entry_itr++) {
-                    SPDLOG_INFO("{}", (*entry_itr)->dump());
-                }
-            }
+        /** Helper to get the map for the TID */
+        std::shared_ptr<std::map<uint64_t, EntryPtr>> _get_map(uint64_t tid) const {
+            return _maps[tid % _partitions];
         }
 
-    private:
+        /** Helper to get the map mutex for the TID */
+        std::shared_ptr<std::shared_mutex> _get_mutex(uint64_t tid) const {
+            return _map_mutexes[tid % _partitions];
+        }
+
         /** Helper, to add an index node at an xid for an ID; assumes a write lock exists on the external map */
         void _add(uint64_t tid, uint64_t eid, uint64_t xid,
                   const std::vector<WriteCacheIndexRowPtr> &rows,
+                  std::shared_ptr<std::map<uint64_t, EntryPtr>> map,
                   std::unique_lock<std::shared_mutex> &map_lock);
 
         /** Helper to replace an existing row's data if it exists. Need to check xid_seq. */

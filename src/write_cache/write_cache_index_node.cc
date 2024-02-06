@@ -103,27 +103,32 @@ namespace springtail {
     WriteCacheIndexRowMap::add(uint64_t tid, uint64_t eid, uint64_t xid,
                                const std::vector<WriteCacheIndexRowPtr> &rows)
     {
-        std::unique_lock<std::shared_mutex> write_lock{map_mutex, std::try_to_lock};
+        std::shared_ptr<std::shared_mutex> map_mutex = _get_mutex(tid);
+        std::shared_ptr<std::map<uint64_t, EntryPtr>> map = _get_map(tid);
+
+        std::unique_lock<std::shared_mutex> write_lock{*map_mutex, std::try_to_lock};
         if (write_lock.owns_lock()) {
             // got write lock
-            _add(tid, eid, xid, rows, write_lock);
+            _add(tid, eid, xid, rows, map, write_lock);
             return;
         }
 
         // didn't get the write lock, get read lock, check
-        std::shared_lock<std::shared_mutex> read_lock{map_mutex};
-        auto itr = map.find(tid);
-        if (itr != map.end()) {
+        std::shared_lock<std::shared_mutex> map_read_lock{*map_mutex};
+        auto itr = map->find(tid);
+        if (itr != map->end()) {
             // found existing entry in top level map; add to existing entry
             EntryPtr entry = itr->second;
-            read_lock.unlock();
             _add_existing(entry, eid, xid, rows);
             return;
         }
+        // unlock the read lock, need to lock exclusive
+        map_read_lock.unlock();
 
         // not found in top level map, get write lock at top level and try again...
-        std::unique_lock<std::shared_mutex> map_write_lock{map_mutex};
-        _add(tid, eid, xid, rows, map_write_lock);
+        std::unique_lock<std::shared_mutex> map_write_lock{*map_mutex};
+        _add(tid, eid, xid, rows, map, map_write_lock);
+
         return;
     }
 
@@ -132,17 +137,19 @@ namespace springtail {
     WriteCacheIndexRowMap::remove(uint64_t tid, uint64_t eid,
                                   uint64_t start_xid, uint64_t end_xid)
     {
+        std::shared_ptr<std::shared_mutex> map_mutex = _get_mutex(tid);
+        std::shared_ptr<std::map<uint64_t, EntryPtr>> map = _get_map(tid);
+
         // lock top level map and search for id
-        std::shared_lock<std::shared_mutex> read_lock{map_mutex};
-        auto itr = map.find(tid);
-        if (itr == map.end()) {
+        std::shared_lock<std::shared_mutex> read_lock{*map_mutex};
+        auto itr = map->find(tid);
+        if (itr == map->end()) {
             // not found
             return;
         }
 
         // found, unlock top level map
         EntryPtr entry = itr->second;
-        read_lock.unlock();
 
         // lock entry map and search for row
         WriteCacheIndexRowPtr rkey = std::make_shared<WriteCacheIndexRow>(eid, start_xid+1);
@@ -162,17 +169,17 @@ namespace springtail {
 
         // found, erase entry and check if map is empty
         entry->set.erase(start_itr, end_itr);
-        bool is_empty = entry->set.empty();
-        entry_lock.unlock();
-
-        if (!is_empty) {
+        if (!entry->set.empty()) {
             return;
         }
+        // entry is empty
+        entry_lock.unlock();
+        read_lock.unlock();
 
         // if map is empty, write lock top level map
-        std::unique_lock<std::shared_mutex> write_lock{map_mutex};
-        itr = map.find(tid);
-        if (itr == map.end()) {
+        std::unique_lock<std::shared_mutex> write_lock{*map_mutex};
+        itr = map->find(tid);
+        if (itr == map->end()) {
             // not found
             return;
         }
@@ -181,7 +188,7 @@ namespace springtail {
         entry = itr->second;
         std::unique_lock<std::shared_mutex> entry_write_lock{entry->entry_mutex};
         if (entry->set.empty()) {
-            map.erase(itr);
+            map->erase(itr);
         }
 
         return;
@@ -193,14 +200,18 @@ namespace springtail {
                                uint64_t end_xid, uint32_t count, uint64_t &cursor,
                                std::vector<std::shared_ptr<WriteCacheIndexRow>> &result) const
     {
+        std::shared_ptr<std::shared_mutex> map_mutex = _get_mutex(tid);
+        std::shared_ptr<std::map<uint64_t, EntryPtr>> map = _get_map(tid);
+
         // lock table map
-        std::shared_lock<std::shared_mutex> tid_lock{map_mutex};
-        auto itr = map.find(tid);
-        if (itr == map.end()) {
+        std::shared_lock<std::shared_mutex> map_lock{*map_mutex};
+        auto itr = map->find(tid);
+        if (itr == map->end()) {
+            // nothing found
             return 0;
         }
+        // found entry
         EntryPtr entry = itr->second;
-        tid_lock.unlock();
 
         // lookup row; exclusive of start
         WriteCacheIndexRowPtr rkey = std::make_shared<WriteCacheIndexRow>(eid, start_xid+1);
@@ -237,28 +248,38 @@ namespace springtail {
     void
     WriteCacheIndexRowMap::_add(uint64_t tid, uint64_t eid, uint64_t xid,
                                 const std::vector<WriteCacheIndexRowPtr> &rows,
+                                std::shared_ptr<std::map<uint64_t, EntryPtr>> map,
                                 std::unique_lock<std::shared_mutex> &map_lock)
     {
         // write lock is held on map mutex
-        auto itr = map.find(tid);
-        if (itr != map.end()) {
+        auto itr = map->find(tid);
+        if (itr != map->end()) {
             // entry found in outer map
             EntryPtr entry = itr->second;
-            map_lock.unlock();
+
+            // could downgrade to a map read lock if it were possible...
+            // this shouldn't be common case though, or if it is there
+            // shouldn't have been contention on the map write lock
+
+            // add to the existing node
             _add_existing(entry, eid, xid, rows);
             return;
-        } else {
-            // no entry found in outer map, create an entry and update that entry's map
-            EntryPtr entry = std::make_shared<Entry>();
-            for (int i = 0; i < rows.size(); i++) {
-                entry->set.insert(rows[i]);
-            }
-            map.insert({tid, entry});
-            return;
         }
+
+        // map write lock is held
+        // no entry found in outer map, create an entry and update that entry's map
+        EntryPtr entry = std::make_shared<Entry>();
+        for (int i = 0; i < rows.size(); i++) {
+            entry->set.insert(rows[i]);
+        }
+        map->insert({tid, entry});
+        return;
     }
 
-    /** Helper to replace an existing row's data if it exists. Need to check xid_seq. */
+    /**
+     * Helper to replace an existing row's data if it exists. Need to check xid_seq.
+     * A map lock should be held, either read or write
+     */
     void
     WriteCacheIndexRowMap::_add_existing(EntryPtr entry, uint64_t eid, uint64_t xid,
                                          const std::vector<WriteCacheIndexRowPtr> &rows)
