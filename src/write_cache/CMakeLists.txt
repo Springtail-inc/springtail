@@ -32,7 +32,7 @@ add_custom_command(
 )
 
 # target to ensure that all files are built prior to start of compilation
-add_custom_target(generated_thrift
+add_custom_target(write_cache_generated_thrift
     DEPENDS ${GENERATED_FILES}
 )
 
@@ -49,7 +49,7 @@ set(WRITE_CACHE_SOURCES
 
 # add the library target
 add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})
-add_dependencies(springtail_write_cache generated_thrift)
+add_dependencies(springtail_write_cache write_cache_generated_thrift)
 
 # add the gen-cpp dir to the list of files to remove during 'make clean'
 set_target_properties(springtail_write_cache

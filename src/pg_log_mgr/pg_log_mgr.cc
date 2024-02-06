@@ -2,6 +2,7 @@
 
 #include <fmt/core.h>
 
+#include <common/common.hh>
 #include <common/properties.hh>
 #include <common/logging.hh>
 
@@ -11,13 +12,6 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 
 namespace springtail {
-
-    static inline uint64_t get_time_in_millis()
-    {
-        struct timeval t;
-        gettimeofday(&t, nullptr);
-        return (uint64_t)t.tv_sec * 1000 + t.tv_usec / 1000;
-    }
 
     void
     PgLogMgr::start_streaming()
@@ -89,7 +83,6 @@ namespace springtail {
     PgLogMgr::log_reader()
     {
         while (!_shutdown) {
-
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_queue.pop();
             if (log_entry == nullptr) {
@@ -104,8 +97,15 @@ namespace springtail {
     PgLogWriterPtr
     PgLogMgr::_create_logger()
     {
-        std::filesystem::path file = _base_path;
-        file.append(fmt::format("{}", get_time_in_millis()));
+        std::filesystem::path file;
+        do {
+            int offset = 0;
+            file = _base_path;
+            file.append(fmt::format("{}", common::get_time_in_millis() + offset));
+            // shouldn't ever have to loop here...
+            offset++;
+        } while (std::filesystem::exists(file));
+
         return std::make_shared<PgLogWriter>(file, _proto_version);
     }
 }

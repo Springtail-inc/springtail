@@ -633,6 +633,8 @@ namespace springtail
         dataOut.length = _copy_buffer_length - _copy_buffer_offset;
         dataOut.msg_length = _copy_msg_length;
         dataOut.starting_lsn = _last_received_lsn;
+        // see https://github.com/postgres/postgres/blob/f234b8cd16a4ba6e12cc51a36c8e499661d535bb/src/backend/replication/walreceiver.c#L1256
+        dataOut.ending_lsn = _server_latest_lsn; // this is believed to be the end lsn for this message
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream

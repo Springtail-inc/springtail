@@ -5,3 +5,4 @@ external
 *~
 .vscode
 vcpkg_installed
+src/**/gen-cpp

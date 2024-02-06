@@ -27,9 +27,7 @@ namespace springtail {
 
         /**
          * @brief Push entry onto queue, try to merge with entry on back of queue if possible
-         * @param start_offset file start offset of msg
-         * @param end_offset file end offset of msg
-         * @param path file pathname
+         * @param std::shared_ptr<T> entry to push onto queue
          */
         void push(Tptr &entry)
         {
@@ -39,7 +37,7 @@ namespace springtail {
 
         /**
          * @brief Pop entry from queue, optionally waiting for entry
-         * @return PgLogQueueEntryPtr log queue entry
+         * @return std::shared_ptr<T> log queue entry
          */
         Tptr pop()
         {
@@ -62,6 +60,21 @@ namespace springtail {
                 _cv_push.notify_one();
             }
 
+            return entry;
+        }
+
+        /**
+         * @brief Peek at the front of the queue without unlocking
+         * Note: another thread may pop this item between front() and pop(); so use carefully
+         * @return std::shared_ptr<T> element at front of queue
+         */
+        Tptr front() {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            if (_queue.empty()) {
+                return nullptr;
+            }
+
+            Tptr &entry = _queue.front();
             return entry;
         }
 

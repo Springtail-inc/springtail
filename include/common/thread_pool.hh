@@ -170,7 +170,11 @@ namespace springtail {
             if (_shutdown) {
                 throw Error("Pool has shutdown\n");
             }
-            _queue.push(requests);
+            // XXX this isn't a heavily used call, if it becomes so
+            // we can modify the queue to take a list of requests
+            for (auto r: requests) {
+                _queue.push(r);
+            }
         }
 
     private:

@@ -9,9 +9,9 @@
 
 #include <common/object_pool.hh>
 
-namespace springtail {
+#include <ThriftWriteCache.h> // generated file
 
-    class ThriftWriteCacheClient; // forward decl to avoid messy includes
+namespace springtail {
 
     class WriteCacheClient
     {
@@ -194,7 +194,9 @@ namespace springtail {
         struct ThriftClient {
             std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> pool;
             std::shared_ptr<thrift::ThriftWriteCacheClient> client;
-            ~ThriftClient() { std::cout << "Releasing client to pool\n"; pool->put(client); }
+            ~ThriftClient() {
+                pool->put(client);
+            }
         };
 
         /**

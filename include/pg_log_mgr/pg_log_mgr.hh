@@ -21,7 +21,6 @@ namespace springtail {
      */
     class PgLogMgr {
     private:
-
         /**
          * @brief Queue Entry, encodes start/end offset and filename,
          *        plus number of messages covered by offset range

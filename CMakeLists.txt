@@ -51,6 +51,7 @@ add_subdirectory(src/benchmarks)
 add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
 add_subdirectory(src/pg_log_mgr)
+add_subdirectory(src/xid_mgr)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
