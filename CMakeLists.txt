@@ -47,6 +47,9 @@ find_package(spdlog)
 find_package(GTest CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
+enable_testing()
+include(GoogleTest)
+
 ## source modules
 add_subdirectory(src/common)
 add_subdirectory(src/storage)

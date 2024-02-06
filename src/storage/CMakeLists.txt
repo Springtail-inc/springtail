@@ -26,8 +26,6 @@ add_executable(test_extent test/test_extent.cc)
 target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_extent PUBLIC springtail_common springtail_storage GTest::gtest_main)
 
-add_test(NAME io COMMAND test_io)
-add_test(NAME extent COMMAND test_extent)
-add_test(NAME btree
-  COMMAND test_btree
+gtest_discover_tests(test_extent)
+gtest_discover_tests(test_btree
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
