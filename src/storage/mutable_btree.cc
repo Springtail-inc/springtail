@@ -388,7 +388,7 @@ namespace springtail {
         //       make the threshold for a single extent
     }
 
-    std::shared_ptr<MutableBTree::Page>
+    std::vector<std::shared_ptr<MutableBTree::Page>>
     MutableBTree::Page::flush_empty_root(std::shared_ptr<IOHandle> handle,
                                          uint64_t xid)
     {
@@ -398,14 +398,16 @@ namespace springtail {
         // update the extent header
         _extents[0]->header().xid = xid;
         _extents[0]->header().prev_offset = this->extent_id;
-        _extents[0]->type = type;
+        _extents[0]->header().type = type;
 
         // write the empty extent
-        auto &&response = e->async_flush(handle).get();
+        auto &&response = _extents[0]->async_flush(handle).get();
 
         // construct the page this way to ensure we don't try to extract a prev_key
         PagePtr page = std::make_shared<Page>(response->offset);
-        page->set_extent(_extents[0], key_fields);
+        page->set_extent(_extents[0], _key_fields);
+
+        return std::vector<PagePtr>({page});
     }
 
     std::vector<std::shared_ptr<MutableBTree::Page>>
@@ -590,6 +592,7 @@ namespace springtail {
             std::unique_lock parent_lock(page->parent()->mutex, std::try_to_lock);
 
             // if we weren't able to lock the parent, try another page
+            // note: may not be safe to block to acquire parent since we are holding the cache lock
             // XXX should we just block until we get the lock? there's a potential live-lock
             //     here from never being able to get a page
             if (!parent_lock.owns_lock()) {
@@ -598,7 +601,7 @@ namespace springtail {
                 continue;
             }
 
-            // lock the page; should never block since the page isn't being used
+            // lock the page; should never block since the page isn't being used (came off the LRU)
             std::unique_lock page_lock(page->mutex, std::try_to_lock);
             assert(page_lock.owns_lock());
 
@@ -897,42 +900,39 @@ namespace springtail {
         //       mutex, but then there is a potential race condition between updating the
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
+
+        std::vector<PagePtr> &&new_pages = (page->empty())
+            ? page->flush_empty_root(_handle, _xid)
+            : page->flush(_handle, _xid);
+
+        // check if we need to create a new root above this page
         PagePtr new_root;
+        if (new_pages.size() > 1) {
+            // construct the new root's extent
+            ExtentPtr extent = std::make_shared<Extent>(_branch_schema, ExtentType(true, true), _xid);
+            extent->header().prev_offset = page->extent_id;
 
-        if (page->empty()) {
-            // special case for empty tree
-            new_root = page->flush_empty_root(_handle, _xid);
-        } else {
-            std::vector<PagePtr> &&new_pages = page->flush(_handle, _xid);
-
-            // check if we need to create a new root above this page
-            if (new_pages.size() > 1) {
-                // construct the new root's extent
-                ExtentPtr extent = std::make_shared<Extent>(_branch_schema, ExtentType(true, true), _xid);
-                extent->header().prev_offset = page->extent_id;
-
-                // add pointers to the new root for each new page
-                for (PagePtr child : new_pages) {
-                    Extent::MutableRow row = extent->append();
-                    _branch_keys->bind(row)->assign(child->index_key());
-                    _branch_child_f->set_uint64(row, child->extent_id);
-                }
-
-                // write the new extent to disk
-                auto &&future = extent->async_flush(_handle);
-
-                // construct a new root page based on the new extent
-                uint64_t extent_id = future.get()->offset;
-                ValueTuplePtr key = std::make_shared<ValueTuple>(_branch_keys->bind(extent->back()));
-                new_root = std::make_shared<Page>(extent_id, key, extent, _branch_keys);
-
-                // note: we don't need to add these new pages as children because they are clean
-                //       pages that haven't been traversed for modification
-            } else {
-                // if there's just one page, it will replace the root
-                new_root = new_pages[0];
-                new_pages.pop_back();
+            // add pointers to the new root for each new page
+            for (PagePtr child : new_pages) {
+                Extent::MutableRow row = extent->append();
+                _branch_keys->bind(row)->assign(child->index_key());
+                _branch_child_f->set_uint64(row, child->extent_id);
             }
+
+            // write the new extent to disk
+            auto &&future = extent->async_flush(_handle);
+
+            // construct a new root page based on the new extent
+            uint64_t extent_id = future.get()->offset;
+            ValueTuplePtr key = std::make_shared<ValueTuple>(_branch_keys->bind(extent->back()));
+            new_root = std::make_shared<Page>(extent_id, key, extent, _branch_keys);
+
+            // note: we don't need to add these new pages as children because they are clean
+            //       pages that haven't been traversed for modification
+        } else {
+            // if there's just one page, it will replace the root
+            new_root = new_pages[0];
+            new_pages.pop_back();
         }
 
         // mark the old root as flushed

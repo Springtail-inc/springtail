@@ -282,6 +282,15 @@ namespace springtail {
             std::vector<std::shared_ptr<Page>> flush(std::shared_ptr<IOHandle> handle, uint64_t xid);
 
             /**
+             * Specialized case for flushing an empty root page.  Assumes that the caller is holding
+             * an exclusive lock on the page.
+             *
+             * @param handle The file handle for access to write data.
+             * @param xid The XID at which the page is being written.
+             */
+            std::vector<std::shared_ptr<Page>> flush_empty_root(std::shared_ptr<IOHandle> handle, uint64_t xid);
+
+            /**
              * Set the contents of the page to the provided extent.  Stores the key of the final row
              * in the extent to use if the page is mutated and must be replaced in the parent branch
              * pointers.  Must be called when the page is empty.
