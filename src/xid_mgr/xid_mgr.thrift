@@ -1,8 +1,10 @@
 namespace cpp springtail.thrift
 
+typedef i64 xid_t
+
 struct XidRange {
-    1: i64 start_xid,
-    2: i64 end_xid
+    1: xid_t start_xid,
+    2: xid_t end_xid
 }
 
 // status code and optional message
@@ -19,5 +21,10 @@ enum StatusCode {
 
 service ThriftXidMgr {
     Status ping(),
-    XidRange get_xid_range()
+    // get an unused xid range
+    XidRange get_xid_range(),
+    // commit upto and including the provided xid
+    Status commit_xid(1: xid_t xid),
+    // get latest committed xid
+    xid_t get_latest_committed_xid()
 }

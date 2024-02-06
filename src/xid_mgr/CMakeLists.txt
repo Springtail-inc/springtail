@@ -40,6 +40,8 @@ set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 # source files
 set(XID_MGR_SOURCES
     xid_mgr_client.cc
+    xid_mgr_server.cc
+    xid_mgr_service.cc
     ${THRIFT_CC_FILES}
 )
 
