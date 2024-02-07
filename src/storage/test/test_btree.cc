@@ -33,6 +33,9 @@ namespace {
             IOMgr::get_instance()->remove("/tmp/test_btree_Insert10");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAll");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemove");
+            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemoveAll");
+            IOMgr::get_instance()->remove("/tmp/test_btree_InsertSame");
+            IOMgr::get_instance()->remove("/tmp/test_btree_InsertMany");
         }
 
         ExtentSchemaPtr _schema;
@@ -295,4 +298,86 @@ namespace {
         ASSERT_EQ(count, 0);
     }
 
+    TEST_F(BTree_Test, InsertSame) {
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_InsertSame", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+        csv::CSVReader reader("test_btree_simple.csv");
+
+        // insert 5000 of the same row
+        auto &&r = *reader.begin();
+        for (int i = 0; i < 5000; ++i) {
+            // insert data to the tree
+            btree->insert(std::make_shared<CSVTuple>(r, fields));
+        }
+
+        // finalize the tree
+        uint64_t offset = btree->finalize();
+
+        auto tree = _get_btree("/tmp/test_btree_InsertSame", offset);
+
+        auto table_id_f = _schema->get_field("table_id");
+        auto name_f = _schema->get_field("name");
+        auto offset_f = _schema->get_field("offset");
+
+        // check for all entries
+        int count = 0;
+        std::string prev = "";
+        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+            if (prev != "") {
+                ASSERT_EQ(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
+    }
+
+    TEST_F(BTree_Test, InsertMany) {
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_InsertMany", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+
+        // insert 15k entries
+        for (int i = 0; i < 10; i++) {
+            csv::CSVReader reader("test_btree_simple.csv");
+            for (auto &&r : reader) {
+                // insert data to the tree
+                btree->insert(std::make_shared<CSVTuple>(r, fields));
+            }
+        }
+
+        // finalize the tree
+        uint64_t offset = btree->finalize();
+
+        auto tree = _get_btree("/tmp/test_btree_InsertMany", offset);
+
+        auto table_id_f = _schema->get_field("table_id");
+        auto name_f = _schema->get_field("name");
+        auto offset_f = _schema->get_field("offset");
+
+        // check for all entries
+        int count = 0;
+        std::string prev = "";
+        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+            if (prev != "") {
+                ASSERT_GE(name_f->get_text(*i), prev);
+            }
+
+            prev = name_f->get_text(*i);
+            ++count;
+        }
+        ASSERT_EQ(count, 50000);
+    }
 }

@@ -96,8 +96,8 @@ namespace springtail {
             if (!_callback) {
                 // no callback function, easy
                 CacheEntry &entry = _cache.back();
-                _cache.pop_back();
                 _remove_entry(entry);
+                _cache.pop_back();
                 return true;
             }
 

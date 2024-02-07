@@ -410,7 +410,7 @@ namespace springtail {
             std::vector<ExtentPtr> _extents; ///< A list of extents that will be written out when this page is flushed.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
-            mutable std::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
+            mutable std::mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
         };

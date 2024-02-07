@@ -26,6 +26,7 @@ namespace springtail {
         _root = std::make_shared<Page>(extent, _leaf_keys);
 
         // add the root to the cache
+        // note: we do not release it, leaving it's use-count permanently at 1
         std::unique_lock cache_lock(_cache.mutex);
         _cache_insert(_root, cache_lock, false);
     }
@@ -50,12 +51,13 @@ namespace springtail {
         // read the root
         _read_page_internal(_root);
 
-        // add the root to the cache
-        std::unique_lock cache_lock(_cache.mutex);
-        _cache_insert(_root, cache_lock, false);
-
         // set the XID based on the root
         _xid = _root->xid();
+
+        // add the root to the cache
+        // note: we do not release it, leaving it's use-count permanently at 1
+        std::unique_lock cache_lock(_cache.mutex);
+        _cache_insert(_root, cache_lock, false);
     }
 
     void
@@ -544,25 +546,23 @@ namespace springtail {
     }
 
     void
-    MutableBTree::_cache_update_size(PagePtr page,
+    MutableBTree::_cache_update_size(PagePtr update_page,
                                      std::unique_lock<std::shared_mutex> &cache_lock)
     {
         // update the size of the cache given the page size
-        auto &&i = _cache.lookup.find(page->extent_id);
+        auto &&i = _cache.lookup.find(update_page->extent_id);
         assert(i != _cache.lookup.end());
         PageCache::LookupEntry &entry = i->second;
 
         // update the size of the cache based on the new size of the entry
-        _cache.size = _cache.size - std::get<3>(entry) + page->size;
-        std::get<3>(entry) = page->size;
+        _cache.size = _cache.size - std::get<3>(entry) + update_page->size;
+        std::get<3>(entry) = update_page->size;
 
         // evict pages until the size is under the watermark
         while (_cache.size > _cache.max_size) {
             // if somehow there are no evictable pages, print a warning and return
             if (_cache.lru.empty()) {
-                // XXX print warning
-                std::cout << "ERROR" << std::endl;
-                return;
+                assert(0); // XXX we should never hit this case
             }
 
             // get a page
@@ -582,19 +582,20 @@ namespace springtail {
             // check if we can remove immediately
             // note: if the page is not dirty, was already flushed, or has never been accessed since being
             //       created from a flush, then can evict immedately
-            if (!page->is_dirty() || page->flushed || !page->parent()) {
+            PagePtr parent = page->parent();
+            if (!page->is_dirty() || page->flushed || parent == nullptr) {
                 _cache.lookup.erase(page->extent_id);
                 _cache.size -= page->size;
                 continue;
             }
 
             // currently looks evictable and requires a flush; try to acquire the parent page lock
-            std::unique_lock parent_lock(page->parent()->mutex, std::try_to_lock);
+            std::unique_lock parent_lock(parent->mutex, std::try_to_lock);
 
             // if we weren't able to lock the parent, try another page
-            // note: may not be safe to block to acquire parent since we are holding the cache lock
-            // XXX should we just block until we get the lock? there's a potential live-lock
-            //     here from never being able to get a page
+            // note: may not be safe to block to acquire parent since we are holding the cache lock,
+            //       we might need to release it first if we want to force acquistion of the parent?
+            //       As is, there's a potential live-lock here from never being able to get a page
             if (!parent_lock.owns_lock()) {
                 _cache.lru.push_front(page);
                 std::get<1>(entry) = _cache.lru.begin();
@@ -610,13 +611,18 @@ namespace springtail {
 
             // flush the page
             // note: we don't cache the newly created pages since we are trying to free space
-            _flush_page_internal(page, page->parent());
+            _flush_page_internal(page, parent);
 
-            // re-lock the cache
+            // re-lock the cache and continue
             cache_lock.lock();
 
-            // evict the page from the cache and continue
-            _cache_evict(page->extent_id);
+            // evict the page from the cache
+            // note: it's already been removed from the LRU list, so we don't call _cache_evict()
+            auto &&i = _cache.lookup.find(page->extent_id);
+            if (i != _cache.lookup.end()) {
+                _cache.size -= std::get<3>(i->second);
+                _cache.lookup.erase(i);
+            }
         }
     }
 
@@ -725,8 +731,8 @@ namespace springtail {
         page->set_parent(parent);
         parent->add_child(page);
 
-        // release the parent lock
-        parent_lock.release();
+        // unlock the parent lock
+        parent_lock.unlock();
 
         // release the cache for other threads until we have populated the data for this page
         // note: the exclusive lock on the page will prevent others from progressing even if
@@ -938,7 +944,7 @@ namespace springtail {
         // mark the old root as flushed
         page->flushed = true;
 
-        // evict the old root from the cache and add the new pages
+        // evict the old root and add the new pages to the cache since they are no longer roots
         // note: no one should be using this page since we have exclusive lock on both the
         //       parent and the page, meaning no one is holding the page and no one could have
         //       found the page again after releasing it
@@ -949,8 +955,8 @@ namespace springtail {
             _cache_insert(new_page, cache_lock);
         }
 
-        // add the new root to the cache
-        _cache_insert(new_root, cache_lock);
+        // insert the new root with a use-count of 1
+        _cache_insert(new_root, cache_lock, false);
 
         return new_root;
     }
