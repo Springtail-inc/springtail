@@ -1,3 +1,5 @@
+#pragma once
+
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -27,12 +29,28 @@ namespace springtail {
 
         /**
          * @brief Push entry onto queue, try to merge with entry on back of queue if possible
-         * @param std::shared_ptr<T> entry to push onto queue
+         * @param entry std::shared_ptr<T> entry to push onto queue
          */
         void push(Tptr &entry)
         {
             std::unique_lock<std::mutex> write_lock{_mutex};
             _internal_push(entry, write_lock);
+        }
+
+        /**
+         * @brief Push multiple entries onto queue at once, get the write lock once, may block
+         * @param entries list of entries to push on queue
+         */
+        void push(const std::vector<Tptr> &entries)
+        {
+            if (entries.empty()) {
+                return;
+            }
+
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            for (auto entry: entries) {
+                _internal_push(entry, write_lock);
+            }
         }
 
         /**

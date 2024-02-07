@@ -35,13 +35,14 @@ namespace springtail {
         _proto_version = _pg_conn.get_protocol_version();
 
         // create write thread
-        _writer_thread = std::thread(&PgLogMgr::log_writer, this);
-        _reader_thread = std::thread(&PgLogMgr::log_reader, this);
+        _writer_thread = std::thread(&PgLogMgr::_log_writer, this);
+        _reader_thread = std::thread(&PgLogMgr::_log_reader, this);
+        _xact_thread = std::thread(&PgLogMgr::_xact_worker, this);
     }
 
     /** Thread for writing log data */
     void
-    PgLogMgr::log_writer()
+    PgLogMgr::_log_writer()
     {
         PgLogWriterPtr logger = this->_create_logger();
 
@@ -64,7 +65,7 @@ namespace springtail {
                 uint64_t end_offset = logger->offset();
 
                 // record start/end offsets for this message
-                _queue.push(start_offset, end_offset, logger->filename());
+                _logger_queue.push(start_offset, end_offset, logger->filename());
 
                 // check to see if we should rollover log
                 if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
@@ -80,11 +81,11 @@ namespace springtail {
 
     /** Thread for reading log data */
     void
-    PgLogMgr::log_reader()
+    PgLogMgr::_log_reader()
     {
         while (!_shutdown) {
             // get log entry from queue
-            PgLogQueueEntryPtr log_entry = this->_queue.pop();
+            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop();
             if (log_entry == nullptr) {
                 continue;
             }
@@ -100,12 +101,27 @@ namespace springtail {
         std::filesystem::path file;
         do {
             int offset = 0;
-            file = _base_path;
+            file = _repl_log_path;
             file.append(fmt::format("{}", common::get_time_in_millis() + offset));
             // shouldn't ever have to loop here...
             offset++;
         } while (std::filesystem::exists(file));
 
         return std::make_shared<PgLogWriter>(file, _proto_version);
+    }
+
+    void
+    PgLogMgr::_xact_worker()
+    {
+        PgXactHandler xact_handler{_xact_log_path};
+
+        while (!_shutdown) {
+            PgReplMsgStream::PgTransactionPtr xact = _xact_queue->pop();
+            if (xact == nullptr) {
+                continue;
+            }
+
+            xact_handler.process(xact);
+        }
     }
 }

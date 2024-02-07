@@ -29,9 +29,12 @@ namespace springtail {
     void
     PgLogWriter::_fsync_worker()
     {
-        while (!this->_shutdown) {
+        while (!_shutdown) {
             // sleep for at least PG_LOG_MIN_FSYNC_MS
             std::this_thread::sleep_for(std::chrono::milliseconds(PG_LOG_MIN_FSYNC_MS));
+            if (_shutdown) {
+                break;
+            }
             uint64_t offset = _current_offset.load();
 
             // only fsync if offset changed
@@ -121,7 +124,8 @@ namespace springtail {
             current_offset += 16;
             _msg_end_offset = current_offset + data.msg_length;
 
-
+            // add LSN data to queue for fsync thread
+            add_lsn_to_queue(current_offset, data.starting_lsn, _msg_end_offset, data.ending_lsn);
         }
 
         // write message data

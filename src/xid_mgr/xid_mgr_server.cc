@@ -79,9 +79,9 @@ namespace springtail {
     }
 
     std::pair<uint64_t, uint64_t>
-    XidMgrServer::get_xid_range()
+    XidMgrServer::get_xid_range(uint64_t xid)
     {
-        return {0,0};
+        return {xid+1,xid+101};
     }
 
     void
@@ -91,7 +91,7 @@ namespace springtail {
     }
 
     uint64_t
-    XidMgrServer::get_latest_committed_xid()
+    XidMgrServer::get_committed_xid()
     {
         return 0;
     }

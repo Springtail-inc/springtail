@@ -79,13 +79,33 @@ namespace springtail {
     }
 
     std::pair<uint64_t, uint64_t>
-    XidMgrClient::get_xid_range()
+    XidMgrClient::get_xid_range(uint64_t last_xid)
     {
         ThriftClient c = _get_client();
         thrift::XidRange result;
 
-        c.client->get_xid_range(result);
+        c.client->get_xid_range(result, last_xid);
 
         return {result.start_xid, result.end_xid};
+    }
+
+    void
+    XidMgrClient::commit_xid(uint64_t xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::Status result;
+
+        c.client->commit_xid(result, xid);
+
+    }
+
+    uint64_t
+    XidMgrClient::get_committed_xid()
+    {
+        ThriftClient c = _get_client();
+
+        thrift::xid_t xid = c.client->get_committed_xid();
+
+        return xid;
     }
 }

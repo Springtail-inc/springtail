@@ -22,9 +22,11 @@ enum StatusCode {
 service ThriftXidMgr {
     Status ping(),
     // get an unused xid range
-    XidRange get_xid_range(),
+    XidRange get_xid_range(1: xid_t last_xid),
+
     // commit upto and including the provided xid
     Status commit_xid(1: xid_t xid),
+
     // get latest committed xid
-    xid_t get_latest_committed_xid()
+    xid_t get_committed_xid()
 }

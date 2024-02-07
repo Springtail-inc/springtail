@@ -11,13 +11,22 @@
 
 #include <common/concurrent_queue.hh>
 
+#include <pg_repl/pg_repl_msg.hh>
+
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/pg_xact_handler.hh>
 
 namespace springtail {
     /**
      * @brief Postgres log manager
-     * Responsible for storing Postgres logs
+     * Manages pipeline of postgres replication messages.
+     * - creates replication connection and starts streaming
+     * - log writer reads replication stream and writes data into log files
+     * - log reader reads log files and parses begin/commit messages to extract transactions
+     * - xact logger writes out transaction level logs
+     *   - resolves pg xids to springtail xids via xid mgr
+     *   - queues request to GC
      */
     class PgLogMgr {
     private:
@@ -66,8 +75,11 @@ namespace springtail {
         };
 
     public:
+        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgReplMsgStream::PgTransaction>>;
+
         /** Constructor */
-        PgLogMgr(std::filesystem::path base_path,
+        PgLogMgr(const std::filesystem::path &repl_log_path,
+                 const std::filesystem::path &xact_log_path,
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
@@ -75,7 +87,9 @@ namespace springtail {
         : _host(host), _db_name(db_name), _user_name(user_name), _password(password),
           _pub_name(pub_name), _slot_name(slot_name), _port(port),
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-          _base_path(base_path), _pg_log_reader()
+          _repl_log_path(repl_log_path),
+          _xact_queue(std::make_shared<ConcurrentQueue<PgReplMsgStream::PgTransaction>>()),
+          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
         {}
 
         /**
@@ -83,15 +97,7 @@ namespace springtail {
          */
         void start_streaming();
 
-        /**
-         * @brief process data from replication stream in loop, product to queue
-         */
-        void log_writer();
 
-        /**
-         * @brief consume data from queue, scan log entries and notify GC
-         */
-        void log_reader();
 
     private:
         /** minimum size for log rollover */
@@ -112,24 +118,49 @@ namespace springtail {
         /** postgres protocol version */
         int _proto_version;
 
-        /** base path */
-        std::filesystem::path _base_path;
+        std::atomic<bool> _shutdown = false;
+
+
+        /// Stage 1 of pipeline, writing replication log to disk
+
+        /** Process data from replication stream in loop, queue path, offsets */
+        void _log_writer();
 
         /** log writer thread */
         std::thread _writer_thread;
 
-        std::thread _reader_thread;
-
-        std::atomic<bool> _shutdown = false;
-
-        /** queue shared between writer (producer) and reader (consumer threads )*/
-        PgLogQueue _queue;
-
-        /** Log reader */
-        PgLogReader _pg_log_reader;
-
         /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_logger();
+
+        /** replication log base path */
+        std::filesystem::path _repl_log_path;
+
+        /** queue shared between writer (producer) and reader (consumer threads )*/
+        PgLogQueue _logger_queue;
+
+
+        /// Stage 2 of pipeline, reading replication log and parsing xacts
+
+        /** Consume data from queue, scan log entries and notify GC */
+        void _log_reader();
+
+        /** log reader thread */
+        std::thread _reader_thread;
+
+        /** queue shared between reader and xact_worker; contains PgReplMsgStream::PgTransactionPtr */
+        PgTransactionQueuePtr _xact_queue;
+
+        /** log reader */
+        PgLogReader _pg_log_reader;
+
+
+        /// Stage 3 of pipeline, mapping pg xids to xids; notify GC
+        std::filesystem::path _xact_log_path;
+
+        std::thread _xact_thread;
+
+        void _xact_worker();
+
     };
 
 } // namespace springtail
