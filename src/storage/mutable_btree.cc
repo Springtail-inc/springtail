@@ -639,14 +639,19 @@ namespace springtail {
             PagePtr page = _cache.lru.back();
             _cache.lru.pop_back();
 
-            // SPDLOG_INFO("Cache LRU evict: {}", page->extent_id);
+            auto &lru_entry = _cache.lookup.find(page->extent_id)->second;
+            std::get<2>(lru_entry) = 1;
+
+            // save the entry size to reduce the cache size after the page flush
+            uint32_t entry_size = std::get<3>(lru_entry);
 
             // check if we need to try another entry
             // note: if the page is the root we can't evict; if the page has potentially dirty
             //       children, must evict them first
             if (page->type.is_root() || page->has_children()) {
                 _cache.lru.push_front(page);
-                std::get<1>(entry) = _cache.lru.begin();
+                std::get<1>(lru_entry) = _cache.lru.begin();
+                std::get<2>(lru_entry) = 0;
                 continue;
             }
 
@@ -656,17 +661,9 @@ namespace springtail {
             PagePtr parent = page->parent();
             if (!page->is_dirty() || page->flushed || parent == nullptr) {
                 _cache.lookup.erase(page->extent_id);
-                _cache.size -= page->size;
+                _cache.size -= entry_size;
                 continue;
             }
-
-            // evict the page from the cache
-            // note: it's already been removed from the LRU list, so we don't call _cache_evict()
-            auto &&i = _cache.lookup.find(page->extent_id);
-            assert (i != _cache.lookup.end()); // should always be in the cache since we just pulled from the LRU
-
-            // save the entry size to reduce the cache size after the page flush
-            uint32_t entry_size = std::get<3>(i->second);
 
             SPDLOG_INFO("Cache LRU evict choosen: {}", page->extent_id);
 
@@ -694,11 +691,14 @@ namespace springtail {
             // re-lock the cache and continue
             cache_lock.lock();
 
-            // remove the page from the cache now that it has been replaced
-            _cache.lookup.erase(page->extent_id);
+            // re-find the cache entry in case it's changed
+            auto &&i = _cache.lookup.find(page->extent_id);
 
             // free the space before the next check
-            _cache.size -= entry_size;
+            _cache.size -= std::get<3>(i->second);
+
+            // remove the page from the cache now that it has been replaced
+            _cache.lookup.erase(i);
         }
     }
 
