@@ -4,10 +4,13 @@
 
 #include <common/common.hh>
 #include <common/logging.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <pg_log_mgr/pg_xact_handler.hh>
+#include <pg_log_mgr/pg_redis_xact.hh>
 
 namespace springtail {
 
@@ -46,7 +49,7 @@ namespace springtail {
     }
 
     void
-    PgXactHandler::process(PgReplMsgStream::PgTransactionPtr xact)
+    PgXactHandler::process(const PgReplMsgStream::PgTransactionPtr xact)
     {
         // first allocate an xid for this xact
         uint64_t xid = _allocate_xid();
@@ -55,6 +58,10 @@ namespace springtail {
         _logger->log_data(xact, xid);
 
         // finally send notification to GC
+        PgRedisXactValue redis_xact(xact->begin_path, xact->commit_path, xact->begin_offset,
+                                    xact->commit_offset, xact->xact_lsn, xid, xact->xid);
 
+        // XXX need to add customer ID
+        _redis_queue.push(redis::QUEUE_PG_TRANSACTIONS, redis_xact);
     }
 }
