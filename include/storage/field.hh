@@ -1358,6 +1358,7 @@ namespace springtail {
 
         void
         print() {
+            std::string txt;
             for (int i = 0; i < this->size(); i++) {
                 FieldPtr field = this->field(i);
                 switch (field->get_type()) {

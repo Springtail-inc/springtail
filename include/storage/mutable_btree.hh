@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_mutex>
+#include <boost/thread.hpp>
 
 #include <storage/field.hh>
 #include <storage/io.hh>
@@ -177,6 +178,42 @@ namespace springtail {
              */
             bool _check_split(std::vector<ExtentPtr>::iterator pos);
 
+            /**
+             * Returns an iterator to the first entry that has a key that is greater than or equal
+             * to the provided search_key.  Returns end() if there is no such entry.  Helper for
+             * internal use that doesn't lock.
+             *
+             * @param search_key The key we are searching for in the page.
+             */
+            Iterator _lower_bound(TuplePtr search_key);
+
+            /**
+             * Returns an iterator to the first entry that has a key that is greater than or equal
+             * to the provided search_key.  Returns end() if there is no such entry. Helper for
+             * internal use that doesn't lock.
+             *
+             * @param search_key The key we are searching for in the page.
+             */
+            Iterator _find(TuplePtr search_key);
+
+            /** Returns an iterator to the first row in the Page. */
+            Iterator _begin() {
+                return Iterator(this, _extents.begin(), _extents.front()->begin());
+            }
+
+            /** Returns an iterator that indicates that the Page has been fully traversed. */
+            Iterator _end() {
+                return Iterator(this, (++_extents.rbegin()).base(), _extents.back()->end());
+            }
+
+            /**
+             * Check if the page is empty; i.e., it has a single extent with no rows in it.
+             */
+            bool _empty() const {
+                return (_extents.size() == 1 && _extents.front()->empty());
+            }
+
+
         public:
             /** For constructing an empty root. */
             Page(ExtentPtr extent,
@@ -193,7 +230,9 @@ namespace springtail {
             }
 
             Page(uint64_t extent_id)
-                : extent_id(extent_id)
+                : extent_id(extent_id),
+                  flushed(false),
+                  _dirty(false)
             { }
 
             Page(uint64_t extent_id, ValueTuplePtr v, ExtentPtr e, MutableFieldArrayPtr key_fields)
@@ -210,18 +249,21 @@ namespace springtail {
 
             /** Returns an iterator to the first row in the Page. */
             Iterator begin() {
-                return Iterator(this, _extents.begin(), _extents.front()->begin());
+                boost::shared_lock lock(mutex);
+                return _begin();
             }
 
             /** Returns an iterator that indicates that the Page has been fully traversed. */
             Iterator end() {
-                return Iterator(this, (++_extents.rbegin()).base(), _extents.back()->end());
+                boost::shared_lock lock(mutex);
+                return _end();
             }
 
             /**
              * Returns a reference to the last row in the page.
              */
             Extent::Row back() const {
+                boost::shared_lock lock(mutex);
                 return _extents.back()->back();
             }
 
@@ -304,6 +346,7 @@ namespace springtail {
              * Return the current key of the last entry in the page.
              */
             TuplePtr index_key() const {
+                boost::shared_lock lock(mutex);
                 return _key_fields->bind(back());
             }
 
@@ -311,7 +354,7 @@ namespace springtail {
              * Returns the parent of the page, if one is set.  Otherwise returns nullptr.
              */
             std::shared_ptr<Page> parent() const {
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return _parent;
             }
 
@@ -321,7 +364,7 @@ namespace springtail {
              * @param parent The parent of the page.
              */
             void set_parent(std::shared_ptr<Page> parent) {
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _parent = parent;
             }
 
@@ -332,8 +375,9 @@ namespace springtail {
              * @param child A child of this page.
              */
             void add_child(std::shared_ptr<Page> child) {
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _children[child->extent_id] = child;
+                assert(!child->flushed);
             }
 
             /**
@@ -342,7 +386,7 @@ namespace springtail {
              * @param extent_id The extent ID of the page to be removed.
              */
             void remove_child(uint64_t extent_id) {
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 _children.erase(extent_id);
             }
 
@@ -350,7 +394,7 @@ namespace springtail {
              * Checks if the page has children.
              */
             bool has_children() const {
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return !_children.empty();
             }
 
@@ -362,7 +406,7 @@ namespace springtail {
                 // note: must be called when there are children
                 assert(!_children.empty());
 
-                std::unique_lock lock(_children_mutex);
+                boost::unique_lock lock(_children_mutex);
                 return _children.begin()->second;
             }
 
@@ -370,6 +414,7 @@ namespace springtail {
              * Check if the page should be flushed based on the number of extents it contains.
              */
             bool check_flush() const {
+                boost::shared_lock lock(mutex);
                 return (_extents.size() > MAX_EXTENT_COUNT);
             }
 
@@ -377,13 +422,15 @@ namespace springtail {
              * Check if the page is empty; i.e., it has a single extent with no rows in it.
              */
             bool empty() const {
-                return (_extents.size() == 1 && _extents.front()->empty());
+                boost::shared_lock lock(mutex);
+                return _empty();
             }
 
             /**
              * Check if the page is marked dirty.
              */
             bool is_dirty() const {
+                boost::shared_lock lock(mutex);
                 return _dirty;
             }
 
@@ -391,6 +438,7 @@ namespace springtail {
              * Returns the on-disk XID of the page.
              */
             uint64_t xid() const {
+                boost::shared_lock lock(mutex);
                 return _extents.front()->header().xid;
             }
 
@@ -399,10 +447,12 @@ namespace springtail {
             ExtentType type; ///< The type of this page.  Won't change once the page is fully constructed, so safe to read without holding the mutex.
             ValueTuplePtr prev_key; ///< The key in the parent of the previous extent this page is based on.  Won't change once the page is fully constructed.
 
-            // the following are mutex protected
-            mutable std::shared_mutex mutex; ///< A shared mutex for lock management.
             bool flushed; ///< This page has already been flushed to disk and replaced with a new page.
-            uint32_t size; ///< The size of the page.
+            std::atomic<uint32_t> size; ///< The size of the page.  Can be atomically accessed by different threads without holding the mutex.
+
+            mutable boost::shared_mutex disk_mutex; ///< A shared mutex that acts as a barrier for disk reads / writes.
+            mutable boost::shared_mutex mutex; ///< A shared mutex for access to the in-memory data.
+
 
         private:
             bool _dirty; ///< Flag indicating if data has been modified since the last write.
@@ -410,7 +460,7 @@ namespace springtail {
             std::vector<ExtentPtr> _extents; ///< A list of extents that will be written out when this page is flushed.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
-            mutable std::mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
+            mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.
             std::map<uint64_t, std::shared_ptr<Page>> _children; ///< The set of children of this page that are part of a modified path through the tree.
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
         };
@@ -439,7 +489,7 @@ namespace springtail {
             uint64_t max_size;
 
             /** A mutex for exclusive / shared access to the cache. */
-            std::shared_mutex mutex;
+            boost::shared_mutex mutex;
 
         public:
             PageCache(uint64_t max_size)
@@ -459,7 +509,7 @@ namespace springtail {
         std::vector<std::string> _sort_keys;
 
         /** A mutex for protecting access to the tree. */
-        mutable std::shared_mutex _mutex;
+        mutable boost::shared_mutex _mutex;
 
         /** A pointer to the root of the tree. */
         PagePtr _root;
@@ -491,10 +541,20 @@ namespace springtail {
         struct Node {
             const std::shared_ptr<Node> parent; ///< The parent node of this node.
             const PagePtr page; ///< The current page.
+            boost::shared_lock<boost::shared_mutex> lock; ///< A shared lock on the page's disk_mutex
 
             Node(std::shared_ptr<Node> parent, PagePtr page)
                 : parent(parent),
-                  page(page)
+                  page(page),
+                  lock(page->disk_mutex)
+            { }
+
+            Node(std::shared_ptr<Node> parent,
+                 PagePtr page,
+                 boost::unique_lock<boost::shared_mutex> &&data_lock)
+                : parent(parent),
+                  page(page),
+                  lock(std::move(data_lock))
             { }
         };
 
@@ -540,17 +600,20 @@ namespace springtail {
          * @param release If true then the page should immediately be released back to the cache.
          */
         void _cache_insert(PagePtr page,
-                           std::unique_lock<std::shared_mutex> &cache_lock, bool release = true);
+                           boost::unique_lock<boost::shared_mutex> &cache_lock, bool release = true);
 
         /**
          * Updates the size of an entry in the cache.  This may cause an eviction to ensure that the
          * cache doesn't exceed it's maximum size, thus the exclusive lock held on the cache by the
-         * caller must be provided to this function.
+         * caller must be provided to this function.  Also, the page being updated must have it's
+         * disk_mutex held, but not it's access mutex.  Otherwise, updating the size of a parent
+         * node could result in a deadlock trying to acquire the parent's lock again while evicting
+         * a child.
          *
          * @param page The page to update the size of based on its size currently.
          * @param cache_lock The exclusive lock on the cache held by the caller.
          */
-        void _cache_update_size(PagePtr page, std::unique_lock<std::shared_mutex> &cache_lock);
+        void _cache_update_size(PagePtr page, boost::unique_lock<boost::shared_mutex> &cache_lock);
 
         /**
          * Evicts an entry from the cache.  Can only be safely called on pages that have been
@@ -580,12 +643,8 @@ namespace springtail {
          *
          * @param extent_id The ID of the page to be read from disk.
          * @param parent The parent page of the page to be read.
-         * @param parent_lock A shared lock on the parent page which must be held when called.
-         * @param leaf_lock An exclusive lock to acquire on the page we read, if that page is a leaf.
          */
-        PagePtr _read_page(uint64_t extent_id, PagePtr parent,
-                           std::shared_lock<std::shared_mutex> &parent_lock,
-                           std::unique_lock<std::shared_mutex> &leaf_lock);
+        NodePtr _read_page(uint64_t extent_id, NodePtr parent);
 
         /**
          * Find the leaf that *could* hold the provided key.  This will always return a pointer to a
@@ -598,7 +657,7 @@ namespace springtail {
          * @param key The key of the entry to find a position for.
          * @param leaf_lock A lock that is acquired on the mutex of the leaf that we find.
          */
-        NodePtr _find_leaf(TuplePtr key, std::unique_lock<std::shared_mutex> &leaf_lock);
+        NodePtr _find_leaf(TuplePtr key);
 
         /**
          * Flushes the provided page to disk, updating the parent with the corrected pointers after
@@ -637,7 +696,7 @@ namespace springtail {
          *
          * @param root The root page of the tree.
          */
-        void _lock_and_flush_root(PagePtr root);
+        void _lock_and_flush_root(NodePtr root);
 
         /**
          * Flushes the provided Page to disk.  The page contained in the Node must not be locked by

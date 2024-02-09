@@ -46,11 +46,11 @@ namespace springtail {
         /** Start the test; runs the main loop until no more requests exist */
         void start()
         {
-            std::vector<TestStateRequestPtr> requests;
+            ;
 
             while (true) {
                 // get next set of requests
-                requests = _state.get_requests();
+                std::vector<TestStateRequestPtr> &&requests = _state.get_requests();
                 if (requests.size() == 0) {
                     break;
                 }

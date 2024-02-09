@@ -43,7 +43,7 @@ find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
 find_package(Psql)
 find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
-# find_package(Boost REQUIRED boost-program-options)
+find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 

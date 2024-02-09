@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
 #include <storage/mutable_btree.hh>
@@ -8,6 +9,49 @@
 using namespace springtail;
 
 namespace {
+
+    /** Thread test state interface for ThreadedTest */
+    template <class ThreadRequest>
+    class PhasedThreadTest {
+        using ThreadRequestPtr = std::shared_ptr<ThreadRequest>;
+    public:
+        PhasedThreadTest()
+            : _phase(0)
+        { }
+
+        void next_phase() {
+            ++_phase;
+        }
+
+        void add_request(ThreadRequestPtr request) {
+            _requests[_phase].push_back(request);
+        }
+
+        void set_verify(std::function<void()> verify) {
+            _verifiers.insert({_phase, verify});
+        }
+
+        void run(int thread_count) {
+            for (int i = 0; i <= _phase; i++) {
+                // create thread pool for this set of tests
+                auto thread_pool = std::make_shared<ThreadPool<ThreadRequest>>(thread_count);
+
+                // issue the requests
+                thread_pool->queue(_requests[i]);
+
+                // shutdown pool (acts as a barrier)
+                thread_pool->shutdown();
+
+                // verify state
+                ASSERT_NO_FATAL_FAILURE(_verifiers[i]());
+            }
+        }
+
+    private:
+        int _phase;
+        std::map<int, std::vector<ThreadRequestPtr>> _requests;
+        std::map<int, std::function<void()>> _verifiers;
+    };
 
     /**
      * Framework for Basic BTree testing.
@@ -36,6 +80,7 @@ namespace {
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemoveAll");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertSame");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertMany");
+            IOMgr::get_instance()->remove("/tmp/test_btree_ThreadedInserts");
         }
 
         ExtentSchemaPtr _schema;
@@ -84,6 +129,46 @@ namespace {
             return std::make_shared<BTree>(handle, 0, _keys, _schema,
                                            _read_cache, 1, extent_id);
         }
+
+        /**
+         * Request for multi-threading tests.
+         */
+        class Request {
+        public:
+            enum Type {
+                INSERT,
+                REMOVE
+            };
+
+        public:
+            /** add row constructor */
+            Request(std::shared_ptr<MutableBTree> btree, const Type &type, TuplePtr tuple)
+                : _btree(btree),
+                  _type(type),
+                  _tuple(tuple)
+            { }
+
+            /**
+             * @brief Overload () for execution from worker thread.
+             *        Main entry from worker thread
+             */
+            void operator()() {
+                switch (_type) {
+                case(Type::INSERT):
+                    _btree->insert(_tuple);
+                    break;
+                case (Type::REMOVE):
+                    _btree->remove(_tuple);
+                    break;
+                }
+            }
+
+        private:
+            std::shared_ptr<MutableBTree> _btree;
+            Type _type;
+            TuplePtr _tuple;
+        };
+        typedef std::shared_ptr<Request> RequestPtr;
     };
 
     TEST_F(BTree_Test, Insert10) {
@@ -349,7 +434,7 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
-        // insert 15k entries
+        // insert 50k entries
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
@@ -379,5 +464,68 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 50000);
+    }
+
+    TEST_F(BTree_Test, ThreadedInserts) {
+        PhasedThreadTest<Request> tester;
+
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_ThreadedInserts", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+
+        // preapare 50k inserts
+        for (int i = 0; i < 10; i++) {
+            csv::CSVReader reader("test_btree_simple.csv");
+            for (auto &&r : reader) {
+                auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
+                auto request = std::make_shared<Request>(btree, Request::Type::INSERT, tuple);
+                
+                tester.add_request(request);
+            }
+        }
+
+        // verify the entries
+        tester.set_verify([this, btree]() {
+            uint64_t offset = btree->finalize();
+
+            auto tree = _get_btree("/tmp/test_btree_ThreadedInserts", offset);
+
+            auto table_id_f = _schema->get_field("table_id");
+            auto name_f = _schema->get_field("name");
+            auto offset_f = _schema->get_field("offset");
+
+            // check for all entries
+            int count = 0;
+            std::string prev = "";
+            std::map<std::string, int> counts;
+            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+                if (name_f->get_text(*i) < prev) {
+                    SPDLOG_ERROR("{} < {}", name_f->get_text(*i), prev);
+                }
+
+                if (prev != "") {
+                    ASSERT_GE(name_f->get_text(*i), prev);
+                }
+
+                prev = name_f->get_text(*i);
+                ++counts[prev];
+                ++count;
+            }
+
+            for (auto &&entry : counts) {
+                if (entry.second < 10) {
+                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
+                }
+            }
+            ASSERT_EQ(count, 50000);
+        });
+
+        // run the phases using 4 threads (just one phase here)
+        tester.run(4);
     }
 }
