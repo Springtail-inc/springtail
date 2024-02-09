@@ -3,50 +3,51 @@
 namespace springtail {
 
     MutableBTree::MutableBTree(std::shared_ptr<IOHandle> handle,
+                               uint64_t file_id,
                                const std::vector<std::string> &keys,
-                               uint64_t cache_size,
+                               PageCachePtr cache,
                                ExtentSchemaPtr schema)
-        : _cache(cache_size),
+        : _cache(cache),
           _handle(handle),
+          _file_id(file_id),
           _sort_keys(keys),
           _xid(0),
           _finalized(true)
     {
         // initialize the schema information
         _init_schemas(schema, keys);
+    }
+
+    void
+    MutableBTree::init_empty()
+    {
+        // must not have already called init() or init_empty()
+        assert(_root == nullptr);
 
         // construct an empty extent at XID 0 -- an invalid XID
         // note: this extent will be replaced after mutations to the tree are performed following
         //       a call to set_xid()
-        ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType(false, true), 0);
+        ExtentPtr extent = std::make_shared<Extent>(_leaf_schema, ExtentType(false, true), 0);
 
         // create an empty root page
         // note: the implementation depends on a root always existing, but we still consider
         //       the tree finalized at the provided XID until a new target XID is set
-        _root = std::make_shared<Page>(extent, _leaf_keys);
+        _root = std::make_shared<Page>(shared_from_this(), extent, _leaf_keys);
 
         // add the root to the cache
         // note: we do not release it, leaving it's use-count permanently at 1
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
         _cache_insert(_root, cache_lock, false);
     }
 
-    MutableBTree::MutableBTree(std::shared_ptr<IOHandle> handle,
-                               const std::vector<std::string> &keys,
-                               uint64_t cache_size,
-                               std::shared_ptr<ExtentSchema> schema,
-                               uint64_t root_offset)
-        : _cache(cache_size),
-          _handle(handle),
-          _sort_keys(keys),
-          _finalized(true),
-          _leaf_schema(schema)
+    void
+    MutableBTree::init(uint64_t root_offset)
     {
-        // initialize the schema information
-        _init_schemas(schema, keys);
+        // must not have already called init() or init_empty()
+        assert(_root == nullptr);
 
         // construct an empty page to populate
-        _root = std::make_shared<Page>(root_offset);
+        _root = std::make_shared<Page>(shared_from_this(), root_offset);
 
         // read the root
         _read_page_internal(_root);
@@ -56,7 +57,7 @@ namespace springtail {
 
         // add the root to the cache
         // note: we do not release it, leaving it's use-count permanently at 1
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
         _cache_insert(_root, cache_lock, false);
     }
 
@@ -74,6 +75,9 @@ namespace springtail {
     void
     MutableBTree::insert(TuplePtr value)
     {
+        // must have called init() or init_empty()
+        assert(_root != nullptr);
+
         // acquire a shared lock on the btree
         boost::shared_lock tree_lock(_mutex);
 
@@ -87,15 +91,6 @@ namespace springtail {
         // to it from the root, get exclusive lock on the leaf
         NodePtr node = _find_leaf(search_key);
         PagePtr parent = (node->parent) ? node->parent->page : nullptr;
-
-        {
-            std::string info = fmt::format("Insert {}: ", search_key->field(0)->get_text(search_key->row()));
-
-            for (NodePtr p = node; p != nullptr; p = p->parent) {
-                info += fmt::format("{}, ", p->page->extent_id);
-            }
-            SPDLOG_INFO("{}", info);
-        }
 
         // insert the value into the page
         node->page->insert(search_key, value, _leaf_fields);
@@ -116,7 +111,7 @@ namespace springtail {
             }
         }
 
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
         if (!do_flush) {
             // need to update the cache with the updated size of the page
             _cache_update_size(node->page, cache_lock);
@@ -135,6 +130,9 @@ namespace springtail {
     void
     MutableBTree::remove(TuplePtr value)
     {
+        // must have called init() or init_empty()
+        assert(_root != nullptr);
+
         // acquire a shared lock on the btree
         boost::shared_lock tree_lock(_mutex);
 
@@ -163,7 +161,7 @@ namespace springtail {
             }
         }
 
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
         if (!is_empty) {
             // need to update the cache with the updated size of the page
             _cache_update_size(node->page, cache_lock);
@@ -182,6 +180,9 @@ namespace springtail {
     uint64_t
     MutableBTree::finalize()
     {
+        // must have called init() or init_empty()
+        assert(_root != nullptr);
+
         // acquire an exclusive lock on the tree here
         boost::unique_lock lock(_mutex);
 
@@ -441,8 +442,7 @@ namespace springtail {
     }
 
     std::vector<std::shared_ptr<MutableBTree::Page>>
-    MutableBTree::Page::flush_empty_root(std::shared_ptr<IOHandle> handle,
-                                         uint64_t xid)
+    MutableBTree::Page::flush_empty_root(uint64_t xid)
     {
         // note: this should never block since we should be holding the disk_mutex, but doing this
         //       for clarity / consistency
@@ -457,18 +457,17 @@ namespace springtail {
         _extents[0]->header().type = type;
 
         // write the empty extent
-        auto &&response = _extents[0]->async_flush(handle).get();
+        auto &&response = _extents[0]->async_flush(_btree->_handle).get();
 
         // construct the page this way to ensure we don't try to extract a prev_key
-        PagePtr page = std::make_shared<Page>(response->offset);
+        PagePtr page = std::make_shared<Page>(_btree, response->offset);
         page->set_extent(_extents[0], _key_fields);
 
         return std::vector<PagePtr>({page});
     }
 
     std::vector<std::shared_ptr<MutableBTree::Page>>
-    MutableBTree::Page::flush(std::shared_ptr<IOHandle> handle,
-                              uint64_t xid)
+    MutableBTree::Page::flush(uint64_t xid)
     {
         // note: this should never block since we should be holding the disk_mutex, but doing this
         //       for clarity / consistency
@@ -489,7 +488,7 @@ namespace springtail {
             e->header().prev_offset = this->extent_id;
             e->header().type = type;
 
-            futures.push_back(e->async_flush(handle));
+            futures.push_back(e->async_flush(_btree->_handle));
         }
 
         // as the writes complete, create the new pages
@@ -497,7 +496,8 @@ namespace springtail {
             auto &&response = futures[i].get();
 
             ValueTuplePtr key = std::make_shared<ValueTuple>(_key_fields->bind(_extents[i]->back()));
-            PagePtr page = std::make_shared<Page>(response->offset, key, _extents[i], _key_fields);
+            PagePtr page = std::make_shared<Page>(_btree, response->offset,
+                                                  key, _extents[i], _key_fields);
 
             new_pages.push_back(page);
         }
@@ -534,18 +534,16 @@ namespace springtail {
     MutableBTree::PagePtr
     MutableBTree::_cache_get(uint64_t extent_id)
     {
-        // SPDLOG_INFO("Cache get: {}", extent_id);
-
         // find the entry if it exists
-        auto &&i = _cache.lookup.find(extent_id);
-        if (i == _cache.lookup.end()) {
+        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        if (i == _cache->lookup.end()) {
             return nullptr;
         }
         PageCache::LookupEntry &entry = i->second;
 
         // remove the page from the LRU list if on the list
         if (std::get<2>(entry) == 0) {
-            _cache.lru.erase(std::get<1>(entry));
+            _cache->lru.erase(std::get<1>(entry));
         }
 
         // increment the usage counter
@@ -558,14 +556,12 @@ namespace springtail {
     void
     MutableBTree::_cache_release(PagePtr page)
     {
-        // SPDLOG_INFO("Cache release: {}", page->extent_id);
-
         // find the entry; must exist in the cache since can't be chosen for eviction while it is in use
-        auto &&i = _cache.lookup.find(page->extent_id);
+        auto &&i = _cache->lookup.find(page->get_lookup_id());
 
         // it's possible that the page was evicted due to a flush, in which case it will no
         // longer be in the cache
-        if (i == _cache.lookup.end()) {
+        if (i == _cache->lookup.end()) {
             return;
         }
 
@@ -575,8 +571,8 @@ namespace springtail {
 
         // if zero then add to the LRU list
         if (usage == 0) {
-            _cache.lru.push_front(page);
-            std::get<1>(i->second) = _cache.lru.begin();
+            _cache->lru.push_front(page);
+            std::get<1>(i->second) = _cache->lru.begin();
         }
     }
 
@@ -585,11 +581,8 @@ namespace springtail {
     {
         // place the page into the cache, but not into the LRU queue
         // note: set the use count to 1 since the caller is actively using the page
-        _cache.lookup.insert_or_assign(page->extent_id,
-                                       PageCache::LookupEntry(page,
-                                                              _cache.lru.end(),
-                                                              1, // use count
-                                                              0)); // size
+        PageCache::LookupEntry entry{ page, _cache->lru.end(), 1, 0 };
+        _cache->lookup.insert_or_assign(page->get_lookup_id(), std::move(entry));
     }
 
     void
@@ -613,33 +606,32 @@ namespace springtail {
     MutableBTree::_cache_update_size(PagePtr update_page,
                                      boost::unique_lock<boost::shared_mutex> &cache_lock)
     {
-        // SPDLOG_INFO("Cache update: {}", update_page->extent_id);
-
         // update the size of the cache given the page size
-        auto &&i = _cache.lookup.find(update_page->extent_id);
-        assert(i != _cache.lookup.end());
+        auto &&i = _cache->lookup.find(update_page->get_lookup_id());
+        assert(i != _cache->lookup.end());
         PageCache::LookupEntry &entry = i->second;
 
         // update the size of the cache based on the new size of the entry
         // note: atomic access to the size
         uint32_t page_size = update_page->size;
 
-        _cache.size = _cache.size - std::get<3>(entry) + page_size;
+        _cache->size = _cache->size - std::get<3>(entry) + page_size;
         std::get<3>(entry) = page_size;
 
         // evict pages until the size is under the watermark
-        while (_cache.size > _cache.max_size) {
+        while (_cache->size > _cache->max_size) {
             // if somehow there are no evictable pages, print a warning and return
-            if (_cache.lru.empty()) {
+            if (_cache->lru.empty()) {
                 assert(0); // XXX we should never hit this case
             }
 
             // get a page
             // note: coming off the LRU we know that no one else is currently using this page
-            PagePtr page = _cache.lru.back();
-            _cache.lru.pop_back();
+            PagePtr page = _cache->lru.back();
+            _cache->lru.pop_back();
 
-            auto &lru_entry = _cache.lookup.find(page->extent_id)->second;
+            // find the hash entry and set the usage count
+            auto &lru_entry = _cache->lookup.find(page->get_lookup_id())->second;
             std::get<2>(lru_entry) = 1;
 
             // save the entry size to reduce the cache size after the page flush
@@ -649,8 +641,8 @@ namespace springtail {
             // note: if the page is the root we can't evict; if the page has potentially dirty
             //       children, must evict them first
             if (page->type.is_root() || page->has_children()) {
-                _cache.lru.push_front(page);
-                std::get<1>(lru_entry) = _cache.lru.begin();
+                _cache->lru.push_front(page);
+                std::get<1>(lru_entry) = _cache->lru.begin();
                 std::get<2>(lru_entry) = 0;
                 continue;
             }
@@ -660,12 +652,10 @@ namespace springtail {
             //       created from a flush, then can evict immedately
             PagePtr parent = page->parent();
             if (!page->is_dirty() || page->flushed || parent == nullptr) {
-                _cache.lookup.erase(page->extent_id);
-                _cache.size -= entry_size;
+                _cache->lookup.erase(page->get_lookup_id());
+                _cache->size -= entry_size;
                 continue;
             }
-
-            SPDLOG_INFO("Cache LRU evict choosen: {}", page->extent_id);
 
             // unlock the cache for others to proceed
             cache_lock.unlock();
@@ -691,25 +681,26 @@ namespace springtail {
             // re-lock the cache and continue
             cache_lock.lock();
 
-            // re-find the cache entry in case it's changed
-            auto &&i = _cache.lookup.find(page->extent_id);
+            // re-find the cache entry
+            auto &&i = _cache->lookup.find(page->get_lookup_id());
 
             // free the space before the next check
-            _cache.size -= std::get<3>(i->second);
+            _cache->size -= std::get<3>(i->second);
 
             // remove the page from the cache now that it has been replaced
-            _cache.lookup.erase(i);
+            // note: we don't do this earlier since a reader could come in requesting the page and
+            //       then there would be a race which could result in the page being re-read from
+            //       disk and modified, resulting in invalid behavior
+            _cache->lookup.erase(i);
         }
     }
 
     void
     MutableBTree::_cache_evict(uint64_t extent_id)
     {
-        SPDLOG_INFO("Cache direct evict: {}", extent_id);
-
         // find the entry if it exists
-        auto &&i = _cache.lookup.find(extent_id);
-        if (i == _cache.lookup.end()) {
+        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        if (i == _cache->lookup.end()) {
             return; // not an error since someone else may have evicted
         }
 
@@ -724,12 +715,12 @@ namespace springtail {
         // during a finalize() the entries are flushed without being acquired out of the cache,
         // so in that case we also need to remove it from the LRU list
         if (std::get<2>(entry) == 0) {
-            _cache.lru.erase(std::get<1>(entry));
+            _cache->lru.erase(std::get<1>(entry));
         }
 
         // remove the entry from the cache
-        _cache.size -= std::get<3>(entry);
-        _cache.lookup.erase(i);
+        _cache->size -= std::get<3>(entry);
+        _cache->lookup.erase(i);
     }
 
     void
@@ -760,11 +751,8 @@ namespace springtail {
     MutableBTree::_read_page(uint64_t extent_id,
                              NodePtr parent)
     {
-        // note: when entering, parent_lock is held and leaf_lock not held
-        SPDLOG_INFO("Reading page: {} [{}]", extent_id, parent->page->extent_id);
-
         // lock the cache
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
 
         // check if the entry already exists
         PagePtr page = _cache_get(extent_id);
@@ -791,10 +779,10 @@ namespace springtail {
         }
 
         // no page in the cache, so construct a page that we can populate
-        page = std::make_shared<Page>(extent_id);
+        page = std::make_shared<Page>(shared_from_this(), extent_id);
 
-        // get an exclusive lock the new page's data, prevents others from using the page until the
-        // data is available
+        // prevent others from using the page until the data is available
+        // note: this will never block
         boost::unique_lock data_lock(page->disk_mutex);
 
         // place the page into the cache, but not into the LRU queue
@@ -874,7 +862,7 @@ namespace springtail {
         //       mutex, but then there is a potential race condition between updating the
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
-        std::vector<PagePtr> &&new_pages = page->flush(_handle, _xid);
+        std::vector<PagePtr> &&new_pages = page->flush(_xid);
 
         // update the parent's pointers
         parent->update_branch(page, new_pages, _branch_child_f);
@@ -884,11 +872,6 @@ namespace springtail {
 
         // mark the page as flushed
         page->flushed = true;
-        std::string dbg = fmt::format("(1) Flushed page: {} [{}]-> ", page->extent_id, parent->extent_id);
-        for (auto &&new_page : new_pages) {
-            dbg += fmt::format("{}, ", new_page->extent_id);
-        }
-        SPDLOG_INFO(dbg);
 
         return new_pages;
     }
@@ -929,14 +912,14 @@ namespace springtail {
             _remove_page_internal(page, parent);
 
             // evict the removed page from the cache
-            boost::unique_lock cache_lock(_cache.mutex);
+            boost::unique_lock cache_lock(_cache->mutex);
             _cache_evict(page->extent_id);
         } else {
             // perform the actual page flush
             std::vector<PagePtr> &&new_pages = _flush_page_internal(page, parent);
 
             // evict the page from the cache and add the new pages
-            boost::unique_lock cache_lock(_cache.mutex);
+            boost::unique_lock cache_lock(_cache->mutex);
 
             _cache_evict(page->extent_id);
             for (auto &&new_page : new_pages) {
@@ -979,8 +962,8 @@ namespace springtail {
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
         std::vector<PagePtr> &&new_pages = (page->empty())
-            ? page->flush_empty_root(_handle, _xid)
-            : page->flush(_handle, _xid);
+            ? page->flush_empty_root(_xid)
+            : page->flush(_xid);
 
         // check if we need to create a new root above this page
         PagePtr new_root;
@@ -1002,7 +985,7 @@ namespace springtail {
             // construct a new root page based on the new extent
             uint64_t extent_id = future.get()->offset;
             ValueTuplePtr key = std::make_shared<ValueTuple>(_branch_keys->bind(extent->back()));
-            new_root = std::make_shared<Page>(extent_id, key, extent, _branch_keys);
+            new_root = std::make_shared<Page>(shared_from_this(), extent_id, key, extent, _branch_keys);
 
             // note: we don't need to add these new pages as children because they are clean
             //       pages that haven't been traversed for modification
@@ -1014,20 +997,12 @@ namespace springtail {
 
         // mark the old root as flushed
         page->flushed = true;
-        std::string dbg = fmt::format("(2) Flushed page: {} -> ", page->extent_id);
-        for (auto &&new_page : new_pages) {
-            dbg += fmt::format("{}, ", new_page->extent_id);
-        }
-        if (new_root) {
-            dbg += fmt::format("r {}, ", new_root->extent_id);
-        }
-        SPDLOG_INFO(dbg);
 
         // evict the old root and add the new pages to the cache since they are no longer roots
         // note: no one should be using this page since we have exclusive lock on both the
         //       parent and the page, meaning no one is holding the page and no one could have
         //       found the page again after releasing it
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
 
         _cache_evict(page->extent_id);
         for (auto &&new_page : new_pages) {
@@ -1097,7 +1072,7 @@ namespace springtail {
             }
         } else {
             // otherwise, update the parent's size in the cache
-            boost::unique_lock cache_lock(_cache.mutex);
+            boost::unique_lock cache_lock(_cache->mutex);
             _cache_update_size(node->page, cache_lock);
         }
     }
@@ -1114,7 +1089,6 @@ namespace springtail {
 
         // mark the page flushed
         page->flushed = true;
-        SPDLOG_INFO("(3) Flushed page: {}", page->extent_id);
     }
 
     void
@@ -1139,7 +1113,7 @@ namespace springtail {
         _remove_page_internal(page, parent);
 
         // evict the page from the cache
-        boost::unique_lock cache_lock(_cache.mutex);
+        boost::unique_lock cache_lock(_cache->mutex);
         _cache_evict(page->extent_id);
     }
 

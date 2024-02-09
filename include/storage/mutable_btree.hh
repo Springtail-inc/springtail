@@ -35,16 +35,60 @@ namespace springtail {
      * read-only BTree objects constructed against the same underlying file being used concurrently
      * with the MutableBTree.
      */
-    class MutableBTree {
+    class MutableBTree : public std::enable_shared_from_this<MutableBTree> {
     private:
         // forward declarations
         class Page;
+        typedef std::shared_ptr<Page> PagePtr;
+
         struct Node;
         typedef std::shared_ptr<Node> NodePtr;
         
     public:
         /**
-         * Constructs an empty tree at the provided XID.
+         * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
+         */
+        class PageCache {
+        public:
+            /** Cache entry typedef, tuple of PagePtr, LRU iterator, usage count, page size */
+            typedef std::tuple<PagePtr, typename std::list<PagePtr>::iterator, int, uint32_t> LookupEntry;
+
+            /** The ID type for the lookup is <file_id, extent_id> */
+            typedef std::pair<uint64_t, uint64_t> LookupID;
+
+            /** A map from extent ID to LookupEntry. */
+            std::unordered_map<LookupID, LookupEntry, boost::hash<LookupID>> lookup;
+
+            /** A list of pages in LRU order.  In-use pages are not kept in this LRU list.*/
+            std::list<PagePtr> lru;
+
+            /** The total bytes currently stored in the page cache. */
+            uint64_t size;
+
+            /** The maximum allowed bytes in the page cache. */
+            uint64_t max_size;
+
+            /** A mutex for exclusive / shared access to the cache. */
+            boost::shared_mutex mutex;
+
+        public:
+            PageCache(uint64_t max_size)
+                : size(0),
+                  max_size(max_size)
+            { }
+        };
+        typedef std::shared_ptr<PageCache> PageCachePtr;
+
+        /**
+         * Function for creating a page cache that can be shared among btrees.
+         */
+        static PageCachePtr create_cache(uint64_t size) {
+            return std::make_shared<PageCache>(size);
+        }
+
+    public:
+        /**
+         * Constructs an uninitialized tree at the provided XID.
          *
          * @param handle The file handle to the underlying on-disk representation.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
@@ -52,24 +96,20 @@ namespace springtail {
          * @param schema The schema of the leaf entries of the tree.
          */
         MutableBTree(std::shared_ptr<IOHandle> handle,
+                     uint64_t file_id,
                      const std::vector<std::string> &keys,
-                     uint64_t cache_size,
+                     PageCachePtr cache,
                      ExtentSchemaPtr schema);
 
         /**
-         * Constructs a mutable tree from an existing on-disk tree.
-         *
-         * @param handle The file handle to the underlying on-disk representation.
-         * @param keys A list of keys from the schema that are used to sort the entries of the tree.
-         * @param cache_size The maximum size of the in-memory cache of pages.
-         * @param schema The schema of the leaf entries of the tree.
-         * @param root_offset The position of the root within the file.
+         * Initialize an empty tree.
          */
-        MutableBTree(std::shared_ptr<IOHandle> handle,
-                     const std::vector<std::string> &keys,
-                     uint64_t cache_size,
-                     std::shared_ptr<ExtentSchema> schema,
-                     uint64_t root_offset);
+        void init_empty();
+
+        /**
+         * Initialize a tree with a given root offset.
+         */
+        void init(uint64_t root_offset);
 
         /**
          * Mark the BTree as making modifications for a given target XID.
@@ -216,11 +256,13 @@ namespace springtail {
 
         public:
             /** For constructing an empty root. */
-            Page(ExtentPtr extent,
+            Page(std::shared_ptr<MutableBTree> btree,
+                 ExtentPtr extent,
                  MutableFieldArrayPtr key_fields)
                 : extent_id(0),
                   type(false, true),
                   flushed(false),
+                  _btree(btree),
                   _dirty(false),
                   _key_fields(key_fields),
                   _parent(nullptr)
@@ -229,17 +271,24 @@ namespace springtail {
                 size = extent->byte_count();
             }
 
-            Page(uint64_t extent_id)
+            Page(std::shared_ptr<MutableBTree> btree,
+                 uint64_t extent_id)
                 : extent_id(extent_id),
                   flushed(false),
+                  _btree(btree),
                   _dirty(false)
             { }
 
-            Page(uint64_t extent_id, ValueTuplePtr v, ExtentPtr e, MutableFieldArrayPtr key_fields)
+            Page(std::shared_ptr<MutableBTree> btree,
+                 uint64_t extent_id,
+                 ValueTuplePtr v,
+                 ExtentPtr e,
+                 MutableFieldArrayPtr key_fields)
                 : extent_id(extent_id),
                   type(e->type()),
                   prev_key(v),
                   flushed(false),
+                  _btree(btree),
                   _dirty(false),
                   _key_fields(key_fields)
             {
@@ -321,7 +370,7 @@ namespace springtail {
              * @param handle The file handle for access to write data.
              * @param xid The XID at which the page is being written.
              */
-            std::vector<std::shared_ptr<Page>> flush(std::shared_ptr<IOHandle> handle, uint64_t xid);
+            std::vector<std::shared_ptr<Page>> flush(uint64_t xid);
 
             /**
              * Specialized case for flushing an empty root page.  Assumes that the caller is holding
@@ -330,7 +379,7 @@ namespace springtail {
              * @param handle The file handle for access to write data.
              * @param xid The XID at which the page is being written.
              */
-            std::vector<std::shared_ptr<Page>> flush_empty_root(std::shared_ptr<IOHandle> handle, uint64_t xid);
+            std::vector<std::shared_ptr<Page>> flush_empty_root(uint64_t xid);
 
             /**
              * Set the contents of the page to the provided extent.  Stores the key of the final row
@@ -341,6 +390,12 @@ namespace springtail {
              * @param key_fields The fields that represent the key within this page.
              */
             void set_extent(ExtentPtr extent, MutableFieldArrayPtr key_fields);
+
+            PageCache::LookupID
+            get_lookup_id()
+            {
+                return PageCache::LookupID{_btree->_file_id, extent_id};
+            }
 
             /**
              * Return the current key of the last entry in the page.
@@ -455,6 +510,7 @@ namespace springtail {
 
 
         private:
+            std::shared_ptr<MutableBTree> _btree; ///< The btree this page is associated with.
             bool _dirty; ///< Flag indicating if data has been modified since the last write.
             MutableFieldArrayPtr _key_fields; ///< The fields representing the key in the btree.
             std::vector<ExtentPtr> _extents; ///< A list of extents that will be written out when this page is flushed.
@@ -465,45 +521,15 @@ namespace springtail {
             std::shared_ptr<Page> _parent; ///< Pointer to the parent page.  Won't change once the page is fully constructed.
         };
 
-        /** Pointer typedef for MutableBTree::Page. */
-        typedef std::shared_ptr<Page> PagePtr;
-
-        /**
-         * Cache of Page objects.  Works with the BTree page locks to enable thread-safe access.
-         */
-        class PageCache {
-        public:
-            /** Cache entry typedef, tuple of PagePtr, LRU iterator, usage count, page size */
-            typedef std::tuple<PagePtr, typename std::list<PagePtr>::iterator, int, uint32_t> LookupEntry;
-
-            /** A map from extent ID to LookupEntry. */
-            std::unordered_map<uint64_t, LookupEntry, boost::hash<uint64_t>> lookup;
-
-            /** A list of pages in LRU order.  In-use pages are not kept in this LRU list.*/
-            std::list<PagePtr> lru;
-
-            /** The total bytes currently stored in the page cache. */
-            uint64_t size;
-
-            /** The maximum allowed bytes in the page cache. */
-            uint64_t max_size;
-
-            /** A mutex for exclusive / shared access to the cache. */
-            boost::shared_mutex mutex;
-
-        public:
-            PageCache(uint64_t max_size)
-                : size(0),
-                  max_size(max_size)
-            { }
-        };
-
     private:
         /** The cache of pages for this MutableBTree. */
-        PageCache _cache;
+        PageCachePtr _cache;
 
         /** The handle to the underlying on-disk data. */
         std::shared_ptr<IOHandle> _handle;
+
+        /** The file ID for the underlying on-disk data. */
+        uint64_t _file_id;
 
         /** The set of keys that form the sort order of the tree. */
         std::vector<std::string> _sort_keys;
