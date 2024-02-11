@@ -1,3 +1,4 @@
+#include <storage/btree_common.hh>
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
@@ -145,9 +146,6 @@ namespace springtail {
 
         // traverse the tree to find the appropriate page to remove from
         NodePtr node = _find_leaf(search_key);
-
-        // once we've traversed the tree we can release the tree lock
-        tree_lock.unlock();
 
         // remove the value from the page
         node->page->remove(search_key);
@@ -410,7 +408,7 @@ namespace springtail {
         // find the position to perform the remove
         auto &&i = _find(search_key);
         if (i == _end()) {
-            return; // no entry to remove
+            return; // no such entry found
         }
         ExtentPtr e = *(i._extent_i);
 
@@ -436,9 +434,12 @@ namespace springtail {
         }
 
         // XXX re-merge extents if possible?
-        // note: we don't perform cross-Page merge here as it's handled during GC vacuum but
-        //       we could check if the size of this extent and the one before / after would
-        //       make the threshold for a single extent
+
+        // note: we currently don't perform cross-Page merge here as it's handled during GC vacuum
+        //       but we could check if the size of this extent and the one before / after would make
+        //       the threshold for a single extent.  One potentially better approach is to keep the
+        //       size of the child in the pointer and then do split / merge as we traverse down the
+        //       tree rather than cleaning up afterward.
     }
 
     std::vector<std::shared_ptr<MutableBTree::Page>>
@@ -1155,11 +1156,11 @@ namespace springtail {
         _leaf_keys = _leaf_schema->get_mutable_fields(keys);
 
         // construct the schema for the branches
-        SchemaColumn child("child", 0, SchemaType::UINT64, false);
+        SchemaColumn child(BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
         _branch_schema = _leaf_schema->create_schema(keys, { child });
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_mutable_fields(keys);
-        _branch_child_f = _branch_schema->get_mutable_field("child");
+        _branch_child_f = _branch_schema->get_mutable_field(BTREE_CHILD_FIELD);
     }
 }
