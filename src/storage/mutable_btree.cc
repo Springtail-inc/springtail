@@ -94,10 +94,13 @@ namespace springtail {
         PagePtr parent = (node->parent) ? node->parent->page : nullptr;
 
         // insert the value into the page
+        boost::unique_lock page_lock(node->page->mutex);
         node->page->insert(search_key, value, _leaf_fields);
 
         // check if this page needs to be flushed
         bool do_flush = node->page->check_flush();
+        page_lock.unlock();
+
         if (do_flush) {
             // check if this is the root
             if (parent == nullptr) {
@@ -148,10 +151,13 @@ namespace springtail {
         NodePtr node = _find_leaf(search_key);
 
         // remove the value from the page
+        boost::unique_lock page_lock(node->page->mutex);
         node->page->remove(search_key);
 
         // check if this page needs to be removed
         bool is_empty = node->page->empty();
+        page_lock.unlock();
+
         if (is_empty) {
             // check if this is a non-root page
             if (node->parent != nullptr) {
@@ -226,25 +232,15 @@ namespace springtail {
 
         this->size += pair.first->byte_count() + pair.second->byte_count();
 
-        // verify that the extents are in-order
-        auto i = _extents.begin();
-        auto j = i++;
-        while (i < _extents.end()) {
-            assert(!_key_fields->bind((*i)->back())->less_than(_key_fields->bind((*j)->back())));
-            ++i;
-            ++j;
-        }
-
         return true;
     }
 
-
     MutableBTree::Page::Iterator
-    MutableBTree::Page::_lower_bound(TuplePtr search_key)
+    MutableBTree::Page::lower_bound(TuplePtr search_key)
     {
         // if the page is empty then return end()
-        if (_empty()) {
-            return _end();
+        if (this->empty()) {
+            return this->end();
         }
 
         // find the extent that might contain the search key
@@ -253,7 +249,7 @@ namespace springtail {
                                         return this->_key_fields->bind(extent->back())->less_than(key);
                                     });
         if (i == _extents.end()) {
-            return _end();
+            return this->end();
         }
 
         // try to find the row within the extent
@@ -263,7 +259,7 @@ namespace springtail {
                                             return this->_key_fields->bind(row)->less_than(key);
                                         });
         if (row_i == e->end()) {
-            return _end();
+            return this->end();
         }
 
         // construct an iterator to this entry
@@ -271,41 +267,21 @@ namespace springtail {
     }
 
     MutableBTree::Page::Iterator
-    MutableBTree::Page::_find(TuplePtr search_key)
+    MutableBTree::Page::find(TuplePtr search_key)
     {
         // use lower_bound() to do a binary search for the entry
-        auto &&i = _lower_bound(search_key);
-        if (i == _end()) {
+        auto &&i = this->lower_bound(search_key);
+        if (i == this->end()) {
             return i;
         }
 
         // if the key is < the returned row, then there is no matching entry, return end()
         if (search_key->less_than(_key_fields->bind(*i))) {
-            return _end();
+            return this->end();
         }
 
         // return the Iterator
         return i;
-    }
-
-    MutableBTree::Page::Iterator
-    MutableBTree::Page::lower_bound(TuplePtr search_key)
-    {
-        // read lock the page
-        boost::shared_lock lock(mutex);
-
-        // execute the internal helper
-        return _lower_bound(search_key);
-    }
-
-    MutableBTree::Page::Iterator
-    MutableBTree::Page::find(TuplePtr search_key)
-    {
-        // read lock the page
-        boost::shared_lock lock(mutex);
-
-        // execute the internal helper
-        return _find(search_key);
     }
 
     void
@@ -313,13 +289,10 @@ namespace springtail {
                                       std::vector<std::shared_ptr<Page>> new_pages,
                                       MutableFieldPtr offset_f)
     {
-        // lock for exclusive access
-        boost::unique_lock lock(mutex);
-
         // remove the old child page from the entries
         // note: key should always exist since it's a pointer to an existing child
-        auto &&page_i = _find(old_page->prev_key);
-        assert(page_i != _end());
+        auto &&page_i = this->find(old_page->prev_key);
+        assert(page_i != this->end());
         ExtentPtr e = *(page_i._extent_i);
 
         // remove the old page while updating the page size
@@ -348,7 +321,7 @@ namespace springtail {
             bool did_split = _check_split(page_i._extent_i);
             if (did_split) {
                 // re-find the insert position
-                page_i = _find(page->prev_key);
+                page_i = this->find(page->prev_key);
             }
         }
     }
@@ -358,13 +331,11 @@ namespace springtail {
                                TuplePtr value,
                                MutableFieldArrayPtr fields)
     {
-        std::unique_lock lock(mutex);
-
         // mark this page as dirty
         _dirty = true;
 
         // handle the empty page case
-        if (_empty()) {
+        if (this->empty()) {
             ExtentPtr e = _extents.front();
 
             // add a row
@@ -380,7 +351,7 @@ namespace springtail {
         }
 
         // find the position to perform the insert
-        auto &&i = _lower_bound(search_key);
+        auto &&i = this->lower_bound(search_key);
 
         // set the correct iterators
         ExtentPtr e = *i._extent_i;
@@ -403,11 +374,9 @@ namespace springtail {
     void
     MutableBTree::Page::remove(TuplePtr search_key)
     {
-        std::unique_lock lock(mutex);
-
         // find the position to perform the remove
-        auto &&i = _find(search_key);
-        if (i == _end()) {
+        auto &&i = this->find(search_key);
+        if (i == this->end()) {
             return; // no such entry found
         }
         ExtentPtr e = *(i._extent_i);
@@ -445,9 +414,7 @@ namespace springtail {
     std::vector<std::shared_ptr<MutableBTree::Page>>
     MutableBTree::Page::flush_empty_root(uint64_t xid)
     {
-        // note: this should never block since we should be holding the disk_mutex, but doing this
-        //       for clarity / consistency
-        boost::unique_lock lock(mutex);
+        // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
         // since this is an empty root, ensure that it is now a leaf node
         ExtentType type(false, true);
@@ -470,10 +437,7 @@ namespace springtail {
     std::vector<std::shared_ptr<MutableBTree::Page>>
     MutableBTree::Page::flush(uint64_t xid)
     {
-        // note: this should never block since we should be holding the disk_mutex, but doing this
-        //       for clarity / consistency
-        boost::unique_lock lock(mutex);
-
+        // note: we must be holding the disk_mutex, so no need to lock the access mutex
         std::vector<PagePtr> new_pages;
 
         // if the root was split, then remove the root flag from the type
@@ -510,7 +474,7 @@ namespace springtail {
     MutableBTree::Page::set_extent(ExtentPtr extent,
                                    MutableFieldArrayPtr key_fields)
     {
-        boost::unique_lock lock(mutex);
+        // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
         // note: page should be empty when this is called
         assert(_extents.size() == 0);
@@ -750,7 +714,8 @@ namespace springtail {
 
     MutableBTree::NodePtr
     MutableBTree::_read_page(uint64_t extent_id,
-                             NodePtr parent)
+                             NodePtr parent,
+                             boost::shared_lock<boost::shared_mutex> &parent_lock)
     {
         // lock the cache
         boost::unique_lock cache_lock(_cache->mutex);
@@ -760,6 +725,9 @@ namespace springtail {
         if (page != nullptr) {
             // no longer need to access the cache, release the lock
             cache_lock.unlock();
+
+            // once we have a pointer to the page we can release the parent
+            parent_lock.unlock();
 
             // note: acquiring the disk_mutex of the new page ensures that the page data has been
             //       populated before continuing
@@ -791,14 +759,17 @@ namespace springtail {
         //       hold an exclusive lock on the page
         _cache_insert_empty(page);
 
-        // update the page book-keeping
-        page->set_parent(parent->page);
-        parent->page->add_child(page);
-
         // release the cache for other threads until we have populated the data for this page
         // note: the exclusive lock on the page will prevent others from progressing even if
         //       they try to access this page
         cache_lock.unlock();
+
+        // once we have a pointer to the page we can release the parent
+        parent_lock.unlock();
+
+        // update the page book-keeping
+        page->set_parent(parent->page);
+        parent->page->add_child(page);
 
         // read extent from disk and update the page metadata
         _read_page_internal(page);
@@ -829,6 +800,9 @@ namespace springtail {
 
         // iterate through the levels until we find a leaf page
         while (node->page->type.is_branch()) {
+            // lock page for read access
+            boost::shared_lock page_lock(node->page->mutex);
+
             // use a lower_bound() check to find the appropriate child branch
             auto &&i = node->page->lower_bound(key);
 
@@ -839,7 +813,8 @@ namespace springtail {
             uint64_t extent_id = _branch_child_f->get_uint64(row);
 
             // read the child page; will handle updating the locks
-            NodePtr child = _read_page(extent_id, node);
+            // note: this will release the page_lock once it has a pointer to the child in memory
+            NodePtr child = _read_page(extent_id, node, page_lock);
 
             // if the child was flushed while we were reading the page, we need to re-find it in the parent
             if (!child) {
@@ -864,6 +839,9 @@ namespace springtail {
         //       parent's pointers and flushing the parent.  It might be possible with more
         //       complex logic.
         std::vector<PagePtr> &&new_pages = page->flush(_xid);
+
+        // lock the parent for exclusive access
+        boost::unique_lock parent_lock(parent->mutex);
 
         // update the parent's pointers
         parent->update_branch(page, new_pages, _branch_child_f);
