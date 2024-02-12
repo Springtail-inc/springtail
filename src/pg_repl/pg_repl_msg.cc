@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <variant>
+#include <algorithm>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
@@ -1261,7 +1262,7 @@ namespace springtail
 
         // iterate, reading in 128 characters and searching for null char
         while (true) {
-            uint64_t length = std::min(128ull, _end_offset - _current_offset);
+	  uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
             _stream->read(buffer, length);
             uint64_t curr_len = strnlen(buffer, length);
             str_len += curr_len;

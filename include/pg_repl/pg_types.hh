@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstdint>
+#include <cstring>
 #include <sys/time.h>
 
 namespace springtail

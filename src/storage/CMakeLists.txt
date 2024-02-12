@@ -2,7 +2,7 @@
 set(STORAGE_SOURCES compressors.cc datafile.cc extent.cc schema.cc schema_column.cc io.cc io_mgr.cc io_file.cc io_request.cc)
 
 find_package(lz4 REQUIRED)
-find_package(xxhash CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 
 add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <optional>
+#include <variant>
+
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
 
