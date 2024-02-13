@@ -540,7 +540,6 @@ namespace {
         tester.run(4);
     }
 
-#if 0
     TEST_F(BTree_Test, ThreadedInsertAndRemove) {
         PhasedThreadTest<Request> tester;
 
@@ -553,15 +552,13 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
-        // preapare 50k inserts
-        for (int i = 0; i < 10; i++) {
-            csv::CSVReader reader("test_btree_simple.csv");
-            for (auto &&r : reader) {
-                auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-                auto request = std::make_shared<Request>(btree, Request::Type::INSERT, tuple);
+        // preapare 5k inserts
+        csv::CSVReader reader("test_btree_simple.csv");
+        for (auto &&r : reader) {
+            auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
+            auto request = std::make_shared<Request>(btree, Request::Type::INSERT, tuple);
                 
-                tester.add_request(request);
-            }
+            tester.add_request(request);
         }
 
         // verify the entries
@@ -593,11 +590,11 @@ namespace {
             }
 
             for (auto &&entry : counts) {
-                if (entry.second < 10) {
+                if (entry.second > 1) {
                     SPDLOG_INFO("{} = {}", entry.first, entry.second);
                 }
             }
-            ASSERT_EQ(count, 50000);
+            ASSERT_EQ(count, 5000);
 
             // set the next XID
             btree->set_xid(2);
@@ -606,15 +603,13 @@ namespace {
         // move to phase 2
         tester.next_phase();
 
-        // preapare 50k inserts
-        for (int i = 0; i < 10; i++) {
-            csv::CSVReader reader("test_btree_simple.csv");
-            for (auto &&r : reader) {
-                auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-                auto request = std::make_shared<Request>(btree, Request::Type::REMOVE, tuple);
+        // preapare 5k removes
+        csv::CSVReader reader2("test_btree_simple.csv");
+        for (auto &&r : reader2) {
+            auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
+            auto request = std::make_shared<Request>(btree, Request::Type::REMOVE, tuple);
                 
-                tester.add_request(request);
-            }
+            tester.add_request(request);
         }
 
         // verify the entries
@@ -639,7 +634,6 @@ namespace {
         // run the phases using 4 threads (just one phase here)
         tester.run(4);
     }
-#endif
 
     TEST_F(BTree_Test, ThreadedInsertsTwoFiles) {
         PhasedThreadTest<Request> tester;

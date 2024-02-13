@@ -525,18 +525,26 @@ namespace springtail {
             const PagePtr page; ///< The current page.
             boost::shared_lock<boost::shared_mutex> lock; ///< A shared lock on the page's disk_mutex
 
+            /**
+             * Constructor for the Node.  Automatically acquires a shared lock on the Page object's
+             * disk_mutex.
+             */
             Node(std::shared_ptr<Node> parent, PagePtr page)
                 : parent(parent),
                   page(page),
                   lock(page->disk_mutex)
             { }
 
+            /**
+             * Constructor for the Node.  Downgrades an existing exclusive lock on the Page object's
+             * disk_mutex to a shared lock.
+             */
             Node(std::shared_ptr<Node> parent,
                  PagePtr page,
-                 boost::unique_lock<boost::shared_mutex> &&data_lock)
+                 boost::unique_lock<boost::shared_mutex> &&disk_lock)
                 : parent(parent),
                   page(page),
-                  lock(std::move(data_lock))
+                  lock(std::move(disk_lock))
             { }
         };
 

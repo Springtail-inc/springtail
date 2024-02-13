@@ -821,6 +821,7 @@ namespace springtail {
                        const Extent::Row &rhs_row,
                        bool nulls_last=true) const
         {
+            // XXX we can implement this using some kind of simple hash and comparing the values.
             throw TypeError("Can't compare binary fields -- unclear how to handle");
         }
     };
