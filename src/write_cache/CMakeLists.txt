@@ -73,3 +73,14 @@ target_link_libraries(test_threaded
     GTest::gtest GTest::gtest_main
 )
 
+add_executable(write_cache_daemon write_cache_daemon.cc)
+
+target_include_directories(write_cache_daemon
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+            ${THRIFT_GEN_PATH}
+)
+
+target_link_libraries(write_cache_daemon
+    PRIVATE springtail_common
+    PRIVATE springtail_write_cache
+)
