@@ -4,7 +4,7 @@
 #include <string>
 #include <memory>
 
-#include <psql_cdc/libpq_connection.hh>
+#include <pg_repl/libpq_connection.hh>
 
 namespace springtail
 {

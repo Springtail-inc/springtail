@@ -1,7 +1,9 @@
 #pragma once
 
 #include <iostream>
+#include <fstream>
 #include <cstdint>
+#include <cstring>
 #include <sys/time.h>
 
 namespace springtail
@@ -143,6 +145,35 @@ namespace springtail
         n16 = pg_ntoh16(n16);
         return n16;
     }
+
+    static inline int16_t recvint16(std::fstream &stream)
+    {
+        char buffer[2];
+        stream.read(buffer, 2);
+        return recvint16(buffer);
+    }
+
+    static inline int32_t recvint32(std::fstream &stream)
+    {
+        char buffer[4];
+        stream.read(buffer, 4);
+        return recvint32(buffer);
+    }
+
+    static inline int64_t recvint64(std::fstream &stream)
+    {
+        char buffer[8];
+        stream.read(buffer, 8);
+        return recvint16(buffer);
+    }
+
+    static inline int8_t recvint8(std::fstream &stream)
+    {
+        char buffer;
+        stream.read(&buffer, 1);
+        return buffer;
+    }
+
 
     /** postgres command uses time as defined since 01/01/2000 00:00:00
         this is the number of msec from 1970 to 2000 */

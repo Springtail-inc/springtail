@@ -7,9 +7,9 @@
 
 // springtail includes
 #include <common/common.hh>
-#include <psql_cdc/pg_types.hh>
-#include <psql_cdc/pg_repl_connection.hh>
-#include <psql_cdc/pg_repl_msg.hh>
+#include <pg_repl/pg_types.hh>
+#include <pg_repl/pg_repl_connection.hh>
+#include <pg_repl/pg_repl_msg.hh>
 
 
 int main(int argc, char* argv[])
@@ -120,6 +120,15 @@ int main(int argc, char* argv[])
 
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
+
+        // update LSNs
+        if (data.msg_offset == 0) {
+            pg_conn.set_last_flushed_LSN(data.starting_lsn);
+        }
+
+        if (data.msg_offset == data.msg_length) {
+            pg_conn.set_last_flushed_LSN(data.ending_lsn);
+        }
 
         if (dump_buffer && data.msg_offset == 0) {
             // iterate through the messages

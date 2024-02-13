@@ -8,10 +8,10 @@
 
 // springtail includes
 #include <common/common.hh>
-#include <psql_cdc/exception.hh>
-#include <psql_cdc/pg_types.hh>
-#include <psql_cdc/pg_copy_table.hh>
-#include <psql_cdc/libpq_connection.hh>
+#include <pg_repl/exception.hh>
+#include <pg_repl/pg_types.hh>
+#include <pg_repl/pg_copy_table.hh>
+#include <pg_repl/libpq_connection.hh>
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 

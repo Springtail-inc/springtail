@@ -37,10 +37,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 ## Default location of properties file
 add_compile_definitions(SPRINGTAIL_PROPERTIES="${PROJECT_SOURCE_DIR}/system.json")
 
-find_library(LIB_ELF NAMES elf PATHS /usr/local/lib)
-find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib)
+find_library(LIB_ELF NAMES elf PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
+find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
 
-find_package(Psql)
 find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
@@ -50,14 +49,19 @@ find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 enable_testing()
 include(GoogleTest)
 
+add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
+
 ## source modules
 add_subdirectory(src/common)
 add_subdirectory(src/storage)
 add_subdirectory(src/benchmarks)
-add_subdirectory(src/psql_cdc)
+add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
+add_subdirectory(src/pg_log_mgr)
+add_subdirectory(src/xid_mgr)
 
 ## Messages keep at end of file
+message(STATUS "xxhash: " ${xxhash_DIR})
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 message(STATUS "Compiler: " ${CMAKE_CXX_COMPILER})
 message(STATUS "Compiler flags: " ${CMAKE_CXX_COMPILE_FLAGS})

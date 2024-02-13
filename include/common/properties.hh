@@ -7,7 +7,7 @@
 #endif
 
 namespace springtail {
-    
+
     /**
      * @brief Properties singleton object, initialized in springtail_init()
      */
@@ -19,6 +19,8 @@ namespace springtail {
         static inline constexpr char IOPOOL_CONFIG[] = "iopool";
         /** Write cache config */
         static inline constexpr char WRITE_CACHE_CONFIG[] = "write_cache";
+        /** XID mgr config */
+        static inline constexpr char XID_MGR_CONFIG[] = "xid_mgr";
 
         /** Default properties file, defined by make -D option, or macro above */
         static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;
@@ -39,7 +41,7 @@ namespace springtail {
     private:
         /** static _instance singleton */
         static Properties *_instance;
-        
+
         /** json containing parsed settings file */
         nlohmann::json _json;
 

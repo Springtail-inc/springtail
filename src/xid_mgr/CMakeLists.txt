@@ -11,10 +11,10 @@ find_program(
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
 # set variables for thrift schema .thrift file and generated .h
-set(THRIFT_SCHEMA "write_cache.thrift")
+set(THRIFT_SCHEMA "xid_mgr.thrift")
 set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")
-set(THRIFT_CC_FILES "${THRIFT_GEN_PATH}/ThriftWriteCache.cpp;${THRIFT_GEN_PATH}/write_cache_types.cpp")
-set(THRIFT_HH_FILES "${THRIFT_GEN_PATH}/ThriftWriteCache.h;${THRIFT_GEN_PATH}/write_cache_types.h")
+set(THRIFT_CC_FILES "${THRIFT_GEN_PATH}/ThriftXidMgr.cpp;${THRIFT_GEN_PATH}/xid_mgr_types.cpp")
+set(THRIFT_HH_FILES "${THRIFT_GEN_PATH}/ThriftXidMgr.h;${THRIFT_GEN_PATH}/xid_mgr_types.h")
 
 set(GENERATED_FILES ${THRIFT_CC_FILES} ${THRIFT_HH_FILES})
 
@@ -30,7 +30,7 @@ add_custom_command(
 )
 
 # target to ensure that all files are built prior to start of compilation
-add_custom_target(write_cache_generated_thrift
+add_custom_target(xid_mgr_generated_thrift
     DEPENDS ${GENERATED_FILES}
 )
 
@@ -38,36 +38,28 @@ add_custom_target(write_cache_generated_thrift
 set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
 
 # source files
-set(WRITE_CACHE_SOURCES
-    write_cache_client.cc
-    write_cache_server.cc write_cache_service.cc write_cache_index.cc write_cache_table_set.cc
-    write_cache_index_node.cc
+set(XID_MGR_SOURCES
+    xid_mgr_client.cc
+    xid_mgr_server.cc
+    xid_mgr_service.cc
     ${THRIFT_CC_FILES}
 )
 
 # add the library target
-add_library(springtail_write_cache ${WRITE_CACHE_SOURCES})
-add_dependencies(springtail_write_cache write_cache_generated_thrift)
+add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
+add_dependencies(springtail_xid_mgr xid_mgr_generated_thrift)
 
 # add the gen-cpp dir to the list of files to remove during 'make clean'
-set_target_properties(springtail_write_cache
+set_target_properties(springtail_xid_mgr
     PROPERTIES ADDITIONAL_CLEAN_FILES ${THRIFT_GEN_PATH}
 )
 
 # include the thrift gen-cpp dir as an include path; so we don't have to move the .h files
-target_include_directories(springtail_write_cache
+target_include_directories(springtail_xid_mgr
     PRIVATE ${CMAKE_SOURCE_DIR}/include
             ${THRIFT_GEN_PATH}
 )
 
-target_link_libraries(springtail_write_cache
+target_link_libraries(springtail_xid_mgr
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
-
-add_executable(test_threaded test/write_cache_index_test.cc)
-target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(test_threaded
-    PRIVATE springtail_common springtail_write_cache
-    GTest::gtest GTest::gtest_main
-)
-

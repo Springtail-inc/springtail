@@ -2,6 +2,7 @@
 
 #include <lz4.h>
 #include <vector>
+#include <memory>
 
 namespace springtail {
 

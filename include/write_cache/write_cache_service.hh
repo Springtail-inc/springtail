@@ -51,11 +51,11 @@ namespace springtail {
                 std::shared_ptr<apache::thrift::transport::TSocket> sock =
                     std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
 
-                std::cout << "Incoming connection\n";
-                std::cout << "\tSocketInfo: "  << sock->getSocketInfo() << "\n";
-                std::cout << "\tPeerHost: "    << sock->getPeerHost() << "\n";
-                std::cout << "\tPeerAddress: " << sock->getPeerAddress() << "\n";
-                std::cout << "\tPeerPort: "    << sock->getPeerPort() << "\n";
+                SPDLOG_DEBUG("Incoming connection\n");
+                SPDLOG_DEBUG("\tSocketInfo: {}\n", sock->getSocketInfo());
+                SPDLOG_DEBUG("\tPeerHost: {}\n", sock->getPeerHost());
+                SPDLOG_DEBUG("\tPeerAddress: {}\n", sock->getPeerAddress());
+                SPDLOG_DEBUG("\tPeerPort: {}\n", sock->getPeerPort());
 
                 return new ThriftWriteCacheService();
             }

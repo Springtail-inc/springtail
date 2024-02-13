@@ -10,11 +10,11 @@
 #include <sys/socket.h>
 #include <fmt/core.h>
 
-#include <psql_cdc/pg_types.hh>
-#include <psql_cdc/libpq_connection.hh>
-#include <psql_cdc/pg_repl_msg.hh>
-#include <psql_cdc/pg_repl_connection.hh>
-#include <psql_cdc/exception.hh>
+#include <pg_repl/pg_types.hh>
+#include <pg_repl/libpq_connection.hh>
+#include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_repl_connection.hh>
+#include <pg_repl/exception.hh>
 
 // from socket.h; indicates more data is coming to send
 #if !defined(MSG_MORE)
@@ -67,7 +67,8 @@ namespace springtail
      * @throws PgIOError on connection failure
      * @throws PgQueryError on failure to set search path
      */
-    void PgReplConnection::connect()
+    void
+    PgReplConnection::connect()
     {
         if (_connection.get() != nullptr) {
             throw PgAlreadyConnectedError();
@@ -80,7 +81,8 @@ namespace springtail
     /**
      * @brief Close connection; stop streaming
      */
-    void PgReplConnection::close()
+    void
+    PgReplConnection::close()
     {
         // end streaming if started, this will close streaming connection
         end_streaming();
@@ -99,7 +101,8 @@ namespace springtail
      * @throws PgStreamingError if connection is already streaming
      * @throws PgQueryError if replication command failed
      */
-    void PgReplConnection::start_streaming(LSN_t LSN)
+    void
+    PgReplConnection::start_streaming(LSN_t LSN)
     {
         if (_started_streaming) {
             // error already streaming
@@ -149,10 +152,10 @@ namespace springtail
         // we do this on using sockets to support non-blocking reads of less
         // than the full message length on the stream connection for copy data
         std::cout << "Executing: " << cmd << std::endl;
-        send_copy_data(cmd_buffer, cmd_length, MSG_QUERY);
+        _send_copy_data(cmd_buffer, cmd_length, MSG_QUERY);
 
         // read message header for response; msg type placed in _msg_type
-        read_msg_header();
+        _read_msg_header();
         if (_msg_type != MSG_COPY_BOTH) {
             std::cerr << "Error could not start WAL streaming: (msg type=" << _msg_type << ")\n";
             _stream_connection.reset(nullptr);
@@ -160,7 +163,7 @@ namespace springtail
         }
 
         // skip over rest of result message
-        skip_message();
+        _skip_message();
 
         _copy_state = NEW_MSG;
         _started_streaming = true;
@@ -171,7 +174,8 @@ namespace springtail
      * @brief End streaming; close streaming connection
      *        hide errors, as not useful at this point, as connection is being closed
      */
-    void PgReplConnection::end_streaming()
+    void
+    PgReplConnection::end_streaming()
     {
         if (!_started_streaming) {
             return;
@@ -212,7 +216,8 @@ namespace springtail
      * @return true if has data, false otherwise
      * @throws PgIOError on stream error
      */
-    bool PgReplConnection::check_data_stream(int timeout_secs)
+    bool
+    PgReplConnection::_check_data_stream(int timeout_secs)
     {
         fd_set fds;
         FD_ZERO(&fds);
@@ -238,7 +243,8 @@ namespace springtail
      * @return true if has data, false otherwise
      * @throws PgIOError on stream error
      */
-    bool PgReplConnection::handle_timeout()
+    bool
+    PgReplConnection::_handle_timeout()
     {
 
         if (_started_streaming) {
@@ -248,17 +254,17 @@ namespace springtail
                 // see if we've been idle for longer (received no data)
                 // than IDLE_SLOT_TIMEOUT_MSEC; if so we force an update
                 // based on the current LSN
-                fast_forward_stream();
+                _fast_forward_stream();
             }
 
             // check to see if we should send a standby message
             if ((now - _last_status_time) > STANDBY_MSG_INTERVAL_MSEC) {
-                send_standby_status_msg();
+                _send_standby_status_msg();
             }
         }
 
         // select wait on data stream
-        return check_data_stream(READ_TIMEOUT_SEC);
+        return _check_data_stream(READ_TIMEOUT_SEC);
     }
 
 
@@ -270,9 +276,10 @@ namespace springtail
      * @param msg_type type of message (optional; default COPY_DATA message)
      * @throws PgIOError on send error
      */
-    void PgReplConnection::send_copy_data(const char *buffer,
-                                          int length,
-                                          char cmd = MSG_COPY_DATA)
+    void
+    PgReplConnection::_send_copy_data(const char *buffer,
+                                      int length,
+                                      char cmd = MSG_COPY_DATA)
     {
         char msg_header[COPY_MSG_HDR_SIZE];
 
@@ -310,9 +317,10 @@ namespace springtail
      * @throws PgIOError on receive error
      * @throws PgNotConnectedError if connection has closed
      */
-    int PgReplConnection::recv_copy_data(char *buffer,
-                                         int length,
-                                         bool async=true)
+    int
+    PgReplConnection::_recv_copy_data(char *buffer,
+                                      int length,
+                                      bool async=true)
     {
         while (true) {
             int r = recv(_streaming_socket,
@@ -322,7 +330,7 @@ namespace springtail
 
             if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
                 std::cout << "Recv got ewouldblock\n";
-                r = handle_timeout();
+                r = _handle_timeout();
                 if (r >= 0) {
                     // either data is now available or it isn't
                     // either way go around again.
@@ -350,7 +358,8 @@ namespace springtail
      * @throws PgIOError on receive error
      * @throws PgNotConnectedError if connection has closed
      */
-    void PgReplConnection::read_msg_header()
+    void
+    PgReplConnection::_read_msg_header()
     {
         // msg header 1B for message type, 4B for length
         char msg_header[5];
@@ -360,8 +369,8 @@ namespace springtail
         while (msg_header_offset < COPY_MSG_HDR_SIZE) {
 
             // do a non-blocking read on the socket
-            int r = recv_copy_data(&msg_header[msg_header_offset],
-                                 COPY_MSG_HDR_SIZE-msg_header_offset);
+            int r = _recv_copy_data(&msg_header[msg_header_offset],
+                                    COPY_MSG_HDR_SIZE-msg_header_offset);
 
             msg_header_offset += r;
         }
@@ -378,8 +387,8 @@ namespace springtail
         // fits within a single copy buffer (which it should)
         // other message types are handled by the caller
         if (_msg_type == MSG_ERROR_RESPONSE && _copy_msg_length < COPY_BUFFER_SIZE) {
-            read_msg_data(false);
-            dump_error_response();
+            _read_msg_data(false);
+            _dump_error_response();
         }
     }
 
@@ -387,7 +396,8 @@ namespace springtail
     /**
      * @brief Helper to dump out error response
      */
-    void PgReplConnection::dump_error_response()
+    void
+    PgReplConnection::_dump_error_response()
     {
         // format: code 1B, message string null terminated
         // code: 'M' has the most useful message
@@ -413,7 +423,8 @@ namespace springtail
      * @throws PgIOError on receive error
      * @throws PgNotConnectedError if connection has closed
      */
-    void PgReplConnection::read_msg_data(bool async=true)
+    void
+    PgReplConnection::_read_msg_data(bool async=true)
     {
         int to_read = std::min(_copy_msg_length - _copy_msg_offset,
                                COPY_BUFFER_SIZE);
@@ -425,7 +436,7 @@ namespace springtail
             // or the remaining data left for this message
             // this ensures we can at least decode the keep alive
             // message
-            int r = recv_copy_data(&_copy_buffer[offset],
+            int r = _recv_copy_data(&_copy_buffer[offset],
                                    to_read, async);
             to_read -= r;
             length += r;
@@ -447,12 +458,13 @@ namespace springtail
      * @throws PgIOError on receive error
      * @throws PgNotConnectedError if connection has closed
      */
-    void PgReplConnection::skip_message()
+    void
+    PgReplConnection::_skip_message()
     {
         while (_copy_msg_offset < _copy_msg_length) {
             // should read min of COPY_BUFFER_SIZE or remaining copy msg size
             // this shouldn't block since we've already read in the header
-            read_msg_data(false); // async=false
+            _read_msg_data(false); // async=false
             _copy_msg_offset += _copy_buffer_length;
         }
 
@@ -473,11 +485,12 @@ namespace springtail
      * @throws PgNotConnectedError if connection has closed
      * @throws PgCopyDoneError if copy done is returned
      */
-    void PgReplConnection::read_copy_header()
+    void
+    PgReplConnection::_read_copy_header()
     {
         // this will essentially block until data is read
         // _copy_msg_length will be set
-        read_msg_header();
+        _read_msg_header();
 
         // check for COPY DATA msg, handle other messages
         switch (_msg_type) {
@@ -500,7 +513,7 @@ namespace springtail
             default:
                 // skip message for now
                 std::cout << "Skipping message: " << _msg_type << std::endl;
-                skip_message();
+                _skip_message();
                 _copy_state = NEW_MSG;
                 return;
         }
@@ -514,10 +527,11 @@ namespace springtail
      * @throws PgNotConnectedError if connection has closed
      * @throws PgCopyDoneError if copy done is returned
      */
-    void PgReplConnection::read_copy_data()
+    void
+    PgReplConnection::_read_copy_data()
     {
         // read the copy message data
-        read_msg_data();
+        _read_msg_data();
 
         // if this is the first part of the message we've read
         // decode the copy message; either a keep alive or xlog data
@@ -528,7 +542,7 @@ namespace springtail
             switch (_copy_buffer[0]) {
                 case MSG_KEEP_ALIVE:
                     std::cout << "Found keep alive\n";
-                    offset = process_keep_alive(_copy_buffer, _copy_buffer_length);
+                    offset = _process_keep_alive(_copy_buffer, _copy_buffer_length);
 
                     // there shouldn't be more data
                     if (offset != _copy_msg_length) {
@@ -543,7 +557,7 @@ namespace springtail
 
                 case MSG_XLOG_DATA:
                     std::cout << "Found xlog data\n";
-                    offset = process_xlog_header(_copy_buffer, _copy_buffer_length);
+                    offset = _process_xlog_header(_copy_buffer, _copy_buffer_length);
 
                     // adjust msg size to remove xlog header
                     _copy_msg_offset -= offset;
@@ -571,29 +585,24 @@ namespace springtail
      * @throws PgNotConnectedError if connection has closed
      * @throws PgNotStreamingError if connection is not streaming
      */
-    void PgReplConnection::read_data(PgCopyData &dataOut)
+    void
+    PgReplConnection::read_data(PgCopyData &dataOut)
     {
         if (!_started_streaming) {
             throw PgNotStreamingError();
         }
 
-        // calling readData implicitly ack's the last received LSN
-        // only do this if full message has been consumed
-        if (_copy_state == NEW_MSG) {
-            set_last_flushed_LSN(_last_received_lsn);
-        }
-
         do {
             // see if we need to read the messsage header first
             if (_copy_state == NEW_MSG) {
-                read_copy_header();
+                _read_copy_header();
             }
 
             // read the header in, now read the data message (or continue reading it)
             // skip if we need to read a new message
             if (_copy_state == READ_COPY_HEADER ||
                 _copy_state == STREAMING) {
-                read_copy_data();
+                _read_copy_data();
             }
 
             // if all data was consumed we go around again
@@ -618,6 +627,8 @@ namespace springtail
         dataOut.length = _copy_buffer_length - _copy_buffer_offset;
         dataOut.msg_length = _copy_msg_length;
         dataOut.starting_lsn = _last_received_lsn;
+        // see https://github.com/postgres/postgres/blob/f234b8cd16a4ba6e12cc51a36c8e499661d535bb/src/backend/replication/walreceiver.c#L1256
+        dataOut.ending_lsn = _server_latest_lsn; // this is believed to be the end lsn for this message
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream
@@ -630,7 +641,8 @@ namespace springtail
      * @return number of bytes consumed
      * @throws PgMessageToSmallError if buffer not big enough for message
      */
-    int PgReplConnection::process_keep_alive(const char *buffer, int length)
+    int
+    PgReplConnection::_process_keep_alive(const char *buffer, int length)
     {
         // handle keep alive
         if (length < (1 + 8 + 8)) {
@@ -663,7 +675,7 @@ namespace springtail
         _last_received_time = send_time;
 
         if (response_requested) {
-            send_standby_status_msg();
+            _send_standby_status_msg();
         }
 
         return pos;
@@ -675,7 +687,8 @@ namespace springtail
      * @return number of bytes consumed
      * @throws PgMessageToSmallError if buffer not big enough for message
      */
-    int PgReplConnection::process_xlog_header(const char *buffer, int length)
+    int
+    PgReplConnection::_process_xlog_header(const char *buffer, int length)
     {
         // handle log data
         if (length < (1 + 8 + 8 + 8)) {
@@ -705,7 +718,8 @@ namespace springtail
      * @brief Fast forward the data stream to current LSN (ack to server)
      * @throws PgQueryError if query to get current LSN fails
      */
-    void PgReplConnection::fast_forward_stream()
+    void
+    PgReplConnection::_fast_forward_stream()
     {
         // execute query: SELECT pg_current_wal_lsn()
         const char *cmd = CURRENT_LSN_SQL;
@@ -733,14 +747,14 @@ namespace springtail
 
         // check that there is still no data; false means no data
         // timeout of 0 means return immediately (i.e., poll)
-        if (check_data_stream(0)) {
+        if (_check_data_stream(0)) {
             return;
         }
 
         // fast forward stream
         _last_flushed_lsn = lsn;
 
-        send_standby_status_msg();
+        _send_standby_status_msg();
     }
 
 
@@ -752,10 +766,9 @@ namespace springtail
      * @param send_time time for this send (pg msecs)
      * @return size of buffer returned
      */
-    int PgReplConnection::encode_standby_status_msg(LSN_t last_received_lsn,
-                                                    LSN_t last_flushed_lsn,
-                                                    int64_t send_time,
-                                                    char replybuf[34])
+    int
+    PgReplConnection::_encode_standby_status_msg(int64_t send_time,
+                                                 char replybuf[34])
     {
         int pos = 0;
 
@@ -764,10 +777,10 @@ namespace springtail
         pos += 1;
 
         // check if this is right XXX
-        sendint64(last_received_lsn, &replybuf[pos]); // write position
+        sendint64(_last_received_lsn+1, &replybuf[pos]); // write position
         pos += 8;
 
-        sendint64(last_flushed_lsn, &replybuf[pos]); // flush position
+        sendint64(_last_flushed_lsn+1, &replybuf[pos]); // flush position
         pos += 8;
 
         sendint64(INVALID_LSN, &replybuf[pos]);    // apply position
@@ -787,20 +800,19 @@ namespace springtail
      * @brief Send standby status feedback message to server
      * @throws PgIOError on send error
      */
-    void PgReplConnection::send_standby_status_msg()
+    void
+    PgReplConnection::_send_standby_status_msg()
     {
         char replybuf[STANDBY_MSG_SIZE];
         int64_t now = get_pgtime_in_millis();
 
         // set applied lsn and flushed lsn to same value
-        int len = encode_standby_status_msg(_last_flushed_lsn,
-                                            _last_flushed_lsn,
-                                            now, replybuf);
+        int len = _encode_standby_status_msg(now, replybuf);
 
         std::cout << "Standby message send: LSN=" << _last_flushed_lsn << std::endl;
 
         // send data
-        send_copy_data(replybuf, len);
+        _send_copy_data(replybuf, len);
 
         _last_status_time = now;
     }
@@ -812,7 +824,8 @@ namespace springtail
      * @return true if slot exists, false otherwise
      * @throws PgQueryError on error
      */
-    bool PgReplConnection::check_slot_exists()
+    bool
+    PgReplConnection::check_slot_exists()
     {
         LSN_t restart_lsn;
         LSN_t flushed_lsn;
@@ -830,8 +843,9 @@ namespace springtail
      * @return true if slot exists, false otherwise
      * @throws PgQueryError on error
      */
-    bool PgReplConnection::check_slot_exists(LSN_t &restart_lsn_out,
-                                             LSN_t &flushed_lsn_out)
+    bool
+    PgReplConnection::check_slot_exists(LSN_t &restart_lsn_out,
+                                        LSN_t &flushed_lsn_out)
     {
         if (_started_streaming) {
             throw std::runtime_error("No queries after streaming starts");
@@ -878,7 +892,8 @@ namespace springtail
      * @throws PgQueryError on error
      * @throws PgStreamingError if already streaming
      */
-    void PgReplConnection::drop_replication_slot()
+    void
+    PgReplConnection::drop_replication_slot()
     {
         if (_started_streaming) {
             throw PgStreamingError();
@@ -911,8 +926,9 @@ namespace springtail
      * @throws PgStreamingError if streaming already started
      * @throws PgQueryError on query error
      */
-    void PgReplConnection::create_replication_slot(bool export_snapshot,
-                                                   bool temporary)
+    void
+    PgReplConnection::create_replication_slot(bool export_snapshot,
+                                              bool temporary)
     {
         if (_started_streaming) {
             throw PgStreamingError();
@@ -988,9 +1004,10 @@ namespace springtail
      *
      * @param lsn LSN indicating safe point to truncate log up to
      */
-    void PgReplConnection::set_last_flushed_LSN(LSN_t lsn) noexcept
+    void
+    PgReplConnection::set_last_flushed_LSN(LSN_t lsn) noexcept
     {
-        if (lsn == INVALID_LSN || lsn <= _last_flushed_lsn) {
+        if (lsn == INVALID_LSN) {
             return;
         }
 
@@ -1002,7 +1019,8 @@ namespace springtail
      * @brief Get server version
      * @return get remote server version; -1 if not set
      */
-    int PgReplConnection::get_server_version() noexcept
+    int
+    PgReplConnection::get_server_version() noexcept
     {
         return _server_version;
     }
@@ -1011,7 +1029,8 @@ namespace springtail
      * @brief Get pgoutput protocol version
      * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
      */
-    int PgReplConnection::get_protocol_version() noexcept
+    int
+    PgReplConnection::get_protocol_version() noexcept
     {
         return _proto_version;
     }

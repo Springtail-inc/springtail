@@ -4,8 +4,8 @@
 #include <optional>
 #include <fmt/core.h>
 
-#include <psql_cdc/libpq_connection.hh>
-#include <psql_cdc/exception.hh>
+#include <pg_repl/libpq_connection.hh>
+#include <pg_repl/exception.hh>
 
 namespace springtail {
 
