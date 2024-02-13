@@ -1,0 +1,7 @@
+build
+debug
+release
+external
+*~
+.vscode
+vcpkg_installed

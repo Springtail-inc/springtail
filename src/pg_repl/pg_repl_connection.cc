@@ -592,12 +592,6 @@ namespace springtail
             throw PgNotStreamingError();
         }
 
-        // calling readData implicitly ack's the last received LSN
-        // only do this if full message has been consumed
-        if (_copy_state == NEW_MSG) {
-            set_last_flushed_LSN(_last_received_lsn);
-        }
-
         do {
             // see if we need to read the messsage header first
             if (_copy_state == NEW_MSG) {
@@ -773,9 +767,7 @@ namespace springtail
      * @return size of buffer returned
      */
     int
-    PgReplConnection::_encode_standby_status_msg(LSN_t last_received_lsn,
-                                                 LSN_t last_flushed_lsn,
-                                                 int64_t send_time,
+    PgReplConnection::_encode_standby_status_msg(int64_t send_time,
                                                  char replybuf[34])
     {
         int pos = 0;
@@ -785,10 +777,10 @@ namespace springtail
         pos += 1;
 
         // check if this is right XXX
-        sendint64(last_received_lsn, &replybuf[pos]); // write position
+        sendint64(_last_received_lsn+1, &replybuf[pos]); // write position
         pos += 8;
 
-        sendint64(last_flushed_lsn, &replybuf[pos]); // flush position
+        sendint64(_last_flushed_lsn+1, &replybuf[pos]); // flush position
         pos += 8;
 
         sendint64(INVALID_LSN, &replybuf[pos]);    // apply position
@@ -815,9 +807,7 @@ namespace springtail
         int64_t now = get_pgtime_in_millis();
 
         // set applied lsn and flushed lsn to same value
-        int len = _encode_standby_status_msg(_last_flushed_lsn,
-                                            _last_flushed_lsn,
-                                            now, replybuf);
+        int len = _encode_standby_status_msg(now, replybuf);
 
         std::cout << "Standby message send: LSN=" << _last_flushed_lsn << std::endl;
 
@@ -1017,7 +1007,7 @@ namespace springtail
     void
     PgReplConnection::set_last_flushed_LSN(LSN_t lsn) noexcept
     {
-        if (lsn == INVALID_LSN || lsn <= _last_flushed_lsn) {
+        if (lsn == INVALID_LSN) {
             return;
         }
 

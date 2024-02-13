@@ -40,6 +40,12 @@ namespace springtail {
         _xact_thread = std::thread(&PgLogMgr::_xact_worker, this);
     }
 
+    void
+    PgLogMgr::_lsn_callback(LSN_t lsn)
+    {
+        _pg_conn.set_last_flushed_LSN(lsn);
+    }
+
     /** Thread for writing log data */
     void
     PgLogMgr::_log_writer()
@@ -107,7 +113,8 @@ namespace springtail {
             offset++;
         } while (std::filesystem::exists(file));
 
-        return std::make_shared<PgLogWriter>(file, _proto_version);
+        return std::make_shared<PgLogWriter>(file, _proto_version,
+            [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
     }
 
     void

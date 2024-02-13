@@ -121,6 +121,15 @@ int main(int argc, char* argv[])
         out_fh.write(data.buffer, data.length);
         out_fh.flush();
 
+        // update LSNs
+        if (data.msg_offset == 0) {
+            pg_conn.set_last_flushed_LSN(data.starting_lsn);
+        }
+
+        if (data.msg_offset == data.msg_length) {
+            pg_conn.set_last_flushed_LSN(data.ending_lsn);
+        }
+
         if (dump_buffer && data.msg_offset == 0) {
             // iterate through the messages
             msg.set_buffer(data.buffer, data.length);

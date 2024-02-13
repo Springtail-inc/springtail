@@ -13,6 +13,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 
+#include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_xact_handler.hh>
@@ -29,51 +30,6 @@ namespace springtail {
      *   - queues request to GC
      */
     class PgLogMgr {
-    private:
-        /**
-         * @brief Queue Entry, encodes start/end offset and filename,
-         *        plus number of messages covered by offset range
-         */
-        struct PgLogQueueEntry {
-            uint64_t start_offset;
-            uint64_t end_offset;
-            std::filesystem::path path;
-            int num_messages;
-
-            PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
-                : start_offset(start_offset), end_offset(end_offset), path(path), num_messages(1)
-            {}
-        };
-        using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
-
-        /** Queue class between log writer and log reader */
-        class PgLogQueue : public ConcurrentQueue<PgLogQueueEntry> {
-        public:
-            /**
-             * @brief Push entry onto queue, try to merge with entry on back of queue if possible
-             * @param start_offset file start offset of msg
-             * @param end_offset file end offset of msg
-             * @param path file pathname
-             */
-            void push(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
-            {
-                std::unique_lock<std::mutex> write_lock{_mutex};
-
-                // get the last enqueued entry and see if we can modify it to include this message as well
-                PgLogQueueEntryPtr &entry = _queue.back();
-                if (entry->path == path && entry->end_offset == start_offset) {
-                    entry->end_offset = end_offset;
-                    entry->num_messages++;
-                    return;
-                }
-
-                // otherwise create and add new entry
-                PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(start_offset, end_offset, path);
-
-                _internal_push(new_entry, write_lock);
-            }
-        };
-
     public:
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgReplMsgStream::PgTransaction>>;
 
@@ -92,12 +48,20 @@ namespace springtail {
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
         {}
 
-        /**
-         * @brief Setup streaming and start
-         */
+        /** Setup streaming and startup threads */
         void start_streaming();
 
+        /** Wait for threads */
+        void join() {
+            _writer_thread.join();
+            _reader_thread.join();
+            _xact_thread.join();
+        }
 
+        /** Set shutdown flag */
+        void shutdown() {
+            _shutdown = true;
+        }
 
     private:
         /** minimum size for log rollover */
@@ -118,8 +82,8 @@ namespace springtail {
         /** postgres protocol version */
         int _proto_version;
 
+        /** shutdown flag */
         std::atomic<bool> _shutdown = false;
-
 
         /// Stage 1 of pipeline, writing replication log to disk
 
@@ -138,6 +102,8 @@ namespace springtail {
         /** queue shared between writer (producer) and reader (consumer threads )*/
         PgLogQueue _logger_queue;
 
+        /** callback from log writer class to update lsn from fsync thread*/
+        void _lsn_callback(LSN_t lsn);
 
         /// Stage 2 of pipeline, reading replication log and parsing xacts
 
@@ -155,12 +121,15 @@ namespace springtail {
 
 
         /// Stage 3 of pipeline, mapping pg xids to xids; notify GC
+
+        /** base path for storing transaction log files */
         std::filesystem::path _xact_log_path;
 
+        /** transaction notification/logging thread */
         std::thread _xact_thread;
 
+        /** transaction worker -- thread fn */
         void _xact_worker();
-
     };
 
 } // namespace springtail

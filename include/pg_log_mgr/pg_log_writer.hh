@@ -47,7 +47,8 @@ namespace springtail {
          * @param file file to be writing
          * @param proto_version protocol version
          */
-        PgLogWriter(const std::filesystem::path &file, int proto_version);
+        PgLogWriter(const std::filesystem::path &file, int proto_version,
+                    std::function<void (LSN_t)> lsn_callback_fn);
 
         /**
          * @brief Add data to log; start of message starts with header.
@@ -110,6 +111,9 @@ namespace springtail {
         /** postgres version */
         int _proto_version;
 
+        /** callback for setting the lsn */
+        std::function<void (LSN_t)> _lsn_callback_fn;
+
         /** current offset -- access from fsync thread */
         std::atomic<uint64_t> _current_offset = 0;
 
@@ -138,11 +142,11 @@ namespace springtail {
         void _fsync_worker();
 
         /** Queue offsets and LSN pairs */
-        void add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
-                              uint64_t end_offset, LSN_t end_lsn);
+        void _add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
+                               uint64_t end_offset, LSN_t end_lsn);
 
         /** Update latest_synced_lsn based on fsync offset and queue */
-        void update_lsn_from_queue();
+        void _update_lsn_from_queue();
 
         /** Shutdown the fsync thread and join with it */
         void _shutdown_fsync() {

@@ -10,8 +10,9 @@
 
 namespace springtail {
 
-    PgLogWriter::PgLogWriter(const std::filesystem::path &file, int proto_version)
-        : _file(file), _proto_version(proto_version)
+    PgLogWriter::PgLogWriter(const std::filesystem::path &file, int proto_version,
+                             std::function<void (uint64_t)> lsn_callback_fn)
+        : _file(file), _proto_version(proto_version), _lsn_callback_fn(lsn_callback_fn)
 
     {
         int fmode = O_APPEND | O_CREAT;
@@ -46,12 +47,12 @@ namespace springtail {
             ::fsync(_fd);
             _last_fsync_offset = offset;
 
-            update_lsn_from_queue();
+            _update_lsn_from_queue();
         }
     }
 
     void
-    PgLogWriter::add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
+    PgLogWriter::_add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
                                   uint64_t end_offset, LSN_t end_lsn)
     {
         std::unique_lock lock{_queue_mutex};
@@ -60,7 +61,7 @@ namespace springtail {
     }
 
     void
-    PgLogWriter::update_lsn_from_queue()
+    PgLogWriter::_update_lsn_from_queue()
     {
         std::unique_lock lock{_queue_mutex};
         uint64_t curr_offset = _last_fsync_offset.load();
@@ -81,6 +82,7 @@ namespace springtail {
 
         if (latest_lsn != queued_lsn && queued_lsn != INVALID_LSN) {
             _latest_synced_lsn = queued_lsn;
+            _lsn_callback_fn(queued_lsn);
         }
     }
 
@@ -95,7 +97,7 @@ namespace springtail {
         if (curr_offset != _last_fsync_offset.load()) {
             ::fsync(_fd);
             _last_fsync_offset = curr_offset;
-            update_lsn_from_queue();
+            _update_lsn_from_queue();
         }
 
         // finally close the fd
@@ -125,7 +127,7 @@ namespace springtail {
             _msg_end_offset = current_offset + data.msg_length;
 
             // add LSN data to queue for fsync thread
-            add_lsn_to_queue(current_offset, data.starting_lsn, _msg_end_offset, data.ending_lsn);
+            _add_lsn_to_queue(current_offset, data.starting_lsn, _msg_end_offset, data.ending_lsn);
         }
 
         // write message data

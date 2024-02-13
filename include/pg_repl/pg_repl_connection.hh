@@ -2,6 +2,9 @@
 
 #include <string>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <atomic>
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/exception.hh>
@@ -27,7 +30,10 @@ namespace springtail
      * @details Provides interfaces for setting up replication
      *          connection and for streaming replication data.
      *          Creates to libpq connections, 1 for queries, 1 for streaming
-     *          issuing queries while streaming is active will end streaming
+     *          issuing queries while streaming is active will end streaming.
+     *
+     *          The majority of this class is not threadsafe.  The only threadsafe
+     *          function is: set_last_flushed_LSN()
      */
     class PgReplConnection
     {
@@ -117,7 +123,7 @@ namespace springtail
         CopyState _copy_state = NEW_MSG;
 
         /** last flushed lsn */
-        LSN_t _last_flushed_lsn = INVALID_LSN;
+        std::atomic<LSN_t> _last_flushed_lsn = INVALID_LSN;
         /** last received lsn from data copy (from wal_start) */
         LSN_t _last_received_lsn = INVALID_LSN;
         /** servers latest lsn (from wal_end) */
@@ -128,7 +134,7 @@ namespace springtail
         /** last time status was sent */
         int64_t _last_status_time;
         /** last time data was flushed */
-        int64_t _last_flushed_time;
+        std::atomic<int64_t> _last_flushed_time;
 
         void _send_standby_status_msg();
 
@@ -159,10 +165,8 @@ namespace springtail
 
         void _dump_error_response();
 
-        static int _encode_standby_status_msg(LSN_t last_received_lsn,
-                                              LSN_t last_flushed_lsn,
-                                              int64_t send_time,
-                                              char replybuf[34]);
+        int _encode_standby_status_msg(int64_t send_time,
+                                       char replybuf[34]);
 
     public:
 
