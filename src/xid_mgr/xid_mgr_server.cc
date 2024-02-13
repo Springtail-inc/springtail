@@ -24,6 +24,8 @@ namespace springtail {
     /* static initialization must happen outside of class */
     XidMgrServer* XidMgrServer::_instance {nullptr};
 
+    std::once_flag XidMgrServer::_init_flag;
+
     XidMgrServer *
     XidMgrServer::_init()
     {

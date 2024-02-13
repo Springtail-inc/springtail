@@ -63,3 +63,15 @@ target_include_directories(springtail_xid_mgr
 target_link_libraries(springtail_xid_mgr
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
+
+add_executable(xid_mgr_daemon xid_mgr_daemon.cc)
+
+target_include_directories(xid_mgr_daemon
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+            ${THRIFT_GEN_PATH}
+)
+
+target_link_libraries(xid_mgr_daemon
+    PRIVATE springtail_common
+    PRIVATE springtail_xid_mgr
+)
