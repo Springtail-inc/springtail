@@ -12,4 +12,9 @@ add_executable(test_thread test/test_thread.cc)
 target_include_directories(test_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_thread PRIVATE springtail_common GTest::gtest_main)
 
-# gtest_discover_tests(test_thread)
+add_executable(test_queue test/test_queue.cc)
+target_include_directories(test_queue PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_queue PRIVATE springtail_common GTest::gtest_main)
+
+gtest_discover_tests(test_thread)
+gtest_discover_tests(test_queue)
