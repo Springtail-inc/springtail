@@ -1062,6 +1062,9 @@ namespace springtail {
     MutableBTree::_remove_page_internal(PagePtr page,
                                         PagePtr parent)
     {
+        // lock the parent's data before modifying it
+        boost::unique_lock lock(parent->mutex);
+
         // remove the page from the parent
         parent->remove(page->prev_key);
 
