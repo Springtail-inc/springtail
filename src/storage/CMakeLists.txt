@@ -3,6 +3,7 @@ set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc 
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
+find_package(GTest CONFIG REQUIRED)
 
 add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -13,7 +14,10 @@ target_link_libraries(springtail_storage PRIVATE lz4::lz4 xxHash::xxhash)
 
 add_executable(test_io test/io_test.cc)
 target_include_directories(test_io PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_io PUBLIC springtail_common springtail_storage)
+target_link_libraries(test_io
+  PUBLIC springtail_common springtail_storage
+  PRIVATE GTest::gtest_main
+)
 
 add_executable(read_leaf test/read_leaf.cc)
 target_include_directories(read_leaf PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -37,3 +41,4 @@ target_link_libraries(test_extent PUBLIC springtail_common springtail_storage GT
 gtest_discover_tests(test_extent)
 gtest_discover_tests(test_btree
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
+# gtest_discover_tests(test_io)
