@@ -30,9 +30,18 @@ target_link_libraries(read_branch PUBLIC springtail_common springtail_storage)
 add_executable(test_btree test/test_btree.cc)
 target_include_directories(test_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_btree PRIVATE "--coverage")
+
+if(LINUX)
+    set(GCOV_LIB "gcov")
+else()
+    set(GCOV_LIB "")
+endif()
+
 target_link_libraries(test_btree
-  PUBLIC springtail_common springtail_storage GTest::gtest_main
-  PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread)
+    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
+
+
 
 add_executable(test_extent test/test_extent.cc)
 target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
