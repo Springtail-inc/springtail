@@ -81,6 +81,6 @@ target_include_directories(write_cache_daemon
 )
 
 target_link_libraries(write_cache_daemon
-    PRIVATE springtail_common
     PRIVATE springtail_write_cache
+    PRIVATE springtail_common
 )
