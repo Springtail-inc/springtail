@@ -26,6 +26,8 @@ namespace springtail {
     /* static initialization must happen outside of class */
     WriteCacheServer* WriteCacheServer::_instance {nullptr};
 
+    std::once_flag WriteCacheServer::_init_flag;
+
     WriteCacheServer *
     WriteCacheServer::_init()
     {
