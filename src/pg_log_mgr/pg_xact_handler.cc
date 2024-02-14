@@ -58,7 +58,7 @@ namespace springtail {
         _logger->log_data(xact, xid);
 
         // finally send notification to GC
-        PgRedisXactValue redis_xact(xact->begin_path, xact->commit_path, xact->begin_offset,
+        PgRedisXactValue redis_xact(xact->begin_path, xact->commit_path, _db_id, xact->begin_offset,
                                     xact->commit_offset, xact->xact_lsn, xid, xact->xid);
 
         // XXX need to add customer ID

@@ -25,15 +25,22 @@ namespace springtail {
 
         PgXactLogWriterPtr _logger;
 
+        /** database id */
+        uint64_t _db_id=1;
+
         /** next xid in xid range allocated by xid mgr */
         uint64_t _next_xid;
+
         /** last xid in xid range allocated by xid mgr */
         uint64_t _last_xid;
 
+        /** redis queue */
         RedisQueue<PgRedisXactValue> _redis_queue;
 
+        /** Create logger to write out xid log */
         void _create_logger();
 
+        /** Allocate xid */
         uint64_t _allocate_xid();
     };
 }

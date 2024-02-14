@@ -21,6 +21,7 @@ namespace springtail {
          * @brief Construct a new Pg Redis Xact Value object
          * @param begin_path   file path holding begin message
          * @param commit_path  file path holding commit message
+         * @param db_id        database id
          * @param begin_offset file offset for begin message
          * @param commit_offset file offset for commit message
          * @param xact_lsn transaction LSN
@@ -29,11 +30,11 @@ namespace springtail {
          */
         PgRedisXactValue(const std::filesystem::path &begin_path,
                          const std::filesystem::path &commit_path,
-                         uint64_t begin_offset, uint64_t commit_offset,
+                         uint64_t db_id, uint64_t begin_offset, uint64_t commit_offset,
                          uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid)
             : begin_path(begin_path), commit_path(commit_path),
               begin_offset(begin_offset), commit_offset(commit_offset),
-              xact_lsn(xact_lsn), xid(xid), pg_xid(pg_xid)
+              xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid)
         {}
 
         /**
@@ -48,13 +49,14 @@ namespace springtail {
             assert(split.size() == 7);
 
             // serialized order: xid, pg_xid, xact_lsn, begin_path, begin_offset, commit_path, commit_offset
-            xid = std::stoull(split[0]); // xid
-            pg_xid = std::stoul(split[1]); // pg_xid
-            xact_lsn = std::stoull(split[2]); // lsn
-            begin_path = std::filesystem::path(split[3]); // begin path
-            begin_offset = std::stoull(split[4]); // begin offset
-            commit_path = std::filesystem::path(split[5]); // commit path
-            commit_offset = std::stoull(split[6]); // commit offset
+            db_id = std::stoull(split[0]); // db_id
+            xid = std::stoull(split[1]); // xid
+            pg_xid = std::stoul(split[2]); // pg_xid
+            xact_lsn = std::stoull(split[3]); // lsn
+            begin_path = std::filesystem::path(split[4]); // begin path
+            begin_offset = std::stoull(split[5]); // begin offset
+            commit_path = std::filesystem::path(split[6]); // commit path
+            commit_offset = std::stoull(split[7]); // commit offset
         }
 
         /**
@@ -63,7 +65,7 @@ namespace springtail {
          */
         std::string serialize() const
         {
-            return fmt::format("{}:{}:{}:{}:{}:{}:{}", xid, pg_xid, xact_lsn, begin_path.c_str(),
+            return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}", db_id, xid, pg_xid, xact_lsn, begin_path.c_str(),
                                begin_offset, commit_path.c_str(), commit_offset);
         }
 
@@ -73,6 +75,7 @@ namespace springtail {
         uint64_t commit_offset;
         uint64_t xact_lsn;
         uint64_t xid;
+        uint64_t db_id; ///< database id
         uint32_t pg_xid;
     };
 }
