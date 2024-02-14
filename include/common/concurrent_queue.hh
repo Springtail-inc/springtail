@@ -134,8 +134,6 @@ namespace springtail {
             // push entry
             _queue.push(entry);
 
-            write_lock.unlock();
-
             // notify condition variable
             _cv_pop.notify_one();
         }
