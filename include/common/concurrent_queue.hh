@@ -69,7 +69,7 @@ namespace springtail {
                 return nullptr;
             }
 
-            Tptr &entry = _queue.front();
+            Tptr entry = _queue.front();
             _queue.pop();
 
             write_lock.unlock();
