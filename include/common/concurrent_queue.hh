@@ -31,7 +31,7 @@ namespace springtail {
          * @brief Push entry onto queue, try to merge with entry on back of queue if possible
          * @param entry std::shared_ptr<T> entry to push onto queue
          */
-        void push(Tptr &entry)
+        void push(Tptr entry)
         {
             std::unique_lock<std::mutex> write_lock{_mutex};
             _internal_push(entry, write_lock);
