@@ -210,6 +210,8 @@ namespace springtail {
             pointer operator->() const { return &_row; }
             Iterator& operator++() { _row.offset += _row.extent->row_size(); return *this; }
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+            Iterator& operator--() { _row.offset -= _row.extent->row_size(); return *this; }
+            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
             friend bool operator==(const Iterator& a, const Iterator& b) { return a._row.offset == b._row.offset; }
             friend bool operator!= (const Iterator& a, const Iterator& b) { return a._row.offset != b._row.offset; }
             
