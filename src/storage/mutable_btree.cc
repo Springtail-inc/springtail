@@ -377,6 +377,8 @@ namespace springtail {
         // find the position to perform the remove
         auto &&i = this->find(search_key);
         if (i == this->end()) {
+            SPDLOG_INFO("Failed to remove entry");
+            search_key->print();
             return; // no such entry found
         }
         ExtentPtr e = *(i._extent_i);

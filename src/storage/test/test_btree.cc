@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/threaded_test.hh>
 
 #include <storage/csv_field.hh>
 #include <storage/btree.hh>
@@ -9,49 +10,6 @@
 using namespace springtail;
 
 namespace {
-
-    /** Thread test state interface for ThreadedTest */
-    template <class ThreadRequest>
-    class PhasedThreadTest {
-        using ThreadRequestPtr = std::shared_ptr<ThreadRequest>;
-    public:
-        PhasedThreadTest()
-            : _phase(0)
-        { }
-
-        void next_phase() {
-            ++_phase;
-        }
-
-        void add_request(ThreadRequestPtr request) {
-            _requests[_phase].push_back(request);
-        }
-
-        void set_verify(std::function<void()> verify) {
-            _verifiers.insert({_phase, verify});
-        }
-
-        void run(int thread_count) {
-            for (int i = 0; i <= _phase; i++) {
-                // create thread pool for this set of tests
-                auto thread_pool = std::make_shared<ThreadPool<ThreadRequest>>(thread_count);
-
-                // issue the requests
-                thread_pool->queue(_requests[i]);
-
-                // shutdown pool (acts as a barrier)
-                thread_pool->shutdown();
-
-                // verify state
-                ASSERT_NO_FATAL_FAILURE(_verifiers[i]());
-            }
-        }
-
-    private:
-        int _phase;
-        std::map<int, std::vector<ThreadRequestPtr>> _requests;
-        std::map<int, std::function<void()>> _verifiers;
-    };
 
     /**
      * Framework for Basic BTree testing.
