@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc datafile.cc extent.cc schema.cc schema_column.cc io.cc io_mgr.cc io_file.cc io_request.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -9,11 +9,36 @@ add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_storage PRIVATE lz4::lz4 xxHash::xxhash)
 
+
+## tests
+
 add_executable(test_io test/io_test.cc)
 target_include_directories(test_io PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_io
-    PRIVATE springtail_common
-    PRIVATE springtail_storage
-    PRIVATE GTest::gtest_main)
+  PUBLIC springtail_common springtail_storage
+  PRIVATE GTest::gtest_main
+)
 
+add_executable(read_leaf test/read_leaf.cc)
+target_include_directories(read_leaf PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(read_leaf PUBLIC springtail_common springtail_storage)
+
+add_executable(read_branch test/read_branch.cc)
+target_include_directories(read_branch PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(read_branch PUBLIC springtail_common springtail_storage)
+
+add_executable(test_btree test/test_btree.cc)
+target_include_directories(test_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_btree PRIVATE "--coverage")
+target_link_libraries(test_btree
+  PUBLIC springtail_common springtail_storage GTest::gtest_main
+  PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread)
+
+add_executable(test_extent test/test_extent.cc)
+target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_extent PUBLIC springtail_common springtail_storage GTest::gtest_main)
+
+gtest_discover_tests(test_extent)
+gtest_discover_tests(test_btree
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 # gtest_discover_tests(test_io)

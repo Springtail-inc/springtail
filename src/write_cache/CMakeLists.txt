@@ -10,8 +10,6 @@ find_program(
 
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
-find_package(GTest CONFIG REQUIRED)
-
 # set variables for thrift schema .thrift file and generated .h
 set(THRIFT_SCHEMA "write_cache.thrift")
 set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")
@@ -66,13 +64,6 @@ target_link_libraries(springtail_write_cache
     PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
 )
 
-add_executable(test_threaded test/write_cache_index_test.cc)
-target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(test_threaded
-    PRIVATE springtail_common springtail_write_cache
-    GTest::gtest GTest::gtest_main
-)
-
 add_executable(write_cache_daemon write_cache_daemon.cc)
 
 target_include_directories(write_cache_daemon
@@ -84,3 +75,13 @@ target_link_libraries(write_cache_daemon
     PRIVATE springtail_write_cache
     PRIVATE springtail_common
 )
+
+## tests
+add_executable(test_threaded test/write_cache_index_test.cc)
+target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+target_link_libraries(test_threaded
+    PRIVATE springtail_common springtail_write_cache
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_threaded)

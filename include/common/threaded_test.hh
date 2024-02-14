@@ -1,81 +1,69 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <vector>
 #include <type_traits>
 
 #include <common/thread_pool.hh>
+
 #include <gtest/gtest.h>
 
 namespace springtail {
 
-    /** Thread test state interface for ThreadedTest */
+    /**
+     * Allows a test to easily implement a multi-phase test in which each phase consists of a queue
+     * of operations over which a configurable number of workers execute in parallel.  After each
+     * phase is a verification step.
+     *
+     * To use this class, the test should create a request object and provide it as the template
+     * parameter.  During test construction, the requests and verification are also set up in
+     * phases.  First the requests are populated in the current phase by repeatedly calling
+     * add_request().  Then the verification function for the phase is provided by calling
+     * set_verify().  To add an additional phase, you call next_phase() and repeat the steps of
+     * add_request() and set_verify().  This can be done any number of times.  Once all of the
+     * phases have been defined, the test calls run(), which will execute the sequence of phases
+     * in-order.
+     */
     template <class ThreadRequest>
-    class ThreadTestState : public testing::Test {
+    class PhasedThreadTest {
         using ThreadRequestPtr = std::shared_ptr<ThreadRequest>;
     public:
-        // testing::Test provides SetUp() and TearDown virtual methods
-        virtual ~ThreadTestState() {}
-        virtual std::vector<ThreadRequestPtr> get_requests() = 0;
-        virtual void verify() = 0;
-        virtual void TestBody() {}
-    };
+        PhasedThreadTest()
+            : _phase(0)
+        { }
 
-    /**
-     * @brief Threaded test class; provide a test state class and test request class
-     * @tparam TestState class derived from ThreadTestState; implements core test
-     * @tparam TestStateRequest must have operator() overloaded;
-     *         implements the requests executed by the threads
-     */
-    template <class TestState, class TestStateRequest>
-    class ThreadedTest {
-        using TestStatePtr = std::shared_ptr<TestState>;
-        using TestStateRequestPtr = std::shared_ptr<TestStateRequest>;
-    public:
-        /**
-         * @brief Construct a new Threaded Test object
-         * @param num_threads number of concurrent threads
-         */
-        ThreadedTest(int num_threads) :
-            _num_threads(num_threads), _state()
-        {
-            static_assert(std::is_base_of_v<ThreadTestState<TestStateRequest>, TestState>,
-                          "Template param must be derived from ThreadTestState class");
+        void next_phase() {
+            ++_phase;
         }
 
-        /** Start the test; runs the main loop until no more requests exist */
-        void start()
-        {
-            std::vector<TestStateRequestPtr> requests;
+        void add_request(ThreadRequestPtr request) {
+            _requests[_phase].push_back(request);
+        }
 
-            while (true) {
-                // get next set of requests
-                requests = _state.get_requests();
-                if (requests.size() == 0) {
-                    break;
-                }
+        void set_verify(std::function<void()> verify) {
+            _verifiers.insert({_phase, verify});
+        }
 
+        void run(int thread_count) {
+            for (int i = 0; i <= _phase; i++) {
                 // create thread pool for this set of tests
-                _thread_pool = std::make_shared<ThreadPool<TestStateRequest>>(_num_threads);
+                auto thread_pool = std::make_shared<ThreadPool<ThreadRequest>>(thread_count);
 
                 // issue the requests
-                _thread_pool->queue(requests);
+                thread_pool->queue(_requests[i]);
 
                 // shutdown pool (acts as a barrier)
-                _thread_pool->shutdown();
-                _thread_pool = nullptr;
+                thread_pool->shutdown();
 
                 // verify state
-                ASSERT_NO_FATAL_FAILURE(_state.verify());
+                ASSERT_NO_FATAL_FAILURE(_verifiers[i]());
             }
         }
 
-
     private:
-        int _num_threads;
-
-        std::shared_ptr<ThreadPool<TestStateRequest>> _thread_pool{nullptr};
-
-        TestState _state;
+        int _phase;
+        std::map<int, std::vector<ThreadRequestPtr>> _requests;
+        std::map<int, std::function<void()>> _verifiers;
     };
 }

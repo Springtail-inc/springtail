@@ -6,9 +6,12 @@ cmake_minimum_required(VERSION 3.22)
 
 ## project definition
 project(Springtail
-    VERSION 0.1
-    DESCRIPTION "Springtail source code"
-    LANGUAGES CXX)
+  VERSION 0.1
+  DESCRIPTION "Springtail source code"
+  LANGUAGES CXX)
+
+## add ctest framework
+include(CTest)
 
 ## check for vcpkg install
 if (NOT IS_DIRECTORY "${PROJECT_SOURCE_DIR}/external/vcpkg")
@@ -39,6 +42,12 @@ find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib /usr/lib/x86_64-linux-gn
 
 find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
+find_package(Boost REQUIRED thread)
+find_package(GTest CONFIG REQUIRED)
+find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
+
+enable_testing()
+include(GoogleTest)
 
 add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 

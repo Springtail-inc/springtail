@@ -203,6 +203,7 @@ namespace springtail {
         }
     }
 
+#if 0
     /**
      * Debugging dump header in readable format
      */
@@ -224,6 +225,7 @@ namespace springtail {
             hdr_off += 8;
         }
     }
+#endif
 
 
     uint64_t
@@ -312,7 +314,7 @@ namespace springtail {
         uint64_t hash;
         std::copy_n(&hdr[4], sizeof(uint64_t), reinterpret_cast<char *>(&hash));
 
-        dump_hdr(hdr, 4 + 8 + 8 * count);
+        // dump_hdr(hdr, 4 + 8 + 8 * count);
 
         int hdr_off = 12;
 
@@ -493,7 +495,7 @@ namespace springtail {
             assert(hdr_off <= (4 + 8 + 8 * count));
         }
 
-        dump_hdr(hdr, hdr_off);
+        // dump_hdr(hdr, hdr_off);
 
         // do the write
         int bytes_written = ::pwritev(_fd, iov, count+1, offset);

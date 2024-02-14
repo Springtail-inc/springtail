@@ -33,6 +33,20 @@ namespace springtail {
          * @return std::shared_ptr<EntryType> value result or nullptr if not found
          */
         virtual std::shared_ptr<EntryType> get(const IdType &id) = 0;
+
+        /**
+         * @brief Evict an entry from the cache based on ID (key)
+         * @param id ID (key)
+         * @return std::shared_ptr<EntryType> value of the evicted entry or nullptr if not found
+         */
+        virtual std::shared_ptr<EntryType> evict(const IdType &id) = 0;
+
+        /**
+         * @brief Update the size associated with an entry.  Force eviction if that causes the cache
+         *        to exceed it's limits.
+         * @param id ID (key)
+         */
+        virtual void update_size(const IdType &id, uint64_t size) = 0;
     };
 
 
@@ -82,8 +96,8 @@ namespace springtail {
             if (!_callback) {
                 // no callback function, easy
                 CacheEntry &entry = _cache.back();
-                _cache.pop_back();
                 _remove_entry(entry);
+                _cache.pop_back();
                 return true;
             }
 
@@ -102,6 +116,21 @@ namespace springtail {
             }
 
             return false; // nothing evictable
+        }
+
+        /**
+         * @brief Check the size of the cache and evict entries until it is below the max size.
+         * @param size An optional entry size to add to the current cache size.  Allows the caller
+         *             to make space for new entry of the given size.
+         */
+        void
+        _check_and_evict(uint64_t size = 0) {
+            while (_cache_size + size > _cache_max) {
+                if (!_evict_next()) {
+                    SPDLOG_WARN("Object cache eviction, nothing evictable");
+                    break; // nothing evictable
+                }
+            }
         }
 
     public:
@@ -153,12 +182,7 @@ namespace springtail {
         insert(const IdType &id, std::shared_ptr<EntryType> entry, uint64_t size=1)
         {
             // if we need more space, evict entries until we have enough space
-            while (_cache_size + size > _cache_max) {
-                if (!_evict_next()) {
-                    SPDLOG_WARN("Object cache eviction, nothing evictable");
-                    break; // nothing evictable
-                }
-            }
+            _check_and_evict(size);
 
             // push onto the front of the LRU queue
             _cache.push_front({id, entry, size});
@@ -185,6 +209,62 @@ namespace springtail {
 
             // return the data
             return std::get<1>(*(i->second));
+        }
+
+        /**
+         * @brief Evict an entry from the cache based on ID (key).  Throws an exception if the entry
+         *        cannot be evicted due to the callback.
+         * @param id ID (key)
+         * @return std::shared_ptr<EntryType> value of the evicted entry or nullptr if not found
+         */
+        std::shared_ptr<EntryType>
+        evict(const IdType &id)
+        {
+            // find the entry if it exists
+            auto &&i = _lookup.find(id);
+            if (i == _lookup.end()) {
+                return nullptr;
+            }
+
+            // retrieve the value from the lookup entry
+            CacheEntry &entry = *(i->second);
+            auto value = std::get<1>(entry);
+
+            // check the callback if one exists
+            if (_callback && _callback(value) == false) {
+                return nullptr; // if we weren't able to evict, return a nullptr
+            }
+
+            // remove the entry from the cache
+            _cache_size -= std::get<2>(entry);
+            _cache.erase(i->second);
+            _lookup.erase(i);
+
+            return value;
+        }
+
+        /**
+         * @brief Update the size associated with an entry.  Force eviction if that causes the cache
+         *        to exceed it's limits.
+         * @param id ID (key)
+         */
+        void
+        update_size(const IdType &id, uint64_t size)
+        {
+            // find the entry
+            auto &&i = _lookup.find(id);
+            if (i == _lookup.end()) {
+                SPDLOG_WARN("Tried to update the size of a non-existant cache entry");
+                return;
+            }
+
+            // resize the entry
+            uint64_t old_size = std::get<2>(*(i->second));
+            _cache_size = _cache_size - old_size + size;
+            std::get<2>(*(i->second)) = size;
+
+            // evict until the cache is the correct size
+            _check_and_evict();
         }
     };
 }

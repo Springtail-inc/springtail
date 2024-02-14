@@ -211,13 +211,13 @@ namespace springtail {
         /** data vectors */
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, 
+        IORequestWrite(const std::filesystem::path &path, bool is_compressed, 
                        uint64_t offset, std::shared_ptr<std::vector<char>> datavec, 
                        io_write_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
               offset(offset) { data.push_back(datavec); }
 
-        IORequestWrite(std::filesystem::path &path, bool is_compressed, uint64_t offset, 
+        IORequestWrite(const std::filesystem::path &path, bool is_compressed, uint64_t offset, 
                        const std::vector<std::shared_ptr<std::vector<char>>> &data, 
                        io_write_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::WRITE, path, is_compressed, cb),
@@ -260,13 +260,13 @@ namespace springtail {
         /** Data vectors */
         std::vector<std::shared_ptr<std::vector<char>>> data;
 
-        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+        IORequestAppend(const std::filesystem::path &path, bool is_compressed, 
                         std::shared_ptr<std::vector<char>> datavec, 
                         io_append_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb)
               { data.push_back(datavec); }
 
-        IORequestAppend(std::filesystem::path &path, bool is_compressed, 
+        IORequestAppend(const std::filesystem::path &path, bool is_compressed, 
                        const std::vector<std::shared_ptr<std::vector<char>>> &data, 
                        io_append_callback_fn cb) 
             : IORequestTemplate(IORequest::IOType::APPEND, path, is_compressed, cb), data(data) {}
@@ -309,7 +309,7 @@ namespace springtail {
         /** offset of this read */
         uint64_t offset; 
 
-        IORequestRead(std::filesystem::path &path, bool is_compressed, 
+        IORequestRead(const std::filesystem::path &path, bool is_compressed, 
                       uint64_t offset, io_read_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::READ, path, is_compressed, cb),
               offset(offset) {}
@@ -351,7 +351,7 @@ namespace springtail {
      */
     class IORequestSync : public IORequestTemplate<IOResponse> {
     public:
-        IORequestSync(std::filesystem::path &path, bool is_compressed, 
+        IORequestSync(const std::filesystem::path &path, bool is_compressed, 
                       io_status_callback_fn cb)
             : IORequestTemplate(IORequest::IOType::SYNC, path, is_compressed, cb) {}
 

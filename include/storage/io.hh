@@ -63,7 +63,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseRead>> Future containing a IOResponseRead ptr
          */        
         std::future<std::shared_ptr<IOResponseRead>>
-        async_read(uint64_t pos, io_read_callback_fn callback);
+        async_read(uint64_t pos, io_read_callback_fn callback) const;
 
         /**
          * @brief Asynchronous append; append data to end of file
@@ -73,7 +73,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseAppend>> Future containing a IOResponseAppend ptr
          */
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_append(const char *buffer, int length, io_append_callback_fn callback);
+        async_append(const char *buffer, int length, io_append_callback_fn callback) const;
 
         /**
          * @brief Asynchronous append; append data to end of file
@@ -82,7 +82,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseAppend>> Future containing a IOResponseAppend ptr
          */        
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_append(std::shared_ptr<std::vector<char>> data, io_append_callback_fn callback);
+        async_append(std::shared_ptr<std::vector<char>> data, io_append_callback_fn callback) const;
 
         /**
          * @brief Asynchronous append; append data to end of file
@@ -92,7 +92,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseAppend>> Future containing a IOResponseAppend ptr
          */
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_append_callback_fn callback);
+        async_append(std::shared_ptr<std::vector<char>> data[], uint8_t count, io_append_callback_fn callback) const;
 
         /**
          * @brief Asynchronous append; append data to end of file
@@ -101,7 +101,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseAppend>> Future containing a IOResponseAppend ptr
          */
         std::future<std::shared_ptr<IOResponseAppend>>
-        async_append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_append_callback_fn callback);
+        async_append(const std::vector<std::shared_ptr<std::vector<char>>> &data, io_append_callback_fn callback) const;
 
         /**
          * @brief Asynchronous write; overwrite data at offset
@@ -111,7 +111,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseWrite>> Future containing a IOResponseWrite ptr
          */
         std::future<std::shared_ptr<IOResponseWrite>>
-        async_write(uint64_t offset, std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback);
+        async_write(uint64_t offset, std::shared_ptr<std::vector<char>> data, io_write_callback_fn callback) const;
 
         /**
          * @brief Asynchronous write; overwrite data at offset
@@ -121,7 +121,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponseWrite>> Future containing a IOResponseWrite ptr
          */
         std::future<std::shared_ptr<IOResponseWrite>>
-        async_write(uint64_t offset, std::vector<std::shared_ptr<std::vector<char>>> data, io_write_callback_fn callback);
+        async_write(uint64_t offset, std::vector<std::shared_ptr<std::vector<char>>> data, io_write_callback_fn callback) const;
 
         /**
          * @brief Asynchronous sync; sync data to disk
@@ -129,7 +129,7 @@ namespace springtail {
          * @return std::future<std::shared_ptr<IOResponse>> Future containing a IOResponse ptr
          */
         std::future<std::shared_ptr<IOResponse>>
-        async_sync(io_status_callback_fn callback);
+        async_sync(io_status_callback_fn callback) const;
 
         // sync operations, no callback blocks until completion
 
@@ -139,7 +139,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseRead> IOResponseRead ptr
          */        
         std::shared_ptr<IOResponseRead>
-        read(uint64_t pos);
+        read(uint64_t pos) const;
 
         /**
          * @brief Synchronous append; calls async append; blocks on future
@@ -148,7 +148,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseAppend> IOResponseAppend ptr
          */
         std::shared_ptr<IOResponseAppend>
-        append(const char *buffer, int length);
+        append(const char *buffer, int length) const;
         
         /**
          * @brief Synchronous append; calls async append; blocks on future
@@ -156,7 +156,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseAppend> IOResponseAppend ptr
          */
         std::shared_ptr<IOResponseAppend>
-        append(std::shared_ptr<std::vector<char>> data);
+        append(std::shared_ptr<std::vector<char>> data) const;
 
         /**
          * @brief Synchronous append; calls async append; blocks on future
@@ -165,7 +165,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseAppend> IOResponseAppend ptr
          */
         std::shared_ptr<IOResponseAppend>
-        append(std::shared_ptr<std::vector<char>> data[], uint8_t count);
+        append(std::shared_ptr<std::vector<char>> data[], uint8_t count) const;
 
         /**
          * @brief Synchronous append; calls async append; blocks on future
@@ -173,7 +173,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseAppend> IOResponseAppend ptr
          */
         std::shared_ptr<IOResponseAppend>
-        append(const std::vector<std::shared_ptr<std::vector<char>>> &data);
+        append(const std::vector<std::shared_ptr<std::vector<char>>> &data) const;
 
         /**
          * @brief Synchronous write (overwrite); calls async read; blocks on future
@@ -182,7 +182,7 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseWrite> IOResopnseWrite ptr
          */
         std::shared_ptr<IOResponseWrite>
-        write(uint64_t offset, std::shared_ptr<std::vector<char>> data);
+        write(uint64_t offset, std::shared_ptr<std::vector<char>> data) const;
 
         /**
          * @brief Synchronous write (overwrite); calls async read; blocks on future
@@ -191,14 +191,14 @@ namespace springtail {
          * @return std::shared_ptr<IOResponseWrite> IOResopnseWrite ptr
          */
         std::shared_ptr<IOResponseWrite>
-        write(uint64_t offset, std::vector<std::shared_ptr<std::vector<char>>> data);
+        write(uint64_t offset, std::vector<std::shared_ptr<std::vector<char>>> data) const;
 
         /**
          * @brief Synchronous sync; sync data to disk; calls async sync; waits on future
          * @return std::shared_ptr<IOResponse> IOResponse ptr
          */
         std::shared_ptr<IOResponse>
-        sync();
+        sync() const;
 
         // no close, FH cache closes handles as necessary
     };
