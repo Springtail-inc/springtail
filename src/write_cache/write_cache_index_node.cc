@@ -289,7 +289,6 @@ namespace springtail {
         // in future we can merge or remove old entries based on type of op
         std::unique_lock<std::shared_mutex> entry_lock{entry->entry_mutex};
         for (int i = 0; i < rows.size(); i++) {
-            // XXX need to check if row already exists in the set, if so just replace it
             entry->set.insert(rows[i]);
         }
     }

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <mutex>
+#include <shared_mutex>
 #include <memory>
 
 #include <nlohmann/json.hpp>
@@ -45,6 +46,18 @@ namespace springtail {
 
         Json::get_to<int>(server_json, "port", _port, 55051);
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
+
+        std::string base_path;
+        Json::get_to<std::string>(json, "base_path", base_path, "/xid_mgr");
+        _base_path = std::filesystem::path(base_path);
+        if (!std::filesystem::exists(_base_path)) {
+            std::filesystem::create_directories(_base_path);
+        }
+
+        _fd = open((_base_path / XID_MGR_COMMIT_FILE).c_str(), O_RDWR | O_CREAT, 0644);
+        if (_fd < 0) {
+            throw Error("Failed to open xid_mgr file");
+        }
     }
 
     /**
@@ -80,22 +93,52 @@ namespace springtail {
         }
     }
 
+    void
+    XidMgrServer::_write_committed_xid(uint64_t xid)
+    {
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+        if (xid <= _committed_xid) {
+            return;
+        }
+        _committed_xid = xid;
+        lseek(_fd, 0, SEEK_SET);
+        write(_fd, &xid, sizeof(xid));
+    }
+
+    uint64_t
+    XidMgrServer::_read_committed_xid()
+    {
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+        lseek(_fd, 0, SEEK_SET);
+        read(_fd, &_committed_xid, sizeof(_committed_xid));
+        return _committed_xid;
+    }
+
     std::pair<uint64_t, uint64_t>
     XidMgrServer::get_xid_range(uint64_t xid)
     {
+        if (xid <= 0) {
+            return {_committed_xid+1, _committed_xid+101};
+        }
         return {xid+1,xid+101};
     }
 
     void
     XidMgrServer::commit_xid(uint64_t xid)
     {
+        _write_committed_xid(xid);
         return;
     }
 
     uint64_t
     XidMgrServer::get_committed_xid()
     {
-        return 0;
+        std::shared_lock<std::shared_mutex> lock(_mutex);
+        if (_committed_xid == 0) {
+            lock.unlock();
+            return _read_committed_xid();
+        }
+        return _committed_xid;
     }
 
 }

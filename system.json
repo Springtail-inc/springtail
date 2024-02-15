@@ -26,5 +26,16 @@
             "connections": 8,
             "server" : "localhost"
         }
+    },
+    "xid_mgr": {
+        "server" : {
+            "port" : 55052,
+            "worker_threads": 8,
+            "base_path": "/tmp/xid_mgr",
+        },
+        "client": {
+            "connections": 8,
+            "server" : "localhost"
+        }
     }
 }
