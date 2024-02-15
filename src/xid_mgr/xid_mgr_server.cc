@@ -110,7 +110,10 @@ namespace springtail {
     {
         std::unique_lock<std::shared_mutex> lock(_mutex);
         lseek(_fd, 0, SEEK_SET);
-        read(_fd, &_committed_xid, sizeof(_committed_xid));
+        int res = read(_fd, &_committed_xid, sizeof(_committed_xid));
+        if (res == 0) {
+            _committed_xid = 0;
+        }
         return _committed_xid;
     }
 
@@ -134,7 +137,7 @@ namespace springtail {
     XidMgrServer::get_committed_xid()
     {
         std::shared_lock<std::shared_mutex> lock(_mutex);
-        if (_committed_xid == 0) {
+        if (_committed_xid == -1) {
             lock.unlock();
             return _read_committed_xid();
         }

@@ -99,7 +99,7 @@ namespace springtail {
         int _port;
 
         /** last committed xid */
-        uint64_t _committed_xid = 0;
+        uint64_t _committed_xid = -1;
 
         /** base path */
         std::filesystem::path _base_path;
