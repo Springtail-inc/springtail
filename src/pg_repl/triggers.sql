@@ -17,7 +17,8 @@ BEGIN
                 'name', obj.object_name,
                 'identity', obj.object_identity);
 
-            PERFORM pg_logical_emit_message(true, 'springtail ' || tg_tag, msg::text);
+            -- tg_tag is DROP TABLE
+            PERFORM pg_logical_emit_message(true, 'springtail:' || tg_tag || ':' || obj.objid, msg::text);
         END IF;
     END LOOP;
 END;
@@ -36,7 +37,7 @@ BEGIN
         FROM (
             SELECT json_build_object('name', column_name,
                 'is_nullable', is_nullable::boolean,
-                'type', udt_name, 
+                'type', udt_name,
                 'default', column_default,
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
                 'position', ordinal_position
@@ -58,9 +59,10 @@ BEGIN
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'columns', json_columns,
-            'identity', obj.object_identity)::text;
+            'identity', obj.object_identity);
 
-        PERFORM pg_logical_emit_message(true, 'springtail ' || obj.command_tag, msg);
+        -- tg_tag is CREATE TABLE or ALTER TABLE
+        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag || ':' || obj.objid, msg::text);
     END LOOP;
 END;
 $$;
@@ -73,6 +75,6 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_drops
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_ddl
-   ON ddl_command_end 
+   ON ddl_command_end
    WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
    EXECUTE FUNCTION springtail_event_trigger_for_ddl();

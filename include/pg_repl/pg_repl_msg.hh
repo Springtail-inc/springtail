@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <variant>
+#include <set>
 
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
@@ -227,9 +228,10 @@ namespace springtail
 
 
         // Message prefixes
-        static inline constexpr char MSG_PREFIX_CREATE_TABLE[] = "springtail CREATE TABLE";
-        static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail ALTER TABLE";
-        static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail DROP TABLE";
+        static inline constexpr char MSG_PREFIX_SPRINGTAIL[] = "springtail:";
+        static inline constexpr char MSG_PREFIX_CREATE_TABLE[] = "springtail:CREATE TABLE";
+        static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail:ALTER TABLE";
+        static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail:DROP TABLE";
 
         /** Protocol version */
         int _proto_version = 1;
@@ -354,8 +356,11 @@ namespace springtail
             uint64_t commit_offset;
             LSN_t xact_lsn;
             uint32_t xid;
+            std::set<uint64_t> oids;
         };
         using PgTransactionPtr = std::shared_ptr<PgTransaction>;
+
+        using PgTransactionVectorPtr = std::shared_ptr<std::vector<PgReplMsgStream::PgTransactionPtr>>;
 
         /**
          * @brief Construct a new Pg Repl Msg Stream object
@@ -369,12 +374,13 @@ namespace springtail
          * @param offset offset of messages from start of file
          * @param size size of message chunk to parse
          * @param proto_version protocol version of message chunk
-         * @return std::vector<PgTransactionPtr> a list of transaction entries
+         * @param committed_xacts out | vector of committed transactions
          */
-        std::vector<PgTransactionPtr> scan_log(std::shared_ptr<std::fstream> _stream,
-                                               const std::filesystem::path &path,
-                                               uint64_t offset, uint64_t size,
-                                               int proto_version);
+        void scan_log(std::shared_ptr<std::fstream> _stream,
+                      const std::filesystem::path &path,
+                      uint64_t offset, uint64_t size,
+                      int proto_version,
+                      PgTransactionVectorPtr committed_xacts);
 
     private:
 
@@ -389,7 +395,7 @@ namespace springtail
         static inline constexpr int LEN_STREAM_ABORT  = (4 + 4 + 8 + 8);
 
         /** Helper to decode/skip a single message */
-        void _scan_message();
+        void _scan_message(PgTransactionVectorPtr committed_xacts);
 
         // skip messages
         void _skip_tuple();
@@ -401,7 +407,7 @@ namespace springtail
         void _skip_truncate();
         void _skip_type();
         void _skip_origin();
-        void _skip_message();
+        bool _skip_message(uint64_t &oid, uint32_t &xid);
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {
@@ -449,17 +455,20 @@ namespace springtail
 
         /** Underlying file stream */
         std::shared_ptr<std::fstream> _stream;
+
         /** Underlying file path for stream */
         std::filesystem::path _current_path;
+
         /** Current offset within stream (from beginning) */
         uint64_t _current_offset;
+
         /** End offset of message block relative to beginning of stream */
         uint64_t _end_offset;
+
         /** Current message transaction if in non-streaming mode */
         PgTransactionPtr _current_xact = nullptr;
+
         /** Map of in progress transactions if in streaming mode */
-        std::map<uint64_t, PgTransactionPtr> _xact_map;
-        /** list of transactions encountered so far */
-        std::vector<PgTransactionPtr> _committed_xacts;
+        std::map<uint32_t, PgTransactionPtr> _xact_map;
     };
 }

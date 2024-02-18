@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <common/logging.hh>
+#include <common/common.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -1262,7 +1263,7 @@ namespace springtail
 
         // iterate, reading in 128 characters and searching for null char
         while (true) {
-	  uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
+	        uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
             _stream->read(buffer, length);
             uint64_t curr_len = strnlen(buffer, length);
             str_len += curr_len;
@@ -1392,28 +1393,54 @@ namespace springtail
         _skip_string();
     }
 
-    void
-    PgReplMsgStream::_skip_message()
+    bool
+    PgReplMsgStream::_skip_message(uint64_t &oid, uint32_t &xid)
     {
         if (_streaming) {
-            _current_offset += 4; // xid
+            xid = _recvint32();
         }
 
         _current_offset += (1 + 8); // flags + lsn
 
-        _skip_string(); // msg prefix
+        // need to decode message prefix to get oid
+        char buffer[128];
+        uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
+        _stream->read(buffer, length);
 
-        uint32_t len = _recvint32(); // msg len
+        // buffer should contain the full string, max should be about 45B, min ~24B
+        uint64_t str_len = strnlen(buffer, length);
+        if (str_len == length || strcmp(buffer, MSG_PREFIX_SPRINGTAIL) != 0) {
+            // not a springtail message
+            _skip_string(); // prefix string
+            _current_offset += _recvint32(); // msg len + msg
 
-        _current_offset += len; // msg
+            return false;
+        }
+
+        // found springtail message process it
+        // should be in form "springtail:OP NAME:OID"
+        std::vector<std::string> parts;
+        common::split_string(":", buffer, parts);
+
+        assert(parts.size() == 3);
+
+        // extract oid
+        oid = std::stoull(parts[2]);
+
+        _current_offset += str_len + 1; // null char is 1 more than str_len
+
+        _current_offset += _recvint32(); // msg len + msg
+
+        return true;
     }
 
 
-    std::vector<PgReplMsgStream::PgTransactionPtr>
+    void
     PgReplMsgStream::scan_log(std::shared_ptr<std::fstream> stream,
                               const std::filesystem::path &path,
                               uint64_t offset, uint64_t size,
-                              int proto_version)
+                              int proto_version,
+                              PgTransactionVectorPtr committed_xacts)
     {
         _current_path = path;
         _current_offset = offset;
@@ -1425,26 +1452,20 @@ namespace springtail
             throw PgIOError();
         }
 
-        if (offset != 0) {
-            _stream->seekg(_current_offset, std::fstream::beg);
-        }
-        _committed_xacts.clear();
-
         while (_current_offset < _end_offset) {
-            _scan_message();
+            _scan_message(committed_xacts);
         }
 
-        return _committed_xacts;
+        return;
     }
 
     void
-    PgReplMsgStream::_scan_message()
+    PgReplMsgStream::_scan_message(PgTransactionVectorPtr committed_xacts)
     {
         uint64_t start_offset = _current_offset;
 
         // first byte is opcode
-        char msg_type = recvint8(*_stream);
-        _current_offset++;
+        char msg_type = _recvint8();
 
         switch(msg_type) {
 
@@ -1489,7 +1510,7 @@ namespace springtail
                 xact->commit_path = _current_path;
                 xact->commit_offset = commit_offset;
 
-                _committed_xacts.push_back(xact);
+                committed_xacts->push_back(xact);
                 _current_xact = nullptr;
 
                 break;
@@ -1519,9 +1540,30 @@ namespace springtail
                 _skip_origin();
                 break;
 
-            case MSG_MESSAGE: // message
-                _skip_message();
+            case MSG_MESSAGE: { // message; usually a ddl command
+                uint64_t oid;
+                uint32_t xid;
+                if (_skip_message(oid, xid)) {
+                    // found a springtail message having to do with
+                    // table creation, alteration, or deletion, record OID
+                    if (!_streaming) {
+                        // if not in streaming mode take xid from current transaction
+                        xid = _current_xact->xid;
+                        _current_xact->oids.insert(oid);
+                    } else {
+                        // in streaming mode lookup current transaction in xact map
+                        auto itr = _xact_map.find(xid);
+                        if (itr == _xact_map.end()) {
+                            // no start streaming xact found...
+                            SPDLOG_WARN("XID not found for message: xid={}\n", xid);
+                        } else {
+                            PgTransactionPtr xact = itr->second;
+                            xact->oids.insert(oid);
+                        }
+                    }
+                }
                 break;
+            }
 
             case MSG_TYPE: // type
                 _skip_type();
@@ -1582,7 +1624,7 @@ namespace springtail
 
                 _xact_map.erase(itr);
 
-                _committed_xacts.push_back(xact);
+                committed_xacts->push_back(xact);
                 break;
             }
 
@@ -1596,6 +1638,7 @@ namespace springtail
                 PgMsgStreamAbort &abort_msg = std::get<PgMsgStreamAbort>(_decoded_msg.msg);
 
                 _xact_map.erase(abort_msg.xid);
+
                 break;
             }
 

@@ -16,15 +16,6 @@ namespace springtail {
     }
 
     void
-    ThriftXidMgrService::get_xid_range(thrift::XidRange& _return, const thrift::xid_t request)
-    {
-        XidMgrServer *server = XidMgrServer::get_instance();
-        std::pair<uint64_t, uint64_t> range = server->get_xid_range(request);
-        _return.start_xid = range.first;
-        _return.end_xid = range.second;
-    }
-
-    void
     ThriftXidMgrService::commit_xid(thrift::Status& _return, const thrift::xid_t request)
     {
         XidMgrServer *server = XidMgrServer::get_instance();

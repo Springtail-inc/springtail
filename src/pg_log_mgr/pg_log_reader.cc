@@ -12,8 +12,6 @@ namespace springtail {
     PgLogReader::process_log(const std::filesystem::path &path, uint64_t start_offset,
                              uint64_t end_offset, int num_messages)
     {
-        std::vector<PgReplMsgStream::PgTransactionPtr> xacts;
-
         // if we are processing a new file create a new file stream
         if (_stream == nullptr || path != _current_path) {
             _create_stream(path, start_offset);
@@ -27,6 +25,8 @@ namespace springtail {
 
         // iterate through the set of messages
         for (int i = 0; i < num_messages; i++) {
+            PgReplMsgStream::PgTransactionVectorPtr xacts = std::make_shared<std::vector<PgReplMsgStream::PgTransactionPtr>>();
+
             // read header
             char buffer[PgLogWriter::PG_LOG_HDR_BYTES];
             _stream->read(buffer, PgLogWriter::PG_LOG_HDR_BYTES);
@@ -40,8 +40,9 @@ namespace springtail {
             assert(header.magic == PgLogWriter::PG_LOG_MAGIC);
 
             // process the log message chunk, get back a list of xactions
-            xacts = _pg_repl_stream.scan_log(_stream, _current_path, _current_offset,
-                                             header.msg_length, header.proto_version);
+            _pg_repl_stream.scan_log(_stream, _current_path, _current_offset,
+                                     header.msg_length, header.proto_version,
+                                     xacts);
 
             // enqueue the xactions for the xact logger to send to GC
             _queue->push(xacts);

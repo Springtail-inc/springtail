@@ -54,7 +54,7 @@ namespace springtail {
             std::filesystem::create_directories(_base_path);
         }
 
-        _fd = open((_base_path / XID_MGR_COMMIT_FILE).c_str(), O_RDWR | O_CREAT, 0644);
+        _fd = open((_base_path / std::filesystem::path(XID_MGR_COMMIT_FILE)).c_str(), O_RDWR | O_CREAT, 0644);
         if (_fd < 0) {
             throw Error("Failed to open xid_mgr file");
         }
@@ -115,15 +115,6 @@ namespace springtail {
             _committed_xid = 0;
         }
         return _committed_xid;
-    }
-
-    std::pair<uint64_t, uint64_t>
-    XidMgrServer::get_xid_range(uint64_t xid)
-    {
-        if (xid <= 0) {
-            return {_committed_xid+1, _committed_xid+101};
-        }
-        return {xid+1,xid+101};
     }
 
     void
