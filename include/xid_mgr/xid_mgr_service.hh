@@ -19,7 +19,6 @@ namespace springtail {
         ThriftXidMgrService() = default;
 
         void ping(thrift::Status& _return) override;
-        void get_xid_range(thrift::XidRange& _return, const thrift::xid_t request) override;
         void commit_xid(thrift::Status& _return, const thrift::xid_t request) override;
         thrift::xid_t get_committed_xid() override;
     };

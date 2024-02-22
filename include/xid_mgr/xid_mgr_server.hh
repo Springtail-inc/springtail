@@ -48,13 +48,6 @@ namespace springtail {
         // interfaces from thrift
 
         /**
-         * @brief Get an unallocated xid range
-         * @param last_xid last allocated xid, 0 for none
-         * @return std::pair<uint64_t, uint64_t> start/end offset inclusive
-         */
-        std::pair<uint64_t, uint64_t> get_xid_range(uint64_t last_xid);
-
-        /**
          * @brief commit up to and including given xid
          * @param xid
          */

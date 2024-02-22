@@ -33,13 +33,6 @@ namespace springtail {
         void ping();
 
         /**
-         * @brief Get newly allocated xid range
-         * @param last_xid last allocated xid, 0 if none
-         * @return std::pair<uint64_t, uint64_t> first=start of range, second=end of range inclusive
-         */
-        std::pair<uint64_t, uint64_t> get_xid_range(uint64_t last_xid);
-
-        /**
          * @brief Commit xid, mark it as latest
          * @param xid xid to commit
          */

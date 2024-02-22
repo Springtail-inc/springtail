@@ -54,6 +54,15 @@ namespace springtail {
         }
 
         /**
+         * @brief Push multiple entries onto queue at once, get the write lock once, may block
+         * @param entries list of entries to push on queue
+         */
+        void push(const std::shared_ptr<std::vector<Tptr>> entries)
+        {
+            push(*entries);
+        }
+
+        /**
          * @brief Pop entry from queue, optionally waiting for entry
          * @return std::shared_ptr<T> log queue entry
          */

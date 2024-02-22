@@ -78,4 +78,33 @@ namespace springtail {
         uint64_t db_id; ///< database id
         uint32_t pg_xid;
     };
+
+    /**
+     * @brief Postgres Redis Value for OID sorted set.  Score is xid, value is xid:oid
+     */
+    class PgRedisOidValue {
+    public:
+        PgRedisOidValue(uint64_t oid, uint64_t xid)
+            : oid(oid), xid(xid)
+        {}
+
+        PgRedisOidValue(const std::string &string_value)
+        {
+            std::vector<std::string> split;
+            common::split_string(":", string_value, split);
+
+            assert(split.size() == 2);
+
+            xid = std::stoull(split[0]);
+            oid = std::stoull(split[1]);
+        }
+
+        std::string serialize() const
+        {
+            return fmt::format("{}:{}", xid, oid);
+        }
+
+        uint64_t oid;
+        uint64_t xid;
+    };
 }

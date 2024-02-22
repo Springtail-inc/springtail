@@ -29,13 +29,13 @@ namespace springtail {
         uint64_t _db_id=1;
 
         /** next xid in xid range allocated by xid mgr */
-        uint64_t _next_xid;
-
-        /** last xid in xid range allocated by xid mgr */
-        uint64_t _last_xid;
+        uint64_t _next_xid=0;
 
         /** redis queue */
         RedisQueue<PgRedisXactValue> _redis_queue;
+
+        /** redis sorted set */
+        RedisSortedSet<PgRedisOidValue> _oid_set;
 
         /** Create logger to write out xid log */
         void _create_logger();
