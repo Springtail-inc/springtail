@@ -88,37 +88,105 @@ namespace springtail {
 
     /**
      * @brief Redis queue, uses RedisMgr client
+     *
+     * Implements a producer / consumer queue in Redis with optional two-phase commit.  The
+     * producer(s) calls push() to add entries to the queue.  Consumer(s) call pop() to consume an
+     * entry off of the queue.  Once processing of the entry is complete, the consumer calls
+     * commit() to complete the operation or abort() to fail the operation and return it to the
+     * queue.  If two-phase commit is not required, a consumer can also call pop_and_commit() which
+     * will atomically perform a pop() and commit().
+     *
      * @tparam T value type, should implement std::string serialize().
      */
     template<typename T>
     class RedisQueue {
     public:
+        RedisQueue(const std::string &key)
+            : _key(key),
+              _redis(RedisMgr::get_instance()->get_client())
+        { }
+
         /**
-         * @brief Push item onto queue (list)
+         * @brief Push item onto queue.
          * @param key list key
          * @param value value to queue
          * @return uint64_t items on list
          */
-        uint64_t push(const std::string &key, const T &value)
+        uint64_t push(const T &value)
         {
-            std::string value_string = value.serialize();
-            return RedisMgr::get_instance()->get_client()->rpush(key, value_string);
+            return _redis->rpush(_key, value.serialize());
         }
 
         /**
-         * @brief Pop item from queue (list)
-         * @param key list key
+         * @brief Pop item from queue (list).
+         *
+         * To support a two-phase commit, we move the item from the primary queue to separate list
+         * for the specific worker.  When the work for an item is complete, then the worker must
+         * call commit() to commit the work item and remove it from it's list.  Or call abort() to
+         * return the work item to the primary queue.
+         *
+         * @param worker_id The unique ID of the worker.
          * @param timeout_secs timeout in seconds (0=block forever)
-         * @return true if value was received, false if timedout
+         * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop(const std::string &key, uint64_t timeout_secs=0)
+        std::shared_ptr<T> pop(uint64_t worker_id, uint64_t timeout_secs=0)
         {
-            // returns an optional pair, no value if timeout first=key, second=value
-            auto &&res = RedisMgr::get_instance()->get_client()->blpop(key, timeout_secs);
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+
+            // remove from the main queue and move to the worker queue
+            auto &&res = _redis->blmove(_key, worker_key, "LEFT", "RIGHT", timeout_secs);
             if (res) {
                 return std::make_shared<T>(res->second);
             }
             return nullptr;
         }
+
+        /**
+         * @brief Commit a worker's active item.
+         *
+         * Removes the worker's item from it's separate list to complete the two-phase commit.
+         *
+         * @param worker_id The unique ID of the worker.
+         */
+        void commit(uint64_t worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->lpop(worker_key);
+        }
+
+        /**
+         * @brief Abort a worker's active item.
+         *
+         * Removes the worker's item from it's separate list and returns it to the central queue to
+         * be re-processed.  Places the work item at the front of the queue to ensure it is worked
+         * on next.
+         *
+         * @param worker_id The unique ID of the worker.
+         */
+        void abort(uint64_t worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->lmove(worker_key, _key, "LEFT", "LEFT");
+        }
+
+        /**
+         * @brief Logically performs a pop() and complete() in a single operation.
+         *
+         * @param timeout_secs timeout in seconds (0=block forever)
+         * @return A pointer to the value if a value was received, nullptr if timedout
+         */
+        std::shared_ptr<T> pop_and_commit(uint64_t timeout_sec=0)
+        {
+            // returns an optional pair, no value if timeout first=key, second=value
+            auto &&res = _redis->blpop(key, timeout_secs);
+            if (res) {
+                return std::make_shared<T>(res->second);
+            }
+            return nullptr;
+        }
+
+    private:
+        std::string _key; ///< The unique key within Redis for this queue.
+        std::shared_ptr<RedisClient> _redis; ///< A connection to Redis.
     };
 }
