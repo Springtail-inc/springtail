@@ -1482,12 +1482,12 @@ namespace springtail
                 xact->begin_path = _current_path;
                 xact->begin_offset = _current_offset-1; // adjust for opcode
 
-                char buffer[LEN_BEGIN];
-                _read_buffer(buffer, LEN_BEGIN);
-
+                // read in begin and decode it
                 // decode assumes 1B opcode is in buffer, so skips it
-                set_buffer(buffer-1, LEN_BEGIN);
-                decode_begin(); // returns bytes decoded
+                char buffer[LEN_BEGIN + 1];
+                _read_buffer(buffer + 1, LEN_BEGIN);
+                set_buffer(buffer, LEN_BEGIN);
+                decode_begin();
 
                 assert(_decoded_msg.msg_type == PgReplMsgType::BEGIN);
                 PgMsgBegin &begin_msg = std::get<PgMsgBegin>(_decoded_msg.msg);
@@ -1503,11 +1503,11 @@ namespace springtail
             case MSG_COMMIT: { // commit
                 uint64_t commit_offset = _current_offset - 1; // adjust for opcode
 
-                char buffer[LEN_COMMIT];
-                _read_buffer(buffer, LEN_COMMIT);
-
-                // decode assumes 1B opcode is in buffer, so skips it
-                set_buffer(buffer-1, LEN_COMMIT);
+                // read in commit and decode it
+                // decode assumes 1B opcode is in buffer and skips it
+                char buffer[LEN_COMMIT + 1];
+                _read_buffer(buffer + 1, LEN_COMMIT);
+                set_buffer(buffer, LEN_COMMIT);
                 decode_commit();
 
                 PgMsgCommit &commit_msg = std::get<PgMsgCommit>(_decoded_msg.msg);
@@ -1587,11 +1587,11 @@ namespace springtail
 
                 _streaming = true;
 
-                char buffer[LEN_STREAM_START];
-                _read_buffer(buffer, LEN_STREAM_START);
-
-                // decode assumes 1B opcode is in buffer, so skips it
-                set_buffer(buffer-1, LEN_STREAM_START);
+                // read stream start into buffer and decode it
+                // decode assumes 1B opcode is in buffer and skips it
+                char buffer[LEN_STREAM_START + 1];
+                _read_buffer(buffer + 1, LEN_STREAM_START);
+                set_buffer(buffer, LEN_STREAM_START);
                 decode_stream_start();
 
                 PgMsgStreamStart &start_msg = std::get<PgMsgStreamStart>(_decoded_msg.msg);
@@ -1617,11 +1617,11 @@ namespace springtail
                 // note: stream commit comes after stream stop
                 uint64_t commit_offset = _current_offset - 1; // adjust for opcode
 
-                char buffer[LEN_STREAM_COMMIT];
-                _read_buffer(buffer, LEN_STREAM_COMMIT);
-
-                // decode assumes 1B opcode is in buffer, so skips it
-                set_buffer(buffer-1, LEN_STREAM_COMMIT);
+                // read stream commit into buffer and decode it
+                // decode assumes 1B opcode is in buffer and skips it
+                char buffer[LEN_STREAM_COMMIT + 1];
+                _read_buffer(buffer + 1, LEN_STREAM_COMMIT);
+                set_buffer(buffer, LEN_STREAM_COMMIT);
                 decode_stream_commit();
 
                 PgMsgStreamCommit &commit_msg = std::get<PgMsgStreamCommit>(_decoded_msg.msg);
@@ -1649,11 +1649,12 @@ namespace springtail
 
             case MSG_STREAM_ABORT: {
                 // note: stream abort comes after stream stop
-                char buffer[LEN_STREAM_ABORT];
-                _read_buffer(buffer, LEN_STREAM_ABORT);
 
-                // decode assumes 1B opcode is in buffer, so skips it
-                set_buffer(buffer-1, LEN_STREAM_ABORT);
+                // read in stream abort and decode it
+                // decode assumes 1B opcode is in buffer and skips it
+                char buffer[LEN_STREAM_ABORT + 1];
+                _read_buffer(buffer + 1, LEN_STREAM_ABORT);
+                set_buffer(buffer, LEN_STREAM_ABORT);
                 decode_stream_abort();
 
                 PgMsgStreamAbort &abort_msg = std::get<PgMsgStreamAbort>(_decoded_msg.msg);
@@ -1674,10 +1675,6 @@ namespace springtail
         if (_current_offset > _end_offset) {
             SPDLOG_WARN("Buffer overrun in decode: consumed={}, bytes available={}\n",
                         (_current_offset - start_offset), (_end_offset - start_offset));
-
-            /* Note: an error here will really require closing and re-opening the
-             * replication stream to try and re-read the data */
-
             throw PgUnexpectedDataError();
         }
 
