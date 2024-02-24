@@ -97,7 +97,7 @@ namespace springtail {
             }
 
             _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
-                                       log_entry->end_offset, log_entry->num_messages);
+                                       log_entry->num_messages);
         }
     }
 

@@ -103,6 +103,18 @@ namespace springtail
     }
 
     /**
+     * @brief Copy 16bit int into buffer in network format
+     *
+     * @param i value to copy into buffer
+     * @param buffer pointer to preallocated buffer
+     */
+    static inline void sendint16(int16_t i, char *buffer)
+    {
+         int16_t n16 = pg_hton16(i);
+         std::memcpy(buffer, &n16, 2);
+    }
+
+    /**
      * @brief Copy 64 bit int from buffer from network format to host format
      *
      * @param buffer buffer containing data

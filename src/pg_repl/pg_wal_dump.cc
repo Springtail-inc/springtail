@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
         ("dbname,d", boost::program_options::value<std::string>(&db_name)->default_value("springtail"), "DB database name")
         ("user,u", boost::program_options::value<std::string>(&user_name)->default_value("springtail"), "DB user name")
         ("password,P", boost::program_options::value<std::string>(&password)->default_value(""), "DB Password")
-        ("outfile,o", boost::program_options::value<std::filesystem::path>(&outfile)->default_value("wal.log"), "WAL output file")
+        ("outfile,o", boost::program_options::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")), "WAL output file")
         ("publication,b", boost::program_options::value<std::string>(&pub_name)->default_value("springtail"), "Publication name")
         ("dump,D", "Dump contents of buffer to stdout")
         ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");

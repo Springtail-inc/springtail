@@ -10,7 +10,7 @@ namespace springtail {
 
     void
     PgLogReader::process_log(const std::filesystem::path &path, uint64_t start_offset,
-                             uint64_t end_offset, int num_messages)
+                             int num_messages)
     {
         // if we are processing a new file create a new file stream
         if (_stream == nullptr || path != _current_path) {
@@ -33,8 +33,7 @@ namespace springtail {
             _current_offset += PgLogWriter::PG_LOG_HDR_BYTES;
 
             // decode header
-            PgLogWriter::PgLogHeader header;
-            PgLogWriter::decode_header(buffer, header);
+            PgLogWriter::PgLogHeader header(buffer);
 
             // validate magic number
             assert(header.magic == PgLogWriter::PG_LOG_MAGIC);

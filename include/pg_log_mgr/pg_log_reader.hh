@@ -31,11 +31,11 @@ namespace springtail {
          * @brief Process next set of messages from log file
          * @param path file path
          * @param start_offset starting file offset
-         * @param end_offset ending offset
          * @param num_messages number of messages to process
          */
-        void process_log(const std::filesystem::path &path, uint64_t start_offset,
-                         uint64_t end_offset, int num_messages);
+        void process_log(const std::filesystem::path &path,
+                         uint64_t start_offset,
+                         int num_messages);
     private:
         /** current file path */
         std::filesystem::path _current_path;

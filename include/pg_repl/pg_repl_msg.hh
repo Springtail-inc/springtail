@@ -208,7 +208,7 @@ namespace springtail
      */
     class PgReplMsg
     {
-    protected:
+    public:
         // Proto V1; message flags, first byte
         static inline constexpr char MSG_BEGIN    = 'B';
         static inline constexpr char MSG_COMMIT   = 'C';
@@ -233,6 +233,7 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail:ALTER TABLE";
         static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail:DROP TABLE";
 
+    protected:
         /** Protocol version */
         int _proto_version = 1;
 

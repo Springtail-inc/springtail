@@ -134,7 +134,7 @@ namespace springtail
 
         // replication start command
         std::unique_ptr<char[]> pub_name = _stream_connection->escape_string(_pub_name);
-        std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names '{}'",
+        std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {:X}/{:X} (proto_version '{}', publication_names '{}', streaming 'on'",
             _slot_name, lsn_higher, lsn_lower, _proto_version, pub_name.get());
 
         if (_server_version >= PG_VERS_14) {

@@ -221,6 +221,8 @@ namespace springtail
                 continue;
             }
 
+            assert(tuple.tuple_data[i].type == 't' || tuple.tuple_data[i].type == 'b');
+
             tuple.tuple_data[i].data_len = recvint32(&buffer[pos]);
             pos += 4;
 
@@ -1445,12 +1447,15 @@ namespace springtail
         _current_path = path;
         _current_offset = offset;
         _end_offset = offset + size;
+        _stream = stream;
 
         set_proto_version(proto_version);
 
-        if (!_stream->is_open()) {
+        if (_stream == nullptr || !_stream->is_open()) {
             throw PgIOError();
         }
+
+        SPDLOG_DEBUG("Starting scan at offset: {}, size: {}\n", _current_offset, size);
 
         while (_current_offset < _end_offset) {
             _scan_message(committed_xacts);
@@ -1467,39 +1472,47 @@ namespace springtail
         // first byte is opcode
         char msg_type = _recvint8();
 
+        SPDLOG_DEBUG("Scanning message: {} at offset: {}\n", msg_type, _current_offset);
+
         switch(msg_type) {
 
             // V1 Protocol
             case MSG_BEGIN: { // begin
                 PgTransactionPtr xact = std::make_shared<PgTransaction>();
                 xact->begin_path = _current_path;
-                xact->begin_offset = _current_offset;
+                xact->begin_offset = _current_offset-1; // adjust for opcode
 
                 char buffer[LEN_BEGIN];
                 _read_buffer(buffer, LEN_BEGIN);
 
-                set_buffer(buffer, LEN_BEGIN);
-                _current_offset += decode_begin(); // returns bytes decoded
+                // decode assumes 1B opcode is in buffer, so skips it
+                set_buffer(buffer-1, LEN_BEGIN);
+                decode_begin(); // returns bytes decoded
 
                 assert(_decoded_msg.msg_type == PgReplMsgType::BEGIN);
                 PgMsgBegin &begin_msg = std::get<PgMsgBegin>(_decoded_msg.msg);
                 xact->xact_lsn = begin_msg.xact_lsn;
                 xact->xid = begin_msg.xid;
 
+                SPDLOG_DEBUG("Begin: xid={}, xact_lsn={}\n", xact->xid, xact->xact_lsn);
+
                 _current_xact = xact;
                 break;
             }
 
             case MSG_COMMIT: { // commit
-                uint64_t commit_offset = _current_offset;
+                uint64_t commit_offset = _current_offset - 1; // adjust for opcode
 
                 char buffer[LEN_COMMIT];
                 _read_buffer(buffer, LEN_COMMIT);
 
-                set_buffer(buffer, LEN_COMMIT);
-                _current_offset += decode_commit();
+                // decode assumes 1B opcode is in buffer, so skips it
+                set_buffer(buffer-1, LEN_COMMIT);
+                decode_commit();
 
                 PgMsgCommit &commit_msg = std::get<PgMsgCommit>(_decoded_msg.msg);
+
+                SPDLOG_DEBUG("Commit: commit_lsn={}, xact_lsn={}\n", commit_msg.commit_lsn, commit_msg.xact_lsn);
 
                 PgTransactionPtr xact = _current_xact;
                 if (_current_xact == nullptr || commit_msg.xact_lsn != _current_xact->xact_lsn) {
@@ -1570,18 +1583,19 @@ namespace springtail
                 break;
 
             case MSG_STREAM_START: {
-                uint64_t start_offset = _current_offset;
+                uint64_t start_offset = _current_offset - 1;  // adjust for opcode
 
                 _streaming = true;
 
                 char buffer[LEN_STREAM_START];
                 _read_buffer(buffer, LEN_STREAM_START);
 
-                set_buffer(buffer, LEN_STREAM_START);
-                _current_offset += decode_stream_start();
+                // decode assumes 1B opcode is in buffer, so skips it
+                set_buffer(buffer-1, LEN_STREAM_START);
+                decode_stream_start();
 
                 PgMsgStreamStart &start_msg = std::get<PgMsgStreamStart>(_decoded_msg.msg);
-
+                SPDLOG_DEBUG("Stream start: xid={}, first={}\n", start_msg.xid, start_msg.first);
                 if (start_msg.first) {
                     // new transaction
                     PgTransactionPtr xact = std::make_shared<PgTransaction>();
@@ -1594,20 +1608,25 @@ namespace springtail
             }
 
             case MSG_STREAM_STOP:
+                assert(_streaming); // should be streaming (v2+ protocol)
                 _streaming = false;
                 _current_offset += LEN_STREAM_STOP;
                 break;
 
             case MSG_STREAM_COMMIT: {
-                uint64_t commit_offset = _current_offset;
+                // note: stream commit comes after stream stop
+                uint64_t commit_offset = _current_offset - 1; // adjust for opcode
 
                 char buffer[LEN_STREAM_COMMIT];
                 _read_buffer(buffer, LEN_STREAM_COMMIT);
 
-                set_buffer(buffer, LEN_STREAM_COMMIT);
-                _current_offset += decode_stream_commit();
+                // decode assumes 1B opcode is in buffer, so skips it
+                set_buffer(buffer-1, LEN_STREAM_COMMIT);
+                decode_stream_commit();
 
                 PgMsgStreamCommit &commit_msg = std::get<PgMsgStreamCommit>(_decoded_msg.msg);
+
+                SPDLOG_DEBUG("Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
 
                 auto itr = _xact_map.find(commit_msg.xid);
                 if (itr == _xact_map.end()) {
@@ -1629,13 +1648,17 @@ namespace springtail
             }
 
             case MSG_STREAM_ABORT: {
+                // note: stream abort comes after stream stop
                 char buffer[LEN_STREAM_ABORT];
                 _read_buffer(buffer, LEN_STREAM_ABORT);
 
-                set_buffer(buffer, LEN_STREAM_ABORT);
-                _current_offset += decode_stream_abort();
+                // decode assumes 1B opcode is in buffer, so skips it
+                set_buffer(buffer-1, LEN_STREAM_ABORT);
+                decode_stream_abort();
 
                 PgMsgStreamAbort &abort_msg = std::get<PgMsgStreamAbort>(_decoded_msg.msg);
+
+                SPDLOG_DEBUG("Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
 
                 _xact_map.erase(abort_msg.xid);
 
@@ -1649,15 +1672,16 @@ namespace springtail
 
         // sanity check
         if (_current_offset > _end_offset) {
-            std::cerr << "Buffer overrun in decode: consumed="
-                      << (_current_offset - start_offset) << ", bytes available="
-                      << (_end_offset - start_offset) << std::endl;
+            SPDLOG_WARN("Buffer overrun in decode: consumed={}, bytes available={}\n",
+                        (_current_offset - start_offset), (_end_offset - start_offset));
 
             /* Note: an error here will really require closing and re-opening the
              * replication stream to try and re-read the data */
 
             throw PgUnexpectedDataError();
         }
+
+        SPDLOG_DEBUG("Consumed: {} bytes, bytes available: {}\n", (_current_offset - start_offset), (_end_offset - _current_offset));
     }
 
 }
