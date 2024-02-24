@@ -7,6 +7,8 @@
 #include <queue>
 #include <mutex>
 
+#include <fmt/format.h>
+
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_connection.hh>
 
@@ -19,18 +21,6 @@ namespace springtail {
     */
     class PgLogWriter {
     public:
-        /** Magic number used in log header */
-        static constexpr uint32_t PG_LOG_MAGIC=0xDEFC8193;
-
-        /**
-         * Size of the log header preceeds each message
-         * 4B Magic number; 4B Msg length; 8B starting LSN; 8B ending LSN; 4B protocol version
-         */
-        static constexpr int PG_LOG_HDR_BYTES=28;
-
-        /** don't fsync more frequently than this */
-        static constexpr int PG_LOG_MIN_FSYNC_MS=50;
-
         /**
          * @brief Log header
          */
@@ -40,7 +30,45 @@ namespace springtail {
             LSN_t start_lsn;
             LSN_t end_lsn;
             uint32_t proto_version;
+
+            static constexpr int SIZE = (4 + 4 + 8 + 8 + 4);
+
+            PgLogHeader(uint32_t msg_length, LSN_t start_lsn, LSN_t end_lsn, uint32_t proto_version)
+                : magic(PG_LOG_MAGIC), msg_length(msg_length), start_lsn(start_lsn),
+                  end_lsn(end_lsn), proto_version(proto_version)
+            {}
+
+            PgLogHeader(const char * const buffer) {
+                magic = recvint32(buffer);
+                msg_length = recvint32(buffer + 4);
+                start_lsn = recvint64(buffer + 8);
+                end_lsn = recvint64(buffer + 16);
+                proto_version = recvint32(buffer + 24);
+            }
+
+            void encode_header(char * const buffer) {
+                sendint32(magic, buffer);
+                sendint32(msg_length, buffer + 4);
+                sendint64(start_lsn, buffer + 8);
+                sendint64(end_lsn, buffer + 16);
+                sendint32(proto_version, buffer + 24);
+            }
+
+            std::string to_string() {
+                return fmt::format("Header: magic={:#X}, msg_length={}, start_lsn={}, end_lsn={}, proto_version={}",
+                                   magic, msg_length, start_lsn, end_lsn, proto_version);
+            }
         };
+
+        /** Magic number used in log header */
+        static constexpr uint32_t PG_LOG_MAGIC=0xDEFC8193UL;
+
+
+        /** Size of the log header preceeds each message */
+        static constexpr int PG_LOG_HDR_BYTES=PgLogHeader::SIZE;
+
+        /** FSYNC interval, don't fsync more frequently than this */
+        static constexpr int PG_LOG_MIN_FSYNC_MS=50;
 
         /**
          * @brief Construct a new Pg Log Writer object
@@ -59,6 +87,7 @@ namespace springtail {
          */
         bool log_data(const PgCopyData &data);
 
+        /** Get current offset */
         uint64_t offset() const { return _current_offset; }
 
         /** Close the file */
@@ -75,19 +104,6 @@ namespace springtail {
          * @return std::filesystem::path& filename
          */
         std::filesystem::path &filename() { return _file; }
-
-        /**
-         * @brief Helper to decode log header
-         * @param buffer buffer containing header data of length PG_LOG_HDR_BYTES
-         * @param header out | header to be filled in
-         */
-        static void decode_header(const char * const buffer, PgLogHeader &header) {
-            header.magic = recvint32(buffer);
-            header.msg_length = recvint32(buffer + 4);
-            header.start_lsn = recvint64(buffer + 8);
-            header.end_lsn = recvint64(buffer + 16);
-            header.proto_version = recvint32(buffer + 24);
-        }
 
         /**
          * @brief Get the latest synced lsn

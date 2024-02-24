@@ -116,14 +116,11 @@ namespace springtail {
         // write out header containing length if start of message
         if (data.msg_offset == 0) {
             char buffer[PG_LOG_HDR_BYTES];
-            sendint32(PG_LOG_MAGIC, buffer);
-            sendint32(data.msg_length, buffer + 4);
-            sendint64(data.starting_lsn, buffer + 8);
-            sendint64(data.ending_lsn, buffer + 16);
-            sendint32(_proto_version, buffer + 24);
+            PgLogHeader header(data.msg_length, data.starting_lsn, data.ending_lsn, _proto_version);
+            header.encode_header(buffer);
 
-            ::write(_fd, buffer, 16);
-            current_offset += 16;
+            ::write(_fd, buffer, PG_LOG_HDR_BYTES);
+            current_offset += PG_LOG_HDR_BYTES;
             _msg_end_offset = current_offset + data.msg_length;
 
             // add LSN data to queue for fsync thread
