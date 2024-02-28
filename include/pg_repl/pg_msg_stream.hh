@@ -67,17 +67,23 @@ namespace springtail {
 
         PgMsgStreamReader() = default;
 
-        PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset,
-                          const std::filesystem::path &end_file, uint64_t end_offset);
-
-        PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset=0);
+        /**
+         * @brief Construct a new Pg Msg Stream Reader object
+         * @param start_file file to start reading from
+         * @param start_offset offset to start reading from (0 = beginning of file)
+         * @param end_offset offset to stop reading at (-1 = end of file)
+         */
+        PgMsgStreamReader(const std::filesystem::path &start_file,
+                          uint64_t start_offset=0, uint64_t end_offset=-1);
 
         /**
          * @brief Set the file and offset to start reading from
-         * @param start_file
-         * @param start_offset
+         * @param start_file file to start reading from
+         * @param start_offset offset to start reading from (0 = beginning of file)
+         * @param end_offset offset to stop reading at (-1 = end of file)
          */
-        void set_file(const std::filesystem::path &start_file, uint64_t start_offset);
+        void set_file(const std::filesystem::path &start_file,
+                      uint64_t start_offset=0, uint64_t end_offset=-1);
 
         /**
          * @brief Read next message from stream
@@ -127,10 +133,10 @@ namespace springtail {
          */
         bool end_of_stream() const
         {
-            if (_stream.eof() && _current_path == _end_path) {
+            if (_stream.eof()) {
                 return true;
             }
-            if (_end_msg_offset != -1 && _current_offset >= _end_msg_offset && _current_path == _end_path) {
+            if (_end_msg_offset != -1 && _current_offset >= _end_msg_offset) {
                 return true;
             }
             return false;
@@ -200,8 +206,6 @@ namespace springtail {
     private:
         std::fstream _stream;                ///< current file stream
 
-        std::filesystem::path _start_path;   ///< starting file path
-        std::filesystem::path _end_path;     ///< ending file path
         std::filesystem::path _current_path; ///< current file path
 
         uint64_t _current_offset;       ///< current file offset

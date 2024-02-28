@@ -15,32 +15,34 @@
 
 namespace springtail {
 
-    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset,
-                                         const std::filesystem::path &end_file, uint64_t end_offset=-1)
-        : _start_path(start_file), _end_path(end_file),
-          _end_msg_offset(end_offset)
+    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
+                                         uint64_t start_offset,
+                                         uint64_t end_offset)
+        : _current_path(start_file), _current_offset(start_offset), _end_msg_offset(end_offset)
     {
-        _current_path = start_file;
-        _current_offset = start_offset;
-
         _open_file(start_file, start_offset);
     }
 
-    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset)
-        : PgMsgStreamReader(start_file, start_offset, start_file, -1) {}
-
     void
-    PgMsgStreamReader::set_file(const std::filesystem::path &file, uint64_t offset)
+    PgMsgStreamReader::set_file(const std::filesystem::path &file,
+                                uint64_t start_offset,
+                                uint64_t end_offset)
     {
+        _end_msg_offset = end_offset;
+
         if (file != _current_path || !_stream.is_open()) {
-            _open_file(file, offset);
+            // file isn't currently open, so open it
+            // this reads in the header and sets _current_offset
+            _open_file(file, start_offset);
             return;
         }
 
-        if (_current_offset != offset) {
-            _current_offset = offset;
+        // file was already open, so just seek to the new offset
+        if (_current_offset != start_offset) {
+            _current_offset = start_offset;
             _seek_stream();
         }
+        // ...and read the header
         _read_header();
     }
 
@@ -55,6 +57,7 @@ namespace springtail {
         _current_path = file;
         _current_offset = offset;
         _end_offset = offset;
+
         if (_current_offset != 0) {
             _seek_stream();
         }
@@ -102,18 +105,16 @@ namespace springtail {
     PgMsgStreamReader::read_message(const char filter[])
     {
         SPDLOG_DEBUG("Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
+        // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
         }
 
         // check if we are done reading this message block
         if (_end_offset == _current_offset) {
+            // if so read the header and check for eof
             if (!_read_header()) {
                 // hit eof; if we are at the end file, then we are done
-                if (_current_path == _end_path) {
-                    return nullptr;
-                }
-                // open next file XXX fix
                 return nullptr;
             }
         }
