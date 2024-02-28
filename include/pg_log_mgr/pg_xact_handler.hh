@@ -18,24 +18,18 @@ namespace springtail {
          * @brief Process transaction entry
          * @param xact transaction entry
          */
-        void process(const PgReplMsgStream::PgTransactionPtr xact);
+        void process(const PgTransactionPtr xact);
 
     private:
         std::filesystem::path _base_path;
 
-        PgXactLogWriterPtr _logger;
+        PgXactLogWriterPtr _logger;  ///< logger to write out xid log
 
-        /** database id */
-        uint64_t _db_id=1;
+        uint64_t _db_id=1;           ///< db id
+        uint64_t _next_xid=0;        ///< next xid in xid range
 
-        /** next xid in xid range allocated by xid mgr */
-        uint64_t _next_xid=0;
-
-        /** redis queue */
-        RedisQueue<PgRedisXactValue> _redis_queue;
-
-        /** redis sorted set */
-        RedisSortedSet<PgRedisOidValue> _oid_set;
+        RedisQueue<PgRedisXactValue> _redis_queue; ///< redis queue for GC
+        RedisSortedSet<PgRedisOidValue> _oid_set;  ///< redis sorted set for oid to xid mapping
 
         /** Create logger to write out xid log */
         void _create_logger();

@@ -11,6 +11,7 @@
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_connection.hh>
+#include <pg_repl/pg_msg_stream.hh>
 
 namespace springtail {
     /**
@@ -21,51 +22,7 @@ namespace springtail {
     */
     class PgLogWriter {
     public:
-        /**
-         * @brief Log header
-         */
-        struct PgLogHeader {
-            uint32_t magic;
-            uint32_t msg_length;
-            LSN_t start_lsn;
-            LSN_t end_lsn;
-            uint32_t proto_version;
 
-            static constexpr int SIZE = (4 + 4 + 8 + 8 + 4);
-
-            PgLogHeader(uint32_t msg_length, LSN_t start_lsn, LSN_t end_lsn, uint32_t proto_version)
-                : magic(PG_LOG_MAGIC), msg_length(msg_length), start_lsn(start_lsn),
-                  end_lsn(end_lsn), proto_version(proto_version)
-            {}
-
-            PgLogHeader(const char * const buffer) {
-                magic = recvint32(buffer);
-                msg_length = recvint32(buffer + 4);
-                start_lsn = recvint64(buffer + 8);
-                end_lsn = recvint64(buffer + 16);
-                proto_version = recvint32(buffer + 24);
-            }
-
-            void encode_header(char * const buffer) {
-                sendint32(magic, buffer);
-                sendint32(msg_length, buffer + 4);
-                sendint64(start_lsn, buffer + 8);
-                sendint64(end_lsn, buffer + 16);
-                sendint32(proto_version, buffer + 24);
-            }
-
-            std::string to_string() {
-                return fmt::format("Header: magic={:#X}, msg_length={}, start_lsn={}, end_lsn={}, proto_version={}",
-                                   magic, msg_length, start_lsn, end_lsn, proto_version);
-            }
-        };
-
-        /** Magic number used in log header */
-        static constexpr uint32_t PG_LOG_MAGIC=0xDEFC8193UL;
-
-
-        /** Size of the log header preceeds each message */
-        static constexpr int PG_LOG_HDR_BYTES=PgLogHeader::SIZE;
 
         /** FSYNC interval, don't fsync more frequently than this */
         static constexpr int PG_LOG_MIN_FSYNC_MS=50;
@@ -73,9 +30,9 @@ namespace springtail {
         /**
          * @brief Construct a new Pg Log Writer object
          * @param file file to be writing
-         * @param proto_version protocol version
+         * @param lsn_callback_fn callback when LSN has been fsynced
          */
-        PgLogWriter(const std::filesystem::path &file, int proto_version,
+        PgLogWriter(const std::filesystem::path &file,
                     std::function<void (LSN_t)> lsn_callback_fn);
 
         /**
@@ -121,11 +78,11 @@ namespace springtail {
         };
         using LsnOffsetPtr = std::shared_ptr<LsnOffset>;
 
-        /** current file path */
-        std::filesystem::path _file;
+        /** message stream writer */
+        PgMsgStreamWriter _writer;
 
-        /** postgres version */
-        int _proto_version;
+        /** file path */
+        std::filesystem::path _file;
 
         /** callback for setting the lsn */
         std::function<void (LSN_t)> _lsn_callback_fn;
@@ -135,9 +92,6 @@ namespace springtail {
 
         /** offset of end of current message */
         uint64_t _msg_end_offset = 0;
-
-        /** file descriptor */
-        int _fd;
 
         /** shutdown flag for fsync thread */
         std::atomic<bool> _shutdown = false;
@@ -151,6 +105,7 @@ namespace springtail {
         /** fsync thread */
         std::thread _fsync_thread;
 
+        /** queue of LSNs and offsets */
         std::queue<LsnOffsetPtr> _lsn_queue;
         std::mutex _queue_mutex;
 

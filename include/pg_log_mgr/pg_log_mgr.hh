@@ -31,7 +31,7 @@ namespace springtail {
      */
     class PgLogMgr {
     public:
-        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgReplMsgStream::PgTransaction>>;
+        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
 
         /** Constructor */
         PgLogMgr(const std::filesystem::path &repl_log_path,
@@ -44,7 +44,7 @@ namespace springtail {
           _pub_name(pub_name), _slot_name(slot_name), _port(port),
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
-          _xact_queue(std::make_shared<ConcurrentQueue<PgReplMsgStream::PgTransaction>>()),
+          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
         {}
 

@@ -1,0 +1,1052 @@
+#include <stdio.h>
+
+#include <vector>
+#include <memory>
+
+#include <nlohmann/json.hpp>
+
+#include <common/common.hh>
+#include <common/exception.hh>
+#include <common/logging.hh>
+
+#include <pg_repl/pg_msg_stream.hh>
+#include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/exception.hh>
+
+namespace springtail {
+
+    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset,
+                                         const std::filesystem::path &end_file, uint64_t end_offset=-1)
+        : _start_path(start_file), _end_path(end_file),
+          _end_msg_offset(end_offset)
+    {
+        _current_path = start_file;
+        _current_offset = start_offset;
+
+        _open_file(start_file, start_offset);
+    }
+
+    PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file, uint64_t start_offset)
+        : PgMsgStreamReader(start_file, start_offset, start_file, -1) {}
+
+    void
+    PgMsgStreamReader::set_file(const std::filesystem::path &file, uint64_t offset)
+    {
+        if (file != _current_path || !_stream.is_open()) {
+            _open_file(file, offset);
+            return;
+        }
+
+        if (_current_offset != offset) {
+            _current_offset = offset;
+            _seek_stream();
+        }
+        _read_header();
+    }
+
+    void
+    PgMsgStreamReader::_open_file(const std::filesystem::path &file, uint64_t offset)
+    {
+        _stream.open(file, std::fstream::in | std::fstream::binary);
+        if (!_stream.is_open()) {
+            throw PgIOError();
+        }
+
+        _current_path = file;
+        _current_offset = offset;
+        _end_offset = offset;
+        if (_current_offset != 0) {
+            _seek_stream();
+        }
+
+        // read in the header from new file, this should reset the end_offset
+        _read_header();
+    }
+
+    bool
+    PgMsgStreamReader::_read_header()
+    {
+        char buffer[PgMsgStreamHeader::SIZE];
+        _header_offset = _current_offset;
+
+        if (!_read_buffer(buffer, PgMsgStreamHeader::SIZE)) {
+            SPDLOG_DEBUG("End of file: {}", _current_path);
+            return false;
+        }
+
+        PgMsgStreamHeader header(buffer);
+        if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
+            SPDLOG_WARN("Invalid stream header magic number: {}", header.magic);
+            throw PgIOError();
+        }
+
+        SPDLOG_DEBUG("Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
+
+        _end_offset = header.msg_length + _current_offset;
+        _proto_version = header.proto_version;
+
+        return true;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::read_message(const char filter[],
+                                    bool &eos, bool &eob)
+    {
+        PgMsgPtr msg = read_message(filter);
+        eos = end_of_stream();
+        eob = end_of_block();
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::read_message(const char filter[])
+    {
+        SPDLOG_DEBUG("Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
+        if (end_of_stream()) {
+            return nullptr;
+        }
+
+        // check if we are done reading this message block
+        if (_end_offset == _current_offset) {
+            if (!_read_header()) {
+                // hit eof; if we are at the end file, then we are done
+                if (_current_path == _end_path) {
+                    return nullptr;
+                }
+                // open next file XXX fix
+                return nullptr;
+            }
+        }
+
+        // read the message type
+        char msg_type = _recvint8();
+        bool skip_msg = !_is_message_filtered(msg_type, filter);
+        PgMsgPtr msg = nullptr;
+
+        SPDLOG_DEBUG("Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
+                      msg_type, _current_offset, _end_offset, skip_msg);
+
+        if (skip_msg) {
+            _skip_msg(msg_type);
+        } else {
+            // current streaming state; may be reset by msg parsing
+            bool is_streaming = _streaming;
+
+            // decode message
+            msg = _decode_msg(msg_type);
+            if (msg != nullptr) {
+                msg->proto_version = _proto_version;
+                msg->is_streaming = is_streaming;
+            }
+        }
+
+        // sanity check to make sure we didn't go past end of message block
+        if (_current_offset > _end_offset) {
+            SPDLOG_WARN("Overran end of message block");
+            throw PgMessageTooSmallError();
+        }
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_msg(char msg_type)
+    {
+        switch(msg_type) {
+            case pg_msg::MSG_BEGIN:
+                return _decode_begin();
+            case pg_msg::MSG_COMMIT:
+                return _decode_commit();
+            case pg_msg::MSG_RELATION:
+                return _decode_relation();
+            case pg_msg::MSG_INSERT:
+                return _decode_insert();
+            case pg_msg::MSG_UPDATE:
+                return _decode_update();
+            case pg_msg::MSG_DELETE:
+                return _decode_delete();
+            case pg_msg::MSG_TRUNCATE:
+                return _decode_truncate();
+            case pg_msg::MSG_TYPE:
+                return _decode_type();
+            case pg_msg::MSG_ORIGIN:
+                return _decode_origin();
+            case pg_msg::MSG_MESSAGE:
+                return _decode_message();
+            case pg_msg::MSG_STREAM_START:
+                return _decode_stream_start();
+            case pg_msg::MSG_STREAM_STOP:
+                return _decode_stream_stop();
+            case pg_msg::MSG_STREAM_COMMIT:
+                return _decode_stream_commit();
+            case pg_msg::MSG_STREAM_ABORT:
+                return _decode_stream_abort();
+            default:
+                SPDLOG_WARN("Unknown message type: {}", msg_type);
+                throw PgMessageError();
+        }
+    }
+
+    void
+    PgMsgStreamReader::_skip_msg(char msg_type)
+    {
+        switch(msg_type) {
+            case pg_msg::MSG_BEGIN:
+                return _skip_begin();
+            case pg_msg::MSG_COMMIT:
+                return _skip_commit();
+            case pg_msg::MSG_RELATION:
+                return _skip_relation();
+            case pg_msg::MSG_INSERT:
+                return _skip_insert();
+            case pg_msg::MSG_UPDATE:
+                return _skip_update();
+            case pg_msg::MSG_DELETE:
+                return _skip_delete();
+            case pg_msg::MSG_TRUNCATE:
+                return _skip_truncate();
+            case pg_msg::MSG_TYPE:
+                return _skip_type();
+            case pg_msg::MSG_ORIGIN:
+                return _skip_origin();
+            case pg_msg::MSG_MESSAGE:
+                return _skip_message();
+            case pg_msg::MSG_STREAM_START:
+                return _skip_stream_start();
+            case pg_msg::MSG_STREAM_STOP:
+                return _skip_stream_stop();
+            case pg_msg::MSG_STREAM_COMMIT:
+                return _skip_stream_commit();
+            case pg_msg::MSG_STREAM_ABORT:
+                return _skip_stream_abort();
+            default:
+                SPDLOG_WARN("Unknown message type: {}", msg_type);
+                throw PgMessageError();
+        }
+    }
+
+    // if msg_type is not in filter then skip message
+    bool
+    PgMsgStreamReader::_is_message_filtered(char msg_type, const char filter[]) const {
+        for (int i = 0; filter[i] != '\0'; i++) {
+            if (msg_type == filter[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void
+    PgMsgStreamReader::_skip_tuple()
+    {
+        int num_cols = _recvint16();
+
+        for (int i = 0; i < num_cols; i++) {
+            _seek_stream();
+            char type = _recvint8();
+            if (type == 'n' || type =='u') {
+                continue;
+            }
+            uint32_t data_len = _recvint32();
+            _current_offset += (data_len);
+        }
+    }
+
+    void
+    PgMsgStreamReader::_decode_tuple(PgMsgTupleData &tuple)
+    {
+        int num_columns = _recvint16();
+        tuple.tuple_data.resize(num_columns);
+
+        for (int i = 0; i < num_columns; i++) {
+            tuple.tuple_data[i].type = _recvint8();
+            if (tuple.tuple_data[i].type == 'n' ||
+                tuple.tuple_data[i].type == 'u') {
+                continue;
+            }
+
+            assert(tuple.tuple_data[i].type == 't' || tuple.tuple_data[i].type == 'b');
+
+            int32_t data_len = _recvint32();
+            tuple.tuple_data[i].data.resize(data_len);
+
+            _read_buffer(tuple.tuple_data[i].data.data(), data_len);
+        }
+    }
+
+    void
+    PgMsgStreamReader::_skip_string()
+    {
+        // seek to current offset
+        _seek_stream();
+
+        // need to find terminating null char
+        char buffer[128];
+        uint64_t str_len = 0;
+
+        // iterate, reading in 128 characters and searching for null char
+        while (true) {
+	        uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
+            _stream.read(buffer, length); // this doesn't change the current offset
+            uint64_t curr_len = strnlen(buffer, length);
+            str_len += curr_len;
+            // curr_len == 0 if string is null, length if no null found, or number of bytes up to null char
+            if (curr_len < length) {
+                break;
+            }
+            if (length == 0) {
+                // string not found in message block!
+                throw PgMessageTooSmallError();
+            }
+        }
+
+        _current_offset += str_len + 1; // null char is 1 more than str_len
+    }
+
+    void
+    PgMsgStreamReader::_decode_string(std::string &ostring)
+    {
+        char next_char;
+        // Read characters until null terminator
+        while ((next_char = _recvint8()) != '\0') {
+            ostring.push_back(next_char);
+        }
+    }
+
+    void
+    PgMsgStreamReader::_skip_relation()
+    {
+        // 4 - transaction ID if streaming
+        if (_streaming) {
+            _current_offset += 4;
+        }
+
+        // 4 - oid
+        _current_offset += 4;
+        _skip_string(); // namespace str
+        _skip_string(); // rel name str
+        _current_offset++;
+
+        int16_t num_columns = _recvint16();
+        for (int i = 0; i < num_columns; i++) {
+            _current_offset++;
+            _skip_string();  // column name
+            _current_offset += (4 + 4); // oid, type modifier
+        }
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_relation()
+    {
+        /*
+            Byte1('R')  Identifies the message as a relation message.
+            Int32 Xid of the transaction (only present for streamed transactions).
+                  This field is available since protocol version 2.
+            Int32 ID of the relation.
+            String Namespace (empty string for pg_catalog).
+            String Relation name.
+            Int8 Replica identity setting for the relation (same as relreplident in pg_class).
+              # select relreplident from pg_class where relname = 'test_table';
+              # from the documentation and looking at the tables this is not int8 but a single character
+              # background: https://www.postgresql.org/docs/10/sql-altertable.html#SQL-CREATETABLE-REPLICA-IDENTITY
+            Int16 Number of columns.
+            Next, the following message part appears for each column (except generated columns):
+                Int8 Flags for the column. Currently can be either 0 for no flags or 1 which marks
+                     the column as part of the key.
+                String Name of the column.
+                Int32 ID of the column's data type.
+                Int32 Type modifier of the column (atttypmod).
+        */
+
+        PgMsgRelation relation;
+
+        if (_streaming) {
+            relation.xid = _recvint32();
+        }
+
+        relation.rel_id = _recvint32();
+        _decode_string(relation.namespace_str);
+        _decode_string(relation.rel_name_str);
+
+        relation.identity = _recvint8();
+        int num_columns = _recvint16();
+        relation.columns.resize(num_columns);
+
+        for (int i = 0; i < num_columns; i++) {
+            relation.columns[i].flags = _recvint8();
+            _decode_string(relation.columns[i].column_name);
+            relation.columns[i].oid = _recvint32();
+            relation.columns[i].type_modifier = _recvint32();
+        }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::RELATION);
+        msg->msg.emplace<PgMsgRelation>(relation);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_insert()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+        _current_offset += (4 + 1); // rel id + new type flag
+        _skip_tuple();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_insert()
+    {
+        /*
+            Byte1('I')  Identifies the message as an insert message.
+            Int32 ID of the relation corresponding to the ID in the relation message
+            Int32 XID present since version 2 (PG14)
+            Byte1('N') Identifies the following TupleData message as a new tuple.
+            TupleData TupleData message part representing the contents of new tuple.
+        */
+
+        PgMsgInsert insert;
+
+        if (_streaming) {
+            insert.xid = _recvint32(); // only present in v2
+        }
+        insert.rel_id = _recvint32();
+        insert.new_type = _recvint8(); // should be 'N
+
+        _decode_tuple(insert.new_tuple);
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::INSERT);
+        msg->msg.emplace<PgMsgInsert>(insert);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_update()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += 4; // rel_id
+
+        _seek_stream();
+        char type = _stream.get(); // old type
+        if (type == 'K' || type == 'O') {
+            _current_offset++;
+        } else {
+            _seek_stream();
+        }
+        _skip_tuple();
+
+        _seek_stream();
+        type = _stream.get(); // new type; should be N
+        if (type == 'N') {
+            _current_offset++;
+        } else {
+            _seek_stream();
+        }
+        _skip_tuple();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_update()
+    {
+        /*
+            Byte1('U')      Identifies the message as an update message.
+            Int32           XID present since version 2 (PG14)
+            Int32           ID of the relation corresponding to the ID in the relation message.
+            Byte1('K')      Identifies the following TupleData submessage as a key.
+                            This field is optional and is only present if the update changed data in
+                            any of the column(s) that are part of the REPLICA IDENTITY index.
+            Byte1('O')      Identifies the following TupleData submessage as an old tuple.
+                            This field is optional and is only present if table in which the update
+                            happened has REPLICA IDENTITY set to FULL.
+            TupleData       TupleData message part representing the contents of the old tuple or primary key. Only present if the previous 'O' or 'K' part is present.
+            Byte1('N')      Identifies the following TupleData message as a new tuple.
+            TupleData       TupleData message part representing the contents of a new tuple.
+
+                            INT16 number of attrs; for each attr:
+                              1 Byte kind -- 'n'ull 'u'nchanged 't'ext 'b'inary
+                              't/b' - INT32 length; then read data and null terminate
+
+            The Update message may contain either a 'K' message part or an 'O' message part or
+            neither of them, but never both of them.
+        */
+
+        PgMsgUpdate update;
+
+        if (_streaming) {
+            update.xid = _recvint32();
+        }
+        update.rel_id = _recvint32();
+
+        update.old_type = _recvint8();
+        assert(update.old_type == 'K' || update.old_type == 'O');
+        _decode_tuple(update.old_tuple);
+
+        update.new_type = _recvint8();
+        assert(update.new_type == 'N');
+        _decode_tuple(update.new_tuple);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::UPDATE);
+        msg->msg.emplace<PgMsgUpdate>(update);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_delete()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += 4; // rel_id
+
+        _seek_stream();
+        char type = _stream.get(); // old type
+        if (type == 'K' || type == 'O') {
+            _current_offset++;
+        } else {
+            _seek_stream();
+        }
+        _skip_tuple();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_delete()
+    {
+        /*
+            Byte1('D')      Identifies the message as a delete message.
+            Int32           XID present since version 2 (PG14)
+            Int32           ID of the relation corresponding to the ID in the relation message.
+            Byte1('K')      Identifies the following TupleData submessage as a key.
+                            This field is present if the table in which the delete has happened uses an index
+                            as REPLICA IDENTITY.
+            Byte1('O')      Identifies the following TupleData message as a old tuple.
+                            This field is present if the table in which the delete has happened has
+                            REPLICA IDENTITY set to FULL.
+            TupleData       TupleData message part representing the contents of the old tuple or primary key,
+                            depending on the previous field.
+
+            The Delete message may contain either a 'K' message part or an 'O' message part,
+            but never both of them.
+        */
+
+        PgMsgDelete delete_msg;
+
+        if (_streaming) {
+            delete_msg.xid = _recvint32();
+        }
+        delete_msg.rel_id = _recvint32();
+        delete_msg.type = _recvint8();
+        assert(delete_msg.type == 'K' || delete_msg.type == 'O');
+        _decode_tuple(delete_msg.tuple);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DELETE);
+        msg->msg.emplace<PgMsgDelete>(delete_msg);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_truncate()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        uint32_t num_rels = _recvint32();
+        _current_offset++; // options flag
+        _current_offset += (4 * num_rels); // rel ids
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_truncate()
+    {
+        /*
+            Byte1('T')      Identifies the message as a truncate message.
+            Int32           XID present since version 2 (PG14)
+            Int32           Number of relations
+            Int8            Option bits for TRUNCATE: 1 for CASCADE, 2 for RESTART IDENTITY
+            Int32           ID of the relation corresponding to the ID in the relation message.
+                            This field is repeated for each relation.
+        */
+
+        PgMsgTruncate truncate;
+
+        if (_streaming) {
+            truncate.xid = _recvint32();
+        }
+
+        truncate.num_rels = _recvint32();
+        truncate.options = _recvint8();
+        truncate.rel_ids.resize(truncate.num_rels);
+        for (int i = 0; i < truncate.num_rels; i++) {
+            truncate.rel_ids[i] = _recvint32();
+        }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TRUNCATE);
+        msg->msg.emplace<PgMsgTruncate>(truncate);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_type()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+        _current_offset += 4; // oid
+
+        _skip_string(); // namespace
+        _skip_string(); // data type
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_type()
+    {
+        /*
+            Byte1('Y') Identifies the message as a type message.
+            Int32 (TransactionId) Xid of the transaction (only present for streamed transactions).
+                  This field is available since protocol version 2.
+            Int32 (Oid) OID of the data type.
+            String Namespace (empty string for pg_catalog).
+            String Name of the data type.
+        */
+
+        PgMsgType type;
+
+        if (_streaming) {
+            type.xid = _recvint32();
+        }
+
+        type.oid = _recvint32();
+        _decode_string(type.namespace_str);
+        _decode_string(type.data_type_str);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::TYPE);
+        msg->msg.emplace<PgMsgType>(type);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_origin()
+    {
+        _current_offset += 8;
+        _skip_string();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_origin()
+    {
+        /*
+            Byte1('O') Identifies the message as an origin message.
+            Int64 (XLogRecPtr) The LSN of the commit on the origin server.
+            String Name of the origin.
+
+            Note that there can be multiple Origin messages inside a single transaction.
+        */
+
+        PgMsgOrigin origin;
+        origin.commit_lsn = _recvint64();
+        _decode_string(origin.name_str);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ORIGIN);
+        msg->msg.emplace<PgMsgOrigin>(origin);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_begin()
+    {
+        _current_offset += LEN_BEGIN;
+        _seek_stream();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_begin()
+    {
+        /*
+            Byte1('B') Identifies the message as a begin message.
+            Int64 The final LSN of the transaction.
+            Int64 Commit timestamp of the transaction. Number of microseconds since Y2K
+            Int32 Xid of the transaction.
+        */
+
+        PgMsgBegin begin;
+        begin.xact_lsn = _recvint64();
+        begin.commit_ts = _recvint64();
+        begin.xid = _recvint32();
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::BEGIN);
+        msg->msg.emplace<PgMsgBegin>(begin);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_commit()
+    {
+        _current_offset += LEN_COMMIT;
+        _seek_stream();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_commit()
+    {
+        /*
+            Byte1('C') Identifies the message as a commit message.
+            Int8 Flags; currently unused (must be 0).
+            Int64 The LSN of the commit.
+            Int64 The end LSN of the transaction.
+            Int64 Commit timestamp of the transaction. Number of microseconds since Y2K
+        */
+
+        PgMsgCommit commit;
+
+        int8_t flags = _recvint8();
+        assert(flags == 0);
+
+        commit.commit_lsn = _recvint64();
+        commit.xact_lsn = _recvint64();
+        commit.commit_ts = _recvint64();
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COMMIT);
+        msg->msg.emplace<PgMsgCommit>(commit);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_stream_start()
+    {
+        _current_offset += LEN_STREAM_START;
+        _seek_stream();
+
+        _streaming = true;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_stream_start()
+    {
+        /*
+            Byte1('S')  Identifies the message as a stream start message.
+            Int32       Xid of the transaction.
+            Int8_t      A value of 1 indicates this is the first stream segment for this XID, 0 for any other stream segment.
+        */
+
+        PgMsgStreamStart start;
+
+        start.xid = _recvint32();
+        start.first = (_recvint8() == 1);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_START);
+        msg->msg.emplace<PgMsgStreamStart>(start);
+
+        _streaming = true;
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_stream_stop()
+    {
+        _current_offset += LEN_STREAM_STOP;
+        _seek_stream();
+
+        _streaming = false;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_stream_stop()
+    {
+        /*
+            Byte1('E')  Identifies the message as a stream stop message.
+        */
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_STOP);
+        _streaming = false;
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_stream_commit()
+    {
+        _current_offset += LEN_STREAM_COMMIT;
+        _seek_stream();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_stream_commit()
+    {
+        /*
+            Byte1('c')  Identifies the message as a stream commit message.
+            Int32       Xid of the transaction.
+            Int8(0)     Flags; currently unused.
+            Int64       The LSN of the commit.
+            Int64       The end LSN of the transaction.
+            Int64       Commit timestamp of the transaction. The value is in number of
+                        microseconds since PostgreSQL epoch (2000-01-01).
+        */
+        PgMsgStreamCommit commit;
+
+        commit.xid = _recvint32();
+        _recvint8(); // flags
+        commit.commit_lsn = _recvint64();
+        commit.xact_lsn = _recvint64();
+        commit.commit_ts = _recvint64();
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_COMMIT);
+        msg->msg.emplace<PgMsgStreamCommit>(commit);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_stream_abort()
+    {
+        _current_offset += LEN_STREAM_ABORT;
+        _seek_stream();
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_stream_abort()
+    {
+        /*
+            Byte1('A')  Identifies the message as a stream abort message.
+            Int32       Xid of the transaction.
+            Int32       Xid of the subtransaction (will be same as xid of the transaction for top-level transactions).
+            Int64       The LSN of the abort. This field is available since protocol version 4.
+            Int64       Abort timestamp of the transaction. The value is in number of
+                        microseconds since PostgreSQL epoch (2000-01-01). This field is available
+                        since protocol version 4.
+        */
+        PgMsgStreamAbort abort;
+
+        abort.xid = _recvint32();
+        abort.sub_xid = _recvint32();
+        if (_proto_version >= 4) {
+            abort.abort_lsn = _recvint64();
+            abort.abort_ts = _recvint64();
+        }
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::STREAM_ABORT);
+        msg->msg.emplace<PgMsgStreamAbort>(abort);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_decode_schema_columns(nlohmann::json &column_json,
+                                        std::vector<PgMsgSchemaColumn> &columns)
+    {
+        // iterate through json array
+        for (auto &el: column_json.items()) {
+            PgMsgSchemaColumn column;
+            nlohmann::json json = el.value();
+
+            json["name"].get_to(column.column_name);
+            json["type"].get_to(column.udt_type);
+            json["is_nullable"].get_to(column.is_nullable);
+            json["is_pkey"].get_to(column.is_pkey);
+            json["position"].get_to(column.position);
+
+            if (!json["default"].is_null()) {
+                column.default_value = json["default"].get<std::string>();
+            }
+
+            columns.push_back(column);
+        }
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_create_table(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgTable table_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            SPDLOG_INFO("Create/alter table msg not for table object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        table_msg.xid = message.xid; // only valid in streaming mode
+        table_msg.lsn = message.lsn;
+        json["schema"].get_to(table_msg.schema);
+        json["oid"].get_to(table_msg.oid);
+
+        // identity in form: schema.table; parse out table
+        std::string identity;
+        json["identity"].get_to(identity);
+        auto const pos = identity.find_last_of('.');
+        table_msg.table = identity.substr(pos + 1);
+
+        _decode_schema_columns(json["columns"], table_msg.columns);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
+        msg->msg.emplace<PgMsgTable>(table_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_alter_table(PgMsgMessage &message, char *buffer, int len)
+    {
+        // same data as in create table, call that to do the decode and
+        // then just switch the type so we know it is an alter table
+        PgMsgPtr msg = _decode_create_table(message, buffer, len);
+        if (msg == nullptr) {
+            return msg;
+        }
+
+        msg->msg_type = PgMsgEnum::ALTER_TABLE;
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_drop_table(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgDropTable drop_table_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, could be an index, default value or something other
+        // than a table; if so we skip decoding
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "table") {
+            SPDLOG_INFO("Drop table not for table object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        drop_table_msg.xid = message.xid; // only valid in streaming mode
+        drop_table_msg.lsn = message.lsn;
+
+        json["oid"].get_to(drop_table_msg.oid);
+        json["schema"].get_to(drop_table_msg.schema);
+        json["name"].get_to(drop_table_msg.table);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
+        msg->msg.emplace<PgMsgDropTable>(drop_table_msg);
+
+        return msg;
+    }
+
+    void
+    PgMsgStreamReader::_skip_message()
+    {
+        if (_streaming) {
+            _current_offset += 4; // xid
+        }
+
+        _current_offset += (1 + 8); // flags + lsn
+        _skip_string(); // prefix
+        _current_offset += _recvint32(); // msg len + msg
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_message()
+    {
+        /*
+            Byte1('M') Identifies the message as a logical decoding message.
+            Int32 (TransactionId) Xid of the transaction (only present for streamed transactions).
+                   This field is available since protocol version 2.
+            Int8 Flags; Either 0 for no flags or 1 if the logical decoding message is transactional.
+            Int64 (XLogRecPtr) The LSN of the logical decoding message.
+            String The prefix of the logical decoding message.
+            Int32 Length of the content.
+            Byten The content of the logical decoding message.
+        */
+
+        PgMsgMessage msg;
+
+        if (_streaming) {
+            msg.xid = _recvint32();
+        } else {
+            msg.xid = 0;
+        }
+        msg.flags = _recvint8();
+        msg.lsn = _recvint64();
+        _decode_string(msg.prefix_str);
+
+        int data_len = _recvint32();
+        char buffer[data_len];
+        _read_buffer(buffer, data_len);
+
+        if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_TABLE) {
+            return _decode_create_table(msg, buffer, data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_TABLE) {
+            return _decode_alter_table(msg, buffer, data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TABLE) {
+            return _decode_drop_table(msg, buffer, data_len);
+        } else {
+            return nullptr;
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////
+
+    PgMsgStreamWriter::PgMsgStreamWriter(const std::filesystem::path &file)
+        : _file(file)
+    {
+        mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP;
+
+        _fd = ::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, owner);
+        if (_fd == -1) {
+            throw PgIOError();
+        }
+    }
+
+    uint64_t
+    PgMsgStreamWriter::write_message(const PgCopyData &data)
+    {
+        if (data.length == 0) {
+            return _current_offset;
+        }
+
+        // write out header containing length if start of message
+        if (data.msg_offset == 0) {
+            char buffer[PgMsgStreamHeader::SIZE];
+            PgMsgStreamHeader header(data.msg_length, data.starting_lsn, data.ending_lsn, data.proto_version);
+            header.encode_header(buffer);
+
+            ::write(_fd, buffer, PgMsgStreamHeader::SIZE);
+            _current_offset += PgMsgStreamHeader::SIZE;
+            _msg_end_offset = _current_offset + data.msg_length;
+        }
+
+        // write out message
+        ::write(_fd, data.buffer, data.length);
+        _current_offset += data.length;
+
+        return _current_offset;
+    }
+
+    void
+    PgMsgStreamWriter::sync()
+    {
+        ::fsync(_fd);
+    }
+
+    void
+    PgMsgStreamWriter::close()
+    {
+        if (_fd != -1) {
+            ::close(_fd);
+            _fd = -1;
+        }
+    }
+
+}

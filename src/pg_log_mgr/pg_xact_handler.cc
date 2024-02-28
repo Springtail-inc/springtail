@@ -41,7 +41,7 @@ namespace springtail {
     }
 
     void
-    PgXactHandler::process(const PgReplMsgStream::PgTransactionPtr xact)
+    PgXactHandler::process(const PgTransactionPtr xact)
     {
         // first allocate an xid for this xact
         uint64_t xid = _allocate_xid();

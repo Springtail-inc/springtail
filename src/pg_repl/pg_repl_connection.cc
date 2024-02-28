@@ -633,6 +633,7 @@ namespace springtail
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream
         dataOut.msg_offset = _copy_msg_offset - dataOut.length;
+        dataOut.proto_version = _proto_version;
     }
 
 
@@ -736,7 +737,7 @@ namespace springtail
 
         // result in form: XXX/XXX; convert to LSN_t
         char *str = _connection->get_value(0, 0);
-        LSN_t lsn = PgReplMsg::str_to_LSN(str);
+        LSN_t lsn = pg_msg::str_to_LSN(str);
         _connection->clear();
 
         // check that LSN is ahead of where we are
@@ -874,8 +875,8 @@ namespace springtail
             char *restart_lsn_str = _connection->get_value(0, 0);
             char *confirmed_flush_lsn_str = _connection->get_value(0, 1);
 
-            restart_lsn_out = PgReplMsg::str_to_LSN(restart_lsn_str);
-            flushed_lsn_out = PgReplMsg::str_to_LSN(confirmed_flush_lsn_str);
+            restart_lsn_out = pg_msg::str_to_LSN(restart_lsn_str);
+            flushed_lsn_out = pg_msg::str_to_LSN(confirmed_flush_lsn_str);
 
             _connection->clear();
             return true;

@@ -3,6 +3,8 @@
 #include <memory>
 #include <fstream>
 #include <filesystem>
+#include <map>
+#include <vector>
 
 #include <common/concurrent_queue.hh>
 
@@ -17,14 +19,14 @@ namespace springtail {
     class PgLogReader {
     public:
         /** convenience type for the shared transaction queue */
-        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgReplMsgStream::PgTransaction>>;
+        using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
 
         /**
          * @brief Construct a new Pg Log Reader object
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
         PgLogReader(const PgTransactionQueuePtr queue)
-            : _pg_repl_stream(), _queue(queue)
+            : _queue(queue)
         {}
 
         /**
@@ -40,23 +42,34 @@ namespace springtail {
         /** current file path */
         std::filesystem::path _current_path;
 
-        /** current file stream -- shared with pg_repl_msg */
-        std::shared_ptr<std::fstream> _stream = nullptr;
-
-        /** current file offset */
-        uint64_t _current_offset = 0;
-
         /** postgres replication stream log parser */
-        PgReplMsgStream _pg_repl_stream;
+        PgMsgStreamReader _reader;
 
         /** transaction queue -- pg xids extracted from log entries */
         PgTransactionQueuePtr _queue;
 
-        /**
-         * @brief Helper to create a new file stream
-         * @param path file path
-         * @param start_offset starting offset
-         */
-        void _create_stream(const std::filesystem::path &path, uint64_t start_offset);
+        /** current transaction */
+        PgTransactionPtr _current_xact;
+
+        /** Map of in progress transactions if in streaming mode */
+        std::map<uint32_t, PgTransactionPtr> _xact_map;
+
+        /** Process begin message */
+        void _process_begin(const PgMsgBegin &begin_msg);
+
+        /** Process commit message */
+        void _process_commit(const PgMsgCommit &commit_msg);
+
+        /** Process stream start message */
+        void _process_stream_start(const PgMsgStreamStart &start_msg);
+
+        /** Process stream commit message */
+        void _process_stream_commit(const PgMsgStreamCommit &commit_msg);
+
+        /** Process stream abort message */
+        void _process_stream_abort(const PgMsgStreamAbort &abort_msg);
+
+        /** Process ddl change message; add oid to xact oid set */
+        void _process_ddl(uint32_t oid, int32_t xid, bool is_streaming);
     };
 }

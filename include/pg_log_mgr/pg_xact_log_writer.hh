@@ -21,7 +21,7 @@ namespace springtail {
          * @param xact postgres transaction
          * @param xid springtail xid
          */
-        void log_data(PgReplMsgStream::PgTransactionPtr xact, uint64_t xid);
+        void log_data(PgTransactionPtr xact, uint64_t xid);
 
         /** Close the file */
         void close();
