@@ -18,6 +18,8 @@ TEST(QueueTest, SimpleTest) {
     queue.push(std::make_shared<QueueEntry>(4));
     queue.push(std::make_shared<QueueEntry>(5));
 
+    EXPECT_EQ(queue.size(), 5);
+
     auto entry = queue.pop();
     EXPECT_EQ(entry->a, 1);
     entry = queue.pop();

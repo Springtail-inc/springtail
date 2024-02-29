@@ -24,3 +24,7 @@
 {"cmd":"insert", "table": "table1", "row": ["2", "two", null]}
 {"cmd":"stream stop"}
 {"cmd":"stream commit"}
+{"cmd":"begin"}
+{"cmd":"drop table", "table": "table1"}
+{"cmd":"commit"}
+

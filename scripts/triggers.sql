@@ -18,7 +18,7 @@ BEGIN
                 'identity', obj.object_identity);
 
             -- tg_tag is DROP TABLE
-            PERFORM pg_logical_emit_message(true, 'springtail:' || tg_tag || ':' || obj.objid, msg::text);
+            PERFORM pg_logical_emit_message(true, 'springtail:' || tg_tag, msg::text);
         END IF;
     END LOOP;
 END;
@@ -53,6 +53,7 @@ BEGIN
         ) AS obj_select
         INTO json_columns;
 
+        -- Note: no obj.object_name, will split identity instead in code
         msg := json_build_object('xid', txid_current(),
             'cmd', obj.command_tag,
             'oid', obj.objid::bigint,
@@ -62,7 +63,7 @@ BEGIN
             'identity', obj.object_identity);
 
         -- tg_tag is CREATE TABLE or ALTER TABLE
-        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag || ':' || obj.objid, msg::text);
+        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
     END LOOP;
 END;
 $$;

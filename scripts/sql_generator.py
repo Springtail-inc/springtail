@@ -52,13 +52,38 @@ class Generator:
 
         self.execute(sql)
 
-    
+
     def insert(self, table_idx, a, b):
         table = self.tables[table_idx]
 
         sql = "INSERT INTO {} (a, b) VALUES ({}, '{}')".format(table, a, b)
         self.execute(sql)
 
+    def sub_insert(self, table_idx, a, b):
+        table = self.tables[table_idx]
+
+        # this should generate a savepoint and release
+        sql = "SAVEPOINT sub_insert"
+        self.execute(sql)
+
+        sql = "INSERT INTO {} (a, b) VALUES ({}, '{}')".format(table, a, b)
+        self.execute(sql)
+
+        sql = "RELEASE SAVEPOINT sub_insert"
+        # sql = "ROLLBACK TO SAVEPOINT sub_insert"
+        self.execute(sql)
+
+    def savepoint(self, name):
+        sql = "SAVEPOINT {}".format(name)
+        self.execute(sql)
+
+    def release_savepoint(self, name):
+        sql = "RELEASE SAVEPOINT {}".format(name)
+        self.execute(sql)
+
+    def rollback_savepoint(self, name):
+        sql = "ROLLBACK TO SAVEPOINT {}".format(name)
+        self.execute(sql)
 
     def commit(self):
         self.connection.commit()
@@ -104,9 +129,20 @@ if __name__ == '__main__':
 
     print ("Generating inserts: {}".format(args.iters))
     text = generator.generate_text(args.rsize);
+
+    # start transaction
+    generator.insert(tables[0], 0, text)
+
+    generator.savepoint("subxact")
     for i in range(0, args.iters):
         for j in range(0, args.ntables):
             generator.insert(tables[j], i, text)
+
+    generator.rollback_savepoint("subxact")
+
+    # generate sub query
+    # generator.sub_insert(tables[0], 0, text)
+
     generator.commit()
 
     generator.close()

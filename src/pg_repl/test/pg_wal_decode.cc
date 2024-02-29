@@ -31,6 +31,12 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (file.empty() || !std::filesystem::exists(std::filesystem::path(file))) {
+        std::cerr << "No file specified" << std::endl;
+        std::cout << desc << std::endl;
+        return 1;
+    }
+
     // init logging/backtrace
     springtail_init();
 

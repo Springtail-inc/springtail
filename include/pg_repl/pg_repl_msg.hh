@@ -217,6 +217,7 @@ namespace springtail
         LSN_t xact_lsn;
         uint32_t xid;
         std::set<uint64_t> oids;
+        std::set<uint32_t> aborted_xids;
     };
     using PgTransactionPtr = std::shared_ptr<PgTransaction>;
 

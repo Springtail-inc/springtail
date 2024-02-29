@@ -176,7 +176,7 @@ namespace springtail
     {
         char buffer[8];
         stream.read(buffer, 8);
-        return recvint16(buffer);
+        return recvint64(buffer);
     }
 
     static inline int8_t recvint8(std::fstream &stream)

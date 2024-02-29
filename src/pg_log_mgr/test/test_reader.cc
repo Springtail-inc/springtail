@@ -102,7 +102,7 @@ namespace {
     TEST_F(LogReader_Test, ProcessLog)
     {
         // create a new log file
-        process_json_cmd_file(std::filesystem::path("test_reader.json"));
+        process_json_cmd_file(std::filesystem::path("/tmp/test_reader.json"));
 
         // read the header
         uint64_t offset = 0;
@@ -113,7 +113,7 @@ namespace {
         }
 
         // xact list is from the log generator
-        ASSERT_EQ(_xact_list.size(), 6);
+        ASSERT_EQ(_xact_list.size(), _queue->size());
 
         // pop items from queue and validate
         PgTransactionPtr xact;
@@ -127,6 +127,8 @@ namespace {
             EXPECT_EQ(xact->xid, xact_cmp->xid);
             EXPECT_EQ(xact->begin_offset, xact_cmp->begin_offset);
             EXPECT_EQ(xact->commit_offset, xact_cmp->commit_offset);
+            EXPECT_EQ(xact->oids.size(), xact_cmp->oids.size());
+            EXPECT_EQ(xact->oids, xact_cmp->oids);
         }
 
         EXPECT_TRUE(_queue->empty());

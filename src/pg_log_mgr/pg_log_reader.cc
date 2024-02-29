@@ -140,6 +140,8 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
 
+        // commit only happens for the top level xid, subxacts under the xid
+        // automatically commit unless they were previously aborted
         auto itr = _xact_map.find(commit_msg.xid);
         if (itr == _xact_map.end()) {
             // no start streaming xact found...
@@ -162,7 +164,17 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
 
-        _xact_map.erase(abort_msg.xid);
+        // abort is really for the subtransaction xid
+        // if sub_xid == xid, then it's a top level xact that aborted
+        if (abort_msg.sub_xid == abort_msg.xid) {
+            _xact_map.erase(abort_msg.xid);
+        } else {
+            // subtransaction aborted, add to parent xact aborted list
+            auto itr = _xact_map.find(abort_msg.xid);
+            if (itr != _xact_map.end()) {
+                itr->second->aborted_xids.insert(abort_msg.sub_xid);
+            }
+        }
     }
 
     void
