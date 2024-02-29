@@ -9,7 +9,6 @@ set(PG_LOG_SOURCES
     pg_log_reader.cc
     pg_xact_handler.cc
     pg_xact_log_writer.cc
-    pg_log_gen.cc
 )
 
 add_library(springtail_pglog ${PG_LOG_SOURCES})
@@ -30,15 +29,6 @@ target_include_directories(pg_log_mgr_daemon
 target_link_libraries(pg_log_mgr_daemon
     PUBLIC springtail_pglog
     PRIVATE Boost::program_options
-)
-
-add_executable(gen_log test/gen_log.cc)
-target_link_libraries(gen_log
-    PUBLIC springtail_pglog
-    PRIVATE Boost::program_options
-)
-target_include_directories(gen_log
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
 
 add_executable(test_log_reader test/test_reader.cc)
