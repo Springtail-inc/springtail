@@ -12,7 +12,7 @@
 
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_log_gen.hh>
+#include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
@@ -132,4 +132,4 @@ namespace {
         EXPECT_TRUE(_queue->empty());
     }
 
-}
+} // namespace

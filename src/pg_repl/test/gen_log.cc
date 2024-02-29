@@ -5,7 +5,7 @@
 
 #include <common/common.hh>
 
-#include <pg_log_mgr/pg_log_gen.hh>
+#include <pg_repl/pg_msg_log_gen.hh>
 
 using namespace springtail;
 
