@@ -54,7 +54,7 @@ namespace springtail {
     }
 
     void
-    PgXactLogWriter::log_data(PgReplMsgStream::PgTransactionPtr xact, uint64_t xid)
+    PgXactLogWriter::log_data(PgTransactionPtr xact, uint64_t xid)
     {
         // write message
         // 4B message length + 4B magic + 4B postgres XID + 8B springtail XID +

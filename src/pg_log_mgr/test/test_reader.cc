@@ -14,6 +14,7 @@
 #include <pg_log_mgr/pg_log_reader.hh>
 #include <pg_log_mgr/pg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_msg_stream.hh>
 
 using namespace springtail;
 
@@ -74,17 +75,17 @@ namespace {
         uint32_t read_header(uint64_t &offset)
         {
             // read in the file from *fp until eof
-            char buffer[PgLogWriter::PG_LOG_HDR_BYTES];
-            if (::fread(buffer, PgLogWriter::PG_LOG_HDR_BYTES, 1, _fp) <= 0) {
+            char buffer[PgMsgStreamHeader::SIZE];
+            if (::fread(buffer, PgMsgStreamHeader::SIZE, 1, _fp) <= 0) {
                 return 0;
             }
 
             // decode header
-            PgLogWriter::PgLogHeader header(buffer);
+            PgMsgStreamHeader header(buffer);
             SPDLOG_DEBUG("{}\n", header.to_string());
-            EXPECT_EQ(header.magic, PgLogWriter::PG_LOG_MAGIC);
+            EXPECT_EQ(header.magic, PgMsgStreamHeader::PG_LOG_MAGIC);
 
-            offset = ::ftell(_fp) - PgLogWriter::PG_LOG_HDR_BYTES;
+            offset = ::ftell(_fp) - PgMsgStreamHeader::SIZE;
 
             ::fseek(_fp, header.msg_length, SEEK_CUR);
 
@@ -93,9 +94,9 @@ namespace {
 
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
-        PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgReplMsgStream::PgTransaction>>();
+        PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
         PgLogReader _log_reader{_queue};
-        std::vector<PgReplMsgStream::PgTransactionPtr> _xact_list;
+        std::vector<PgTransactionPtr> _xact_list;
     };
 
     TEST_F(LogReader_Test, ProcessLog)
@@ -111,16 +112,17 @@ namespace {
             _log_reader.process_log(_log_file, offset, 1);
         }
 
+        // xact list is from the log generator
         ASSERT_EQ(_xact_list.size(), 6);
 
         // pop items from queue and validate
-        PgReplMsgStream::PgTransactionPtr xact;
-        PgReplMsgStream::PgTransactionPtr xact_cmp;
+        PgTransactionPtr xact;
+        PgTransactionPtr xact_cmp;
 
         // validate the transactions based on what the log generator created
         for (int i = 0; i < _xact_list.size(); i++) {
-            xact = _queue->pop();
-            xact_cmp = _xact_list[i];
+            xact = _queue->pop();      // pop from queue from log reader
+            xact_cmp = _xact_list[i];  // from log generator
             ASSERT_NE(xact, nullptr);
             EXPECT_EQ(xact->xid, xact_cmp->xid);
             EXPECT_EQ(xact->begin_offset, xact_cmp->begin_offset);

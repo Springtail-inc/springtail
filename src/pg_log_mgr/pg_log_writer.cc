@@ -10,21 +10,12 @@
 
 namespace springtail {
 
-    PgLogWriter::PgLogWriter(const std::filesystem::path &file, int proto_version,
+    PgLogWriter::PgLogWriter(const std::filesystem::path &file,
                              std::function<void (uint64_t)> lsn_callback_fn)
-        : _file(file), _proto_version(proto_version), _lsn_callback_fn(lsn_callback_fn)
+        : _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
 
     {
-        int fmode = O_APPEND | O_CREAT;
-        mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP;
-
-        _fd = ::open(file.c_str(), fmode, owner);
-        if (_fd == -1) {
-            SPDLOG_ERROR("Error opening file: path={}, errno={}", file.c_str(), errno);
-            throw Error("Error opening file for PgLogFile");
-        }
-
-         _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
+        _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
     }
 
     void
@@ -44,7 +35,7 @@ namespace springtail {
             }
 
             // do fsync and update offset
-            ::fsync(_fd);
+            _writer.sync();
             _last_fsync_offset = offset;
 
             _update_lsn_from_queue();
@@ -53,7 +44,7 @@ namespace springtail {
 
     void
     PgLogWriter::_add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
-                                  uint64_t end_offset, LSN_t end_lsn)
+                                   uint64_t end_offset, LSN_t end_lsn)
     {
         std::unique_lock lock{_queue_mutex};
         _lsn_queue.push(std::make_shared<LsnOffset>(start_offset, start_lsn));
@@ -68,6 +59,9 @@ namespace springtail {
         LSN_t latest_lsn = _latest_synced_lsn.load();
         LSN_t queued_lsn = INVALID_LSN;
 
+        // go through the lsn queue and check if the current offset
+        // is greater than the offset of the LSN in the queue, if so
+        // then pop the LSN off the queue and update the latest LSN
         while (!_lsn_queue.empty()) {
             LsnOffsetPtr p = _lsn_queue.front();
             if (p->offset <= curr_offset) {
@@ -95,13 +89,13 @@ namespace springtail {
         // see if we need to do a final fsync
         uint64_t curr_offset = _current_offset.load();
         if (curr_offset != _last_fsync_offset.load()) {
-            ::fsync(_fd);
+            _writer.sync();
             _last_fsync_offset = curr_offset;
             _update_lsn_from_queue();
         }
 
         // finally close the fd
-        ::close(_fd);
+        _writer.close();
     }
 
     bool
@@ -111,32 +105,25 @@ namespace springtail {
             return false;
         }
 
-        uint64_t current_offset = _current_offset.load();
+        // write message data, returns offset after write
+        uint64_t current_offset = _writer.write_message(data);
 
         // write out header containing length if start of message
         if (data.msg_offset == 0) {
-            char buffer[PG_LOG_HDR_BYTES];
-            PgLogHeader header(data.msg_length, data.starting_lsn, data.ending_lsn, _proto_version);
-            header.encode_header(buffer);
-
-            ::write(_fd, buffer, PG_LOG_HDR_BYTES);
-            current_offset += PG_LOG_HDR_BYTES;
-            _msg_end_offset = current_offset + data.msg_length;
+            _msg_end_offset = _writer.msg_end_offset();
 
             // add LSN data to queue for fsync thread
             _add_lsn_to_queue(current_offset, data.starting_lsn, _msg_end_offset, data.ending_lsn);
         }
 
-        // write message data
-        ::write(_fd, data.buffer, data.length);
-        current_offset += data.length;
-
+        // update shared current offset atomic var
         _current_offset = current_offset;
 
         if (_msg_end_offset == current_offset) {
             // full message written
             return true;
         }
+
         return false;
     }
 }

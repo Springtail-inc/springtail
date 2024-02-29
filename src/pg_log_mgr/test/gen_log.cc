@@ -43,7 +43,7 @@ int main(int argc, char **argv)
     log_gen.parse_commands(input_file);
 
     if (dump) {
-        PgLogGen::dump_file(output_file);
+        PgMsgLogGen::dump_file(output_file);
     }
 
     return 0;

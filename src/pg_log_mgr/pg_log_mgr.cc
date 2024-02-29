@@ -113,7 +113,7 @@ namespace springtail {
             offset++;
         } while (std::filesystem::exists(file));
 
-        return std::make_shared<PgLogWriter>(file, _proto_version,
+        return std::make_shared<PgLogWriter>(file,
             [this](LSN_t lsn) { _pg_conn.set_last_flushed_LSN(lsn); });
     }
 
@@ -123,7 +123,7 @@ namespace springtail {
         PgXactHandler xact_handler{_xact_log_path};
 
         while (!_shutdown) {
-            PgReplMsgStream::PgTransactionPtr xact = _xact_queue->pop();
+            PgTransactionPtr xact = _xact_queue->pop();
             if (xact == nullptr) {
                 continue;
             }

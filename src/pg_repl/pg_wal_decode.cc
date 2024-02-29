@@ -7,6 +7,9 @@
 // springtail includes
 #include <common/common.hh>
 #include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_msg_stream.hh>
+
+using namespace springtail;
 
 int main(int argc, char* argv[])
 {
@@ -29,62 +32,20 @@ int main(int argc, char* argv[])
     }
 
     // init logging/backtrace
-    springtail::springtail_init();
+    springtail_init();
 
-    // open wal log file (written by pg_wal_dump)
-    std::FILE* f = std::fopen(file.c_str(), "rb");
-    if (f == nullptr) {
-        std::cerr << "Error opening output file: " << file;
-        return -1;
-    }
+    PgMsgStreamReader reader(file);
 
-    void *buffer = nullptr;
-    int max_buffer_len = 0;
+    bool eob = false, eos = false;
 
-    char int_buf[4];
-    int r = std::fread(int_buf, 4, 1, f);
-    if (r <= 0) {
-        // eof
-        return 0;
-    }
-    int proto_version = springtail::recvint32(int_buf);
-
-    // init with protocol version
-    springtail::PgReplMsg msg(proto_version);
-
-    while (true) {
-        // read first 4 bytes for length
-        int r = std::fread(int_buf, 4, 1, f);
-        if (r <= 0) {
-            // eof
-            return 0;
-        }
-        int32_t len = springtail::recvint32(int_buf);
-
-        std::cout << "\nRead buffer of length: " << len << std::endl;
-
-        // see if another buffer is required
-        if (len > max_buffer_len) {
-            if (buffer != nullptr) {
-                std::free(buffer);
-            }
-            buffer = std::malloc(len);
-            max_buffer_len = len;
-        }
-
-        // read in the buffer
-        r = std::fread(buffer, len, 1, f);
-        if (r <= 0) {
-            return 0;
-        }
-
-        // iterate through the messages
-        msg.set_buffer((const char *)buffer, len);
-        while (msg.has_next_msg()) {
-            const springtail::PgReplMsgDecoded &decoded_msg = msg.decode_next_msg();
-            std::string s = msg.dump_msg(decoded_msg);
+    // consume messages from log until end of file
+    while (!eos) {
+        // read next message parsing all messages
+        PgMsgPtr msg = reader.read_message(PgMsgStreamReader::ALL_MESSAGES, eos, eob);
+        if (msg != nullptr) {
+            // dump the message
+            std::string s = pg_msg::dump_msg(*msg);
             std::cout << s;
         }
-
     }
 }
