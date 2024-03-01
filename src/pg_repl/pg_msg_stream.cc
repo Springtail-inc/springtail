@@ -278,30 +278,8 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_string()
     {
-        // seek to current offset
-        _seek_stream();
-
-        // need to find terminating null char
-        char buffer[128];
-        uint64_t str_len = 0;
-
-        // iterate, reading in 128 characters and searching for null char
-        while (true) {
-	        uint64_t length = std::min((uint64_t)128, _end_offset - _current_offset);
-            _stream.read(buffer, length); // this doesn't change the current offset
-            uint64_t curr_len = strnlen(buffer, length);
-            str_len += curr_len;
-            // curr_len == 0 if string is null, length if no null found, or number of bytes up to null char
-            if (curr_len < length) {
-                break;
-            }
-            if (length == 0) {
-                // string not found in message block!
-                throw PgMessageTooSmallError();
-            }
-        }
-
-        _current_offset += str_len + 1; // null char is 1 more than str_len
+        // Read characters until null terminator
+        while (_recvint8() != '\0' && _current_offset <= _end_offset) {}
     }
 
     void
@@ -431,22 +409,12 @@ namespace springtail {
 
         _current_offset += 4; // rel_id
 
-        _seek_stream();
-        char type = _stream.get(); // old type
-        if (type == 'K' || type == 'O') {
-            _current_offset++;
-        } else {
-            _seek_stream();
-        }
+        char type = _recvint8(); // old type
+        assert(type == 'K' || type == 'O');
         _skip_tuple();
 
-        _seek_stream();
-        type = _stream.get(); // new type; should be N
-        if (type == 'N') {
-            _current_offset++;
-        } else {
-            _seek_stream();
-        }
+        type = _recvint8(); // new type; should be N
+        assert(type == 'N');
         _skip_tuple();
     }
 
@@ -505,13 +473,8 @@ namespace springtail {
 
         _current_offset += 4; // rel_id
 
-        _seek_stream();
-        char type = _stream.get(); // old type
-        if (type == 'K' || type == 'O') {
-            _current_offset++;
-        } else {
-            _seek_stream();
-        }
+        char type = _recvint8(); // old type
+        assert(type == 'K' || type == 'O');
         _skip_tuple();
     }
 
@@ -888,7 +851,7 @@ namespace springtail {
         json["schema"].get_to(table_msg.schema);
         json["oid"].get_to(table_msg.oid);
 
-        // identity in form: schema.table; parse out table
+        // identity in form: schema.table; parse out table; no object_name in trigger
         std::string identity;
         json["identity"].get_to(identity);
         auto const pos = identity.find_last_of('.');

@@ -212,6 +212,7 @@ namespace springtail {
         uint64_t _end_offset;           ///< ending file offset for this message block
         uint64_t _end_msg_offset;       ///< ending message offset in end file
         uint64_t _header_offset;        ///< starting offset of message block
+        uint64_t _internal_offset;      ///< internal offset within file, not to be altered by user
 
         int _proto_version;             ///< protocol version of message block (from header)
 
@@ -219,7 +220,11 @@ namespace springtail {
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {
+            if (_current_offset == _internal_offset) {
+                return;
+            }
             _stream.seekg(_current_offset, std::fstream::beg);
+            _internal_offset = _current_offset;
         }
 
         /** Read stream at current offset, return uint32_t */
@@ -227,6 +232,7 @@ namespace springtail {
             _seek_stream();
             uint32_t res = recvint32(_stream);
             _current_offset += 4;
+            _internal_offset += 4;
             return res;
         }
 
@@ -235,6 +241,7 @@ namespace springtail {
             _seek_stream();
             uint64_t res = recvint64(_stream);
             _current_offset += 8;
+            _internal_offset += 8;
             return res;
         }
 
@@ -243,6 +250,7 @@ namespace springtail {
             _seek_stream();
             uint16_t res = recvint16(_stream);
             _current_offset += 2;
+            _internal_offset += 2;
             return res;
         }
 
@@ -251,6 +259,7 @@ namespace springtail {
             _seek_stream();
             uint8_t res = recvint8(_stream);
             _current_offset++;
+            _internal_offset++;
             return res;
         }
 
@@ -264,6 +273,7 @@ namespace springtail {
             }
             assert(_stream.gcount() == size);
             _current_offset += size;
+            _internal_offset += size;
             return true; // no eof
         }
 

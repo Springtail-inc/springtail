@@ -118,6 +118,11 @@ namespace springtail {
             return _queue.empty();
         }
 
+        int size() {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            return _queue.size();
+        }
+
     protected:
         /** max number of elements in queue */
         int _limit=-1;
