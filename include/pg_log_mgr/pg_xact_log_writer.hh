@@ -12,16 +12,28 @@ namespace springtail {
     public:
         static constexpr int PG_XLOG_MIN_FSYNC_MS = 50;
 
-        static constexpr uint32_t PG_XLOG_MAGIC = 0xA3F94B1C;
-
-        PgXactLogWriter(const std::filesystem::path &file);
+        static constexpr uint8_t PG_XLOG_MAGIC[] = {0xA3, 0xF9, 0x4B};
 
         /**
-         * @brief Log the xact to file
+         * @brief Construct a new Pg Xact Log Writer object; creates file
+         * @param file path dir/name
+         */
+        PgXactLogWriter(const std::filesystem::path &file);
+
+        ~PgXactLogWriter() { close(); }
+
+        /**
+         * @brief Log the committed xact to file
          * @param xact postgres transaction
          * @param xid springtail xid
          */
-        void log_data(PgTransactionPtr xact, uint64_t xid);
+        void log_commit(PgTransactionPtr xact);
+
+        /**
+         * @brief Log a stream start, not yet committed, no xid allocated
+         * @param xact postgres transaction
+         */
+        void log_stream_start(PgTransactionPtr xact);
 
         /** Close the file */
         void close();

@@ -98,10 +98,9 @@ namespace springtail {
          * @brief Add one or more rows to the cache for a specific table and extent and operation type
          * @param tid  Table ID
          * @param eid  Extent ID
-         * @param op   Row operation type
          * @param rows Set of rows
          */
-        void add_rows(uint64_t tid, uint64_t eid, RowOp op, std::vector<RowData> rows);
+        void add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> rows);
 
         /**
          * @brief Fetch list of table IDs that have been dirtied prior to and up to XID

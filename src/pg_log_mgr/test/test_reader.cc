@@ -102,7 +102,7 @@ namespace {
     TEST_F(LogReader_Test, ProcessLog)
     {
         // create a new log file
-        process_json_cmd_file(std::filesystem::path("/tmp/test_reader.json"));
+        process_json_cmd_file(std::filesystem::path("test_reader.json"));
 
         // read the header
         uint64_t offset = 0;

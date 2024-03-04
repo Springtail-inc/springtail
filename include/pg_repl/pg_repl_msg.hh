@@ -210,14 +210,19 @@ namespace springtail
      * Also includes set of oids changed within the transaction
      */
     struct PgTransaction {
-        std::filesystem::path begin_path;
-        std::filesystem::path commit_path;
-        uint64_t begin_offset;  ///< offset to block header
-        uint64_t commit_offset; ///< offset to end of commit msg
+        static constexpr uint8_t TYPE_COMMIT = 0;
+        static constexpr uint8_t TYPE_STREAM_START = 1;
+
+        uint64_t begin_offset;   ///< offset to start of block header
+        uint64_t commit_offset;  ///< offset to end of commit msg
+        uint64_t springtail_xid; ///< springtail xid
         LSN_t xact_lsn;
+        uint8_t type;
         uint32_t xid;
         std::set<uint64_t> oids;
-        std::set<uint32_t> aborted_xids;
+        std::set<uint32_t> aborted_xids; // stream subxacts that aborted
+        std::filesystem::path begin_path;
+        std::filesystem::path commit_path;
     };
     using PgTransactionPtr = std::shared_ptr<PgTransaction>;
 

@@ -6,6 +6,7 @@
 #include <common/logging.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
+#include <common/filesystem.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -14,22 +15,24 @@
 
 namespace springtail {
 
-    PgXactHandler::PgXactHandler(const std::filesystem::path &base_path)
-        : _base_path(base_path)
-    {}
+    PgXactHandler::PgXactHandler(const std::filesystem::path &base_dir)
+        : _base_dir(base_dir)
+    {
+        _create_logger();
+
+        // XXX need to fetch latest xid from xid mgr
+    }
 
     void
     PgXactHandler::_create_logger()
     {
-        int offset = 0;
-        std::filesystem::path file;
-        do {
-            file = _base_path;
-            file.append(fmt::format("{}", common::get_time_in_millis() + offset));
-            // shouldn't ever have to loop here...
-            offset++;
-        } while (std::filesystem::exists(file));
-
+        std::filesystem::path file = fs::find_latest_modified_file(_base_dir);
+        if (file.empty()) {
+            file = _base_dir / fmt::format("{}{:04d}{}", LOG_PREFIX, 0, LOG_SUFFIX);
+        } else {
+            file = get_next_logfile(file);
+        }
+        _current_logfile = file;
         _logger = std::make_shared<PgXactLogWriter>(file);
     }
 
@@ -43,11 +46,19 @@ namespace springtail {
     void
     PgXactHandler::process(const PgTransactionPtr xact)
     {
+        // if stream start, just log it
+        if (xact->type == PgTransaction::TYPE_STREAM_START) {
+            _logger->log_stream_start(xact);
+            return;
+        }
+
         // first allocate an xid for this xact
         uint64_t xid = _allocate_xid();
 
-        // next issue log request
-        _logger->log_data(xact, xid);
+        // next log the data
+        assert (xact->type == PgTransaction::TYPE_COMMIT);
+        xact->springtail_xid = xid;
+        _logger->log_commit(xact);
 
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
@@ -56,7 +67,7 @@ namespace springtail {
 
         // finally send notification to GC
         PgRedisXactValue redis_xact(xact->begin_path, xact->commit_path, _db_id, xact->begin_offset,
-                                    xact->commit_offset, xact->xact_lsn, xid, xact->xid);
+                                    xact->commit_offset, xact->xact_lsn, xid, xact->xid, xact->aborted_xids);
 
         // XXX need to add customer ID
         _redis_queue.push(redis::QUEUE_PG_TRANSACTIONS, redis_xact);
