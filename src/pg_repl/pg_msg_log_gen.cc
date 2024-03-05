@@ -435,7 +435,7 @@ namespace springtail {
                 break;
             }
             count++;
-            PgMsgPtr msg = reader.read_message(PgMsgStreamReader::ALL_MESSAGES, eos, eob);
+            PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
             if (msg == nullptr) {
                 continue;
             }

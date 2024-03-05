@@ -57,7 +57,6 @@ namespace {
             PgLogGenJson log_gen(_log_file);
             log_gen.parse_commands(json_file);
             _xact_list = log_gen.get_xact_list();
-            // PgLogGen::dump_file(_log_file);
 
             // if the file was open then close it
             if (_fp != nullptr) {

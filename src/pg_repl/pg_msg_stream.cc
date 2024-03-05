@@ -92,7 +92,7 @@ namespace springtail {
     }
 
     PgMsgPtr
-    PgMsgStreamReader::read_message(const char filter[],
+    PgMsgStreamReader::read_message(const std::vector<char> &filter,
                                     bool &eos, bool &eob)
     {
         PgMsgPtr msg = read_message(filter);
@@ -102,7 +102,7 @@ namespace springtail {
     }
 
     PgMsgPtr
-    PgMsgStreamReader::read_message(const char filter[])
+    PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
         SPDLOG_DEBUG("Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
         // check if we've already encountered the end of the file
@@ -228,9 +228,9 @@ namespace springtail {
 
     // if msg_type is not in filter then skip message
     bool
-    PgMsgStreamReader::_is_message_filtered(char msg_type, const char filter[]) const {
-        for (int i = 0; filter[i] != '\0'; i++) {
-            if (msg_type == filter[i]) {
+    PgMsgStreamReader::_is_message_filtered(char msg_type, const std::vector<char> &filter) const {
+        for (auto c : filter) {
+            if (msg_type == c) {
                 return true;
             }
         }
@@ -410,12 +410,14 @@ namespace springtail {
         _current_offset += 4; // rel_id
 
         char type = _recvint8(); // old type
-        assert(type == 'K' || type == 'O');
-        _skip_tuple();
+        if (type == 'K' || type == 'O') {
+            _skip_tuple();
+            type = _recvint8(); // new type; should be N
+        } else {
+            assert(type == 'N');
 
-        type = _recvint8(); // new type; should be N
-        assert(type == 'N');
-        _skip_tuple();
+        }
+        _skip_tuple(); // New tuple
     }
 
     PgMsgPtr
@@ -451,10 +453,14 @@ namespace springtail {
         update.rel_id = _recvint32();
 
         update.old_type = _recvint8();
-        assert(update.old_type == 'K' || update.old_type == 'O');
-        _decode_tuple(update.old_tuple);
+        if (update.old_type == 'K' || update.old_type == 'O') {
+            _decode_tuple(update.old_tuple);
+            update.new_type = _recvint8();
+        } else {
+            update.new_type = update.old_type;
+            update.old_type = {};
+        }
 
-        update.new_type = _recvint8();
         assert(update.new_type == 'N');
         _decode_tuple(update.new_tuple);
 
@@ -773,7 +779,10 @@ namespace springtail {
     void
     PgMsgStreamReader::_skip_stream_abort()
     {
-        _current_offset += LEN_STREAM_ABORT;
+        _current_offset += 8; // xid + sub_xid
+        if (_proto_version >= 4) {
+            _current_offset += (8 + 8); // abort_lsn + abort_ts
+        }
         _seek_stream();
     }
 

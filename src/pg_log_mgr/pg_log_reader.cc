@@ -20,7 +20,7 @@ namespace springtail {
         // init stream reader
         _reader.set_file(path, start_offset);
 
-        char filter[] = { pg_msg::MSG_BEGIN,
+        std::vector<char> filter = { pg_msg::MSG_BEGIN,
             pg_msg::MSG_COMMIT,
             pg_msg::MSG_STREAM_START,
             pg_msg::MSG_STREAM_COMMIT,

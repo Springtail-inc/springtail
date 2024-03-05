@@ -36,7 +36,7 @@ namespace {
         ASSERT_EQ(xact.aborted_xids, aborted_xids);
     }
 
-    TEST(PgRedisXactValue, ToString)
+    TEST(PgRedisXactValue_Test, ToString)
     {
         std::filesystem::path begin_path = "/tmp/begin.log";
         std::filesystem::path commit_path = "/tmp/commit.log";
