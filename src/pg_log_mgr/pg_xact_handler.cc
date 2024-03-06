@@ -15,7 +15,8 @@
 namespace springtail {
 
     PgXactHandler::PgXactHandler(const std::filesystem::path &base_path)
-        : _base_path(base_path)
+        : _base_path(base_path),
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
     {}
 
     void
@@ -59,6 +60,6 @@ namespace springtail {
                                     xact->commit_offset, xact->xact_lsn, xid, xact->xid);
 
         // XXX need to add customer ID
-        _redis_queue.push(redis::QUEUE_PG_TRANSACTIONS, redis_xact);
+        _redis_queue.push(redis_xact);
     }
 }

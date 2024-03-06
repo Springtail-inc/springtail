@@ -13,9 +13,11 @@
 namespace springtail {
     // pre-declare field classes
     class Field;
+    typedef std::shared_ptr<Field> FieldPtr;
+
     class MutableField;
-    class FieldArray;
-    class MutableFieldArray;
+    typedef std::shared_ptr<MutableField> MutableFieldPtr;
+
     class Tuple;
 
     /** The types of schema column updates that can be applied to a schema. */
@@ -118,10 +120,10 @@ namespace springtail {
         virtual std::shared_ptr<Field> get_field(const std::string &name) const = 0;
 
         /** Returns a Tuple representing all of the columns of the schema. */
-        virtual std::shared_ptr<FieldArray> get_fields() const = 0;
+        virtual std::shared_ptr<std::vector<FieldPtr>> get_fields() const = 0;
 
         /** Returns a Tuple representing an ordered subset of the columns in the schema. */
-        virtual std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const = 0;
+        virtual std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const = 0;
     };
     typedef std::shared_ptr<Schema> SchemaPtr;
 
@@ -135,7 +137,7 @@ namespace springtail {
         uint32_t _row_size;
 
         /** Map of column names to <field, order> pairs. */
-        std::map<std::string, std::pair<std::shared_ptr<MutableField>, int>> _field_map;
+        std::map<std::string, std::pair<MutableFieldPtr, int>> _field_map;
 
         /** The order of the columns. */
         std::vector<std::string> _column_order;
@@ -221,22 +223,22 @@ namespace springtail {
         /**
          * Generate a list of all of the fields in the schema.
          */
-        std::shared_ptr<FieldArray> get_fields() const override;
+        std::shared_ptr<std::vector<FieldPtr>> get_fields() const override;
 
         /**
          * Generate a list of all of the fields in the schema.
          */
-        std::shared_ptr<MutableFieldArray> get_mutable_fields() const;
+        std::shared_ptr<std::vector<MutableFieldPtr>> get_mutable_fields() const;
 
         /**
          * Generate a list of fields based on an ordered list of columns.
          */
-        std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const override;
+        std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const override;
 
         /**
          * Generate a list of fields based on an ordered list of columns.
          */
-        std::shared_ptr<MutableFieldArray> get_mutable_fields(const std::vector<std::string> &columns) const;
+        std::shared_ptr<std::vector<MutableFieldPtr>> get_mutable_fields(const std::vector<std::string> &columns) const;
 
         /**
          * Generate a subset of the provided Tuple that contains only the requested columns.  The
@@ -244,6 +246,15 @@ namespace springtail {
          */
         std::shared_ptr<Tuple> tuple_subset(std::shared_ptr<Tuple> tuple,
                                             const std::vector<std::string> &columns) const;
+
+        /**
+         * Return the order of the columns in the schema.
+         */
+        std::vector<std::string>
+        column_order() const
+        {
+            return _column_order;
+        }
     };
     typedef std::shared_ptr<ExtentSchema> ExtentSchemaPtr;
 
@@ -257,6 +268,7 @@ namespace springtail {
     private:
         /** Map from column name to field accessor.  */
         std::map<std::string, std::shared_ptr<Field>> _field_map;
+        ExtentSchemaPtr _extent_schema;
 
     private:
         /**
@@ -272,7 +284,7 @@ namespace springtail {
          * @param field The underlying field.
          * @param fallback The fallback value, stored as a string.
          */
-        std::shared_ptr<Field> _make_null_wrapper(std::shared_ptr<Field> field, const std::string &fallback);
+        std::shared_ptr<Field> _make_default_value(std::shared_ptr<Field> field, const std::string &fallback);
 
     public:
         /**
@@ -311,13 +323,13 @@ namespace springtail {
         /**
          * Return a ConstFieldTuple containing all of the columns in this schema.
          */
-        std::shared_ptr<FieldArray> get_fields() const override;
+        std::shared_ptr<std::vector<FieldPtr>> get_fields() const override;
 
         /**
          * Return a FieldTuple containing the specified columns from this schema.
          * @param columns A list of requested columns for the returned ConstFieldTuple
          */
-        std::shared_ptr<FieldArray> get_fields(const std::vector<std::string> &columns) const override;
+        std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const override;
     };
     typedef std::shared_ptr<VirtualSchema> VirtualSchemaPtr;
 

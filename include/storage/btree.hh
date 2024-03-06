@@ -202,6 +202,16 @@ namespace springtail {
         Iterator lower_bound(TuplePtr search_key, uint64_t xid) const;
 
         /**
+         * Returns an iterator to the first entry at a given XID that has a key that is greater than
+         * or equal to the provided search_key.  Returns an iterator to the last row in the BTree if there is no
+         * such entry.
+         *
+         * @param search_key The key we are searching for in the tree.
+         * @param xid The XID at which we are searching.
+         */
+        Iterator find_for_update(TuplePtr search_key, uint64_t xid) const;
+
+        /**
          * Returns an iterator to the first entry at a given XID that has a key that is equal to the
          * provided search_key.  Returns end() if there is no such entry.
          *
@@ -261,4 +271,6 @@ namespace springtail {
          */
         ExtentPtr _find_root(uint64_t xid) const;
     };
+
+    typedef std::shared_ptr<BTree> BTreePtr;
 }

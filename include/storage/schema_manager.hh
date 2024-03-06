@@ -15,7 +15,7 @@ namespace springtail {
         static const uint64_t TABLES_TID = 1;
         static const uint64_t SCHEMAS_TID = 2;
         static const uint64_t SCHEMAS_HISTORY_TID = 3;
-        // static const uint64_t PRIMARY_INDEXES_TID = 4;
+        static const uint64_t PRIMARY_INDEXES_TID = 4;
 
     private:
         /** Column definitions for the "tables" system table. */
@@ -27,6 +27,9 @@ namespace springtail {
         /** Column definitions for the "schemas_history" system table. */
         static const std::vector<SchemaColumn> SCHEMAS_HISTORY_SCHEMA;
 
+        /** Column definitions for the "primary_indexes" system table. */
+        static const std::vector<SchemaColumn> PRIMARY_INDEXES_SCHEMA;
+
     private:
         /** A helper class that holds all of the information about a table schema in-memory. */
         class SchemaInfo {
@@ -37,6 +40,9 @@ namespace springtail {
             /** A map from <position, xid> to quickly find the set of SchemaUpdate objects that
                 need to be applied to a Schema to get to the target_xid and lsn. */
             std::map<uint32_t, std::map<uint64_t, std::vector<SchemaUpdate>>> _column_updates;
+
+            /** A map from <start_xid> to <primary key>, where primary key is defined as an ordered set of columns. */
+            std::map<uint64_t, std::vector<uint32_t>> _primary_index;
 
         private:
             /**

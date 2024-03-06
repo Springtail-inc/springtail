@@ -149,12 +149,19 @@ namespace {
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         csv::CSVReader reader("test_btree_simple.csv");
 
         auto r = reader.begin();
         for (int i = 0; i < 10; i++) {
             // insert data to the tree
-            btree->insert(std::make_shared<CSVTuple>(*r, fields));
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, *r));
             ++r;
         }
 
@@ -189,11 +196,18 @@ namespace {
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         csv::CSVReader reader("test_btree_simple.csv");
 
         for (auto &&r : reader) {
             // insert data to the tree
-            btree->insert(std::make_shared<CSVTuple>(r, fields));
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
         }
 
         // finalize the tree
@@ -227,11 +241,18 @@ namespace {
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         csv::CSVReader reader("test_btree_simple.csv");
 
         for (auto &&r : reader) {
             // insert data to the tree
-            btree->insert(std::make_shared<CSVTuple>(r, fields));
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
         }
 
         // finalize the tree
@@ -250,7 +271,7 @@ namespace {
                 // auto search_key = _schema->tuple_subset(value, _keys);
                 // btree->remove(search_key);
 
-                btree->remove(std::make_shared<CSVTuple>(r, fields));
+                btree->remove(std::make_shared<FieldTuple>(csv_fields, r));
             }
             ++evens;
         }
@@ -301,11 +322,18 @@ namespace {
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         csv::CSVReader reader("test_btree_simple.csv");
 
         for (auto &&r : reader) {
             // insert data to the tree
-            btree->insert(std::make_shared<CSVTuple>(r, fields));
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
         }
 
         // finalize the tree
@@ -318,7 +346,7 @@ namespace {
         reader = csv::CSVReader("test_btree_simple.csv");
         for (auto &&r : reader) {
             // remove data from the tree
-            btree->remove(std::make_shared<CSVTuple>(r, fields));
+            btree->remove(std::make_shared<FieldTuple>(csv_fields, r));
         }
 
         // finalize the tree
@@ -361,13 +389,20 @@ namespace {
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         csv::CSVReader reader("test_btree_simple.csv");
 
         // insert 5000 of the same row
         auto &&r = *reader.begin();
         for (int i = 0; i < 5000; ++i) {
             // insert data to the tree
-            btree->insert(std::make_shared<CSVTuple>(r, fields));
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
         }
 
         // finalize the tree
@@ -403,12 +438,18 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         // insert 50k entries
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
                 // insert data to the tree
-                btree->insert(std::make_shared<CSVTuple>(r, fields));
+                btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
             }
         }
 
@@ -447,13 +488,20 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         // preapare 50k inserts
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
-                auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-                auto request = std::make_shared<Request>(btree, Request::Type::INSERT, tuple);
-                
+                auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
+                auto value_tuple = std::make_shared<ValueTuple>(tuple);
+                auto request = std::make_shared<Request>(btree, Request::Type::INSERT, value_tuple);
+
                 tester.add_request(request);
             }
         }
@@ -510,11 +558,18 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         // preapare 5k inserts
         csv::CSVReader reader("test_btree_simple.csv");
         for (auto &&r : reader) {
-            auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-            auto request = std::make_shared<Request>(btree, Request::Type::INSERT, tuple);
+            auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
+            auto value_tuple = std::make_shared<ValueTuple>(tuple);
+            auto request = std::make_shared<Request>(btree, Request::Type::INSERT, value_tuple);
                 
             tester.add_request(request);
         }
@@ -564,8 +619,9 @@ namespace {
         // preapare 5k removes
         csv::CSVReader reader2("test_btree_simple.csv");
         for (auto &&r : reader2) {
-            auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-            auto request = std::make_shared<Request>(btree, Request::Type::REMOVE, tuple);
+            auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
+            auto value_tuple = std::make_shared<ValueTuple>(tuple);
+            auto request = std::make_shared<Request>(btree, Request::Type::REMOVE, value_tuple);
                 
             tester.add_request(request);
         }
@@ -607,15 +663,23 @@ namespace {
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
 
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
         // preapare 100k inserts across two trees
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
-                auto tuple = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-                auto request1 = std::make_shared<Request>(btree1, Request::Type::INSERT, tuple);
+                auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
+                auto value_tuple = std::make_shared<ValueTuple>(tuple);
+
+                auto request1 = std::make_shared<Request>(btree1, Request::Type::INSERT, value_tuple);
                 tester.add_request(request1);
 
-                auto request2 = std::make_shared<Request>(btree2, Request::Type::INSERT, tuple);
+                auto request2 = std::make_shared<Request>(btree2, Request::Type::INSERT, value_tuple);
                 tester.add_request(request2);
             }
         }

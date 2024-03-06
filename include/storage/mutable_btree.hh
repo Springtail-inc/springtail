@@ -362,7 +362,7 @@ namespace springtail {
              * Return the current key of the last entry in the page.
              */
             TuplePtr index_key() const {
-                return _key_fields->bind(back());
+                return std::make_shared<MutableTuple>(_key_fields, back());
             }
 
             /**

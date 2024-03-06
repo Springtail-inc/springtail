@@ -115,7 +115,7 @@ namespace springtail {
             auto child_i = std::lower_bound(current->begin(), current->end(), search_key,
                                             [this](const Extent::Row &row, TuplePtr key)
                                             {
-                                                return this->_branch_keys->bind(row)->less_than(key);
+                                                return FieldTuple(this->_branch_keys, row).less_than(key);
                                             });
             if (child_i == current->end()) {
                 return end();
@@ -136,10 +136,59 @@ namespace springtail {
         auto leaf_i = std::lower_bound(current->begin(), current->end(), search_key,
                                        [this](const Extent::Row &row, TuplePtr key)
                                        {
-                                           return this->_leaf_keys->bind(row)->less_than(key);
+                                           return FieldTuple(this->_leaf_keys, row).less_than(key);
                                        });
         if (leaf_i == current->end()) {
             return end();
+        }
+
+        node = std::make_shared<Node>(current, leaf_i, node);
+        return Iterator(this, node, xid);
+    }
+
+    BTree::Iterator
+    BTree::find_for_update(TuplePtr search_key,
+                           uint64_t xid) const
+    {
+        // find the correct root based on the XID
+        auto root = _find_root(xid);
+        if (root == nullptr || root->empty()) {
+            return end();
+        }
+
+        // iterate through the levels until we find a leaf node
+        ExtentPtr current = root;
+        NodePtr node = nullptr;
+        while (current->type().is_branch()) {
+            // perform a lower-bound check to find the appropriate child branch
+            auto child_i = std::lower_bound(current->begin(), current->end(), search_key,
+                                            [this](const Extent::Row &row, TuplePtr key)
+                                            {
+                                                return FieldTuple(this->_branch_keys, row).less_than(key);
+                                            });
+
+            // retrieve the child offset
+            if (child_i == current->end()) {
+                child_i = current->last();
+            }
+            uint64_t extent_id = _branch_child_f->get_uint64(*child_i);
+
+            // read the child extent
+            ExtentPtr child = _read_extent(extent_id);
+
+            // recurse to the child
+            node = std::make_shared<Node>(current, child_i, node);
+            current = child;
+        }
+
+        // now find the entry in the leaf node
+        auto leaf_i = std::lower_bound(current->begin(), current->end(), search_key,
+                                       [this](const Extent::Row &row, TuplePtr key)
+                                       {
+                                           return FieldTuple(this->_leaf_keys, row).less_than(key);
+                                       });
+        if (leaf_i == current->end()) {
+            leaf_i = current->last();
         }
 
         node = std::make_shared<Node>(current, leaf_i, node);
@@ -157,7 +206,7 @@ namespace springtail {
         }
 
         // generate the key of the provided row
-        auto &&key = _leaf_keys->bind(*i);
+        auto key = std::make_shared<FieldTuple>(_leaf_keys, *i);
 
         // if the search key is < found key from lower_bound, then does not exist
         if (search_key->less_than(key)) {
@@ -208,7 +257,11 @@ namespace springtail {
 
         // find the right root for the requested XID
         auto &&root_i = _roots.lower_bound(xid);
-        ExtentPtr root = root_i->second;
+
+        // note: if the XID is in the future, use the most recent available XID
+        ExtentPtr root = (root_i != _roots.end())
+            ? root_i->second
+            : _roots.rbegin()->second;
 
         return root;
     }

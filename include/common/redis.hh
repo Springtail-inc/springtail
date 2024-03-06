@@ -115,7 +115,7 @@ namespace springtail {
          */
         uint64_t push(const T &value)
         {
-            return _redis->rpush(_key, value.serialize());
+            return _redis->lpush(_key, value.serialize());
         }
 
         /**
@@ -135,7 +135,9 @@ namespace springtail {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
 
             // remove from the main queue and move to the worker queue
-            auto &&res = _redis->blmove(_key, worker_key, "LEFT", "RIGHT", timeout_secs);
+            auto &&res = _redis->brpoplpush(worker_key, _key);
+            // note: blmove() not available yet in redis++
+            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_secs);
             if (res) {
                 return std::make_shared<T>(res->second);
             }
@@ -152,7 +154,7 @@ namespace springtail {
         void commit(uint64_t worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
-            _redis->lpop(worker_key);
+            _redis->rpop(worker_key);
         }
 
         /**
@@ -167,7 +169,9 @@ namespace springtail {
         void abort(uint64_t worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
-            _redis->lmove(worker_key, _key, "LEFT", "LEFT");
+            _redis->rpoplpush(worker_key, _key);
+            // note: lmove() not available yet in redis++
+            // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");
         }
 
         /**
@@ -179,7 +183,7 @@ namespace springtail {
         std::shared_ptr<T> pop_and_commit(uint64_t timeout_sec=0)
         {
             // returns an optional pair, no value if timeout first=key, second=value
-            auto &&res = _redis->blpop(key, timeout_secs);
+            auto &&res = _redis->brpop(_key, timeout_sec);
             if (res) {
                 return std::make_shared<T>(res->second);
             }

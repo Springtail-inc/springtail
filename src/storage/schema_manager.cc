@@ -64,18 +64,10 @@ namespace springtail {
         // first get the snapshots from the schemas table
         std::shared_ptr<Table> schemas_table = TableManager::get_table(SCHEMAS_TID);
 
-        // read everything with the given table_id
-        auto cond = std::make_unique<BinaryCondition>(std::make_unique<FieldCondition>("table_id"),
-                                                      "==",
-                                                      std::make_unique<ConstCondition<uint64_t>(table_id));
-
-        auto ordering = std::make_unique<Ordering>({
-                { std::make_unique<FieldCondition>("position"), Ordering::ASC },
-                { std::make_unique<FieldCondition>("start_xid"), Ordering::ASC }
-            });
-
         // construct the column accessors for the schemas table
         std::shared_ptr<Schema> schemas_s = schemas_table->get_schema();
+
+        std::shared_ptr<Field> table_id_f = schemas_s->get_field("table_id");
         std::shared_ptr<Field> start_xid_f = schemas_s->get_field("start_xid");
         std::shared_ptr<Field> end_xid_f = schemas_s->get_field("end_xid");
         std::shared_ptr<Field> name_f = schemas_s->get_field("name");
@@ -84,9 +76,26 @@ namespace springtail {
         std::shared_ptr<Field> nullable_f = schemas_s->get_field("nullable");
         std::shared_ptr<Field> default_value_f = schemas_s->get_field("default_value");
 
+        // read everything with the given table_id
+        // note: use null entries for additional columns in the primary key to ensure we see all entries
+        auto search_key = std::make_shared<ValueTuplePtr>({
+                std::make_shared<ConstField<uint64_t>>(table_id),
+                std::make_shared<ConstNullField>(SchemaType::UINT32),
+                std::make_shared<ConstNullField>(SchemaType::UINT64)
+            });
+
         // scan for the results of the schemas table
-        auto results = schemas_table->scan(cond, ordering);
-        for (auto &&row : results) {
+        auto table_i = schemas_table->lower_bound(search_key);
+        while (table_i != schemas_table->end()) {
+            Extent::Row &row = *table_i;
+
+            // get the table_id from the entry
+            uint64_t tid = table_id_f->get_uint64(row);
+            if (tid != table_id) {
+                // if we have read all of the entries for this table ID, stop processing
+                break;
+            }
+
             // construct a SchemaColumn for each row
             SchemaColumn column;
             column.start_xid = start_xid_f->get_uint64(row);
@@ -112,6 +121,8 @@ namespace springtail {
 
         // construct the column accessors for the schemas table
         std::shared_ptr<Schema> history_s = schemas_history->get_schema();
+
+        std::shared_ptr<Field> table_id_f = history_s->get_field("table_id");
         std::shared_ptr<Field> xid_f = history_s->get_field("xid");
         std::shared_ptr<Field> lsn_f = history_s->get_field("lsn");
         std::shared_ptr<Field> update_type_f = history_s->get_field("update_type");
@@ -122,19 +133,25 @@ namespace springtail {
         std::shared_ptr<Field> default_value_f = history_s->get_field("default_value");
 
         // read everything with the given table_id
-        auto cond = std::make_unique<BinaryCondition>(std::make_unique<FieldCondition>("table_id"),
-                                                      "==",
-                                                      std::make_unique<ConstCondition<uint64_t>(table_id));
-
-        auto ordering = std::make_unique<Ordering>({
-                { std::make_unique<FieldCondition>("posiiton"), Ordering::ASC },
-                { std::make_unique<FieldCondition>("xid"), Ordering::ASC }
-                { std::make_unique<FieldCondition>("lsn"), Ordering::ASC }
+        // note: use null entries for additional columns in the primary key to ensure we see all entries
+        auto search_key = std::make_shared<ValueTuplePtr>({
+                std::make_shared<ConstField<uint64_t>>(table_id),
+                std::make_shared<ConstNullField>(SchemaType::UINT32),
+                std::make_shared<ConstNullField>(SchemaType::UINT64)
             });
 
         // scan for the results of the schemas_history table
-        auto results = schemas_history->scan(cond, ordering);
-        for (auto &&row : results) {
+        auto table_i = schemas_history->lower_bound(search_key);
+        while (table_i != schemas_history->end()) {
+            Extent::Row &row = *table_i;
+
+            // get the table_id from the entry
+            uint64_t tid = table_id_f->get_uint64(row);
+            if (tid != table_id) {
+                // if we have read all of the entries for this table ID, stop processing
+                break;
+            }
+
             // construct a SchemaUpdate for each row
             SchemaUpdate update;
             update.xid = xid_f->get_uint64(row);
@@ -153,10 +170,68 @@ namespace springtail {
         }
     }
 
+    void
+    SchemaManager::SchemaInfo::_read_primary_indexes_table(uint64_t table_id)
+    {
+        // next get the version history from the schemas_history table
+        std::shared_ptr<Table> primary_indexes = TableManager::get_table(PRIMARY_INDEXES_TID);
+
+        // construct the column accessors for the primary indexes table
+        std::shared_ptr<Schema> primary_s = primary_indexes->get_schema();
+
+        std::shared_ptr<Field> table_id_f = primary_s->get_field("table_id");
+        std::shared_ptr<Field> start_xid_f = primary_s->get_field("start_xid");
+        std::shared_ptr<Field> end_xid_f = primary_s->get_field("end_xid");
+        std::shared_ptr<Field> position_f = primary_s->get_field("position");
+        std::shared_ptr<Field> column_id_f = primary_s->get_field("column_id");
+
+        // read everything with the given table_id
+        // note: use null entries for additional columns in the primary key to ensure we see all entries
+        auto search_key = std::make_shared<ValueTuplePtr>({
+                std::make_shared<ConstField<uint64_t>>(table_id),
+                std::make_shared<ConstNullField>(SchemaType::UINT32),
+                std::make_shared<ConstNullField>(SchemaType::UINT64)
+            });
+
+        // scan for the results of the schemas_history table
+        auto table_i = schemas_history->lower_bound(search_key);
+        while (table_i != schemas_history->end()) {
+            Extent::Row &row = *table_i;
+
+            // get the table_id from the entry
+            uint64_t tid = table_id_f->get_uint64(row);
+            if (tid != table_id) {
+                // if we have read all of the entries for this table ID, stop processing
+                break;
+            }
+
+            // note: table is sorted by <table_id, start_xid, position>, making it safe to append
+            //       columns to the vector while scanning
+            _primary_index[start_xid_f->get_uint64(row)].push_back(column_id_f->get_uint32(row));
+            if (position_f->get_uint32(row) == 0 && !end_xid_f->is_null(row)) {
+                // populate an empty primary key at the end XID in case it was removed
+                _primary_index[end_xid_f->get_uint64(row)];
+            }
+        }
+    }
+
     SchemaManager::SchemaInfo::SchemaInfo(uint64_t table_id)
     {
         _read_schema_table(table_id);
         _read_schema_history_table(table_id);
+        _read_primary_indexes_table(table_id);
+    }
+
+    std::vector<std::string>
+    SchemaManager::SchemaInfo::get_primary_key(uint64_t xid)
+    {
+        std::vector<std::string> key;
+
+        auto &&i = _primary_index.lower_bound(xid);
+        for (uint32_t column : i->second) {
+            // XXX need to handle lookup failure
+            key.push_back(_column_map[columns].lower_bound(xid)->second.name);
+        }
     }
 
     std::shared_ptr<ExtentSchema>
