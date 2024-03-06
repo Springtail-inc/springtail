@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
     // consume messages from log until end of file
     while (!eos) {
         // read next message parsing all messages
-        PgMsgPtr msg = reader.read_message(PgMsgStreamReader::ALL_MESSAGES, eos, eob);
+        PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
         if (msg != nullptr) {
             // dump the message
             std::string s = pg_msg::dump_msg(*msg);

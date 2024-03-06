@@ -125,7 +125,7 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, RowOp op, std::vector<RowData> rows)
+    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> rows)
     {
         ThriftClient c = _get_client();
 
@@ -142,29 +142,16 @@ namespace springtail {
             row.xid_seq = r.xid_seq;
             row.primary_key = *r.pkey;
 
-            if (RowOp::DELETE == op) {
-                row.op = thrift::RowOpType::DELETE;
-            } else {
+            if (r.op != RowOp::DELETE) {
                 // update or insert
                 row.__set_data(std::move(std::string(*r.data)));
-            }
-
-            if (RowOp::INSERT == op) {
-                row.op = thrift::RowOpType::INSERT;
-            }
-
-            if (RowOp::UPDATE == op) {
-                row.op = thrift::RowOpType::UPDATE;
-                if (*r.pkey != *r.old_pkey) {
-                    // generate a delete for old pkey and an update for new pkey
-                    thrift::Row row_del;
-                    row_del.xid = r.xid;
-                    row_del.xid_seq = r.xid_seq;
-                    row_del.primary_key = *r.old_pkey;
-                    row_del.op = thrift::RowOpType::DELETE;
-
-                    request.rows.push_back(std::move(row_del));
+                if (r.op == RowOp::INSERT) {
+                    row.op = thrift::RowOpType::INSERT;
+                } else {
+                    row.op = thrift::RowOpType::UPDATE;
                 }
+            } else {
+                row.op = thrift::RowOpType::DELETE;
             }
 
             request.rows.push_back(std::move(row));

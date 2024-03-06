@@ -139,7 +139,7 @@ namespace pg_msg {
                     ss << "  xid=" << delete_msg.xid << std::endl;
                 }
                 ss << "  rel_id=" << delete_msg.rel_id << std::endl;
-                ss << "  Tuples\n";
+                ss << "  Tuples (" << delete_msg.type << ")\n";
                 dump_tuple(delete_msg.tuple, ss);
                 break;
             }
@@ -151,9 +151,9 @@ namespace pg_msg {
                     ss << "  xid=" << update.xid << std::endl;
                 }
                 ss << "  rel_id=" << update.rel_id << std::endl;
-                ss << "  Old tuples" << std::endl;
+                ss << "  Old tuples (" << update.old_type << ")" << std::endl;
                 dump_tuple(update.old_tuple, ss);
-                ss << "  New tuples" << std::endl;
+                ss << "  New tuples (" << update.new_type << ")" << std::endl;
                 dump_tuple(update.new_tuple, ss);
                 break;
             }

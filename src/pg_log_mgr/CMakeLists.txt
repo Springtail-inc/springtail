@@ -9,6 +9,7 @@ set(PG_LOG_SOURCES
     pg_log_reader.cc
     pg_xact_handler.cc
     pg_xact_log_writer.cc
+    pg_xact_log_reader.cc
 )
 
 add_library(springtail_pglog ${PG_LOG_SOURCES})
@@ -34,12 +35,24 @@ target_link_libraries(pg_log_mgr_daemon
 add_executable(test_log_reader test/test_reader.cc)
 target_link_libraries(test_log_reader
     PUBLIC springtail_pglog
-    PRIVATE GTest::gtest_main
-)
-target_include_directories(test_log_reader
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
+    PRIVATE GTest::gtest_main)
+target_include_directories(test_log_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(test_xact_log test/test_xact_log.cc)
+target_link_libraries(test_xact_log
+    PUBLIC springtail_pglog
+    PRIVATE GTest::gtest_main)
+target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(test_redis test/test_redis.cc)
+target_link_libraries(test_redis
+    PUBLIC springtail_pglog
+    PRIVATE GTest::gtest_main)
+target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 gtest_discover_tests(test_log_reader
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
+
+gtest_discover_tests(test_xact_log)
+gtest_discover_tests(test_redis)

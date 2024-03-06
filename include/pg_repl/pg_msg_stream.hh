@@ -62,8 +62,8 @@ namespace springtail {
     class PgMsgStreamReader {
     public:
         /** Filter for all message types */
-        static inline constexpr char ALL_MESSAGES[] = {'B', 'C', 'R', 'I', 'U', 'D', 'T',
-                                                       'O', 'M', 'Y', 'S', 'E', 'c', 'A'};
+        const std::vector<char> ALL_MESSAGES = {'B', 'C', 'R', 'I', 'U', 'D', 'T',
+                                                'O', 'M', 'Y', 'S', 'E', 'c', 'A'};
 
         PgMsgStreamReader() = default;
 
@@ -92,14 +92,14 @@ namespace springtail {
          * @param eob output | end of block; true if no more messages in current block
          * @return PgMsgPtr; nullptr if no more messages or message skipped, check has_more() for EOF across all files
          */
-        PgMsgPtr read_message(const char filter[], bool &eos, bool &eob);
+        PgMsgPtr read_message(const std::vector<char> &filter, bool &eos, bool &eob);
 
         /**
          * @brief Read next message from stream
          * @param filter optional filter to apply to message types; decodes messages in filter
          * @return PgMsgPtr; nullptr if no more messages or message skipped, check has_more() for EOF across all files
          */
-        PgMsgPtr read_message(const char filter[]);
+        PgMsgPtr read_message(const std::vector<char> &filter);
 
         /**
          * @brief Get offset of start of header for current message block
@@ -151,7 +151,6 @@ namespace springtail {
         static inline constexpr int LEN_STREAM_START  = (4 + 1);
         static inline constexpr int LEN_STREAM_STOP   = 0;
         static inline constexpr int LEN_STREAM_COMMIT = (4 + 1 + 8 + 8 + 8);
-        static inline constexpr int LEN_STREAM_ABORT  = (4 + 4 + 8 + 8);
 
         // decode messages
         // v1 messages
@@ -281,7 +280,7 @@ namespace springtail {
         bool _read_header();
 
         /** Checks if msg type is in filtered set, if it is returns true */
-        bool _is_message_filtered(char msg_type, const char filter[]) const;
+        bool _is_message_filtered(char msg_type, const std::vector<char> &v) const;
 
         /** opens a file for reading at given offset */
         void _open_file(const std::filesystem::path &file, uint64_t offset);

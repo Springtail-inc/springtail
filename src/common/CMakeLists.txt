@@ -20,6 +20,11 @@ add_executable(test_common test/test_common.cc)
 target_include_directories(test_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_common PRIVATE springtail_common GTest::gtest_main)
 
+add_executable(test_filesystem test/test_filesystem.cc)
+target_include_directories(test_filesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_filesystem PRIVATE springtail_common GTest::gtest_main)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
+gtest_discover_tests(test_filesystem)

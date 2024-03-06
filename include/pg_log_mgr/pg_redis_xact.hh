@@ -31,10 +31,12 @@ namespace springtail {
         PgRedisXactValue(const std::filesystem::path &begin_path,
                          const std::filesystem::path &commit_path,
                          uint64_t db_id, uint64_t begin_offset, uint64_t commit_offset,
-                         uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid)
+                         uint64_t xact_lsn, uint64_t xid, uint32_t pg_xid,
+                         const std::set<uint32_t> &aborted_xids)
             : begin_path(begin_path), commit_path(commit_path),
               begin_offset(begin_offset), commit_offset(commit_offset),
-              xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid)
+              xact_lsn(xact_lsn), xid(xid), db_id(db_id), pg_xid(pg_xid),
+              aborted_xids(aborted_xids)
         {}
 
         /**
@@ -46,7 +48,7 @@ namespace springtail {
             std::vector<std::string> split;
             common::split_string(":", string_value, split);
 
-            assert(split.size() == 7);
+            assert(split.size() >= 7);
 
             // serialized order: xid, pg_xid, xact_lsn, begin_path, begin_offset, commit_path, commit_offset
             db_id = std::stoull(split[0]); // db_id
@@ -57,6 +59,11 @@ namespace springtail {
             begin_offset = std::stoull(split[5]); // begin offset
             commit_path = std::filesystem::path(split[6]); // commit path
             commit_offset = std::stoull(split[7]); // commit offset
+            int aborted_xids_size = std::stoi(split[8]); // aborted xids size
+
+            for (int i = 0; i < aborted_xids_size; i++) { // aborted xids
+                aborted_xids.insert(std::stoul(split[9 + i], nullptr, 16));
+            }
         }
 
         /**
@@ -65,8 +72,12 @@ namespace springtail {
          */
         std::string serialize() const
         {
-            return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}", db_id, xid, pg_xid, xact_lsn, begin_path.c_str(),
-                               begin_offset, commit_path.c_str(), commit_offset);
+            std::string xid_str = fmt::format("{}:", aborted_xids.size());
+            for (auto xid : aborted_xids) {
+                xid_str += fmt::format("{:X}:", xid);
+            }
+            return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}:{}", db_id, xid, pg_xid, xact_lsn, begin_path.c_str(),
+                               begin_offset, commit_path.c_str(), commit_offset, xid_str);
         }
 
         std::filesystem::path begin_path;
@@ -77,6 +88,7 @@ namespace springtail {
         uint64_t xid;
         uint64_t db_id; ///< database id
         uint32_t pg_xid;
+        std::set<uint32_t> aborted_xids;
     };
 
     /**

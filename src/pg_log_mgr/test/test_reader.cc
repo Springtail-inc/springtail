@@ -57,7 +57,6 @@ namespace {
             PgLogGenJson log_gen(_log_file);
             log_gen.parse_commands(json_file);
             _xact_list = log_gen.get_xact_list();
-            // PgLogGen::dump_file(_log_file);
 
             // if the file was open then close it
             if (_fp != nullptr) {
@@ -102,7 +101,7 @@ namespace {
     TEST_F(LogReader_Test, ProcessLog)
     {
         // create a new log file
-        process_json_cmd_file(std::filesystem::path("/tmp/test_reader.json"));
+        process_json_cmd_file(std::filesystem::path("test_reader.json"));
 
         // read the header
         uint64_t offset = 0;

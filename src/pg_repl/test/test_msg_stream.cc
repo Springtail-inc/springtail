@@ -62,14 +62,13 @@ namespace {
     TEST_F(MsgStreamReader_Test, SkipBlock)
     {
         bool eob=false, eos=false;
-        char filter[] = {};
 
         PgMsgStreamReader reader(_log_file);
 
         int count = 0;
         while (!eob) {
             // read next message
-            PgMsgPtr msg = reader.read_message(filter, eos, eob);
+            PgMsgPtr msg = reader.read_message({}, eos, eob);
             EXPECT_EQ(msg, nullptr);
             count++;
         }
@@ -79,12 +78,10 @@ namespace {
     TEST_F(MsgStreamReader_Test, Offset)
     {
         bool eob=false, eos=false;
-        char filter[] = { };
-
         PgMsgStreamReader reader(_log_file);
 
         // read next message
-        PgMsgPtr msg = reader.read_message(filter, eos, eob);
+        PgMsgPtr msg = reader.read_message({}, eos, eob);
         EXPECT_EQ(msg, nullptr);
         EXPECT_EQ(reader.header_offset(), 0);
         uint64_t offset = reader.block_end_offset();
@@ -92,7 +89,7 @@ namespace {
         EXPECT_NE(offset, reader.offset());
 
         reader.set_file(_log_file, offset);
-        msg = reader.read_message(filter, eos, eob);
+        msg = reader.read_message({}, eos, eob);
         EXPECT_EQ(msg, nullptr);
         EXPECT_EQ(reader.header_offset(), offset);
     }
@@ -100,14 +97,13 @@ namespace {
     TEST_F(MsgStreamReader_Test, SkipStream)
     {
         bool eob=false, eos=false;
-        char filter[] = {};
 
         PgMsgStreamReader reader(_log_file);
 
         int count = 0;
         while (!eos) {
             // read next message
-            PgMsgPtr msg = reader.read_message(filter, eos, eob);
+            PgMsgPtr msg = reader.read_message({}, eos, eob);
             EXPECT_EQ(msg, nullptr);
             count++;
         }
