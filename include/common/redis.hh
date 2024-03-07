@@ -103,6 +103,7 @@ namespace springtail {
         uint64_t push(const std::string &key, const T &value)
         {
             std::string value_string = value.serialize();
+            std::cout << "Pushing: key=" << key << ", value=" << value_string << "\n";
             return RedisMgr::get_instance()->get_client()->rpush(key, value_string);
         }
 
@@ -120,6 +121,18 @@ namespace springtail {
                 return std::make_shared<T>(res->second);
             }
             return nullptr;
+        }
+
+        /** list all values in redis queue */
+        std::vector<T> range(const std::string &key, long long start=0, long long end=-1)
+        {
+            std::vector<std::string> values;
+            RedisMgr::get_instance()->get_client()->lrange(key, start, end, std::back_inserter(values));
+            std::vector<T> result;
+            for (auto &value: values) {
+                result.push_back(T(value));
+            }
+            return result;
         }
     };
 

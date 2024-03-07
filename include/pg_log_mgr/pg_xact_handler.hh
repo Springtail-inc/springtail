@@ -25,9 +25,23 @@ namespace springtail {
          */
         void process(const PgTransactionPtr xact);
 
+
+        /**
+         * @brief Get the next logfile path based on current path
+         * @param path current path
+         * @return std::filesystem::path
+         */
         std::filesystem::path get_next_logfile(std::filesystem::path &path) {
             return fs::get_next_file(path, LOG_PREFIX, LOG_SUFFIX);
         }
+
+        /**
+         * @brief Get the redis xacts object -- for testing
+         * @param start start index (0)
+         * @param end   end index (-1)
+         * @return std::vector<PgRedisXactValue>
+         */
+        std::vector<PgRedisXactValue> get_redis_xacts(long long start=0, long long end=-1);
 
     private:
         std::filesystem::path _base_dir;

@@ -9,9 +9,12 @@
 #include <common/logging.hh>
 #include <common/exception.hh>
 #include <common/concurrent_queue.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
 
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/pg_xact_handler.hh>
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -23,6 +26,8 @@ namespace {
     class LogReader_Test : public ::testing::Test {
     protected:
         static constexpr char const * const LOG_FILE = "/tmp/test_log_reader.log";
+        static constexpr char const * const JSON_FILE = "test_reader.json";
+        static constexpr char const * const XACT_LOG_DIR = "/tmp/test_xact_log";
 
         void SetUp() override {
             // code here will execute just before the test ensues
@@ -30,6 +35,9 @@ namespace {
 
             // create a new log file
             _log_file = std::filesystem::path(LOG_FILE);
+
+            // make a directory in /tmp/
+            std::filesystem::create_directory(XACT_LOG_DIR);
         }
 
         void TearDown() override {
@@ -43,6 +51,12 @@ namespace {
 
             // remove the log file
             std::filesystem::remove(_log_file);
+
+            // remove the directory
+            std::filesystem::remove_all(XACT_LOG_DIR);
+
+            // clean up redis
+            RedisMgr::get_instance()->get_client()->flushdb();
         }
 
         /** Process json command file stored into log file*/
@@ -101,7 +115,7 @@ namespace {
     TEST_F(LogReader_Test, ProcessLog)
     {
         // create a new log file
-        process_json_cmd_file(std::filesystem::path("test_reader.json"));
+        process_json_cmd_file(std::filesystem::path(JSON_FILE));
 
         // read the header
         uint64_t offset = 0;
@@ -109,6 +123,11 @@ namespace {
         while ((msg_length = read_header(offset)) > 0) {
             // process the log
             _log_reader.process_log(_log_file, offset, 1);
+        }
+
+        for (int i = 0; i < _xact_list.size(); i++) {
+            PgTransactionPtr xact = _xact_list[i];
+            std::cout << fmt::format("xact: {}\n", xact->type);
         }
 
         // xact list is from the log generator
@@ -123,14 +142,63 @@ namespace {
             xact = _queue->pop();      // pop from queue from log reader
             xact_cmp = _xact_list[i];  // from log generator
             ASSERT_NE(xact, nullptr);
+            EXPECT_EQ(xact->type, xact_cmp->type);
             EXPECT_EQ(xact->xid, xact_cmp->xid);
             EXPECT_EQ(xact->begin_offset, xact_cmp->begin_offset);
-            EXPECT_EQ(xact->commit_offset, xact_cmp->commit_offset);
-            EXPECT_EQ(xact->oids.size(), xact_cmp->oids.size());
-            EXPECT_EQ(xact->oids, xact_cmp->oids);
+            if (xact->type == PgTransaction::TYPE_COMMIT) {
+                EXPECT_EQ(xact->commit_offset, xact_cmp->commit_offset);
+                EXPECT_EQ(xact->oids.size(), xact_cmp->oids.size());
+                EXPECT_EQ(xact->oids, xact_cmp->oids);
+            }
         }
 
         EXPECT_TRUE(_queue->empty());
+    }
+
+    TEST_F(LogReader_Test, XactHandling)
+    {
+        // initialize the xact handler
+        PgXactHandler xact_handler{std::filesystem::path(XACT_LOG_DIR)};
+
+        // create a new log file
+        process_json_cmd_file(std::filesystem::path(JSON_FILE));
+
+        std::vector<PgTransactionPtr> xact_list;
+        uint64_t offset = 0;
+        uint32_t msg_length;
+
+        // loop reading the header and process the log
+        while ((msg_length = read_header(offset)) > 0) {
+            // process the log
+            _log_reader.process_log(_log_file, offset, 1);
+
+            // process the transactions resulting from log message block
+            while (!_queue->empty()) {
+                PgTransactionPtr xact = _queue->pop();
+
+                // process the transaction
+                xact_handler.process(xact);
+
+                // store it for comparison if of type commit
+                if (xact->type == PgTransaction::TYPE_COMMIT) {
+                    xact_list.push_back(xact);
+                }
+            }
+        }
+
+        // fetch the redis xacts and compare
+        std::vector<PgRedisXactValue> xacts = xact_handler.get_redis_xacts();
+        EXPECT_EQ(xact_list.size(), xacts.size());
+
+        for (int i = 0; i < xact_list.size(); i++) {
+            EXPECT_EQ(xacts[i].pg_xid, xact_list[i]->xid);
+            EXPECT_EQ(xacts[i].xid, xact_list[i]->springtail_xid);
+            EXPECT_EQ(xacts[i].begin_offset, xact_list[i]->begin_offset);
+            EXPECT_EQ(xacts[i].begin_path, xact_list[i]->begin_path);
+            EXPECT_EQ(xacts[i].commit_offset, xact_list[i]->commit_offset);
+            EXPECT_EQ(xacts[i].commit_path, xact_list[i]->commit_path);
+            EXPECT_EQ(xacts[i].aborted_xids.size(), xact_list[i]->aborted_xids.size());
+        }
     }
 
 } // namespace

@@ -49,7 +49,8 @@ namespace springtail {
             // handle log entry type
             switch (type) {
                 case PgTransaction::TYPE_STREAM_START:
-                    _read_stream_start(msg_len);
+                case PgTransaction::TYPE_STREAM_ABORT:
+                    _read_stream_msg(msg_len, type);
                     break;
                 case PgTransaction::TYPE_COMMIT:
                     _read_commit(msg_len, committed_xid);
@@ -176,7 +177,7 @@ namespace springtail {
     }
 
     void
-    PgXactLogReader::_read_stream_start(uint32_t msg_len)
+    PgXactLogReader::_read_stream_msg(uint32_t msg_len, uint8_t type)
     {
         // 4B postgres XID + 8B LSN + 8B begin offset + 4B path len + path string
 
@@ -201,9 +202,13 @@ namespace springtail {
 
         xact->begin_path = std::string(&buffer[offset], path_len);
 
-        xact->type = PgTransaction::TYPE_STREAM_START;
+        xact->type = type;
 
-        _stream_map.insert({xact->xid, xact});
+        if (type == PgTransaction::TYPE_STREAM_START) {
+            _stream_map.insert({xact->xid, xact});
+        } else if (type == PgTransaction::TYPE_STREAM_ABORT) {
+            _stream_map.erase(xact->xid);
+        }
 
         return;
     }

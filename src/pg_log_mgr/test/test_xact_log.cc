@@ -49,7 +49,7 @@ namespace {
         xact2->xact_lsn = 2000;
         xact2->begin_path = std::filesystem::path("/tmp/test_xlog/test_3.log");
 
-        writer.log_stream_start(xact2);
+        writer.log_stream_msg(xact2);
 
         writer.close();
 
