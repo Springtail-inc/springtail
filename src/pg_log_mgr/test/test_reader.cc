@@ -56,7 +56,9 @@ namespace {
             std::filesystem::remove_all(XACT_LOG_DIR);
 
             // clean up redis
-            RedisMgr::get_instance()->get_client()->flushdb();
+            if (using_redis) {
+                RedisMgr::get_instance()->get_client()->flushdb();
+            }
         }
 
         /** Process json command file stored into log file*/
@@ -105,6 +107,7 @@ namespace {
             return header.msg_length;
         }
 
+        bool using_redis = false;
         FILE *_fp = nullptr;
         std::filesystem::path _log_file{LOG_FILE};
         PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
@@ -157,6 +160,15 @@ namespace {
 
     TEST_F(LogReader_Test, XactHandling)
     {
+        // See if redis is enabled
+        try {
+            RedisMgr::get_instance()->get_client()->ping();
+            using_redis = true;
+        } catch (const std::exception &e) {
+            using_redis = false;
+            GTEST_SKIP() << "Redis is not running, skipping test";
+        }
+
         // initialize the xact handler
         PgXactHandler xact_handler{std::filesystem::path(XACT_LOG_DIR)};
 
