@@ -30,10 +30,10 @@ namespace springtail {
         void log_commit(PgTransactionPtr xact);
 
         /**
-         * @brief Log a stream start, not yet committed, no xid allocated
+         * @brief Log a stream message (start or abort), no springtail xid allocated
          * @param xact postgres transaction
          */
-        void log_stream_start(PgTransactionPtr xact);
+        void log_stream_msg(PgTransactionPtr xact);
 
         /** Close the file */
         void close();

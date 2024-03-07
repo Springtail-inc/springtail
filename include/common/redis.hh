@@ -190,6 +190,18 @@ namespace springtail {
             return nullptr;
         }
 
+        /** list all values in redis queue */
+        std::vector<T> range(long long start=0, long long end=-1)
+        {
+            std::vector<std::string> values;
+            _redis->lrange(_key, start, end, std::back_inserter(values));
+            std::vector<T> result;
+            for (auto &value: values) {
+                result.push_back(T(value));
+            }
+            return result;
+        }
+
     private:
         std::string _key; ///< The unique key within Redis for this queue.
         std::shared_ptr<RedisClient> _redis; ///< A connection to Redis.

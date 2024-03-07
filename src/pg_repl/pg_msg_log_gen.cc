@@ -186,12 +186,26 @@ namespace springtail {
     {
         _current_xact->commit_offset = ::ftell(_fp);
         _current_xact->commit_path = _file_name;
+        _current_xact->type = PgTransaction::TYPE_COMMIT;
         _xact_list.push_back(_current_xact);
+    }
+
+    void
+    PgMsgLogGen::_add_stream_xact(uint8_t type)
+    {
+        PgTransactionPtr xact = std::make_shared<PgTransaction>();
+
+        xact->begin_offset = _header_offset;
+        xact->begin_path = _file_name;
+        xact->xid = _xid;
+        xact->type = type;
+        xact->xact_lsn = _begin_lsn;
+        _xact_list.push_back(xact);
     }
 
     uint32_t
     PgMsgLogGen::create_table(const std::string &table_name,
-                           const std::vector<PgMsgSchemaColumn> &columns)
+                              const std::vector<PgMsgSchemaColumn> &columns)
     {
         uint32_t table_id = _next_table_id++;
         _table_id_to_name[table_id] = table_name;
@@ -309,9 +323,10 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::update(uint32_t table_id, const std::vector<std::string> &key_columns,
-                     const std::vector<std::string> &row_columns,
-                     bool using_pkey)
+    PgMsgLogGen::update(uint32_t table_id,
+                        const std::vector<std::string> &key_columns,
+                        const std::vector<std::string> &row_columns,
+                        bool using_pkey)
     {
         _write_uint8(pg_msg::MSG_UPDATE);
         if (_is_streaming) { // since proto version 2
@@ -330,8 +345,8 @@ namespace springtail {
 
     void
     PgMsgLogGen::delrow(uint32_t table_id,
-                     const std::vector<std::string> &key_columns,
-                     bool using_pkey)
+                        const std::vector<std::string> &key_columns,
+                        bool using_pkey)
     {
         _write_uint8(pg_msg::MSG_DELETE);
         if (_is_streaming) { // since proto version 2
@@ -355,6 +370,7 @@ namespace springtail {
 
         if (!_in_stream_xact) {
             _add_start_xact(); // add start xact before header
+            _add_stream_xact(PgTransaction::TYPE_STREAM_START);
             _in_stream_xact = true;
             _stream_xid = _xid++;
             stream_flag = 1; // first stream segment
@@ -410,6 +426,8 @@ namespace springtail {
     PgMsgLogGen::stream_abort()
     {
         _write_header(); // close previous msg, start new one
+
+        _add_stream_xact(PgTransaction::TYPE_STREAM_ABORT);
 
         assert(!_in_stream_xact);
         assert(_is_streaming);

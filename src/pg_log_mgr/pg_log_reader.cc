@@ -133,6 +133,14 @@ namespace springtail {
         xact->begin_offset = _reader.header_offset();
         xact->xid = start_msg.xid;
         _xact_map.insert({xact->xid, xact});
+
+        PgTransactionPtr stream_xact = std::make_shared<PgTransaction>();
+        stream_xact->begin_path = _current_path;
+        stream_xact->begin_offset = _reader.header_offset();
+        stream_xact->xid = start_msg.xid;
+        stream_xact->type = PgTransaction::TYPE_STREAM_START;
+
+        _queue->push(stream_xact);
     }
 
     void
@@ -154,6 +162,7 @@ namespace springtail {
         xact->commit_path = _current_path;
         xact->commit_offset = _reader.offset();
         xact->xact_lsn = commit_msg.xact_lsn;
+        xact->type = PgTransaction::TYPE_COMMIT;
 
         _xact_map.erase(itr);
         _queue->push(xact);
@@ -164,17 +173,27 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
 
-        // abort is really for the subtransaction xid
-        // if sub_xid == xid, then it's a top level xact that aborted
+        auto itr = _xact_map.find(abort_msg.xid);
+        if (itr == _xact_map.end()) {
+            // no start streaming xact found...
+            SPDLOG_WARN("No matching xact for stream abort: xid={}, xact_lsn={}",
+                        abort_msg.xid, abort_msg.abort_lsn);
+            return;
+        }
+
         if (abort_msg.sub_xid == abort_msg.xid) {
-            _xact_map.erase(abort_msg.xid);
+            // if sub_xid == xid, then it's a top level xact that aborted
+            // add it to the xact queue for logging
+            PgTransactionPtr xact = itr->second;
+            xact->type = PgTransaction::TYPE_STREAM_ABORT;
+            _queue->push(xact);
+            // remove it from the map
+            _xact_map.erase(itr);
         } else {
             // subtransaction aborted, add to parent xact aborted list
-            auto itr = _xact_map.find(abort_msg.xid);
-            if (itr != _xact_map.end()) {
-                itr->second->aborted_xids.insert(abort_msg.sub_xid);
-            }
+            itr->second->aborted_xids.insert(abort_msg.sub_xid);
         }
+
     }
 
     void

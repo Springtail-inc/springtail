@@ -25,7 +25,7 @@ namespace springtail {
         /**
          * Drops a table.
          */
-        void alter_table(uint64_t xid, uint64_t lsn, const PgMsgDropTable &msg);
+        void drop_table(uint64_t xid, uint64_t lsn, const PgMsgDropTable &msg);
     };
 
 }

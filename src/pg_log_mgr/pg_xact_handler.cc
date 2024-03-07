@@ -48,8 +48,9 @@ namespace springtail {
     PgXactHandler::process(const PgTransactionPtr xact)
     {
         // if stream start, just log it
-        if (xact->type == PgTransaction::TYPE_STREAM_START) {
-            _logger->log_stream_start(xact);
+        if (xact->type == PgTransaction::TYPE_STREAM_START ||
+            xact->type == PgTransaction::TYPE_STREAM_ABORT) {
+            _logger->log_stream_msg(xact);
             return;
         }
 
@@ -72,5 +73,11 @@ namespace springtail {
 
         // XXX need to add customer ID
         _redis_queue.push(redis_xact);
+    }
+
+    std::vector<PgRedisXactValue>
+    PgXactHandler::get_redis_xacts(long long start, long long end)
+    {
+        return _redis_queue.range(start, end);
     }
 }

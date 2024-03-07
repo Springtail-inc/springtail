@@ -195,6 +195,9 @@ namespace springtail {
 
         /** complete _current_xact with end of xact data, and add to xact list */
         void _add_end_xact();
+
+        /** add a stream message to xact log -- either stream start or stream commit */
+        void _add_stream_xact(uint8_t type);
     };
 
 

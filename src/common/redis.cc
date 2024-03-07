@@ -74,6 +74,8 @@ namespace springtail {
             _instance = nullptr;
         }
     }
+
+
 }
 
 /* Example usage:

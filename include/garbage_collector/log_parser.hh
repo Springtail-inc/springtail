@@ -614,7 +614,7 @@ namespace springtail {
 
                             // generate extents for the delete data and insert data
                             auto schema = table->schema(entry->xid);
-                            auto pkey_schema = schema->create_schema(table->primary_key, {});
+                            auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
                             auto old_extent = std::make_shared<Extent>(pkey_schema, ExtentType::LEAF, entry->xid);
                             auto &&old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple);
@@ -623,7 +623,7 @@ namespace springtail {
                             auto &&new_tuple = _pack_extent(new_extent, update_msg.new_tuple);
 
                             // extract the primary key from the new data tuple
-                            auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key);
+                            auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
 
                             // look up the extent_id for the old tuple
                             uint64_t old_extent_id = table->primary_lookup(old_pkey_tuple);

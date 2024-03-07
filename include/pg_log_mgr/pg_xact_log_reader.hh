@@ -64,15 +64,17 @@ namespace springtail {
 
         /**
          * @brief Read the next committed xact from file
-         * @param xid springtail xid (last committed xid) used as filter
+         * @param msg_len  message length
+         * @param xid      springtail xid (last committed xid) used as filter
          */
         void _read_commit(uint32_t msg_len, uint64_t committed_xid);
 
         /**
          * @brief Read the next stream start from file
-         * @param xid springtail xid (last committed xid) used as filter
+         * @param msg_len message length
+         * @param type    message type
          */
-        void _read_stream_start(uint32_t msg_len);
+        void _read_stream_msg(uint32_t msg_len, uint8_t type);
 
         /** Open file */
         void _open(const std::filesystem::path &path);

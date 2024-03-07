@@ -69,11 +69,12 @@ namespace springtail {
     }
 
     void
-    PgXactLogWriter::log_stream_start(PgTransactionPtr xact)
+    PgXactLogWriter::log_stream_msg(PgTransactionPtr xact)
     {
-        // TYPE_STREAM_START
+        // TYPE_STREAM_START or TYPE_STREAM_ABORT
         // 4B message length + 3B magic + 1B Type
         // 4B postgres XID + 8B LSN + 8B begin offset + 4B path len + path string
+        assert(xact->type == PgTransaction::TYPE_STREAM_START || xact->type == PgTransaction::TYPE_STREAM_ABORT);
 
         uint32_t buffer_len = (4 + 3 + 1 + 4 + 8 + 8 + 4); // fixed msg length
         uint32_t begin_path_len = ::strlen(xact->begin_path.c_str());

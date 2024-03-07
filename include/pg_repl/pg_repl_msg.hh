@@ -210,8 +210,11 @@ namespace springtail
      * Also includes set of oids changed within the transaction
      */
     struct PgTransaction {
-        static constexpr uint8_t TYPE_COMMIT = 0;
-        static constexpr uint8_t TYPE_STREAM_START = 1;
+        enum : uint8_t {
+            TYPE_COMMIT = 0,
+            TYPE_STREAM_START = 1,
+            TYPE_STREAM_ABORT = 2
+        };
 
         uint64_t begin_offset;   ///< offset to start of block header
         uint64_t commit_offset;  ///< offset to end of commit msg
