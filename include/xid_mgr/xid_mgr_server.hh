@@ -10,12 +10,12 @@
 
 namespace springtail {
 
-    class XidMgrServer
     /**
      * @class XidMgrServer
      * @brief This class represents a server for managing transaction IDs (XIDs).
      *        It provides functionality to allocate XID ranges, commit XIDs, and retrieve the latest committed XID.
      */
+    class XidMgrServer
     {
     public:
         static constexpr char const XID_MGR_COMMIT_FILE[] = "xid_mgr_commit";
