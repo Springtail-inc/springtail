@@ -335,6 +335,9 @@ namespace springtail {
                             case PgMsgEnum::CREATE_TABLE: {
                                 auto &table_msg = std::get<PgMsgTable>(msg->msg);
 
+                                // XXX schema changes should be applied in-order, so need to block
+                                //     this operation if there are earlier un-applied schema changes
+
                                 // apply the schema change
                                 _table_manager.create_table(_state.entry->pg_xid, _state.entry->lsn, table_msg);
 
@@ -345,6 +348,9 @@ namespace springtail {
 
                             case PgMsgEnum::ALTER_TABLE: {
                                 auto &table_msg = std::get<PgMsgTable>(msg->msg);
+
+                                // XXX schema changes should be applied in-order, so need to block
+                                //     this operation if there are earlier un-applied schema changes
 
                                 // apply the schema change
                                 _table_manager.alter_table(_state.entry->pg_xid, _state.entry->lsn, table_msg);
@@ -357,8 +363,14 @@ namespace springtail {
                             case PgMsgEnum::DROP_TABLE: {
                                 auto &drop_msg = std::get<PgMsgDropTable>(msg->msg);
 
+                                // XXX schema changes should be applied in-order, so need to block
+                                //     this operation if there are earlier un-applied schema changes
+
                                 // apply the schema change
                                 _table_manager.drop_table(_state.entry->pg_xid, _state.entry->lsn, drop_msg);
+
+                                // XXX also perform a truncation of the table
+                                _process_mutation();
 
                                 // note: we don't notify the backlog until the entire XID is
                                 //       committed since there might be additional schema changes
@@ -643,37 +655,21 @@ namespace springtail {
                                 // lookup the extent for the new key
                                 uint64_t new_extent_id = table->primary_lookup(new_pkey_tuple);
 
-                                // if the insert and remove are from the same extent ID, add the update, otherwise split them into remove and insert
-                                if (old_extent_id == new_extent_id) {
+                                // send a delete and insert to the write cache
+                                RowData delete_data;
+                                delete_data.xid = entry->xid;
+                                delete_data.xid_seq = entry->lsn;
+                                delete_data.pkey = old_extent->seralize();
+                                data.op = RowOp::DELETE;
 
-                                    // send the update to the write cache
-                                    RowData data;
-                                    data.xid = entry->xid;
-                                    data.xid_seq = entry->lsn;
-                                    // XXX do we need to keep the new pkey given it's in the data?
-                                    // data.pkey = new_pkey_extent->seralize();
-                                    data.old_pkey = old_extent->seralize();
-                                    data.data = new_extent->serialize();
-                                    data.op = RowOp::UPDATE;
+                                RowData insert_data;
+                                insert_data.xid = entry->xid;
+                                insert_data.xid_seq = entry->lsn;
+                                insert_data.data = new_extent->seralize();
+                                data.op = RowOp::INSERT;
 
-                                    _write_cache->add_rows(table->id(), old_extent_id, RowOp::UPDATE, { data });
-                                } else {
-                                    // send a delete and insert to the write cache
-                                    RowData delete_data;
-                                    delete_data.xid = entry->xid;
-                                    delete_data.xid_seq = entry->lsn;
-                                    delete_data.pkey = old_extent->seralize();
-                                    data.op = RowOp::DELETE;
-
-                                    RowData insert_data;
-                                    insert_data.xid = entry->xid;
-                                    insert_data.xid_seq = entry->lsn;
-                                    insert_data.data = new_extent->seralize();
-                                    data.op = RowOp::INSERT;
-
-                                    _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { delete_data });
-                                    _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { insert_data });
-                                }
+                                _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { delete_data });
+                                _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { insert_data });
                             }
                             break;
                         }

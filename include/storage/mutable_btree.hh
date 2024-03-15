@@ -142,6 +142,11 @@ namespace springtail {
          */
         uint64_t finalize();
 
+        /**
+         * Helper function to create a tuple that contains the search key fields and a set of
+         * constant value keys.
+         */
+
     private:
         /** The maximum size of an extent before we split it in half. */
         static const uint32_t MAX_EXTENT_SIZE = 64 * 1024;

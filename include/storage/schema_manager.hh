@@ -134,6 +134,62 @@ namespace springtail {
         SchemaUpdate generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
                                      const std::map<uint32_t, SchemaColumn> &new_schema,
                                      uint64_t xid, uint64_t lsn);
+
+        /**
+         * Update the system tables to reflect a mutation to a schema.
+         */
+        void
+        alter_schema(uint64_t table_id, const SchemaColumn &new_column, const SchemaUpdate &update)
+        {
+            // XXX we might be able to collapse these tables together if we record the update type in the schemas table?
+
+            // create the fields for the schemas table update
+            FieldArrayPtr schemas_fields = std::make_shared<FieldArray>(9);
+            FieldArrayPtr schema_history_fields = std::make_shared<FieldArray>(9);
+
+            // the common fields
+            auto table_id_f = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            auto xid_f = std::make_shared<ConstTypeField<uint64_t>>(update.xid);
+            auto lsn_f = std::make_shared<ConstTypeField<uint64_t>>(update.lsn);
+            auto name_f = std::make_shared<ConstTypeField<uint64_t>>(new_column.name);
+            auto position_f = std::make_shared<ConstTypeField<uint32_t>>(new_column.position);
+            auto type_f = std::make_shared<ConstTypeField<uint8_t>>(new_column.type);
+            auto exists_f = std::make_shared<ConstTypeField<bool>>(update.update_type != SchemaUpdateType::REMOVE_COLUMN);
+            auto nullable_f = std::make_shared<ConstTypeField<uint8_t>>(new_column.nullable);
+
+            FieldPtr default_f;
+            if (new_column.default_value) {
+                default_f = std::make_shared<ConstTypeField<std::string>>(*(new_column.default_value));
+            } else {
+                default_f = std::make_shared<ConstNullField>(SchemaType::TEXT);
+            }
+
+            // set the schema fields
+            schemas_fields->at(0) = table_id_f;
+            schemas_fields->at(1) = position_f;
+            schemas_fields->at(2) = xid_f;
+            schemas_fields->at(3) = lsn_f;
+            schemas_fields->at(4) = exists_f;
+            schemas_fields->at(5) = name_f;
+            schemas_fields->at(6) = type_f;
+            schemas_fields->at(7) = nullable_f;
+            schemas_fields->at(8) = default_f;
+
+            _schemas_t->insert(Tuple(schemas_fields, nullptr));
+
+            // set the shared schema_history fields
+            schema_history_fields->at(0) = table_id_f;
+            schema_history_fields->at(1) = xid_f;
+            schema_history_fields->at(2) = lsn_f;
+            schema_history_fields->at(3) = std::make_shared<ConstTypeField<uint8_t>>(update.update_type);
+            schema_history_fields->at(4) = name_f;
+            schema_history_fields->at(5) = position_f;
+            schema_history_fields->at(6) = type_f;
+            schema_history_fields->at(7) = nullable_f;
+            schema_history_fields->at(8) = default_f;
+
+            _schemas_history_t->insert(Tuple(schema_history_fields, nullptr));
+        }
     };
 
 }

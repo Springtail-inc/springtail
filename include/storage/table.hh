@@ -10,7 +10,6 @@ namespace springtail {
     public:
         Table(uint64_t table_id,
               const std::vector<std::string> &primary_key,
-              std::shared_ptr<ExtentSchema> schema,
               std::shared_ptr<ExtentCache> cache,
               uint64_t xid,
               uint64_t root_offset)
@@ -188,4 +187,149 @@ namespace springtail {
         BTreePtr _primary_index;
     };
 
+
+    /**
+     * Interface for mutating a table at the most recent XID.
+     */
+    class MutableTable {
+    public:
+        /**
+         * Add a row to the table.  The data extent ID is provided externally by the write cache, or
+         * if the extent_id is UNKNOWN, then it will utilize the tuple data to determine where the
+         * row should be added.
+         */
+        void insert(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        {
+            if (extent_id == UNKNOWN_EXTENT) {
+                if (_primary_key_columns.empty()) {
+                    _append(value, xid);
+                } else {
+                    _insert(value, xid);
+                }
+            } else {
+                _direct_insert(value, xid, extent_id);
+            }
+        }
+
+        /**
+         * Remove a row from the table.  The data extent ID is provided externally by the write
+         * cache, or if the extent_id is UNKNOWN, then it will utilize the tuple data to identify a
+         * row to remove.
+         */
+        void remove(TuplePtr key, uint64_t xid, uint64_t extent_id)
+        {
+            
+        }
+
+        /**
+         * Remove a row from the table.  The data extent ID is provided externally by the write
+         * cache, or if the extent_id is UNKNOWN, then it will utilize the tuple data to identify a
+         * row to remove.
+         */
+        void update(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        {
+
+        }
+
+        /**
+         * Remove the entries into the extent from the primary and secondary indexes.
+         */
+        void
+        invalidate_indexes(uint64_t extent_id, ExtentPtr extent)
+        {
+            // get the key from the last row of the extent and remove it from the primary index
+            FieldArrayPtr key_fields = _primary_index->get_key_fields();
+            
+            // remove the primary index entry
+            _primary_index->remove(FieldTuple(key_fields, extent.back()));
+
+            // setup the value fields for the secondary indexes
+            FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
+            value_fields[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
+            // go through each row and pass the relevant key to each of the secondary indexes for removal
+            uint32_t row_id;
+            for (auto &&row_i : *extent) {
+                value_fields[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+                for (auto &&secondary : _secondary_indexes) {
+                    key_fields = secondary->get_key_fields();
+
+                    secondary->remove(KeyValueTuple(key_fields, value_fields, *row_i));
+                }
+
+                ++row_id;
+            }
+        }
+
+        /**
+         * Add the entries in the extent into the primary and secondary indexes.
+         */
+        void
+        populate_indexes(uint64_t extent_id, ExtentPtr extent)
+        {
+            // get the key from the last row of the extent and add it to the primary index
+            FieldArrayPtr key_fields = _primary_index->get_key_fields();
+            FieldArrayPtr value_fields = std::make_shared<FieldArray>(1);
+            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+
+            _primary_index->insert(KeyValueTuple(key_fields, value_fields, extent.back()));
+
+            // go through each row and pass the relevant key to each of the secondary indexes for insertion
+            value_fields->resize(2);
+            uint32_t row_id;
+            for (auto &&row_i : *extent) {
+                (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+                for (auto &&secondary : _secondary_indexes) {
+                    key_fields = secondary->get_key_fields();
+
+                    secondary->insert(KeyValueTuple(key_fields, value_fields, *row_i));
+                }
+            }
+        }
+
+    private:
+        void
+        _direct_insert(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        {
+            // get the page from the cache
+            auto page = _cache->get(extent_id, this);
+
+            // add the row to the page
+            page->insert(value);
+
+            // release the page back to the write cache
+            _cache->release(page);
+        }
+
+        void
+        _append(TuplePtr value, uint64_t xid)
+        {
+            // there is no primary key, so append the row to the last extent
+            uint64_t extent_id = _primary_index->back();
+
+            // get the page from the cache
+            auto page  = _cache->get(extent_id);
+
+            // append the value to the extent
+            page->append(value);
+
+            // release the extent back to the write cache
+            // note: the primary index is just a btree of extent IDs in the no-primary-key scenario
+            _cache->release(page);
+        }
+
+        void
+        _insert(TuplePtr value, uint64_t xid)
+        {
+            // we didn't receive an extent_id, so we need to look up the extent from the primary index
+            auto search_key = _schema->tuple_subset(value, _primary_key_columns);
+            auto i = _primary_index->lower_bound(search_key, xid);
+            uint64_t extent_id = extent_id_f->get_uint64(*i);
+
+            // then we can do a direct insert
+            _direct_insert(value, xid, extent_id);
+        }
+    };
 }

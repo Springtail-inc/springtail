@@ -1126,6 +1126,31 @@ namespace springtail {
     };
 
 
+    class KeyValueTuple : public Tuple {
+    public:
+        KeyValueTuple(FieldArrayPtr key, FieldArrayPtr value, const std::any &row)
+            : Tuple(row),
+              _key(key),
+              _value(value)
+        { }
+
+        std::size_t size() const {
+            return _key->size() + _value->size();
+        }
+
+        FieldPtr field(int idx) const {
+            if (idx < _key->size()) {
+                return _key->at(idx);
+            } else {
+                return _value->at(idx - _key->size());
+            }
+        }
+
+    private:
+        FieldArrayPtr _key;
+        FieldArrayPtr _value;
+    };
+
     /**
      * Interface for a mutable Tuple that can have it's value set by another Tuple.
      */
