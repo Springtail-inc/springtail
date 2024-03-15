@@ -20,7 +20,7 @@ namespace logging {
         if ((log_id & _log_mask) == 0) {
             return nullptr;
         }
-        return spdlog::get("springtail");
+        return spdlog::default_logger();
     }
 } // namespace logging
 
