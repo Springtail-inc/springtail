@@ -142,6 +142,14 @@ namespace springtail {
             return false;
         }
 
+        /**
+         * @brief Scan the entire log file validating header, return end LSN of last message
+         * @param file log file to scan
+         * @param truncate if true truncate file to end of last message if eof reached prematurely
+         * @return uint64_t end LSN of last message
+         */
+        static uint64_t scan_log(const std::filesystem::path &file, bool truncate=false);
+
     protected:
         // Proto V1; message lengths if fixed length; excludes first byte for opcode
         static inline constexpr int LEN_BEGIN    = (8 + 8 + 4);
@@ -290,6 +298,8 @@ namespace springtail {
 
         /** Skips a message of a given type */
         void _skip_msg(char msg_type);
+
+        static void _truncate_file(const std::filesystem::path &path, uint64_t offset);
     };
 
     class PgMsgStreamWriter {

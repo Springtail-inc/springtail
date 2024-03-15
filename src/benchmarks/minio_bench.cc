@@ -51,8 +51,8 @@ writer(const std::string &url,
         client.PutObject(args);
         timer.stop();
     }
-
-    std::cout << fmt::format("{:f}", timer.elapsed_ms().count() / file_count) << std::endl;
+    double f = timer.elapsed_ms().count() / file_count;
+    std::cout << fmt::format("{:f}", f) << std::endl;
 }
 
 /**
@@ -100,23 +100,23 @@ int main(int argc, char* argv[]) {
 
     // Create S3 base URL.
     minio::s3::BaseUrl base_url(credentials.at("url").get<std::string>());
- 
+
     // Create credential provider.
     minio::creds::StaticProvider provider(credentials.at("accessKey").get<std::string>(),
                                           credentials.at("secretKey").get<std::string>());
- 
+
     // Create S3 client.
     minio::s3::Client client(base_url, &provider);
 
     std::string bucket_name = "miniobench";
- 
+
     // Check if bucket exists or not.
     bool exist;
     {
         minio::s3::BucketExistsArgs args;
         args.bucket = bucket_name;
         args.region = "us-east-1";
- 
+
         minio::s3::BucketExistsResponse resp = client.BucketExists(args);
         if (!resp) {
             std::cout << "unable to do bucket existence check; " << resp.Error()
@@ -125,15 +125,15 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "message: " << resp.message << std::endl;
- 
+
         exist = resp.exist;
     }
- 
+
     // Create bucket if it doesn't exist.
     if (!exist) {
         minio::s3::MakeBucketArgs args;
         args.bucket = bucket_name;
- 
+
         minio::s3::MakeBucketResponse resp = client.MakeBucket(args);
         std::cout << "message: " << resp.message << std::endl;
         if (!resp) {

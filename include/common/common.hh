@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include <common/logging.hh>
+
 namespace springtail {
-    void springtail_init();
+    void springtail_init(uint32_t logging_mask = LOG_ALL);
 
     namespace common {
         /**

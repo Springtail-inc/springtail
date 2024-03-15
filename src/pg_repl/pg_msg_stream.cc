@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <vector>
 #include <memory>
@@ -73,7 +74,7 @@ namespace springtail {
         _header_offset = _current_offset;
 
         if (!_read_buffer(buffer, PgMsgStreamHeader::SIZE)) {
-            SPDLOG_DEBUG("End of file: {}", _current_path);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "End of file: {}", _current_path.c_str());
             return false;
         }
 
@@ -83,7 +84,7 @@ namespace springtail {
             throw PgIOError();
         }
 
-        SPDLOG_DEBUG("Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading header at offset: {}, msg_length: {}", _header_offset, header.msg_length);
 
         _end_offset = header.msg_length + _current_offset;
         _proto_version = header.proto_version;
@@ -828,6 +829,12 @@ namespace springtail {
             json["is_pkey"].get_to(column.is_pkey);
             json["position"].get_to(column.position);
 
+            if (!json["pk_pos"].is_null()) {
+                json["pk_pos"].get_to(column.pk_position);
+            } else {
+                column.pk_position = -1;
+            }
+
             if (!json["default"].is_null()) {
                 column.default_value = json["default"].get<std::string>();
             }
@@ -967,6 +974,82 @@ namespace springtail {
         } else {
             return nullptr;
         }
+    }
+
+    uint64_t
+    PgMsgStreamReader::scan_log(const std::filesystem::path &file, bool truncate)
+    {
+        std::ifstream stream(file, std::fstream::in | std::fstream::binary);
+        if (!stream.is_open()) {
+            throw PgIOError();
+        }
+
+        uint64_t end_lsn=0;
+
+        while(true) {
+            uint64_t hdr_offset = stream.tellg();
+
+            char buffer[PgMsgStreamHeader::SIZE];
+            stream.read(buffer, PgMsgStreamHeader::SIZE);
+            if (stream.gcount() == 0 && stream.eof()) {
+                // we've hit the end of the file and are done
+                return end_lsn;
+            }
+
+            if (stream.gcount() != PgMsgStreamHeader::SIZE || stream.eof()) {
+                // we've read some of the header but failed to read it all
+                SPDLOG_WARN("Failed to read header from file: {}", file);
+                if (truncate) {
+                    _truncate_file(file, hdr_offset);
+                } else {
+                    throw PgIOError();
+                }
+                return end_lsn;
+            }
+
+            PgMsgStreamHeader header(buffer);
+            if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
+                SPDLOG_WARN("Invalid stream header magic number: {}", header.magic);
+                throw PgIOError();
+            }
+
+            char c = stream.get(); // read the message type
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Header: start_lsn: {}, end_lsn: {}, msg_length: {}, msg_type: {}",
+                                header.start_lsn, header.end_lsn, header.msg_length, c);
+
+            stream.seekg(header.msg_length-1, std::ios::cur);
+            if (stream.eof()) {
+                SPDLOG_WARN("Failed to seek to end of message");
+                if (truncate) {
+                    _truncate_file(file, hdr_offset);
+                } else {
+                    throw PgIOError();
+                }
+            }
+
+            // update ending lsn if we have a valid one
+            // tt seems relation messages 'R' set lsn = 0
+            if (header.end_lsn != 0) {
+                end_lsn = header.end_lsn;
+            }
+        }
+    }
+
+    void
+    PgMsgStreamReader::_truncate_file(const std::filesystem::path &file, uint64_t offset)
+    {
+        int fd = ::open(file.c_str(), O_WRONLY);
+        if (fd == -1) {
+            throw PgIOError();
+        }
+
+        if (::ftruncate(fd, offset) == -1) {
+            ::close(fd);
+            throw PgIOError();
+        }
+
+        ::close(fd);
     }
 
     //////////////////////////////////////////////////////////////////////////
