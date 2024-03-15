@@ -125,9 +125,11 @@ namespace springtail
 
         /** last flushed lsn */
         std::atomic<LSN_t> _last_flushed_lsn = INVALID_LSN;
-        /** last received lsn from data copy (from wal_start) */
-        LSN_t _last_received_lsn = INVALID_LSN;
-        /** servers latest lsn (from wal_end) */
+        /** message start lsn from data copy (from xlog message -- wal_start) */
+        LSN_t _message_start_lsn = INVALID_LSN;
+        /** end of WAL on server from xlog message -- wal_end */
+        LSN_t _message_end_lsn = INVALID_LSN;
+        /** server's latest lsn (from wal_end or keep alive) */
         LSN_t _server_latest_lsn = INVALID_LSN;
 
         /** last time copy data received */

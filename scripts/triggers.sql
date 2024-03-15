@@ -40,7 +40,8 @@ BEGIN
                 'type', udt_name,
                 'default', column_default,
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
-                'position', ordinal_position
+                'position', ordinal_position,
+                'pkey_pos', array_position(pgi.indkey, pga.attnum)
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns

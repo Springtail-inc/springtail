@@ -2,6 +2,7 @@ build
 debug
 release
 external
+docs
 *~
 .vscode
 vcpkg_installed

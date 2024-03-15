@@ -78,7 +78,7 @@ namespace springtail {
     template<typename T, const char *TAG>
     class TrackingAllocator : public std::allocator<T> {
     public:
-        typedef typename std::allocator<T>::pointer pointer;
+        typedef typename std::allocator_traits<std::allocator<T>>::pointer pointer;
         typedef typename std::allocator<T>::size_type size_type;
 
         TrackingAllocator() noexcept = default;

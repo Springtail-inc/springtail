@@ -626,9 +626,8 @@ namespace springtail
         dataOut.buffer = &_copy_buffer[_copy_buffer_offset];
         dataOut.length = _copy_buffer_length - _copy_buffer_offset;
         dataOut.msg_length = _copy_msg_length;
-        dataOut.starting_lsn = _last_received_lsn;
-        // see https://github.com/postgres/postgres/blob/f234b8cd16a4ba6e12cc51a36c8e499661d535bb/src/backend/replication/walreceiver.c#L1256
-        dataOut.ending_lsn = _server_latest_lsn; // this is believed to be the end lsn for this message
+        dataOut.starting_lsn = _message_start_lsn;
+        dataOut.ending_lsn = _message_end_lsn; // this is believed to be the end lsn for this message
 
         // copy msg offset is ahead by the length of data we just read
         // but dataOut.msg_offset points to where the consumer is in the stream
@@ -672,7 +671,10 @@ namespace springtail
             pos += 1;
         }
 
-        _server_latest_lsn = wal_end;
+        if (wal_end > _server_latest_lsn) {
+            _server_latest_lsn = wal_end;
+        }
+
         _last_received_time = send_time;
 
         if (response_requested) {
@@ -702,6 +704,8 @@ namespace springtail
         LSN_t wal_start = recvint64(&buffer[pos]);
         pos += 8;
 
+        // see https://github.com/postgres/postgres/blob/f234b8cd16a4ba6e12cc51a36c8e499661d535bb/src/backend/replication/walreceiver.c#L1256
+        // wal_end is the end of the last record in the message supposedly
         LSN_t wal_end = recvint64(&buffer[pos]);
         pos += 8;
 
@@ -709,8 +713,12 @@ namespace springtail
         pos += 8;
 
         _last_received_time = send_time;
-        _last_received_lsn = wal_start;
-        _server_latest_lsn = wal_end;
+        _message_start_lsn = wal_start;
+        _message_end_lsn = wal_end;
+
+        if (_message_end_lsn > _server_latest_lsn) {
+            _server_latest_lsn = _message_end_lsn;
+        }
 
         return pos;
     }
@@ -741,7 +749,7 @@ namespace springtail
         _connection->clear();
 
         // check that LSN is ahead of where we are
-        if (lsn < _last_received_lsn) {
+        if (lsn < _message_end_lsn) {
             // nothing to do, we'll get there
             return;
         }
@@ -778,7 +786,7 @@ namespace springtail
         pos += 1;
 
         // check if this is right XXX
-        sendint64(_last_received_lsn+1, &replybuf[pos]); // write position
+        sendint64(_message_end_lsn+1, &replybuf[pos]); // write position
         pos += 8;
 
         sendint64(_last_flushed_lsn+1, &replybuf[pos]); // flush position

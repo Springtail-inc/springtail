@@ -18,7 +18,7 @@
 namespace springtail
 {
     /** get oid for table */
-    static const char *TABLE_OID_QUERY =
+    static constexpr char TABLE_OID_QUERY[] =
         "SELECT pg_class.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
@@ -26,7 +26,7 @@ namespace springtail
         "WHERE pg_class.relname='{}' and nspname='{}'";
 
     /** select name, position, is_nullable, default, type, and is primary key for each column */
-    static const char *SCHEMA_QUERY =
+    static constexpr char SCHEMA_QUERY[] =
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, udt_name, "
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey "
@@ -41,10 +41,10 @@ namespace springtail
         "ORDER BY ordinal_position";
 
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction */
-    static const char *XID_QUERY = "SELECT txid_current_snapshot()";
+    static constexpr char XID_QUERY[] = "SELECT txid_current_snapshot()";
 
     /** copy command, output in binary using utf-8 encoding */
-    static const char *COPY_QUERY = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
+    static constexpr char COPY_QUERY[] = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
 
 
     /**

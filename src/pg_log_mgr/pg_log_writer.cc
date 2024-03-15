@@ -43,12 +43,10 @@ namespace springtail {
     }
 
     void
-    PgLogWriter::_add_lsn_to_queue(uint64_t start_offset, LSN_t start_lsn,
-                                   uint64_t end_offset, LSN_t end_lsn)
+    PgLogWriter::_add_lsn_to_queue(uint64_t offset, LSN_t lsn)
     {
         std::unique_lock lock{_queue_mutex};
-        _lsn_queue.push(std::make_shared<LsnOffset>(start_offset, start_lsn));
-        _lsn_queue.push(std::make_shared<LsnOffset>(end_offset, end_lsn));
+        _lsn_queue.push(std::make_shared<LsnOffset>(offset, lsn));
     }
 
     void
@@ -113,7 +111,7 @@ namespace springtail {
             _msg_end_offset = _writer.msg_end_offset();
 
             // add LSN data to queue for fsync thread
-            _add_lsn_to_queue(current_offset, data.starting_lsn, _msg_end_offset, data.ending_lsn);
+            _add_lsn_to_queue(current_offset, data.starting_lsn);
         }
 
         // update shared current offset atomic var
@@ -121,6 +119,7 @@ namespace springtail {
 
         if (_msg_end_offset == current_offset) {
             // full message written
+            _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
             return true;
         }
 

@@ -21,6 +21,12 @@ add_library(springtail_pg ${PG_LIB_SOURCES})
 # executables
 add_executable(pg_wal_dump test/pg_wal_dump.cc)
 add_executable(pg_wal_decode test/pg_wal_decode.cc)
+add_executable(validate_log test/validate_log.cc)
+
+target_include_directories(validate_log
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
 
 # include dirs
 target_include_directories(springtail_pg
@@ -53,6 +59,14 @@ target_link_libraries(pg_wal_dump
 )
 
 target_link_libraries(pg_wal_decode
+    PRIVATE springtail_pg
+    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE Boost::program_options
+    PRIVATE nlohmann_json::nlohmann_json
+    PUBLIC springtail_common
+)
+
+target_link_libraries(validate_log
     PRIVATE springtail_pg
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
