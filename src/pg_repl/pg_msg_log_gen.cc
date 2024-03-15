@@ -88,6 +88,7 @@ namespace springtail {
             }
             col["is_pkey"] = c.is_pkey;
             col["position"] = c.position;
+            col["pk_position"] = c.pk_position;
             columns_json.push_back(col);
 
             assert(c.udt_type == PG_SCHEMA_TYPE_BOOL ||
@@ -567,6 +568,7 @@ namespace springtail {
     {
         std::vector<PgMsgSchemaColumn> columns;
         int i = 0;
+        int pkey_pos = 0;
         for (auto &&c: json["columns"]) {
             PgMsgSchemaColumn col;
             col.column_name = c["name"];
@@ -578,6 +580,11 @@ namespace springtail {
                 col.default_value = c["default"];
             }
             col.is_pkey = c["is_pkey"];
+            if (col.is_pkey) {
+                col.pk_position = pkey_pos++;
+            } else {
+                col.pk_position = -1;
+            }
             col.position = i++;
             columns.push_back(col);
         }

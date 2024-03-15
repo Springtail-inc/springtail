@@ -137,6 +137,7 @@ namespace springtail
         std::string udt_type;
         std::optional<std::string> default_value;
         int position;        // position is maintained if column is renamed
+        int pk_position;     // position in primary key, if is_pkey
         bool is_nullable;
         bool is_pkey;        // is primary key
     };

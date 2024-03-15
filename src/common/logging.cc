@@ -1,10 +1,34 @@
+#include <memory>
+#include <set>
+#include <vector>
+#include <optional>
+#include <map>
+#include <iostream>
+
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/logging.hh>
 
 namespace springtail {
 
-    void init_logging() {
+namespace logging {
+    uint32_t _log_mask = LOG_ALL;
+
+    std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id)
+    {
+        if ((log_id & _log_mask) == 0) {
+            return nullptr;
+        }
+        return spdlog::get("springtail");
+    }
+} // namespace logging
+
+    void init_logging(uint32_t module_mask)
+    {
+        // log bitmask
+        logging::_log_mask = module_mask;
+
         // setup the console to print everything
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(spdlog::level::trace);
@@ -22,5 +46,4 @@ namespace springtail {
 
         spdlog::set_default_logger(logger);
     }
-
-}
+} // namespace springtail
