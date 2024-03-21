@@ -49,8 +49,8 @@ namespace springtail {
      * An object that holds all of the information about a column over a given xid range.
      */
     struct SchemaColumn {
-        uint64_t start_xid;
-        uint64_t end_xid;
+        uint64_t xid;
+        uint64_t lsn;
         std::string name;
         uint32_t position;
         SchemaType type;

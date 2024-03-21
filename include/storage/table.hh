@@ -202,12 +202,12 @@ namespace springtail {
         {
             if (extent_id == UNKNOWN_EXTENT) {
                 if (_primary_key_columns.empty()) {
-                    _append(value, xid);
+                    _insert_append(value, xid);
                 } else {
-                    _insert(value, xid);
+                    _insert_by_lookup(value, xid);
                 }
             } else {
-                _direct_insert(value, xid, extent_id);
+                _insert_direct(value, xid, extent_id);
             }
         }
 
@@ -218,17 +218,34 @@ namespace springtail {
          */
         void remove(TuplePtr key, uint64_t xid, uint64_t extent_id)
         {
-            
+            if (extent_id == UNKNOWN_EXTENT) {
+                if (_primary_key_columns.empty()) {
+                    _remove_by_scan(key, xid);
+                } else {
+                    _remove_by_lookup(key, xid);
+                }
+            } else {
+                _remove_direct(key, xid, extent_id);
+            }
         }
 
         /**
-         * Remove a row from the table.  The data extent ID is provided externally by the write
+         * Update a row in the table.  The value must contain the primary key to be updated and the
+         * table must contain a primary key.  The data extent ID is provided externally by the write
          * cache, or if the extent_id is UNKNOWN, then it will utilize the tuple data to identify a
          * row to remove.
          */
         void update(TuplePtr value, uint64_t xid, uint64_t extent_id)
         {
-
+            if (extent_id == UNKNOWN_EXTENT) {
+                if (_primary_key_columns.empty()) {
+                    // XXX error -- cannot perform an update() with no primary key, should be split into a remove() and insert()
+                } else {
+                    _update_by_lookup(value, xid);
+                }
+            } else {
+                _update_direct(value, xid, extent_id);
+            }
         }
 
         /**
@@ -291,7 +308,7 @@ namespace springtail {
 
     private:
         void
-        _direct_insert(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id)
         {
             // get the page from the cache
             auto page = _cache->get(extent_id, this);
@@ -304,7 +321,7 @@ namespace springtail {
         }
 
         void
-        _append(TuplePtr value, uint64_t xid)
+        _insert_append(TuplePtr value, uint64_t xid)
         {
             // there is no primary key, so append the row to the last extent
             uint64_t extent_id = _primary_index->back();
@@ -321,7 +338,7 @@ namespace springtail {
         }
 
         void
-        _insert(TuplePtr value, uint64_t xid)
+        _insert_by_lookup(TuplePtr value, uint64_t xid)
         {
             // we didn't receive an extent_id, so we need to look up the extent from the primary index
             auto search_key = _schema->tuple_subset(value, _primary_key_columns);
@@ -329,7 +346,101 @@ namespace springtail {
             uint64_t extent_id = extent_id_f->get_uint64(*i);
 
             // then we can do a direct insert
-            _direct_insert(value, xid, extent_id);
+            _insert_direct(value, xid, extent_id);
         }
+
+        void
+        _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        {
+            // get the page from the cache
+            auto page = _cache->get(extent_id, this);
+
+            // remove the row from the page
+            // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
+            page->remove(value);
+
+            // release the page back to the write cache
+            _cache->release(page);
+        }
+
+        void
+        _remove_by_lookup(TuplePtr key, uint64_t xid)
+        {
+            // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
+            auto i = _primary->lower_bound(key, xid);
+            uint64_t extent_id = extent_id_f->get_uint64(*i);
+
+            // then we can do a direct removal
+            _remove_direct(key, xid, extent_id);
+        }
+
+        void
+        _remove_by_scan(TuplePtr value, uint64_t xid)
+        {
+            // we didn't receive an extent_id, and there is no primary index, so we must scan the
+            // file to find the row to remove
+            // note: in this case, it must be a full row match
+            // note: it would be much more performant to perform all of the scan-based removals in
+            //       an XID at once as a batch, since the table is likely to be much larger than the
+            //       set of removals
+            auto fields = _schema->get_fields();
+
+            // scan the index
+            bool found = false;
+            auto &&i = _primary->begin();
+            while (!found && i != _primary->end()) {
+                // scan each extent, looking for a match
+                uint64_t extent_id = extent_id_f->get_uint64(*i);
+
+                // XXX need a way to get a clean page that can be preferentially released if it doesn't contain the row
+                auto page = _cache->get(extent_id, this, true);
+                auto &&j = page->begin();
+                while (!found && j != page->end()) {
+                    if (value->equal(FieldTuple(fields, *j))) {
+                        page->remove(j);
+                        found = true;
+                        continue;
+                    }
+                    ++j;
+                }
+
+                if (!found) {
+                    ++i;
+                }
+            }
+        }
+
+        void
+        _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id)
+        {
+            // get the page from the cache
+            auto page = _cache->get(extent_id, this);
+
+            // find the row in the page
+            // note: this can only be used when a primary key is present, otherwise update should have been split
+            auto &&i = page->find(key);
+            if (i == page->end()) {
+                // XXX error
+            }
+
+            // set the row to the new values
+            auto fields = _schema->get_fields();
+            MutableTuple(fields, *i).assign(value);
+
+            // release the page back to the write cache
+            _cache->release(page);
+        }
+
+        void
+        _update_by_lookup(TuplePtr key, uint64_t xid)
+        {
+            // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
+            auto i = _primary->lower_bound(key, xid);
+            uint64_t extent_id = extent_id_f->get_uint64(*i);
+
+            // then we can do a direct update
+            _update_direct(key, xid, extent_id);
+        }
+
     };
 }

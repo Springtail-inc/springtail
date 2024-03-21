@@ -3,51 +3,23 @@
 #include <storage/schema_manager.hh>
 
 namespace springtail {
-    const std::vector<SchemaColumn> SchemaManager::TABLES_SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "name", 1, SchemaType::TEXT, false }
-    };
-
-    const std::vector<SchemaColumn> SchemaManager::SCHEMAS_SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false }, 
-        { "start_xid", 1, SchemaType::UINT64, false },
-        { "end_xid", 2, SchemaType::UINT64, false },  
-        { "name", 3, SchemaType::TEXT, false },       
-        { "position", 4, SchemaType::UINT32, false }, 
-        { "type", 5, SchemaType::UINT8, false },      
-        { "nullable", 6, SchemaType::BOOLEAN, false },
-        { "default_value", 7, SchemaType::TEXT, true }
-    };
-
-    const std::vector<SchemaColumn> SchemaManager::SCHEMAS_HISTORY_SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "xid", 1, SchemaType::UINT64, false },
-        { "lsn", 2, SchemaType::UINT64, false },
-        { "update_type", 3, SchemaType::UINT8, false },
-        { "name", 3, SchemaType::TEXT, false },
-        { "position", 4, SchemaType::UINT32, false },
-        { "type", 5, SchemaType::UINT8, false },
-        { "nullable", 6, SchemaType::BOOLEAN, false },
-        { "default_value", 7, SchemaType::TEXT, true }
-    };
-
     std::map<uint32_t, SchemaColumn>
     SchemaManager::SchemaInfo::_get_columns_for_xid(uint64_t xid)
     {
         std::map<uint32_t, SchemaColumn> columns;
 
         // for each column, try to find a valid SchemaColumn for the provided xid
-        for (auto &&pair : _column_map) {
-            // XXX double check lower_bound or upper_bound
-            auto &&i = pair.second.lower_bound(xid);
+        for (const auto &pair : _column_map) {
+            // find the schema column definition for this XID
+            auto &&i = pair.second.upper_bound(xid);
 
-            // if there's no entry for this column with end_xid > extent_xid, go to the next column
+            // if there's no entry for this column with a starting XID < xid, go to the next column
             if (i == pair.second.end()) {
                 continue;
             }
 
-            // if the start_xid is after the extent_xid then go to the next column
-            if (i->second.start_xid > xid) {
+            // if the entry does not exist at this point, move to the next column
+            if (!i->second.exists) {
                 continue;
             }
 
@@ -62,35 +34,22 @@ namespace springtail {
     SchemaManager::SchemaInfo::_read_schema_table(uint64_t table_id)
     {
         // first get the snapshots from the schemas table
-        std::shared_ptr<Table> schemas_table = TableManager::get_table(SCHEMAS_TID);
+        auto schemas_t = TableManager::get_table(sys_tbl::Schemas::ID);
 
         // construct the column accessors for the schemas table
-        std::shared_ptr<Schema> schemas_s = schemas_table->get_schema();
-
-        std::shared_ptr<Field> table_id_f = schemas_s->get_field("table_id");
-        std::shared_ptr<Field> start_xid_f = schemas_s->get_field("start_xid");
-        std::shared_ptr<Field> end_xid_f = schemas_s->get_field("end_xid");
-        std::shared_ptr<Field> name_f = schemas_s->get_field("name");
-        std::shared_ptr<Field> position_f = schemas_s->get_field("position");
-        std::shared_ptr<Field> type_f = schemas_s->get_field("type");
-        std::shared_ptr<Field> nullable_f = schemas_s->get_field("nullable");
-        std::shared_ptr<Field> default_value_f = schemas_s->get_field("default_value");
+        auto schema = schemas_table->get_schema();
+        auto fields = schema->get_fields();
 
         // read everything with the given table_id
-        // note: use null entries for additional columns in the primary key to ensure we see all entries
-        auto search_key = std::make_shared<ValueTuplePtr>({
-                std::make_shared<ConstField<uint64_t>>(table_id),
-                std::make_shared<ConstNullField>(SchemaType::UINT32),
-                std::make_shared<ConstNullField>(SchemaType::UINT64)
-            });
+        auto search_key = sys_tbl::Schemas::Data::tuple(table_id, 0, 0);
 
         // scan for the results of the schemas table
-        auto table_i = schemas_table->lower_bound(search_key);
-        while (table_i != schemas_table->end()) {
+        auto table_i = schemas_t->lower_bound(search_key);
+        while (table_i != schemas_t->end()) {
             Extent::Row &row = *table_i;
 
             // get the table_id from the entry
-            uint64_t tid = table_id_f->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
             if (tid != table_id) {
                 // if we have read all of the entries for this table ID, stop processing
                 break;
@@ -98,119 +57,55 @@ namespace springtail {
 
             // construct a SchemaColumn for each row
             SchemaColumn column;
-            column.start_xid = start_xid_f->get_uint64(row);
-            column.end_xid = end_xid_f->get_uint64(row);
-            column.name = name_f->get_text(row);
-            column.position = position_f->get_uint32(row);
-            column.type = type_f->get_uint8(row);
-            column.nullable = nullable_f->get_bool(row);
-            if (!default_value_f->is_null(row)) {
-                column.default_value = default_value_f->get_text(row);
+            column.xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(row);
+            column.lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
+            column.name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
+            column.position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row);
+            column.type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
+            column.nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
+            if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
+                column.default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
             }
+            column.update_type = fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(row);
 
             // place the column into the map
-            _column_map[column.position][column.end_xid] = column;
+            _column_map[column.position][column.xid].push_back(column);
         }
     }
 
     void
-    SchemaManager::SchemaInfo::_read_schema_history_table(uint64_t table_id)
+    SchemaManager::SchemaInfo::_read_indexes_table(uint64_t table_id)
     {
-        // next get the version history from the schemas_history table
-        std::shared_ptr<Table> schemas_history = TableManager::get_table(SCHEMAS_HISTORY_TID);
-
-        // construct the column accessors for the schemas table
-        std::shared_ptr<Schema> history_s = schemas_history->get_schema();
-
-        std::shared_ptr<Field> table_id_f = history_s->get_field("table_id");
-        std::shared_ptr<Field> xid_f = history_s->get_field("xid");
-        std::shared_ptr<Field> lsn_f = history_s->get_field("lsn");
-        std::shared_ptr<Field> update_type_f = history_s->get_field("update_type");
-        std::shared_ptr<Field> name_f = history_s->get_field("name");
-        std::shared_ptr<Field> position_f = history_s->get_field("position");
-        std::shared_ptr<Field> type_f = history_s->get_field("type");
-        std::shared_ptr<Field> nullable_f = history_s->get_field("nullable");
-        std::shared_ptr<Field> default_value_f = history_s->get_field("default_value");
+        // get the "indexes" table
+        auto indexes_t = TableManger::get_table(sys_tbl::Indexes::ID);
+        auto schema = indexes_t->get_schema();
+        auto fields = schema->get_fields();
 
         // read everything with the given table_id
         // note: use null entries for additional columns in the primary key to ensure we see all entries
-        auto search_key = std::make_shared<ValueTuplePtr>({
-                std::make_shared<ConstField<uint64_t>>(table_id),
-                std::make_shared<ConstNullField>(SchemaType::UINT32),
-                std::make_shared<ConstNullField>(SchemaType::UINT64)
-            });
+        auto search_key = sys_tbl::Indexes::Primary::key_tuple(table_id, 0, 0);
 
         // scan for the results of the schemas_history table
-        auto table_i = schemas_history->lower_bound(search_key);
+        auto table_i = indexes_t->primary->lower_bound(search_key);
         while (table_i != schemas_history->end()) {
             Extent::Row &row = *table_i;
 
             // get the table_id from the entry
-            uint64_t tid = table_id_f->get_uint64(row);
+            uint64_t tid = fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(row);
             if (tid != table_id) {
                 // if we have read all of the entries for this table ID, stop processing
                 break;
             }
 
-            // construct a SchemaUpdate for each row
-            SchemaUpdate update;
-            update.xid = xid_f->get_uint64(row);
-            update.lsn = lsn_f->get_uint64(row);
-            update.update_type = update_type_f->get_uint8(row);
-            update.name = name_f->get_text(row);
-            update.position = position_f->get_uint32(row);
-            update.type = type_f->get_uint8(row);
-            update.nullable = nullable_f->get_bool(row);
-            if (!default_value_f->is_null(row)) {
-                update.default_value = default_value_f->get_text(row);
-            }
+            uint64_t index_id = field->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(row);
+            uint64_t xid = field->at(sys_tbl::Indexes::Data::XID)->get_uint64(row);
+            uint32_t position = field->at(sys_tbl::Indexes::Data::LSN)->get_uint32(row);
+            uint32_t column_id = field->at(sys_tbl::Indexes::Data::LSN)->get_uint32(row);
 
-            // place the column into the map
-            _column_updates[position_f->get_uint32()][update.xid].push_back(update);
-        }
-    }
-
-    void
-    SchemaManager::SchemaInfo::_read_primary_indexes_table(uint64_t table_id)
-    {
-        // next get the version history from the schemas_history table
-        std::shared_ptr<Table> primary_indexes = TableManager::get_table(PRIMARY_INDEXES_TID);
-
-        // construct the column accessors for the primary indexes table
-        std::shared_ptr<Schema> primary_s = primary_indexes->get_schema();
-
-        std::shared_ptr<Field> table_id_f = primary_s->get_field("table_id");
-        std::shared_ptr<Field> start_xid_f = primary_s->get_field("start_xid");
-        std::shared_ptr<Field> end_xid_f = primary_s->get_field("end_xid");
-        std::shared_ptr<Field> position_f = primary_s->get_field("position");
-        std::shared_ptr<Field> column_id_f = primary_s->get_field("column_id");
-
-        // read everything with the given table_id
-        // note: use null entries for additional columns in the primary key to ensure we see all entries
-        auto search_key = std::make_shared<ValueTuplePtr>({
-                std::make_shared<ConstField<uint64_t>>(table_id),
-                std::make_shared<ConstNullField>(SchemaType::UINT32),
-                std::make_shared<ConstNullField>(SchemaType::UINT64)
-            });
-
-        // scan for the results of the schemas_history table
-        auto table_i = schemas_history->lower_bound(search_key);
-        while (table_i != schemas_history->end()) {
-            Extent::Row &row = *table_i;
-
-            // get the table_id from the entry
-            uint64_t tid = table_id_f->get_uint64(row);
-            if (tid != table_id) {
-                // if we have read all of the entries for this table ID, stop processing
-                break;
-            }
-
-            // note: table is sorted by <table_id, start_xid, position>, making it safe to append
-            //       columns to the vector while scanning
-            _primary_index[start_xid_f->get_uint64(row)].push_back(column_id_f->get_uint32(row));
-            if (position_f->get_uint32(row) == 0 && !end_xid_f->is_null(row)) {
-                // populate an empty primary key at the end XID in case it was removed
-                _primary_index[end_xid_f->get_uint64(row)];
+            if (index_id == 0) {
+                _primary_index[xid].push_back(column_id);
+            } else {
+                _secondary_indexes[index_id][xid].push_back(column_id);
             }
         }
     }
@@ -218,8 +113,7 @@ namespace springtail {
     SchemaManager::SchemaInfo::SchemaInfo(uint64_t table_id)
     {
         _read_schema_table(table_id);
-        _read_schema_history_table(table_id);
-        _read_primary_indexes_table(table_id);
+        _read_indexes_table(table_id);
     }
 
     std::vector<std::string>
@@ -230,7 +124,7 @@ namespace springtail {
         auto &&i = _primary_index.lower_bound(xid);
         for (uint32_t column : i->second) {
             // XXX need to handle lookup failure
-            key.push_back(_column_map[columns].lower_bound(xid)->second.name);
+            key.push_back(_column_map[column].lower_bound(xid)->second.name);
         }
     }
 
@@ -252,41 +146,39 @@ namespace springtail {
         // determine the columns for the extent XID
         auto &&columns = _get_columns_for_xid(extent_xid);
 
-        // now find all of the updates for each column and apply them to the schema
-        for (auto &&column : columns) {
-            auto i = _column_updates.find(column.position);
-
-            // if there are no updates for a column, move to the next one
-            if (i == _column_updates.end()) {
-                continue;
-            }
-
+        // now go through all of the updates for every column between the extent XID and the target
+        // XID and apply those changes to construct the virtual schema
+        for (const auto & [id, history]: _column_map) {
             // find any updates from xids after the extent schema xid
-            auto j = i.second.upper_bound(extent_xid);
+            // note: the map is in reverse XID order, so most recent XID first
+            auto &&i = history.upper_bound(extent_xid);
+            auto changes_i = std::make_reverse_iterator(i); // go through the map backward from the "current" entry
+
             while (true) {
-                // no such updates, so continue to the next column
-                if (j == i.second.end()) {
+                // no more updates, so continue to the next column
+                if (changes_i == history.rend()) {
                     break;
                 }
 
                 // if any such updates are past the target_xid, then continue to the next column
-                if (j.first > target_xid) {
+                if (changes_i.first > target_xid) {
                     break;
                 }
 
                 // apply any updates from the xid prior to the LSN (if one was provided)
-                for (auto &&update : j.second) {
+                for (const auto &update : changes_i.second) {
                     // if an LSN was provided and the update's LSN is greater than the provided LSN, stop applying updates
                     if (lsn && update.lsn > lsn) {
                         break;
                     }
 
                     // apply the update to the schema as a schema upgrade
+                    // XXX this doesn't match with the creation of the schema below
                     schema->apply_update(update);
                 }
 
                 // move to the next xid with schema updates
-                ++j;
+                ++changes_i;
             }
         }
 
@@ -298,9 +190,10 @@ namespace springtail {
     }
 
     SchemaManager::SchemaManager() {
-        _system_cache[TABLES_TID] = std::make_shared<ExtentSchema>(TABLES_SCHEMA);
-        _system_cache[SCHEMAS_TID] = std::make_shared<ExtentSchema>(SCHEMAS_SCHEMA);
-        _system_cache[SCHEMAS_HISTORY_TID] = std::make_shared<ExtentSchema>(SCHEMAS_SCHEMA);
+        _system_cache[sys_tbl::TableNames::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::SCHEMA);
+        _system_cache[sys_tbl::TableRoots::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::SCHEMA);
+        _system_cache[sys_tbl::Indexes::ID] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::SCHEMA);
+        _system_cache[sys_tbl::Schemas::ID] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::SCHEMA);
     }
 
     std::shared_ptr<const Schema>
@@ -320,6 +213,8 @@ namespace springtail {
             info = std::make_shared<SchemaInfo>(table_id);
             _cache.insert(table_id, info);
         }
+
+        // XXX get the extent schema first and then return that if extent_xid == target_xid?
 
         // retrieve the schema at the appropriate point-in-time
         return info->get_virtual_schema(extent_xid, target_xid, lsn);

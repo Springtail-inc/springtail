@@ -9,17 +9,11 @@ namespace springtail {
      *  a specific XID. */
     class SchemaManager {
     private:
-        static const uint64_t SYSTEM_TABLES_MAX = 256;
+        /** Column definitions for the "table_names" system table. */
+        static const std::vector<SchemaColumn> TABLE_NAMES_SCHEMA;
 
-        // IDs for system schemas
-        static const uint64_t TABLES_TID = 1;
-        static const uint64_t SCHEMAS_TID = 2;
-        static const uint64_t SCHEMAS_HISTORY_TID = 3;
-        static const uint64_t PRIMARY_INDEXES_TID = 4;
-
-    private:
-        /** Column definitions for the "tables" system table. */
-        static const std::vector<SchemaColumn> TABLES_SCHEMA;
+        /** Column definitions for the "table_roots" system table. */
+        static const std::vector<SchemaColumn> TABLE_NAMES_SCHEMA;
 
         /** Column definitions for the "schemas" system table. */
         static const std::vector<SchemaColumn> SCHEMAS_SCHEMA;
@@ -34,8 +28,8 @@ namespace springtail {
         /** A helper class that holds all of the information about a table schema in-memory. */
         class SchemaInfo {
         private:
-            /** A map from <position, end_xid> to quickly find which SchemaColumn definition should be used for a given xid. */
-            std::map<uint32_t, std::map<uint64_t, SchemaColumn>> _column_map;
+            /** A map from <position, xid> ordered in reverse xid order to quickly find which SchemaColumn definition should be used for a given xid using upper_bound. */
+            std::map<uint32_t, std::map<uint64_t, std::vector<SchemaColumn>, std::greater<uint64_t>>> _column_map;
 
             /** A map from <position, xid> to quickly find the set of SchemaUpdate objects that
                 need to be applied to a Schema to get to the target_xid and lsn. */
@@ -134,62 +128,6 @@ namespace springtail {
         SchemaUpdate generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
                                      const std::map<uint32_t, SchemaColumn> &new_schema,
                                      uint64_t xid, uint64_t lsn);
-
-        /**
-         * Update the system tables to reflect a mutation to a schema.
-         */
-        void
-        alter_schema(uint64_t table_id, const SchemaColumn &new_column, const SchemaUpdate &update)
-        {
-            // XXX we might be able to collapse these tables together if we record the update type in the schemas table?
-
-            // create the fields for the schemas table update
-            FieldArrayPtr schemas_fields = std::make_shared<FieldArray>(9);
-            FieldArrayPtr schema_history_fields = std::make_shared<FieldArray>(9);
-
-            // the common fields
-            auto table_id_f = std::make_shared<ConstTypeField<uint64_t>>(table_id);
-            auto xid_f = std::make_shared<ConstTypeField<uint64_t>>(update.xid);
-            auto lsn_f = std::make_shared<ConstTypeField<uint64_t>>(update.lsn);
-            auto name_f = std::make_shared<ConstTypeField<uint64_t>>(new_column.name);
-            auto position_f = std::make_shared<ConstTypeField<uint32_t>>(new_column.position);
-            auto type_f = std::make_shared<ConstTypeField<uint8_t>>(new_column.type);
-            auto exists_f = std::make_shared<ConstTypeField<bool>>(update.update_type != SchemaUpdateType::REMOVE_COLUMN);
-            auto nullable_f = std::make_shared<ConstTypeField<uint8_t>>(new_column.nullable);
-
-            FieldPtr default_f;
-            if (new_column.default_value) {
-                default_f = std::make_shared<ConstTypeField<std::string>>(*(new_column.default_value));
-            } else {
-                default_f = std::make_shared<ConstNullField>(SchemaType::TEXT);
-            }
-
-            // set the schema fields
-            schemas_fields->at(0) = table_id_f;
-            schemas_fields->at(1) = position_f;
-            schemas_fields->at(2) = xid_f;
-            schemas_fields->at(3) = lsn_f;
-            schemas_fields->at(4) = exists_f;
-            schemas_fields->at(5) = name_f;
-            schemas_fields->at(6) = type_f;
-            schemas_fields->at(7) = nullable_f;
-            schemas_fields->at(8) = default_f;
-
-            _schemas_t->insert(Tuple(schemas_fields, nullptr));
-
-            // set the shared schema_history fields
-            schema_history_fields->at(0) = table_id_f;
-            schema_history_fields->at(1) = xid_f;
-            schema_history_fields->at(2) = lsn_f;
-            schema_history_fields->at(3) = std::make_shared<ConstTypeField<uint8_t>>(update.update_type);
-            schema_history_fields->at(4) = name_f;
-            schema_history_fields->at(5) = position_f;
-            schema_history_fields->at(6) = type_f;
-            schema_history_fields->at(7) = nullable_f;
-            schema_history_fields->at(8) = default_f;
-
-            _schemas_history_t->insert(Tuple(schema_history_fields, nullptr));
-        }
     };
 
 }
