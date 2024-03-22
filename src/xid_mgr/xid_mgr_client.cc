@@ -11,7 +11,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 
-#include <ThriftXidMgr.h>
+#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_client_factory.hh>

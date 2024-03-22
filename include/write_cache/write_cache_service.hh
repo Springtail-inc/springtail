@@ -4,7 +4,7 @@
 
 #include <common/logging.hh>
 
-#include "ThriftWriteCache.h"
+#include <thrift/write_cache/ThriftWriteCache.h>
 
 namespace springtail {
 

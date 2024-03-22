@@ -1,76 +1,19 @@
-find_package(Thrift CONFIG REQUIRED)
-
-# the thrift rpc gen
-find_program(
-    THRIFT_COMPILER
-    thrift
-    HINTS ${PROJECT_SOURCE_DIR}/external/vcpkg/packages/
-    REQUIRED
-)
-
-message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
-
-# set variables for thrift schema .thrift file and generated .h
-set(THRIFT_SCHEMA "xid_mgr.thrift")
-set(THRIFT_GEN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp")
-set(THRIFT_CC_FILES "${THRIFT_GEN_PATH}/ThriftXidMgr.cpp;${THRIFT_GEN_PATH}/xid_mgr_types.cpp")
-set(THRIFT_HH_FILES "${THRIFT_GEN_PATH}/ThriftXidMgr.h;${THRIFT_GEN_PATH}/xid_mgr_types.h")
-
-set(GENERATED_FILES ${THRIFT_CC_FILES} ${THRIFT_HH_FILES})
-
-# command to generate .h/.cc files from the .fbs file
-add_custom_command(
-    PRE_BUILD
-    OUTPUT ${GENERATED_FILES}
-    COMMAND ${THRIFT_COMPILER} -o ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types ${THRIFT_SCHEMA}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${THRIFT_SCHEMA}
-    COMMENT "Generating: thrift rpc files: ${THRIFT_COMPILER} -o ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp ${THRIFT_SCHEMA}"
-    VERBATIM
-)
-
-# target to ensure that all files are built prior to start of compilation
-add_custom_target(xid_mgr_generated_thrift
-    DEPENDS ${GENERATED_FILES}
-)
-
-# set the generated property on the generate files, this ensures they are cleaned by 'make clean'
-set_source_files_properties(${GENERATED_FILES} PROPERTIES GENERATED TRUE)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # source files
 set(XID_MGR_SOURCES
     xid_mgr_client.cc
     xid_mgr_server.cc
     xid_mgr_service.cc
-    ${THRIFT_CC_FILES}
 )
 
 # add the library target
 add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
-add_dependencies(springtail_xid_mgr xid_mgr_generated_thrift)
-
-# add the gen-cpp dir to the list of files to remove during 'make clean'
-set_target_properties(springtail_xid_mgr
-    PROPERTIES ADDITIONAL_CLEAN_FILES ${THRIFT_GEN_PATH}
-)
-
-# include the thrift gen-cpp dir as an include path; so we don't have to move the .h files
-target_include_directories(springtail_xid_mgr
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-            ${THRIFT_GEN_PATH}
-)
-
-target_link_libraries(springtail_xid_mgr
-    PRIVATE thrift::thrift # thriftz::thriftz (optional, used for compression)
-)
+target_include_directories(springtail_xid_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(springtail_xid_mgr PRIVATE thrift_xid_mgr nlohmann_json::nlohmann_json)
 
 add_executable(xid_mgr_daemon xid_mgr_daemon.cc)
-
-target_include_directories(xid_mgr_daemon
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-            ${THRIFT_GEN_PATH}
-)
-
+target_include_directories(xid_mgr_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(xid_mgr_daemon
     PRIVATE springtail_common
     PRIVATE springtail_xid_mgr
