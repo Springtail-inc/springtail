@@ -11,42 +11,51 @@ namespace springtail
 {
     /* Postgres message types, see decode functions in
      * PgRep PgMsg.cc for formats */
+
+    /** Tuple data for a single column */
     struct PgMsgTupleDataColumn {
         char type;  // 'n' NULL, 'u' unchanged TOAST, 't' text formatted, 'b' binary
         std::vector<char> data;
     };
 
+    /** Tuple data for a row (set of columns) */
     struct PgMsgTupleData {
         std::vector<PgMsgTupleDataColumn> tuple_data;
     };
 
+    /** Keep alive message */
     struct PgMsgKeepAlive {
         LSN_t wal_end;
         bool response_requested;
     };
 
+    /** Begin transaction message, not streaming */
     struct PgMsgBegin {
         int32_t xid;
         LSN_t xact_lsn;
         int64_t commit_ts;
     };
 
+    /** Commit message not streaming */
     struct PgMsgCommit {
         LSN_t commit_lsn;
         LSN_t xact_lsn;
         int64_t commit_ts;
     };
 
+    /** Origin message */
     struct PgMsgOrigin {
         LSN_t commit_lsn;
         std::string name_str;
     };
 
+    /** Copy message */
     struct PgMsgCopy {
         LSN_t wal_start;
         LSN_t wal_end;
     };
 
+    /** Truncate message */
     struct PgMsgTruncate {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t num_rels;
@@ -54,6 +63,7 @@ namespace springtail
         int8_t options; // 1 for cascade; 2 for restart identity
     };
 
+    /** Type message for an OID */
     struct PgMsgType {
         int32_t xid;   // proto vers 2+ only if streaming
         uint32_t oid;
@@ -61,6 +71,7 @@ namespace springtail
         std::string data_type_str;
     };
 
+    /** Message message -- shouldn't be used; DDL messages are transformed into other types */
     struct PgMsgMessage {
         LSN_t lsn;
         int32_t xid;   // proto vers 2+ only if streaming
@@ -69,6 +80,7 @@ namespace springtail
         // don't store data as we wouldn't know how to interpret it
     };
 
+    /** Delete row message */
     struct PgMsgDelete {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
@@ -76,6 +88,7 @@ namespace springtail
         PgMsgTupleData tuple;
     };
 
+    /** Insert row message */
     struct PgMsgInsert {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
@@ -83,6 +96,7 @@ namespace springtail
         PgMsgTupleData new_tuple;
     };
 
+    /** Update row message */
     struct PgMsgUpdate {
         int32_t xid;   // proto vers 2+ only if streaming
         int32_t rel_id;
@@ -92,6 +106,7 @@ namespace springtail
         PgMsgTupleData new_tuple;
     };
 
+    /** Column relation message -- defines a single column */
     struct PgMsgRelColumn {
         uint32_t oid;   // oid from pg_types table
         int32_t type_modifier; // pg_attribute.atttypmod type specific data; default -1
@@ -99,6 +114,7 @@ namespace springtail
         std::string column_name;
     };
 
+    /** Relation message for a table contains a set of columns */
     struct PgMsgRelation {
         int32_t xid;      // proto vers 2+ only if streaming
         int32_t rel_id;
@@ -108,16 +124,18 @@ namespace springtail
         std::vector<PgMsgRelColumn> columns;
     };
 
-    // stream ops in proto vers 2+ only
+    /** Stream start -- in proto vers 2+ only */
     struct PgMsgStreamStart {
         int32_t xid;
         bool first;
     };
 
+    /** Stream stop -- in proto vers 2+ only */
     struct PgMsgStreamStop {
         // empty
     };
 
+    /** Stream commit -- in proto vers 2+ only */
     struct PgMsgStreamCommit {
         LSN_t commit_lsn;
         LSN_t xact_lsn;
@@ -125,6 +143,9 @@ namespace springtail
         int32_t xid;
     };
 
+    /** Stream abort message -- in proto vers 2+ only --
+     * may be for a subtransaction (if xid != sub_xid)
+     */
     struct PgMsgStreamAbort {
         LSN_t   abort_lsn;  // proto vers 4+
         int64_t abort_ts;   // proto vers 4+
@@ -132,6 +153,7 @@ namespace springtail
         int32_t sub_xid;
     };
 
+    /** Column schema for a single column used by Create table and Alter table */
     struct PgMsgSchemaColumn {
         std::string column_name;
         std::string udt_type;
@@ -142,7 +164,8 @@ namespace springtail
         bool is_pkey;        // is primary key
     };
 
-    struct PgMsgTable { // used by both create table and alter table
+    /** Create table/alter table message decoded */
+    struct PgMsgTable {
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
@@ -151,6 +174,7 @@ namespace springtail
         std::vector<PgMsgSchemaColumn> columns;
     };
 
+    /** Drop table message decoded */
     struct PgMsgDropTable {
         LSN_t lsn;
         uint32_t oid;
@@ -195,11 +219,11 @@ namespace springtail
          PgMsgStreamAbort,
          PgMsgTable,
          PgMsgDropTable
-        > msg;
+        > msg;                 ///< message data
 
-        PgMsgEnum msg_type;    // type defining union member
-        int proto_version;     // which protocol version
-        bool is_streaming;     // is this a streaming message
+        PgMsgEnum msg_type;    ///< type defining union member
+        int proto_version;     ///< which protocol version
+        bool is_streaming;     ///< is this a streaming message
 
         PgMsg(PgMsgEnum type=PgMsgEnum::INVALID)
             : msg_type(type) {}
@@ -211,22 +235,23 @@ namespace springtail
      * Also includes set of oids changed within the transaction
      */
     struct PgTransaction {
+        /** Transaction record type */
         enum : uint8_t {
-            TYPE_COMMIT = 0,
-            TYPE_STREAM_START = 1,
-            TYPE_STREAM_ABORT = 2
+            TYPE_COMMIT = 0,        ///< normal commit or stream commit
+            TYPE_STREAM_START = 1,  ///< stream start
+            TYPE_STREAM_ABORT = 2   ///< stream abort
         };
 
         uint64_t begin_offset;   ///< offset to start of block header
         uint64_t commit_offset;  ///< offset to end of commit msg
         uint64_t springtail_xid; ///< springtail xid
-        LSN_t xact_lsn;
-        uint8_t type;
-        uint32_t xid;
-        std::set<uint64_t> oids;
-        std::set<uint32_t> aborted_xids; // stream subxacts that aborted
-        std::filesystem::path begin_path;
-        std::filesystem::path commit_path;
+        LSN_t xact_lsn;          ///< xact lsn (final lsn of xact; begin_msg.xact_lsn)
+        uint8_t type;            ///< transaction record type (see enum above)
+        uint32_t xid;                      ///< postgres xid
+        std::set<uint64_t> oids;           ///< table oids changed in transaction
+        std::set<uint32_t> aborted_xids;   ///< stream subxacts that aborted
+        std::filesystem::path begin_path;  ///< log path containing begin message
+        std::filesystem::path commit_path; ///< log path containing commit message
     };
     using PgTransactionPtr = std::shared_ptr<PgTransaction>;
 

@@ -30,6 +30,7 @@ DECLARE
     obj record;
     msg text;
     json_columns json;
+    has_pkey boolean;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands()
     LOOP
@@ -63,9 +64,26 @@ BEGIN
             'columns', json_columns,
             'identity', obj.object_identity);
 
-        -- tg_tag is CREATE TABLE or ALTER TABLE
+        -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+
+        RAISE NOTICE 'springtail: % op, %, %', obj.command_tag, obj.object_identity, obj.objsubid;
+
+        -- If a table is created, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
+        IF obj.command_tag = 'CREATE TABLE' THEN
+            SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
+            IF has_pkey IS NULL THEN
+                PERFORM springtail_add_replica_identity_full(obj.object_identity);
+            END IF;
+        END IF;
     END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION springtail_add_replica_identity_full(identity regclass)
+        RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+    EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', identity);
 END;
 $$;
 
@@ -80,3 +98,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_ddl
    ON ddl_command_end
    WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
    EXECUTE FUNCTION springtail_event_trigger_for_ddl();
+
+
+
+

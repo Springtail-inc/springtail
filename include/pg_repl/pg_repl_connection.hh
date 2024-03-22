@@ -173,6 +173,9 @@ namespace springtail
 
     public:
 
+        /** Stub for tests */
+        PgReplConnection() {}
+
         /**
          * @brief Constructor -- does not connect to db
          *

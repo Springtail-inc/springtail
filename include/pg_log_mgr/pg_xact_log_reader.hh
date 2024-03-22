@@ -51,6 +51,14 @@ namespace springtail {
             return _stream_map;
         }
 
+        /**
+         * @brief Get the max springtail xid in log file
+         * @return uint64_t max springtail xid
+         */
+        uint64_t get_max_sp_xid() {
+            return _max_sp_xid;
+        }
+
     private:
         std::filesystem::path _base_dir;  ///< base directory
 
@@ -59,7 +67,9 @@ namespace springtail {
 
         std::fstream _stream;      ///< file stream
 
-        std::vector<PgTransactionPtr> _xact_list;          ///< list of xacts in log files
+        uint64_t _max_sp_xid=0;    ///< max springtail xid in log file
+
+        std::vector<PgTransactionPtr> _xact_list;  ///< list of xacts in log files > committed xid
         std::map<uint32_t, PgTransactionPtr> _stream_map;  ///< map of in progress stream xacts
 
         /**
