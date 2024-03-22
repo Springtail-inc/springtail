@@ -14,7 +14,7 @@
 #include <common/properties.hh>
 #include <common/json.hh>
 
-#include "ThriftWriteCache.h"
+#include <thrift/write_cache/ThriftWriteCache.h>
 
 #include <write_cache/write_cache_server.hh>
 #include <write_cache/write_cache_service.hh>

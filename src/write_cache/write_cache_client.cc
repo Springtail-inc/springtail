@@ -16,7 +16,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 
-#include "ThriftWriteCache.h"
+#include <thrift/write_cache/ThriftWriteCache.h>
 
 #include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_client_factory.hh>

@@ -9,7 +9,7 @@
 
 #include <common/object_pool.hh>
 
-#include <ThriftWriteCache.h> // generated file
+#include <thrift/write_cache/ThriftWriteCache.h> // generated file
 
 namespace springtail {
 

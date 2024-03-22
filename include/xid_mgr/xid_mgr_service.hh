@@ -4,7 +4,7 @@
 
 #include <common/logging.hh>
 
-#include "ThriftXidMgr.h"
+#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 namespace springtail {
 

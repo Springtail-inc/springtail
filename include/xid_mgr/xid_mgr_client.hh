@@ -8,7 +8,7 @@
 
 #include <common/object_pool.hh>
 
-#include <ThriftXidMgr.h> // generated file
+#include <thrift/xid_mgr/ThriftXidMgr.h> // generated file
 
 namespace springtail {
 

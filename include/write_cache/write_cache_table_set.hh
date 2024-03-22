@@ -12,9 +12,8 @@
 
 #include <fmt/core.h>
 
-
-#include "ThriftWriteCache.h"
-#include "write_cache_types.h"
+#include <thrift/write_cache/ThriftWriteCache.h>
+#include <thrift/write_cache/write_cache_types.h>
 
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
