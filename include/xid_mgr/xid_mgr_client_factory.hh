@@ -9,7 +9,7 @@
 
 #include <common/object_pool.hh>
 
-#include "ThriftXidMgr.h"
+#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 namespace springtail {
     /**

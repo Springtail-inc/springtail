@@ -15,7 +15,7 @@
 #include <common/properties.hh>
 #include <common/json.hh>
 
-#include "ThriftXidMgr.h"
+#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>

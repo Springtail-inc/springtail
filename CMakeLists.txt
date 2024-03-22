@@ -66,6 +66,7 @@ add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
 add_subdirectory(src/pg_log_mgr)
 add_subdirectory(src/xid_mgr)
+add_subdirectory(src/thrift)
 
 ## Messages keep at end of file
 message(STATUS "xxhash: " ${xxhash_DIR})
