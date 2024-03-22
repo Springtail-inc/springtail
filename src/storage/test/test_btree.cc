@@ -49,7 +49,7 @@ namespace {
 
         ExtentSchemaPtr _schema;
         std::shared_ptr<MutableBTree> _write_tree;
-        std::shared_ptr<BTree::ExtentCache> _read_cache;
+        std::shared_ptr<ExtentCache> _read_cache;
         MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _keys;
         uint64_t _file_id;

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <shared_mutex>
-
 #include <boost/container_hash/hash.hpp>
 
 #include <storage/field.hh>
@@ -53,8 +51,6 @@ namespace springtail {
         typedef std::shared_ptr<Node> NodePtr;
 
     public:
-        typedef ObjectCache<std::pair<uint64_t, uint64_t>, Extent> ExtentCache;
-
         /**
          * An iterator object for traversing the BTree.
          */

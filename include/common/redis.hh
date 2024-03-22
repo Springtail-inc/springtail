@@ -130,7 +130,7 @@ namespace springtail {
          * @param timeout_secs timeout in seconds (0=block forever)
          * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop(uint64_t worker_id, uint64_t timeout_secs=0)
+        std::shared_ptr<T> pop(const std::string &worker_id, uint64_t timeout_secs=0)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
 
@@ -151,7 +151,7 @@ namespace springtail {
          *
          * @param worker_id The unique ID of the worker.
          */
-        void commit(uint64_t worker_id)
+        void commit(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
             _redis->rpop(worker_key);
@@ -166,7 +166,7 @@ namespace springtail {
          *
          * @param worker_id The unique ID of the worker.
          */
-        void abort(uint64_t worker_id)
+        void abort(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
             _redis->rpoplpush(worker_key, _key);
@@ -210,43 +210,42 @@ namespace springtail {
     template<typename T>
     class RedisSortedSet {
     public:
+        RedisSortedSet(const std::string &key)
+            : _key(key)
+        { }
+
         /**
          * @brief Add item to set
-         * @param key set key
          * @param value value to add
          * @return uint64_t number of items in set
          */
-        #include <vector>
-
-        uint64_t add(const std::string &key, const T &value, const uint64_t score=0)
+        uint64_t add(const T &value, const uint64_t score=0)
         {
             std::string value_string = value.serialize();
-            return RedisMgr::get_instance()->get_client()->zadd(key, value_string, score);
+            return RedisMgr::get_instance()->get_client()->zadd(_key, value_string, score);
         }
 
         /**
          * @brief Remove item from set
-         * @param key set key
          * @param value value to remove
          * @return uint64_t number of items removed
          */
-        uint64_t remove(const std::string &key, const T &value)
+        uint64_t remove(const T &value)
         {
             std::string value_string = value.serialize();
-            return RedisMgr::get_instance()->get_client()->zrem(key, value_string);
+            return RedisMgr::get_instance()->get_client()->zrem(_key, value_string);
         }
 
         /**
          * @brief Get items in set by index
-         * @param key set key
          * @param start start index (0 for first item, -1 for last item)
          * @param stop stop index (inclusive, -1 for all items)
          * @return std::vector<T> set items
          */
-        std::vector<T> get(const std::string &key, const uint64_t start=0, uint64_t stop=-1)
+        std::vector<T> get(const uint64_t start=0, uint64_t stop=-1)
         {
             std::vector<std::string> values;
-            RedisMgr::get_instance()->get_client()->zrange(key, 0, -1, std::back_inserter(values));
+            RedisMgr::get_instance()->get_client()->zrange(_key, start, stop, std::back_inserter(values));
             std::vector<T> result;
             for (auto &value: values) {
                 result.push_back(T(value));
@@ -256,22 +255,31 @@ namespace springtail {
 
         /**
          * @brief Get items in a set by score
-         * @param key set key
          * @param min minimum score (inclusive)
          * @param max maximum score (inclusive)
          * @return std::vector<T>
          */
-        std::vector<T> get_by_score(const std::string &key, const uint64_t min, const uint64_t max)
+        std::vector<T> get_by_score(const uint64_t min, const uint64_t max=-1)
         {
             std::vector<std::string> values;
-            sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
-            RedisMgr::get_instance()->get_client()->zrangebyscore(key, interval, std::back_inserter(values));
+
+            if (max >= 0) {
+                sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
+                RedisMgr::get_instance()->get_client()->zrangebyscore(_key, interval, std::back_inserter(values));
+            } else {
+                sw::redis::LeftBoundedInterval<double> interval(min, sw::redis::BoundType::RIGHT_OPEN);
+                RedisMgr::get_instance()->get_client()->zrangebyscore(_key, interval, std::back_inserter(values));
+            }
+
             std::vector<T> result;
             for (auto &value: values) {
                 result.push_back(T(value));
             }
             return result;
         }
+
+    private:
+        std::string _key; ///< The key of the sorted set.
     };
 
 }

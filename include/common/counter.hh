@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <boost/thread.hpp>
+
 namespace springtail {
 
     /**
@@ -24,7 +27,7 @@ namespace springtail {
 
         /** Increments the counter. */
         void increment() {
-            boost::scoped_lock lock(_mutex);
+            boost::unique_lock lock(_mutex);
             ++_count;
         }
 

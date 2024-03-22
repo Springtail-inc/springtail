@@ -1,129 +1,17 @@
 #pragma once
 
+#include <storage/mutable_btree.hh>
+
 namespace springtail {
+
+    // forward declaration
+    class Table;
 
     /**
      * This cache holds Page objects that represent mutated data extents.  It is used for mutating
      * tables both during system table changes and for the GC commit phase.
      */
     class DataCache {
-        typedef std::shared_ptr<Page> PagePtr;
-
-    public:
-        /**
-         * Constructs the DataCache object.  When being used for the garbage collector the data
-         * cache will make callbacks into the table to update the indexes.
-         *
-         * @param for_gc When true the data cache will issue callbacks to the table to update it
-         *               primary and secondary indexes to match the provided mutations.
-         */
-        DataCache(bool for_gc = false)
-            : _for_gc(for_gc)
-        { }
-
-        /**
-         * Retrieve a Page based on the extent_id.  If no Page is available, create a new Page for it.
-         */
-        PagePtr
-        get(uint64_t extent_id, TablePtr table)
-        {
-            boost::scoped_lock lock(_mutex);
-
-            // check the cache
-            auto page_i = _cache.find({ table->id(), extent_id });
-            if (page_i != _cache.end()) {
-                // increase the use count
-                ++std::get<2>(page_i->second);
-
-                // remove from the LRU list
-                _lru.erase(std::get<1>(page_i->second));
-                std::get<1>(page_i->second) = _lru.end();
-
-                // return the page
-                return std::get<0>(page_i->second);
-            }
-
-            // create and populate the page
-            auto page = std::make_shared<Page>(extent_id, table, _read_cb, _flush_cb);
-            _cache.insert(extent_id, { page, _lru.end(), 0 });
-
-            // XXX how / when do we flush pages out of the cache?  Pages increase when being mutated...
-
-            return page;
-        }
-
-        /**
-         * Releases a dirty page back to the cache.  Page objects that are in-use cannot be flushed
-         * until everyone using them has released them back to the cache.
-         */
-        void
-        release(PagePtr page)
-        {
-            boost::scoped_lock lock(_mutex);
-
-            // find the cache entry
-            auto cache_i = _cache.find({ page->table_id(), page->id() });
-            assert(cache_i != _cache.end());
-
-            // reduce the usage count on the page
-            --std::get<2>(cache_i->second);
-
-            // place the page onto the LRU list
-            if (std::get<2>(cache_i->second) == 0) {
-                auto pos = _lru.insert(_lru.end(), page);
-                std::get<1>(cache_i->second) = pos;
-            }
-        }
-
-        /**
-         * Flush all of the pages associated with a given table.
-         */
-        void
-        flush(TablePtr table)
-        {
-            boost::scoped_lock(_mutex);
-
-            auto i = _cache.lower_bound({ table->id(), 0 });
-            while (i != _cache.end() && i->first == table->id()) {
-                // no one can be using the table's pages
-                assert(std::get<2>(i->second) == 0);
-
-                // flush the page
-                std::get<0>(i->second)->flush(false);
-
-                // clear the page from the LRU list?
-                _lru.erase(std::get<1>(i->second));
-
-                // move to the next entry
-                ++i;
-            }
-        }
-
-        /**
-         * Discard all of the pages associated with a given table.
-         */
-        void
-        discard(TablePtr table)
-        {
-            boost::scoped_lock(_mutex);
-
-            auto i = _cache.lower_bound({ table->id(), 0 });
-            while (i != _cache.end() && i->first == table->id()) {
-                // no one can be using the table's pages
-                assert(std::get<2>(i->second) == 0);
-
-                // flush the page
-                std::get<0>(i->second)->flush(true);
-
-                // move to the next entry
-                auto j = i++;
-
-                // remove the page from the cache
-                _lru.erase(std::get<1>(j->second));
-                _cache.erase(j);
-            }
-        }
-
     public:
         /**
          * Holds the data for a single mutated extent.  Because there may be a large number of
@@ -133,8 +21,9 @@ namespace springtail {
          */
         class Page {
         public:
-            Page(uint64_t extent_id, TablePtr table)
-                : _table(table)
+            Page(uint64_t extent_id, std::shared_ptr<Table> table)
+                : _table(table),
+                  _index(nullptr)
             {
                 // read the initial extent
                 auto extent = _read_extent(extent_id);
@@ -478,10 +367,125 @@ namespace springtail {
             std::map<uint64_t, std::vector<ExtentPtr>> _extent_map;
             MutableBTree _index;
 
-            TablePtr _table;
+            std::shared_ptr<Table> _table;
             uint64_t _id;
         };
         typedef std::shared_ptr<Page> PagePtr;
+
+    public:
+        /**
+         * Constructs the DataCache object.  When being used for the garbage collector the data
+         * cache will make callbacks into the table to update the indexes.
+         *
+         * @param for_gc When true the data cache will issue callbacks to the table to update it
+         *               primary and secondary indexes to match the provided mutations.
+         */
+        DataCache(bool for_gc = false)
+            : _for_gc(for_gc)
+        { }
+
+        /**
+         * Retrieve a Page based on the extent_id.  If no Page is available, create a new Page for it.
+         */
+        PagePtr
+        get(uint64_t extent_id, std::shared_ptr<Table> table)
+        {
+            boost::scoped_lock lock(_mutex);
+
+            // check the cache
+            auto page_i = _cache.find({ table->id(), extent_id });
+            if (page_i != _cache.end()) {
+                // increase the use count
+                ++std::get<2>(page_i->second);
+
+                // remove from the LRU list
+                _lru.erase(std::get<1>(page_i->second));
+                std::get<1>(page_i->second) = _lru.end();
+
+                // return the page
+                return std::get<0>(page_i->second);
+            }
+
+            // create and populate the page
+            auto page = std::make_shared<Page>(extent_id, table, _read_cb, _flush_cb);
+            _cache.insert(extent_id, { page, _lru.end(), 0 });
+
+            // XXX how / when do we flush pages out of the cache?  Pages increase when being mutated...
+
+            return page;
+        }
+
+        /**
+         * Releases a dirty page back to the cache.  Page objects that are in-use cannot be flushed
+         * until everyone using them has released them back to the cache.
+         */
+        void
+        release(PagePtr page)
+        {
+            boost::scoped_lock lock(_mutex);
+
+            // find the cache entry
+            auto cache_i = _cache.find({ page->table_id(), page->id() });
+            assert(cache_i != _cache.end());
+
+            // reduce the usage count on the page
+            --std::get<2>(cache_i->second);
+
+            // place the page onto the LRU list
+            if (std::get<2>(cache_i->second) == 0) {
+                auto pos = _lru.insert(_lru.end(), page);
+                std::get<1>(cache_i->second) = pos;
+            }
+        }
+
+        /**
+         * Flush all of the pages associated with a given table.
+         */
+        void
+        flush(std::shared_ptr<Table> table)
+        {
+            boost::scoped_lock(_mutex);
+
+            auto i = _cache.lower_bound({ table->id(), 0 });
+            while (i != _cache.end() && i->first == table->id()) {
+                // no one can be using the table's pages
+                assert(std::get<2>(i->second) == 0);
+
+                // flush the page
+                std::get<0>(i->second)->flush(false);
+
+                // clear the page from the LRU list?
+                _lru.erase(std::get<1>(i->second));
+
+                // move to the next entry
+                ++i;
+            }
+        }
+
+        /**
+         * Discard all of the pages associated with a given table.
+         */
+        void
+        discard(std::shared_ptr<Table> table)
+        {
+            boost::scoped_lock(_mutex);
+
+            auto i = _cache.lower_bound({ table->id(), 0 });
+            while (i != _cache.end() && i->first == table->id()) {
+                // no one can be using the table's pages
+                assert(std::get<2>(i->second) == 0);
+
+                // flush the page
+                std::get<0>(i->second)->flush(true);
+
+                // move to the next entry
+                auto j = i++;
+
+                // remove the page from the cache
+                _lru.erase(std::get<1>(j->second));
+                _cache.erase(j);
+            }
+        }
 
     private:
         typedef std::tuple<PagePtr, std::list<PagePtr>::iterator, uint32_t> CacheEntry;

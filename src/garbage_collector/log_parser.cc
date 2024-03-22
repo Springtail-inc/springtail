@@ -1,6 +1,14 @@
 #include <garbage_collector/log_parser.hh>
+#include <storage/table_manager.hh>
 
 namespace springtail {
+
+    bool
+    GCLogParser::Backlog::empty() const
+    {
+        boost::shared_lock lock(_mutex);
+        return _backlog.empty();
+    }
 
     bool
     GCLogParser::Backlog::check(uint64_t xid,
@@ -27,7 +35,7 @@ namespace springtail {
                                uint64_t oid,
                                std::shared_ptr<State> entry)
     {
-        boost::scoped_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
 
         // note: There can be a race condition between check() and push(), so we re-perform
         //       the check() here.  If it is no longer blocked, place the request on the
@@ -46,7 +54,7 @@ namespace springtail {
     GCLogParser::StatePtr
     GCLogParser::Backlog::pop()
     {
-        boost::scoped_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
 
         // if nothing is ready, return nullptr
         if (_ready.empty()) {
@@ -59,19 +67,27 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Backlog::add_dep(uint64_t xid,
-                                  uint64_t oid)
+    GCLogParser::Backlog::update_deps()
     {
-        boost::scoped_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
 
-        _table_deps[oid].insert(xid);
-        _xid_map[xid].insert(oid);
+        // pull the dependencies from redis
+        auto &&values = _oid_set.get_by_score(_last_requested_xid + 1);
+
+        // update the dependency mappings
+        for (auto const &value : values) {
+            _table_deps[value.oid].insert(value.xid);
+            _xid_map[value.xid].insert(value.oid);
+        }
+
+        // save that we pulled data through the last seen XID
+        _last_requested_xid = values.back().xid;
     }
 
     void
     GCLogParser::Backlog::clear_dep(uint64_t xid)
     {
-        boost::scoped_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
 
         auto &&i = _xid_map.find(xid);
         if (i == _xid_map.end()) {
@@ -128,15 +144,16 @@ namespace springtail {
     GCLogParser::Reader::run()
     {
         // loop until we are asked to shutdown; on shutdown drain the backlog
-        while (!_shutdown || !_backlog.empty()) {
+        while (!_shutdown || !_backlog->empty()) {
             // check the backlog for an XID to process
-            _state = _backlog.pop();
+            _state = _backlog->pop();
             if (_state == nullptr) {
                 // update the schema dependencies from Redis
-                _backlog.update_deps();
+                _backlog->update_deps();
 
                 // if nothing ready in backlog, pull an XID from redis
-                auto entry = _pg_queue.pop(_worker_id, timeout=1);
+                // note: block for 1 second
+                auto entry = _pg_queue.pop(_worker_id, 1);
                 if (entry == nullptr) {
                     // nothing ready, loop and try again
                     continue;
@@ -146,17 +163,17 @@ namespace springtail {
             }
 
             // once we have an XID, scan the individual mutations from the log
-            uint64_t start_offset = _state.entry->start_offset;
-            uint64_t end_offset = (_state.entry->start_path == _state.entry->end_path)
-                ? _state.entry->end_offset
+            uint64_t begin_offset = _state->entry->begin_offset;
+            uint64_t commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
+                ? _state->entry->commit_offset
                 : -1;
 
-            char filter[] = START_FILTER;
+            std::vector<char> filter = START_FILTER;
 
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
-                _reader.set_file(_state.entry->start_path, start_offset, end_offset);
+                _reader.set_file(_state->entry->begin_path, begin_offset, commit_offset);
 
                 bool end_of_stream = false;
                 while (!end_of_stream && !blocked) {
@@ -166,7 +183,7 @@ namespace springtail {
 
                     // read the next message, if it doesn't pass the filter, skip and continue
                     auto msg = _reader.read_message(filter);
-                    ++_state.lsn;
+                    ++_state->lsn;
 
                     // handle message skipping
                     if (msg == nullptr) {
@@ -178,7 +195,7 @@ namespace springtail {
                     switch(msg->msg_type) {
                     case PgMsgEnum::BEGIN: {
                         auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
-                        if (begin_msg.xid == _state.entry->pg_xid) {
+                        if (begin_msg.xid == _state->entry->pg_xid) {
                             filter = BEGIN_FILTER;
                         }
                         break;
@@ -193,22 +210,22 @@ namespace springtail {
 
                     case PgMsgEnum::STREAM_START: {
                         auto &stream_start_msg = std::get<PgMsgStreamStart>(msg->msg);
-                        if (stream_start_msg.xid == _state.entry->pg_xid) {
-                            _state.process_as_stream = true;
+                        if (stream_start_msg.xid == _state->entry->pg_xid) {
+                            _state->process_as_stream = true;
                             filter = STREAM_START_FILTER;
                         }
                         break;
                     }
 
                     case PgMsgEnum::STREAM_STOP: {
-                        auto &stream_stop_msg = std::get<PgMsgStreamStop>(msg->msg);
+                        // auto &stream_stop_msg = std::get<PgMsgStreamStop>(msg->msg);
                         filter = STREAM_STOP_FILTER;
                         break;
                     }
 
                     case PgMsgEnum::STREAM_COMMIT: {
                         auto &stream_commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
-                        if (stream_commit_msg.xid == _state.entry->pg_xid) {
+                        if (stream_commit_msg.xid == _state->entry->pg_xid) {
                             // stop processing
                             end_of_stream = true;
                             done = true;
@@ -219,33 +236,34 @@ namespace springtail {
                     case PgMsgEnum::INSERT: {
                         auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
-                        blocked = _process_mutation(_state.entry->pg_xid, _state.entry->xid,
+                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
                                                     insert_msg.rel_id, msg,
-                                                    _state.entry->start_path, offset);
+                                                    _state->entry->begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::DELETE: {
                         auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
-                        blocked = _process_mutation(_state.entry->pg_xid, _state.entry->xid,
+                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
                                                     delete_msg.rel_id, msg,
-                                                    _state.entry->start_path, offset);
+                                                    _state->entry->begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::UPDATE: {
                         auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
 
-                        blocked = _process_mutation(_state.entry->pg_xid, _state.entry->xid,
+                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
                                                     update_msg.rel_id, msg,
-                                                    _state.entry->start_path, offset);
+                                                    _state->entry->begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::TRUNCATE: {
                         auto &truncate_msg = std::get<PgMsgTruncate>(msg->msg);
 
-                        blocked = _process_mutation(_state.entry->pg_xid, _state.entry->xid,
+                        // XXX truncate has a list of rel_ids?
+                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
                                                     truncate_msg.rel_id, msg,
-                                                    _state.entry->start_path, offset);
+                                                    _state->entry->begin_path, offset);
                         break;
                     }
 
@@ -254,11 +272,11 @@ namespace springtail {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state.entry->xid, table_msg.oid,
-                                                 _state.entry->start_path, offset);
+                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
+                                                 _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            _table_manager.create_table(_state.entry->xid, _state.entry->lsn, table_msg);
+                            TableMgr::get_instance()->create_table(_state->entry->xid, _state->entry->lsn, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -271,13 +289,13 @@ namespace springtail {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state.entry->xid, table_msg.oid,
-                                                 _state.entry->start_path, offset);
+                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
+                                                 _state->entry->begin_path, offset);
                         if (!blocked) {
                             // XXX need to stall the pipeline in some cases, eg type change
 
                             // apply the schema change
-                            _table_manager.alter_table(_state.entry->xid, _state.entry->lsn, table_msg);
+                            TableMgr::get_instance()->alter_table(_state->entry->xid, _state->entry->lsn, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -290,15 +308,16 @@ namespace springtail {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state.entry->xid, table_msg.oid,
-                                                 _state.entry->start_path, offset);
+                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
+                                                 _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            _table_manager.drop_table(_state.entry->pg_xid, _state.entry->lsn, drop_msg);
+                            TableMgr::get_instance()->drop_table(_state->entry->pg_xid, _state->entry->lsn, drop_msg);
 
-                            // also perform a truncation of the table by queueing this message
-                            _state.mutation_count->increment();
-                            _parser_queue->push({ msg, _state.mutation_count, xid, _state.lsn });
+                            // XXX also perform a truncation of the table by queueing this message?
+                            _state->mutation_count->increment();
+                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn);
+                            _parser_queue->push(entry);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -308,7 +327,7 @@ namespace springtail {
 
                     default:
                         // message should have been filtered, error?
-                        SPDLOG_ERROR("Received invalid message type: {}", msg->msg_type);
+                        SPDLOG_ERROR("Received invalid message type: {}", static_cast<int>(msg->msg_type));
                         break;
                     }
                 }
@@ -319,29 +338,29 @@ namespace springtail {
                 }
 
                 // prepare to scan the next file
-                if (_state.entry->start_path == _state.entry->end_path) {
+                if (_state->entry->begin_path == _state->entry->commit_path) {
                     // XXX can this ever be hit?  Would it be an error to not have seen a commit?
                     done = true;
                 } else {
                     // XXX how to get the next file?
-                    _state.entry->start_path = next_file(_state.entry->start_path);
-                    start_offset = 0;
-                    end_offset = (_state.entry->start_path == _state.entry->end_path)
-                        ? _state.entry->end_offset
+                    _state->entry->begin_path = next_file(_state->entry->begin_path);
+                    begin_offset = 0;
+                    commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
+                        ? _state->entry->commit_offset
                         : -1;
                 }
             }
 
-            // clear the reader, freeing its resources
-            _reader = nullptr;
+            // XXX clear the reader, freeing its resources?
+            // _reader = nullptr;
 
             // if the XID is fully processed, perform cleanup
             if (done) {
                 // wait for the parsers to complete the work for this XID
-                _state.mutation_count->wait();
+                _state->mutation_count->wait();
 
                 // clear the dependencies and commit the entry in the Redis queue
-                _backlog.clear_dep(_state.entry->xid);
+                _backlog->clear_dep(_state->entry->xid);
                 _pg_queue.commit(_worker_id);
             }
         }
@@ -356,11 +375,11 @@ namespace springtail {
     bool
     GCLogParser::Reader::_check_xid(uint64_t pg_xid)
     {
-        if (_state.entry->pg_xid == pg_xid) {
+        if (_state->entry->pg_xid == pg_xid) {
             return true;
         }
 
-        if (_state.entry->aborted_set.find(pg_xid) != _state.entry->aborted_set.end()) {
+        if (_state->entry->aborted_xids.find(pg_xid) != _state->entry->aborted_xids.end()) {
             return false;
         }
 
@@ -376,12 +395,12 @@ namespace springtail {
         // if the mutation involves a table with a schema change in an earlier XID, then we
         // place this XID into the backlog to be picked back up later after the schema
         // change has been applied.
-        if (_backlog.check(xid, oid)) {
+        if (_backlog->check(xid, oid)) {
             // halt processing this XID until earlier schema changes have been applied
-            _state.entry->begin_path = file;
-            _state.entry->start_offset = _reader.offset();
+            _state->entry->begin_path = file;
+            _state->entry->begin_offset = _reader.offset();
 
-            _backlog.push(_state);
+            _backlog->push(xid, oid, _state);
             return true;
         }
 
@@ -397,7 +416,7 @@ namespace springtail {
                                            uint64_t offset)
     {
         // check if we should skip processing this message
-        if (_state.process_as_stream && !_check_xid(pg_xid)) {
+        if (_state->process_as_stream && !_check_xid(pg_xid)) {
             return false;
         }
 
@@ -407,9 +426,38 @@ namespace springtail {
         }
 
         // otherwise we queue this message for processing
-        _state.mutation_count->increment();
-        _parser_queue->push({ msg, _state.mutation_count, xid, _state.lsn });
+        _state->mutation_count->increment();
+        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn);
+        _parser_queue->push(entry);
     }
+
+    const std::vector<char> GCLogParser::Reader::START_FILTER = {
+        pg_msg::MSG_BEGIN,
+        pg_msg::MSG_STREAM_START
+    };
+
+    const std::vector<char> GCLogParser::Reader::BEGIN_FILTER = {
+        pg_msg::MSG_COMMIT,
+        pg_msg::MSG_INSERT,
+        pg_msg::MSG_UPDATE,
+        pg_msg::MSG_DELETE,
+        pg_msg::MSG_TRUNCATE,
+        pg_msg::MSG_MESSAGE
+    };
+
+    const std::vector<char> GCLogParser::Reader::STREAM_START_FILTER = {
+        pg_msg::MSG_STREAM_STOP,
+        pg_msg::MSG_INSERT,
+        pg_msg::MSG_UPDATE,
+        pg_msg::MSG_DELETE,
+        pg_msg::MSG_TRUNCATE,
+        pg_msg::MSG_MESSAGE
+    };
+
+    const std::vector<char> GCLogParser::Reader::STREAM_STOP_FILTER = {
+        pg_msg::MSG_STREAM_START,
+        pg_msg::MSG_STREAM_COMMIT
+    };
 
     void
     GCLogParser::Parser::run()
@@ -426,19 +474,19 @@ namespace springtail {
             PgMsgPtr msg = entry->msg;
 
             // get the table information for the mutation
-            auto table = _table_manager.get_table(msg->table_id);
+            auto table = TableMgr::get_instance()->get_table(msg->table_id);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
             if (table->has_primary()) {
                 switch (msg->msg_type) {
-                case PgMsgEnum::MSG_INSERT: {
+                case PgMsgEnum::INSERT: {
                     // extract the primary key from the message
                     auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
                     // generate an extent tuple from the pg log data
                     auto schema = table->schema(entry->xid);
-                    auto extent = std::make_shared<Extent>(schema, ExtentType::LEAF, entry->xid);
-                    auto &&tuple = _pack_extent(extent, insert_msg.tuple);
+                    auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
+                    auto &&tuple = _pack_extent(extent, insert_msg.new_tuple);
 
                     // extract the primary key from the tuple
                     auto pkey_tuple = schema->tuple_subset(tuple, table->primary_key());
@@ -447,16 +495,16 @@ namespace springtail {
                     uint64_t extent_id = table->primary_lookup(pkey_tuple);
 
                     // send insert to the write cache
-                    RowData data;
+                    WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
                     data.data = extent->serialize();
-                    data.op = RowOp::INSERT;
+                    data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { data });
                     break;
                 }
-                case PgMsgEnum::MSG_DELETE: {
+                case PgMsgEnum::DELETE: {
                     // extract the primary key from the message
                     auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
@@ -467,25 +515,24 @@ namespace springtail {
                     auto schema = table->schema(entry->xid);
                     auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
-                    auto extent = std::make_shared<Extent>(pkey_schema, ExtentType::LEAF, entry->xid);
+                    auto extent = std::make_shared<Extent>(pkey_schema, ExtentType(), entry->xid);
                     auto &&tuple = _pack_extent(extent, delete_msg.tuple);
 
                     // find the affected extent
                     uint64_t extent_id = table->primary_lookup(tuple);
 
                     // send the delete to the write cache
-                    RowData data;
+                    WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
                     data.data = extent->seralize();
-                    data.op = RowOp::DELETE;
+                    data.op = WriteCacheClient::RowOp::DELETE;
 
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { data });
                     break;
                 }
-                case PgMsgEnum::MSG_UPDATE: {
+                case PgMsgEnum::UPDATE: {
                     auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
-                    std::shared_ptr<MsgTuple> old_pkey_tuple;
 
                     // tuple type should be 'K' for primary key
                     assert(update_msg.old_type == 'K');
@@ -494,10 +541,10 @@ namespace springtail {
                     auto schema = table->schema(entry->xid);
                     auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
-                    auto old_extent = std::make_shared<Extent>(pkey_schema, ExtentType::LEAF, entry->xid);
+                    auto old_extent = std::make_shared<Extent>(pkey_schema, ExtentType(), entry->xid);
                     auto &&old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple);
 
-                    auto new_extent = std::make_shared<Extent>(schema, ExtentType::LEAF, entry->xid);
+                    auto new_extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
                     auto &&new_tuple = _pack_extent(new_extent, update_msg.new_tuple);
 
                     // extract the primary key from the new data tuple
@@ -509,43 +556,43 @@ namespace springtail {
                     // check if they have the same primary key
                     if (old_pkey_tuple == new_pkey_tuple) {
                         // send the update to the write cache
-                        RowData data;
+                        WriteCacheClient::RowData data;
                         data.xid = entry->xid;
                         data.xid_seq = entry->lsn;
                         data.pkey = old_extent->serialize();
                         data.data = new_extent->serialize();
-                        data.op = RowOp::UPDATE;
+                        data.op = WriteCacheClient::RowOp::UPDATE;
                                 
-                        _write_cache->add_rows(table->id(), old_extent_id, RowOp::UPDATE, { data });
+                        _write_cache->add_rows(table->id(), old_extent_id, WriteCacheClient::RowOp::UPDATE, { data });
                     } else {
                         // lookup the extent for the new key
                         uint64_t new_extent_id = table->primary_lookup(new_pkey_tuple);
 
                         // send a delete and insert to the write cache
-                        RowData delete_data;
+                        WriteCacheClient::RowData delete_data;
                         delete_data.xid = entry->xid;
                         delete_data.xid_seq = entry->lsn;
                         delete_data.pkey = old_extent->seralize();
-                        data.op = RowOp::DELETE;
+                        delete_data.op = WriteCacheClient::RowOp::DELETE;
 
-                        RowData insert_data;
+                        WriteCacheClient::RowData insert_data;
                         insert_data.xid = entry->xid;
                         insert_data.xid_seq = entry->lsn;
                         insert_data.data = new_extent->seralize();
-                        data.op = RowOp::INSERT;
+                        insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                        _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { delete_data });
-                        _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { insert_data });
+                        _write_cache->add_rows(table->id(), old_extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
+                        _write_cache->add_rows(table->id(), new_extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
                     }
                     break;
                 }
-                case PgMsgEnum::MSG_TRUNCATE: {
+                case PgMsgEnum::TRUNCATE: {
                     // record the truncate into the write cache look-aside
-                    _write_cache->add_table_change(table->id(), { entry->xid, entry->lsn, TableOp::TRUNCATE });
+                    _write_cache->add_table_change(table->id(), { entry->xid, entry->lsn, WriteCacheClient::TableOp::TRUNCATE });
                     break;
                 }
                 default:
-                    SPDLOG_ERROR("Invalid message type: {}", msg->msg_type);
+                    SPDLOG_ERROR("Invalid message type: {}", static_cast<int>(msg->msg_type));
                     break;
                 }
             } else {
@@ -556,24 +603,27 @@ namespace springtail {
                 //       the lookup until we are making the actual mutation, would be better for a
                 //       reader to scan the mutations to see if they impact the query
 
-                if (msg->msg_type == MSG_INSERT) {
+                if (msg->msg_type == PgMsgEnum::INSERT) {
                     uint64_t extent_id = UNKNOWN_EXTENT; // XXX
+
+                    // get the message details
+                    auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
                     // generate an extent with a row holding the PG tuple data
                     auto schema = table->schema(entry->xid);
-                    auto extent = std::make_shared<Extent>(schema, ExtentType::LEAF, entry->xid);
-                    auto &&tuple = _pack_extent(extent, insert_msg.tuple);
+                    auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
+                    auto &&tuple = _pack_extent(extent, insert_msg.new_tuple);
 
                     // send the insert to the write cache
-                    RowData data;
+                    WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
                     data.data = extent->serialize();
-                    data.op = RowOp::INSERT;
+                    data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { insert_data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
 
-                } else if (msg->msg_type == MSG_DELETE) {
+                } else if (msg->msg_type == PgMsgEnum::DELETE) {
                     uint64_t extent_id = UNKNOWN_EXTENT; // XXX
 
                     // generate an extent with a row holding the PG tuple data
@@ -587,16 +637,16 @@ namespace springtail {
                     MutableTuple tuple(fields, extent->append());
                     tuple.assign(FieldTuple(pg_fields, delete_msg.tuple));
 
-                    RowData delete_data;
+                    WriteCacheClient::RowData delete_data;
                     delete_data.xid = entry->xid;
                     delete_data.xid_seq = entry->lsn;
                     delete_data.pkey = extent->seralize();
-                    delete_data.op = RowOp::DELETE;
+                    delete_data.op = WriteCacheClient::RowOp::DELETE;
 
                     // send the delete to the write cache
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { delete_data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
 
-                } else if (msg->msg_type == MSG_UPDATE) {
+                } else if (msg->msg_type == PgMsgEnum::UPDATE) {
                     // generate an extent with a row holding the PG tuple data for the delete and the insert
                     auto schema = table->schema(entry->xid);
 
@@ -611,23 +661,23 @@ namespace springtail {
                     MutableTuple new_tuple(fields, extent->append());
                     new_tuple.assign(FieldTuple(pg_fields, update_msg.new_tuple));
 
-                    RowData delete_data;
+                    WriteCacheClient::RowData delete_data;
                     delete_data.xid = entry->xid;
                     delete_data.xid_seq = entry->lsn;
                     delete_data.pkey = old_extent->seralize();
-                    delete_data.op = RowOp::DELETE;
+                    delete_data.op = WriteCacheClient::RowOp::DELETE;
 
-                    RowData insert_data;
+                    WriteCacheClient::RowData insert_data;
                     insert_data.xid = entry->xid;
                     insert_data.xid_seq = entry->lsn;
                     insert_data.data = new_extent->seralize();
-                    insert_data.op = RowOp::INSERT;
+                    insert_data.op = WriteCacheClient::RowOp::INSERT;
 
                     // do an insert and a delete
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::DELETE, { delete_data });
-                    _write_cache->add_rows(table->id(), extent_id, RowOp::INSERT, { insert_data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
+                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
 
-                } else if (msg->msg_type == MSG_TRUNCATE) {
+                } else if (msg->msg_type == PgMsgEnum::TRUNCATE) {
                     // record the truncate into the write cache look-aside
                     _write_cache->add_table_change(table->id(), { xid, lsn, TableOp::TRUNCATE });
                 } else {

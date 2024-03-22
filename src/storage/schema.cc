@@ -332,7 +332,7 @@ namespace springtail {
 
     VirtualSchema::VirtualSchema(std::shared_ptr<ExtentSchema> extent_schema,
                                  const std::map<uint32_t, SchemaColumn> &columns,
-                                 const std::vector<SchemaUpdate> &updates)
+                                 const std::vector<SchemaColumn> &updates)
         : _extent_schema(extent_schema)
     {
         std::map<uint32_t, std::string> name_map;

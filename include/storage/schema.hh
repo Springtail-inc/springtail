@@ -29,22 +29,6 @@ namespace springtail {
         TYPE_CHANGE = 4
     };
 
-
-    /**
-     * An object that holds all of the information about a column modification in the
-     * form of the updated column information.
-     */
-    struct SchemaUpdate {
-        uint64_t xid;
-        uint64_t lsn;
-        SchemaUpdateType update_type;
-        uint32_t position;
-        std::string name;
-        SchemaType type;
-        bool nullable;
-        std::optional<std::string> default_value;
-    };
-
     /**
      * An object that holds all of the information about a column over a given xid range.
      */
@@ -56,16 +40,17 @@ namespace springtail {
         SchemaType type;
         bool nullable;
         std::optional<std::string> default_value;
+        SchemaUpdateType update_type;
 
-        SchemaColumn(uint64_t start_xid,
-                     uint64_t end_xid,
+        SchemaColumn(uint64_t xid,
+                     uint64_t lsn,
                      const std::string &name,
                      uint32_t position,
                      SchemaType type,
                      bool nullable,
                      std::optional<std::string> default_value=std::optional<std::string>())
-            : start_xid(start_xid),
-              end_xid(end_xid),
+            : xid(xid),
+              lsn(lsn),
               name(name),
               position(position),
               type(type),
@@ -78,8 +63,8 @@ namespace springtail {
                      SchemaType type,
                      bool nullable,
                      std::optional<std::string> default_value=std::optional<std::string>())
-            : start_xid(0),
-              end_xid(std::numeric_limits<uint64_t>::max()),
+            : xid(0),
+              lsn(0),
               name(name),
               position(position),
               type(type),
@@ -88,21 +73,8 @@ namespace springtail {
         { }
 
         /**
-         * For constructing a new column from a NEW_COLUMN update.
+         * Default copy constructor.
          */
-        SchemaColumn(const SchemaUpdate &update)
-            : start_xid(update.xid),
-              end_xid(std::numeric_limits<uint64_t>::max()),
-              name(update.name),
-              position(update.position),
-              type(update.type),
-              nullable(update.nullable),
-              default_value(update.default_value)
-        {
-            assert(update.update_type == SchemaUpdateType::NEW_COLUMN);
-        }
-
-        // default copy constructor
         SchemaColumn(const SchemaColumn &column) = default;
     };
 
@@ -295,7 +267,7 @@ namespace springtail {
          */
         VirtualSchema(std::shared_ptr<ExtentSchema> extent_schema,
                       const std::map<uint32_t, SchemaColumn> &columns,
-                      const std::vector<SchemaUpdate> &updates);
+                      const std::vector<SchemaColumn> &updates);
 
         /**
          * Checks if the column exists within the virtual schema.

@@ -3,8 +3,36 @@
 #include <storage/schema_manager.hh>
 
 namespace springtail {
+    /* static member initialization must happen outside of class */
+    SchemaMgr* SchemaMgr::_instance {nullptr};
+    boost::mutex SchemaMgr::_instance_mutex;
+
+    SchemaMgr *
+    SchemaMgr::get_instance()
+    {
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new SchemaMgr();
+        }
+
+        return _instance;
+    }
+    
+    void
+    SchemaMgr::shutdown()
+    {
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
+
     std::map<uint32_t, SchemaColumn>
-    SchemaManager::SchemaInfo::_get_columns_for_xid(uint64_t xid)
+    SchemaMgr::SchemaInfo::_get_columns_for_xid(uint64_t xid)
     {
         std::map<uint32_t, SchemaColumn> columns;
 
@@ -31,10 +59,10 @@ namespace springtail {
     }
 
     void
-    SchemaManager::SchemaInfo::_read_schema_table(uint64_t table_id)
+    SchemaMgr::SchemaInfo::_read_schema_table(uint64_t table_id)
     {
         // first get the snapshots from the schemas table
-        auto schemas_t = TableManager::get_table(sys_tbl::Schemas::ID);
+        auto schemas_t = TableMgr::get_table(sys_tbl::Schemas::ID);
 
         // construct the column accessors for the schemas table
         auto schema = schemas_table->get_schema();
@@ -74,7 +102,7 @@ namespace springtail {
     }
 
     void
-    SchemaManager::SchemaInfo::_read_indexes_table(uint64_t table_id)
+    SchemaMgr::SchemaInfo::_read_indexes_table(uint64_t table_id)
     {
         // get the "indexes" table
         auto indexes_t = TableManger::get_table(sys_tbl::Indexes::ID);
@@ -110,14 +138,14 @@ namespace springtail {
         }
     }
 
-    SchemaManager::SchemaInfo::SchemaInfo(uint64_t table_id)
+    SchemaMgr::SchemaInfo::SchemaInfo(uint64_t table_id)
     {
         _read_schema_table(table_id);
         _read_indexes_table(table_id);
     }
 
     std::vector<std::string>
-    SchemaManager::SchemaInfo::get_primary_key(uint64_t xid)
+    SchemaMgr::SchemaInfo::get_primary_key(uint64_t xid)
     {
         std::vector<std::string> key;
 
@@ -129,7 +157,7 @@ namespace springtail {
     }
 
     std::shared_ptr<ExtentSchema>
-    SchemaManager::SchemaInfo::get_extent_schema(uint64_t extent_xid)
+    SchemaMgr::SchemaInfo::get_extent_schema(uint64_t extent_xid)
     {
         // determine the columns for the extent XID
         auto &&columns = _get_columns_for_xid(extent_xid);
@@ -139,9 +167,9 @@ namespace springtail {
     }
 
     std::shared_ptr<VirtualSchema>
-    SchemaManager::SchemaInfo::get_virtual_schema(uint32_t extent_xid,
-                                                  uint64_t target_xid,
-                                                  uint64_t lsn=0)
+    SchemaMgr::SchemaInfo::get_virtual_schema(uint32_t extent_xid,
+                                              uint64_t target_xid,
+                                              uint64_t lsn=0)
     {
         // determine the columns for the extent XID
         auto &&columns = _get_columns_for_xid(extent_xid);
@@ -189,7 +217,7 @@ namespace springtail {
         return std::make_shared<VirtualSchema>(schema, columns, updates);
     }
 
-    SchemaManager::SchemaManager() {
+    SchemaMgr::SchemaMgr() {
         _system_cache[sys_tbl::TableNames::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::SCHEMA);
         _system_cache[sys_tbl::TableRoots::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::SCHEMA);
         _system_cache[sys_tbl::Indexes::ID] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::SCHEMA);
@@ -197,7 +225,7 @@ namespace springtail {
     }
 
     std::shared_ptr<const Schema>
-    SchemaManager::get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn = 0)
+    SchemaMgr::get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn = 0)
     {
         // first check if it's an immutable system table schema
         auto &&system_i = _system_cache.find(table_id);
@@ -221,8 +249,8 @@ namespace springtail {
     }
 
     std::shared_ptr<const ExtentSchema>
-    SchemaManager::get_extent_schema(uint64_t table_id,
-                                     uint64_t xid)
+    SchemaMgr::get_extent_schema(uint64_t table_id,
+                                 uint64_t xid)
     {
         // first check if it's an immutable system table schema
         auto &&system_i = _system_cache.find(table_id);
@@ -243,13 +271,13 @@ namespace springtail {
         return info->get_extent_schema(xid);
     }
 
-    SchemaUpdate
-    SchemaManager::generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
-                                   const std::map<uint32_t, SchemaColumn> &new_schema,
-                                   uint64_t xid,
-                                   uint64_t lsn)
+    SchemaColumn
+    SchemaMgr::generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
+                               const std::map<uint32_t, SchemaColumn> &new_schema,
+                               uint64_t xid,
+                               uint64_t lsn)
     {
-        SchemaUpdate update;
+        SchemaColumn update;
         update.xid = xid;
         update.lsn = lsn;
 

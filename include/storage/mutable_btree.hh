@@ -1,6 +1,5 @@
 #pragma once
 
-#include <shared_mutex>
 #include <boost/thread.hpp>
 
 #include <storage/field.hh>
@@ -143,9 +142,13 @@ namespace springtail {
         uint64_t finalize();
 
         /**
-         * Helper function to create a tuple that contains the search key fields and a set of
-         * constant value keys.
+         * Helper function to return the key fields of the btree leaf extents.
          */
+        // XXX is this really necessary?
+        FieldArrayPtr get_key_fields()
+        {
+            return std::make_shared<FieldArray>(_leaf_keys->begin(), _leaf_keys->end());
+        }
 
     private:
         /** The maximum size of an extent before we split it in half. */
@@ -738,4 +741,6 @@ namespace springtail {
          */
         void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
     };
+    typedef std::shared_ptr<MutableBTree> MutableBTreePtr;
+
 }

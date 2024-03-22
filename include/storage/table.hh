@@ -1,5 +1,12 @@
 #pragma once
 
+#include <common/object_cache.hh>
+
+#include <storage/btree.hh>
+#include <storage/data_cache.hh>
+#include <storage/mutable_btree.hh>
+#include <storage/schema_mgr.hh>
+
 namespace springtail {
 
     /**
@@ -8,102 +15,14 @@ namespace springtail {
      */
     class Table {
     public:
-        Table(uint64_t table_id,
-              const std::vector<std::string> &primary_key,
-              std::shared_ptr<ExtentCache> cache,
-              uint64_t xid,
-              uint64_t root_offset)
-        { }
-
-        /** Returns true if the table has a primary key.  False otherwise. */
-        bool has_primary() {
-            return !_primary_key.empty();
-        }
-
-        /** Finds the extent_id that may contain the provided key, using the primary key index. */
-        uint64_t primary_lookup(TuplePtr tuple)
-        {
-            // always returns an iterator to a leaf entry where the key *could* exist in the table
-            auto &&i = _primary_index->find_for_update(tuple, xid);
-            if (i == _primary_index->end()) {
-                // this can only happen if the table is empty, in which case we need to use a
-                // special extent_id that indicates an append
-                return -1;
-            }
-
-            // extract the extent_id and return it
-            return _primary_extent_id_f->get_uint64(*i);
-        }
-
-        /**
-         * Retrieves the schema for the table at a given XID.
-         */
-        SchemaPtr schema(uint64_t xid) const
-        {
-            return _schema_manager->get_extent_schema(_id, xid);
-        }
-
-        /** Retrieves the ordered set of columns that form the primary key. */
-        std::vector<std::string> primary_key() const
-        {
-            return _primary_key_columns;
-        }
-
-        /** Retrieve the ID of this table. */
-        uint64_t id() const
-        {
-            return _id;
-        }
-
-        /**
-         * Returns an iterator to the first row that is greater than or equal to the provided search
-         * key.  Search key must match the primary index order.
-         */
-        Iterator lower_bound(TuplePtr search_key)
-        {
-            // find the extent that could contain the lower_bound() key
-            auto &&i = _primary_index->lower_bound(search_key);
-            if (i == _primary_index->end()) {
-                return end();
-            }
-
-            // read the extent and find the lower_bound() of the key within it
-            ExtentPtr extent = _read_extent_via_primary(i);
-
-            // find the lower_bound() of the key within the data extent
-            return std::lower_bound(extent->begin(), extent->end(), search_key,
-                                    [this](const Extent::Row &row, TuplePtr key)
-                                    {
-                                        return FieldTuple(this->_pkey_fields, row).less_than(key);
-                                    });
-        }
-
-        /**
-         * An iterator to the start of the table.
-         */
-        Iterator begin()
-        {
-            auto &&index_i = _primary_index->begin();
-            auto extent = _read_extent_via_primary(index_i);
-            Iterator(this, _primary_index, index_i, extent, extent->begin());
-        }
-
-        /**
-         * An iterator to the end of the table.
-         */
-        Iterator end()
-        {
-            Iterator(this, _primary_index);
-        }
-
-    public:
         class Iterator {
         public:
             /** Specifically for the end() iterator. */
             Iterator(const Table *table, BTreePtr btree)
                 : _table(table),
                   _btree(btree),
-                  _btree_i(btree->end())
+                  _btree_i(btree->end()),
+                  _extent(nullptr)
             { }
 
             Iterator(const Table *table,
@@ -115,6 +34,15 @@ namespace springtail {
                   _extent(extent),
                   _extent_i(extent_i)
             { }
+
+            Iterator(const Iterator &i)
+                : _table(i._table),
+                  _btree(i._btree),
+                  _btree_i(i._btree_i),
+                  _extent(i._extent),
+                  _extent_i(i._extent_i)
+            { }
+                  
 
             using iterator_category = std::forward_iterator_tag;
             using difference_type   = std::ptrdiff_t;
@@ -164,16 +92,122 @@ namespace springtail {
             Extent::Iterator _extent_i;
         };
 
+    public:
+        Table(uint64_t table_id,
+              uint64_t xid,
+              uint64_t root_offset,
+              const std::vector<std::string> &primary_key,
+              ExtentCachePtr cache)
+            : _id(table_id),
+              _xid(xid),
+              _primary_key(primary_key),
+              _cache(cache)
+        {
+            // XXX need to initialize the _primary_index
+        }
+
+        /** Returns true if the table has a primary key.  False otherwise. */
+        bool has_primary() {
+            return !_primary_key.empty();
+        }
+
+        /** Finds the extent_id that may contain the provided key, using the primary key index. */
+        uint64_t primary_lookup(TuplePtr tuple)
+        {
+            // always returns an iterator to a leaf entry where the key *could* exist in the table
+            auto &&i = _primary_index->find_for_update(tuple, _xid);
+            if (i == _primary_index->end()) {
+                // this can only happen if the table is empty, in which case we need to use a
+                // special extent_id that indicates an append
+                return -1;
+            }
+
+            // extract the extent_id and return it
+            
+            return _primary_extent_id_f->get_uint64(*i);
+        }
+
+        /**
+         * Retrieves the schema for the table at a given XID.
+         */
+        ExtentSchemaPtr extent_schema() const
+        {
+            return SchemaMgr::get_instance()->get_extent_schema(_id, _xid);
+        }
+
+        /**
+         * Get a schema for accessing an extent from this table that was written at the provided XID.
+         */
+        SchemaPtr schema(uint64_t extent_xid) const
+        {
+            return SchemaMgr::get_instance()->get_schema(_id, extent_xid, _xid);
+        }
+
+        /** Retrieves the ordered set of columns that form the primary key. */
+        std::vector<std::string> primary_key() const
+        {
+            return _primary_key;
+        }
+
+        /** Retrieve the ID of this table. */
+        uint64_t id() const
+        {
+            return _id;
+        }
+
+        /**
+         * Returns an iterator to the first row that is greater than or equal to the provided search
+         * key.  Search key must match the primary index order.
+         */
+        Iterator lower_bound(TuplePtr search_key)
+        {
+            // find the extent that could contain the lower_bound() key
+            auto &&i = _primary_index->lower_bound(search_key, _xid);
+            if (i == _primary_index->end()) {
+                return end();
+            }
+
+            // read the extent and find the lower_bound() of the key within it
+            ExtentPtr extent = _read_extent_via_primary(i);
+
+            // find the lower_bound() of the key within the data extent
+            auto &&j = std::lower_bound(extent->begin(), extent->end(), search_key,
+                                        [this](const Extent::Row &row, TuplePtr key)
+                                        {
+                                            return FieldTuple(this->_pkey_fields, row).less_than(key);
+                                        });
+
+            return Iterator(this, _primary_index, i, extent, j);
+        }
+
+        /**
+         * An iterator to the start of the table.
+         */
+        Iterator begin()
+        {
+            auto &&index_i = _primary_index->begin(_xid);
+            auto extent = _read_extent_via_primary(index_i);
+            return Iterator(this, _primary_index, index_i, extent, extent->begin());
+        }
+
+        /**
+         * An iterator to the end of the table.
+         */
+        Iterator end()
+        {
+            return Iterator(this, _primary_index);
+        }
+
     protected:
         ExtentPtr
-        _read_extent_via_primary(BTree::Iterator &pos)
+        _read_extent_via_primary(BTree::Iterator &pos) const
         {
-            uint64_t extent_id = _primary_leaf_extent_f.get_uint64(*pos);
+            uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
             return _read_extent(extent_id);
         }
 
         ExtentPtr
-        _read_extent(uint64_t extent_id)
+        _read_extent(uint64_t extent_id) const
         {
             auto response = _handle->read(extent_id);
             return std::make_shared<Extent>(_schema, response->data);
@@ -183,10 +217,19 @@ namespace springtail {
         /** The ID of the table. */
         uint64_t _id;
 
+        uint64_t _xid;
+        std::vector<std::string> _primary_key;
+        ExtentCachePtr _cache;
+        std::shared_ptr<IOHandle> _handle;
+
+        FieldArrayPtr _pkey_fields;
+        FieldPtr _primary_extent_id_f;
+        ExtentSchemaPtr _schema;
+
         /** The primary index of the table. */
         BTreePtr _primary_index;
     };
-
+    typedef std::shared_ptr<Table> TablePtr;
 
     /**
      * Interface for mutating a table at the most recent XID.
@@ -201,7 +244,7 @@ namespace springtail {
         void insert(TuplePtr value, uint64_t xid, uint64_t extent_id)
         {
             if (extent_id == UNKNOWN_EXTENT) {
-                if (_primary_key_columns.empty()) {
+                if (_primary_key.empty()) {
                     _insert_append(value, xid);
                 } else {
                     _insert_by_lookup(value, xid);
@@ -219,7 +262,7 @@ namespace springtail {
         void remove(TuplePtr key, uint64_t xid, uint64_t extent_id)
         {
             if (extent_id == UNKNOWN_EXTENT) {
-                if (_primary_key_columns.empty()) {
+                if (_primary_key.empty()) {
                     _remove_by_scan(key, xid);
                 } else {
                     _remove_by_lookup(key, xid);
@@ -238,7 +281,7 @@ namespace springtail {
         void update(TuplePtr value, uint64_t xid, uint64_t extent_id)
         {
             if (extent_id == UNKNOWN_EXTENT) {
-                if (_primary_key_columns.empty()) {
+                if (_primary_key.empty()) {
                     // XXX error -- cannot perform an update() with no primary key, should be split into a remove() and insert()
                 } else {
                     _update_by_lookup(value, xid);
@@ -258,21 +301,23 @@ namespace springtail {
             FieldArrayPtr key_fields = _primary_index->get_key_fields();
             
             // remove the primary index entry
-            _primary_index->remove(FieldTuple(key_fields, extent.back()));
+            auto &&pkey = std::make_shared<FieldTuple>(key_fields, extent->back());
+            _primary_index->remove(pkey);
 
             // setup the value fields for the secondary indexes
             FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
-            value_fields[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+            value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
 
             // go through each row and pass the relevant key to each of the secondary indexes for removal
             uint32_t row_id;
-            for (auto &&row_i : *extent) {
-                value_fields[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+            for (auto &&row : *extent) {
+                value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
                 for (auto &&secondary : _secondary_indexes) {
                     key_fields = secondary->get_key_fields();
 
-                    secondary->remove(KeyValueTuple(key_fields, value_fields, *row_i));
+                    auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                    secondary->remove(skey);
                 }
 
                 ++row_id;
@@ -290,18 +335,20 @@ namespace springtail {
             FieldArrayPtr value_fields = std::make_shared<FieldArray>(1);
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
 
-            _primary_index->insert(KeyValueTuple(key_fields, value_fields, extent.back()));
+            auto &&pvalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, extent->back());
+            _primary_index->insert(pvalue);
 
             // go through each row and pass the relevant key to each of the secondary indexes for insertion
             value_fields->resize(2);
             uint32_t row_id;
-            for (auto &&row_i : *extent) {
+            for (auto &&row : *extent) {
                 (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
                 for (auto &&secondary : _secondary_indexes) {
                     key_fields = secondary->get_key_fields();
 
-                    secondary->insert(KeyValueTuple(key_fields, value_fields, *row_i));
+                    auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                    secondary->insert(svalue);
                 }
             }
         }
@@ -327,7 +374,7 @@ namespace springtail {
             uint64_t extent_id = _primary_index->back();
 
             // get the page from the cache
-            auto page  = _cache->get(extent_id);
+            auto page = _cache->get(extent_id);
 
             // append the value to the extent
             page->append(value);
@@ -341,7 +388,7 @@ namespace springtail {
         _insert_by_lookup(TuplePtr value, uint64_t xid)
         {
             // we didn't receive an extent_id, so we need to look up the extent from the primary index
-            auto search_key = _schema->tuple_subset(value, _primary_key_columns);
+            auto search_key = _schema->tuple_subset(value, _primary_key);
             auto i = _primary_index->lower_bound(search_key, xid);
             uint64_t extent_id = extent_id_f->get_uint64(*i);
 
@@ -442,5 +489,15 @@ namespace springtail {
             _update_direct(key, xid, extent_id);
         }
 
+    private:
+        std::vector<std::string> _primary_key;
+
+        DataCache _cache;
+
+        /** The primary index of the table. */
+        MutableBTreePtr _primary_index;
+        std::vector<MutableBTreePtr> _secondary_indexes;
     };
+    typedef std::shared_ptr<MutableTuple> MutableTablePtr;
+
 }

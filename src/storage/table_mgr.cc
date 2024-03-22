@@ -1,10 +1,41 @@
-#include <storage/table_manager.hh>
+#include <storage/table_mgr.hh>
 
 namespace springtail {
-    TablePtr
-    TableManager::get_table(uint64_t table_id, uint64_t xid, uint64_t lsn)
+
+    /* static member initialization must happen outside of class */
+    TableMgr* TableMgr::_instance {nullptr};
+    boost::mutex TableMgr::_instance_mutex;
+
+    TableMgr *
+    TableMgr::get_instance()
     {
-        boost::scoped_lock lock(_mutex);
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new TableMgr();
+        }
+
+        return _instance;
+    }
+    
+    void
+    TableMgr::shutdown()
+    {
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
+
+    TablePtr
+    TableMgr::get_table(uint64_t table_id,
+                        uint64_t xid,
+                        uint64_t lsn)
+    {
+        boost::shared_lock lock(_mutex);
 
         // check the system tables
         // XXX how to populate the system tables?
@@ -46,9 +77,9 @@ namespace springtail {
     }
 
     void
-    TableManager::create_table(uint64_t xid,
-                               uint64_t lsn,
-                               const PgMsgTable &msg)
+    TableMgr::create_table(uint64_t xid,
+                           uint64_t lsn,
+                           const PgMsgTable &msg)
     {
         // add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_table(sys_tbl::TableNames::ID);
@@ -96,9 +127,9 @@ namespace springtail {
     }
 
     void
-    TableManager::alter_table(uint64_t xid,
-                              uint64_t lsn,
-                              const PgMsgTable &msg)
+    TableMgr::alter_table(uint64_t xid,
+                          uint64_t lsn,
+                          const PgMsgTable &msg)
     {
         // get "tables" system table
         auto table_names_t = get_table(TablesNames::ID);
@@ -154,9 +185,9 @@ namespace springtail {
     }
 
     void
-    TableManager::drop_table(uint64_t xid,
-                             uint64_t lsn,
-                             const PgMsgDropTable &msg)
+    TableMgr::drop_table(uint64_t xid,
+                         uint64_t lsn,
+                         const PgMsgDropTable &msg)
     {
         // 1) update the "table_names" with a drop entry
         //    note: the GC-3 should evict these entries once the data has been brought forward and

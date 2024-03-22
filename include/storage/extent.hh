@@ -179,6 +179,10 @@ namespace springtail {
             { }
 
         public:
+            Iterator()
+                : _row(nullptr, 0)
+            { }
+
             Iterator(const Iterator &i)
                 : _row(i._row)
             { }
@@ -485,4 +489,8 @@ namespace springtail {
 
     /** Pointer typedef for Extent. */
     typedef std::shared_ptr<Extent> ExtentPtr;
+
+    /** Cache of <file_id, extent_id> -> Extent */
+    typedef ObjectCache<std::pair<uint64_t, uint64_t>, Extent> ExtentCache;
+    typedef std::shared_ptr<ExtentCache> ExtentCachePtr;
 }

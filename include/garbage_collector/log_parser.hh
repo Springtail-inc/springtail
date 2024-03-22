@@ -1,7 +1,22 @@
 #pragma once
 
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+
+#include <common/concurrent_queue.hh>
 #include <common/counter.hh>
 #include <common/redis.hh>
+#include <common/redis_types.hh>
+
+#include <pg_log_mgr/pg_redis_xact.hh>
+
+#include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_msg_stream.hh>
+
+#include <storage/field.hh>
+
+#include <write_cache/write_cache_client.hh>
 
 namespace springtail {
 
@@ -25,12 +40,13 @@ namespace springtail {
      */
     class GCLogParser {
     public:
-        GCLogParser(uint32_t reader_count, uint32_t parser_count)
+        GCLogParser(uint32_t reader_count,
+                    uint32_t parser_count)
             : _readers(reader_count),
               _parsers(parser_count)
         {
             for (auto &reader : _readers) {
-                reader = std::make_shared<Reader>(pg_queue_key, _parser_queue);
+                reader = std::make_shared<Reader>(redis::QUEUE_PG_TRANSACTIONS, _parser_queue);
             }
 
             for (auto &parser : _parsers) {
@@ -38,6 +54,7 @@ namespace springtail {
             }
 
             _parser_queue = std::make_shared<ParserQueue>();
+            _backlog = std::make_shared<Backlog>(redis::SET_PG_OID_XIDS);
         }
 
         void run()
@@ -101,6 +118,16 @@ namespace springtail {
          */
         class Backlog {
         public:
+            Backlog(const std::string &redis_key)
+                : _oid_set(redis_key)
+            { }
+
+            /**
+             * Checks if the backlog is empty.
+             * @return true if the backlog is empty, false otherwise
+             */
+            bool empty() const;
+
             /**
              * Checks if the given XID should block when mutating the given table OID.
              * @param xid The XID of this request.
@@ -125,11 +152,9 @@ namespace springtail {
             StatePtr pop();
 
             /**
-             * Adds a dependency to an XID, indicating that it mutates the schema of the provided OID.
-             * @param xid The XID on which the OID is dependent.
-             * @param oid The OID of the table which is being mutated.
+             * Updates the XID / table dependencies from Redis.
              */
-            void add_dep(uint64_t xid, uint64_t oid);
+            void update_deps();
 
             /**
              * Clears any requests blocked on the provided XID.
@@ -139,7 +164,7 @@ namespace springtail {
 
         private:
             /** Guard on access to the members. */
-            boost::shared_mutex _mutex;
+            mutable boost::shared_mutex _mutex;
 
             /** List of requests that are ready to be processed. */
             std::list<StatePtr> _ready;
@@ -155,6 +180,12 @@ namespace springtail {
 
             /** Map of XID to the OIDs it modifies for removing dependencies. */
             std::map<uint64_t, std::set<uint64_t>> _xid_map;
+
+            /** The last XID that was requested from Redis. */
+            uint64_t _last_requested_xid;
+
+            /** The interface to Redis to retrieve the table dependencies. */
+            RedisSortedSet<PgRedisOidValue> _oid_set;
         };
         typedef std::shared_ptr<Backlog> BacklogPtr;
 
@@ -189,8 +220,8 @@ namespace springtail {
                   _backlog(backlog),
                   _parser_queue(parser_queue)
             {
-                // XXX need to generate a UUID for the worker ID
-                _worker_id = std::uuid();
+                // XXX it's potentially expensive to construct a generator each time
+                _worker_id = boost::uuids::to_string(boost::uuids::random_generator()());
             }
 
             /**
@@ -228,40 +259,20 @@ namespace springtail {
 
         private:
             /** The filter to use at the start of processing. */
-            static constexpr std::vector<char> START_FILTER = {
-                pg_msg::MSG_BEGIN,
-                pg_msg::MSG_STREAM_START
-            };
+            static const std::vector<char> START_FILTER;
 
             /** The filter to use after seeing a BEGIN message. */
-            static constexpr std::vector<char> BEGIN_FILTER = {
-                pg_msg::MSG_COMMIT,
-                pg_msg::MSG_INSERT,
-                pg_msg::MSG_UPDATE,
-                pg_msg::MSG_DELETE,
-                pg_msg::MSG_TRUNCATE,
-                pg_msg::MSG_MESSAGE
-            };
+            static const std::vector<char> BEGIN_FILTER;
 
             /** The filter to use after seeing a STREAM_START message. */
-            static constexpr std::vector<char> STREAM_START_FILTER = {
-                pg_msg::MSG_STREAM_STOP,
-                pg_msg::MSG_INSERT,
-                pg_msg::MSG_UPDATE,
-                pg_msg::MSG_DELETE,
-                pg_msg::MSG_TRUNCATE,
-                pg_msg::MSG_MESSAGE
-            };
+            static const std::vector<char> STREAM_START_FILTER;
 
             /** The filter to use after seeing a STREAM_STOP message. */
-            static constexpr std::vector<char> STREAM_STOP_FILTER = {
-                pg_msg::MSG_STREAM_START,
-                pg_msg::MSG_STREAM_COMMIT
-            };
+            static const std::vector<char> STREAM_STOP_FILTER;
 
         private:
             /** Unique ID of the worker.  Used for two-phase commit within the Redis queue. */
-            uint64_t _worker_id;
+            std::string _worker_id;
 
             /** Shutdown flag. */
             bool _shutdown;
@@ -281,6 +292,8 @@ namespace springtail {
             /** State machine for processing an XID. */
             StatePtr _state;
         };
+        typedef std::shared_ptr<Reader> ReaderPtr;
+
 
         /**
          * Parses individual messages, identifies which table_id and extent_id they impact, and
@@ -290,7 +303,7 @@ namespace springtail {
         public:
             Parser(ParserQueuePtr parser_queue)
                 : _parser_queue(parser_queue),
-                  _write_cache(WriteCacheClient::get_instance());
+                  _write_cache(WriteCacheClient::get_instance())
             { }
 
             /**
@@ -310,6 +323,7 @@ namespace springtail {
             ParserQueuePtr _parser_queue;
             WriteCacheClient * const _write_cache;
         };
+        typedef std::shared_ptr<Parser> ParserPtr;
 
     private:
         /** A set of reader objects. */
@@ -326,6 +340,9 @@ namespace springtail {
 
         /** The queue between the Reader objects and Parser objects. */
         ParserQueuePtr _parser_queue;
+
+        /** The shared backlog among the Readers */
+        BacklogPtr _backlog;
     };
 
 }
