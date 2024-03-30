@@ -16,12 +16,14 @@
 
 namespace springtail {
 
+    // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
     {
         uint64_t lsn = INVALID_LSN;
 
         // scan latest replication log and extract ending LSN
+        // XXX if we find an empty log then remove file and go to previous log
         std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path);
         if (!latest_log.empty()) {
             lsn = PgMsgStreamReader::scan_log(latest_log, true);
@@ -47,7 +49,7 @@ namespace springtail {
 
         // fetch xaction list from xact reader, and add them to Redis
         // these are transactions with springtail XIDs that are > than last committed XID
-        // XXX clear out Redis first???
+        // XXX clear out Redis first???  Assume we start pipeline from scratch, GC is stopped
         std::vector<PgTransactionPtr> xact_list = xact_reader.get_xact_list();
         for (auto &xact : xact_list) {
             _push_xact_to_redis(xact);
@@ -58,7 +60,7 @@ namespace springtail {
         PgTransactionPtr last_xact = xact_list.back();
         _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
 
-        // XXX notify GC of startup???
+        // XXX notify GC of startup??? notify an external coordinator?
 
         // start streaming
         start_streaming(lsn);

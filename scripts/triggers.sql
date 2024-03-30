@@ -42,7 +42,8 @@ BEGIN
                 'default', column_default,
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
                 'position', ordinal_position,
-                'pkey_pos', array_position(pgi.indkey, pga.attnum)
+                'pkey_pos', array_position(pgi.indkey, pga.attnum),
+                'is_generated', (is_generated <> 'NEVER')
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns

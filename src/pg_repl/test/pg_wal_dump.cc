@@ -7,6 +7,8 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <common/logging.hh>
+
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -23,6 +25,7 @@ int main(int argc, char* argv[])
     std::string pub_name;
     std::string slot_name;
     std::filesystem::path outfile;
+    LSN_t lsn = INVALID_LSN, restart_lsn;
 
     bool create_slot = false;
     int port;
@@ -57,48 +60,51 @@ int main(int argc, char* argv[])
     }
 
     // init logging/backtrace
-    springtail_init();
+    springtail_init(LOG_PG_REPL);
 
     // create postgres connection
     PgReplConnection pg_conn(port, host, db_name, user_name, password, pub_name, slot_name);
 
     pg_conn.connect();
-    std::cout << "Connecting to postgres server: " << host << std::endl;
+    SPDLOG_INFO("Connecting to postgres server: host={}\n", host);
 
-    // create slot if need be
-    create_slot = !pg_conn.check_slot_exists();
+    // create slot if need be; retrieve restart LSN and last flushed lsn
+    create_slot = !pg_conn.check_slot_exists(restart_lsn, lsn);
 
     if (create_slot) {
-        std::cout << "Creating replication slot: " << slot_name << std::endl;
+        SPDLOG_INFO("Creating replication slot: name={}\n", slot_name);
         pg_conn.create_replication_slot(false,  // export
                                         false); // temporary
     }
 
     // start steaming
-    pg_conn.start_streaming(INVALID_LSN);
+    pg_conn.start_streaming(lsn);
 
     // open output file
     PgMsgStreamWriter writer(outfile);
 
     // loop through reading data and writing it to disk
-    std::cout << "Connection and streaming have started.  Dumping data.\n";
+    SPDLOG_INFO("Connection and streaming have started @ LSN={}.  Dumping data.\n", lsn);
     PgCopyData data;
+    bool skip = true;
 
     while (true) {
         pg_conn.read_data(data);
 
-        std::cout << "Recevied data: " << data.length << "; msg length=" << data.msg_length
-                  << "; msg offset=" << data.msg_offset << std::endl;
+        SPDLOG_INFO("Recevied data: data len={}, msg len={}, msg offset={}\n",
+                     data.length, data.msg_length, data.msg_offset);
+        SPDLOG_INFO("  - start LSN={}, end LSN={}\n",
+                    data.starting_lsn, data.ending_lsn);
 
         writer.write_message(data);
 
         // update LSNs
-        if (data.msg_offset == 0) {
-            pg_conn.set_last_flushed_LSN(data.starting_lsn);
-        }
-
-        if (data.msg_offset == data.msg_length) {
-            pg_conn.set_last_flushed_LSN(data.ending_lsn);
+        if (data.msg_offset + data.length == data.msg_length) {
+            if (true || !skip) {
+                SPDLOG_INFO("Setting last flushed LSN: {}\n", data.ending_lsn);
+                pg_conn.set_last_flushed_LSN(data.ending_lsn);
+            }
+            skip = !skip;
         }
     }
 

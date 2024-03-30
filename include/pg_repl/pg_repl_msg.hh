@@ -169,6 +169,7 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
+        bool is_generated;  // is this a generated column
         std::string schema;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;

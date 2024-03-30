@@ -47,7 +47,7 @@ namespace springtail
         };
 
         /** timeout between keep alive messages */
-        static inline constexpr int64_t STANDBY_MSG_INTERVAL_MSEC = 30000L;
+        static inline constexpr int64_t STANDBY_MSG_INTERVAL_MSEC = 10000L;
         /** timeout for an idle slot -- no lsn received; fast forward stream */
         static inline constexpr int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
         /** read timeout for copy data */

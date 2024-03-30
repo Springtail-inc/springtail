@@ -866,6 +866,7 @@ namespace springtail {
         table_msg.lsn = message.lsn;
         json["schema"].get_to(table_msg.schema);
         json["oid"].get_to(table_msg.oid);
+        json["is_generated"].get_to(table_msg.is_generated);
 
         // identity in form: schema.table; parse out table; no object_name in trigger
         std::string identity;

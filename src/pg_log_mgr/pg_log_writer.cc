@@ -117,7 +117,7 @@ namespace springtail {
         // update shared current offset atomic var
         _current_offset = current_offset;
 
-        if (_msg_end_offset == current_offset) {
+        if (data.msg_offset + data.length == data.msg_length) {
             // full message written
             _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
             return true;
