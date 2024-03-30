@@ -38,15 +38,19 @@ namespace springtail {
         std::string name;
         uint32_t position;
         SchemaType type;
+        bool exists;
         bool nullable;
         std::optional<std::string> default_value;
         SchemaUpdateType update_type;
+
+        SchemaColumn() = default;
 
         SchemaColumn(uint64_t xid,
                      uint64_t lsn,
                      const std::string &name,
                      uint32_t position,
                      SchemaType type,
+                     bool exists,
                      bool nullable,
                      std::optional<std::string> default_value=std::optional<std::string>())
             : xid(xid),
@@ -54,6 +58,7 @@ namespace springtail {
               name(name),
               position(position),
               type(type),
+              exists(exists),
               nullable(nullable),
               default_value(default_value)
         { }

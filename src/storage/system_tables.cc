@@ -55,6 +55,14 @@ namespace springtail::sys_tbl {
         { "column_id", 4, SchemaType::UINT32, false }
     };
 
+    Indexes::Primary::SCHEMA = {
+        { "table_id", 0, SchemaType::UINT64, false },
+        { "index_id", 1, SchemaType::UINT64, false },
+        { "xid", 2, SchemaType::UINT64, false },
+        { "position", 3, SchemaType::UINT32, false },
+        { "extent_id", 4, SchemaType::UINT64, false }
+    };
+
     // Schemas
 
     Schemas::Data::SCHEMA = {
@@ -68,5 +76,13 @@ namespace springtail::sys_tbl {
         { "nullable", 7, SchemaType::BOOLEAN, false },
         { "default", 8, SchemaType::TEXT, true },
         { "update_type", 9, SchemaType::UINT8, false }
+    };
+
+    Schemas::Primary::SCHEMA = {
+        { "table_id", 0, SchemaType::UINT64, false },
+        { "position", 1, SchemaType::UINT32, false },
+        { "xid", 2, SchemaType::UINT64, false },
+        { "lsn", 3, SchemaType::UINT64, false },
+        { "extent_id", 4, SchemaType::UINT64, false }
     };
 }

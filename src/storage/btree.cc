@@ -147,6 +147,19 @@ namespace springtail {
     }
 
     BTree::Iterator
+    BTree::inverse_upper_bound(TuplePtr search_key,
+                               uint64_t xid) const
+    {
+        // find the first entry <= the key
+        Iterator &&i = lower_bound(search_key, xid);
+
+        // go to the previous entry
+        --i;
+
+        return i;
+    }
+
+    BTree::Iterator
     BTree::find_for_update(TuplePtr search_key,
                            uint64_t xid) const
     {
