@@ -2,7 +2,8 @@
 
 #include <boost/thread.hpp>
 
-#include <storage/temp_btree.hh>
+#include <storage/extent.hh>
+#include <storage/field.hh>
 
 namespace springtail {
 
@@ -18,9 +19,8 @@ namespace springtail {
     public:
         /**
          * Holds the data for a single mutated extent.  Because there may be a large number of
-         * mutations in a single XID, the Page must be able to spill to disk.  To support this, the
-         * Page may utilize a TempBTree (kept in node-local storage) to track extents
-         * that have been flushed to disk before they are committed.
+         * mutations in a single XID, the Page must eventually be able to spill to disk, however,
+         * right now we keep all of the extents in a single vector in-memory.
          */
         class Page {
         public:
@@ -55,7 +55,7 @@ namespace springtail {
              * Flush this page.
              * XXX we may want a way to partially flush a page to make space in the cache
              */
-            void flush(bool finalize = false);
+            void flush();
 
             /**
              * Retrieve the extent ID of this page.
@@ -75,29 +75,21 @@ namespace springtail {
                 friend DataCache;
 
                 Iterator(Page *page,
-                         TempBTree::Iterator index_i,
-                         std::map<uint64_t, std::vector<ExtentPtr>>::iterator map_i,
                          std::vector<ExtentPtr>::iterator extent_i)
                     : page(page),
-                      index_i(index_i),
-                      map_i(map_i),
                       extent_i(extent_i)
                 { }
 
                 Iterator(Page *page,
-                         TempBTree::Iterator index_i,
-                         std::map<uint64_t, std::vector<ExtentPtr>>::iterator map_i,
                          std::vector<ExtentPtr>::iterator extent_i,
                          Extent::Iterator row_i)
                     : page(page),
-                      index_i(index_i),
-                      map_i(map_i),
                       extent_i(extent_i),
                       row_i(row_i)
                 { }
 
             public:
-                using iterator_category = std::forward_iterator_tag;
+                using iterator_category = std::bidirectional_iterator_tag;
                 using difference_type   = std::ptrdiff_t;
                 using value_type        = const Extent::Row;
                 using pointer           = const Extent::Row *;  // or also value_type*
@@ -107,64 +99,41 @@ namespace springtail {
                 pointer operator->() { return &(*(row_i)); }
 
                 Iterator& operator++();
+                Iterator& operator--();
 
                 Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+                Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
                 friend bool operator==(const Iterator& a, const Iterator& b) {
-                    return ((a.index_i == b.index_i && a.index_i == a.page->_index->end()) ||
-                            (a.index_i ==  b.index_i && a.extent_i == a.extent_i && a.row_i == b.row_i));
+                    return (a.extent_i == b.extent_i &&
+                            (a.extent_i == a.page->_extents.end() || a.row_i == b.row_i));
                 }
 
                 friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
             private:
                 Page * const page;
-                TempBTree::Iterator index_i;
-                std::map<uint64_t, std::vector<ExtentPtr>>::iterator map_i;
                 std::vector<ExtentPtr>::iterator extent_i;
                 Extent::Iterator row_i;
             };
 
             Iterator begin()
             {
-                // if the tree is empty, return end()
-                if (_index->empty()) {
+                // if the extent vector has no rows, return end()
+                if (_extents.empty() || (_extents.size() == 1 && _extents[0]->empty())) {
                     return end();
                 }
 
-                // get the first entry in the tree
-                auto index_i = _index->begin();
-
-                // get the extent
-                uint64_t extent_id;
-                if (index_i == _index->end()) {
-                    // in this case where data has never been flushed, the original extent ID is used
-                    extent_id = _id;
-                } else {
-                    extent_id = _extent_id_f->get_uint64(*index_i);
-                }
-
-                // find the extent in the map
-                auto &&map_i = _extent_map.find(extent_id);
-                if (map_i == _extent_map.end()) {
-                    // if missing, read it and add it to the map
-                    auto extent = _read_extent(extent_id);
-                    auto &&entry = _extent_map.insert({ extent_id, { extent } });
-                    map_i = entry.first;
-                }
-
-                auto extent_i = map_i->second.begin();
+                // get the first row from the first vector entry
+                auto extent_i = _extents.begin();
                 auto row_i = (*extent_i)->begin();
-                return Iterator(this, index_i, map_i, extent_i, row_i);
+                return Iterator(this, extent_i, row_i);
             }
 
             Iterator end()
             {
-                // XXX
-                auto index_i = _index->end();
-                auto map_i = _extent_map.find(_id);
-                auto extent_i = map_i->second.end();
-                return Iterator(this, index_i, map_i, extent_i);
+                auto extent_i = _extents.end();
+                return Iterator(this, extent_i);
             }
 
         protected:
@@ -181,23 +150,15 @@ namespace springtail {
             boost::shared_mutex _mutex;
 
             /**
-             * Holds a map from on-disk extent ID to a set of dirty extents that make up the mutated
-             * data of the original extent.
+             * Holds a set of dirty extents that make up the mutated data of the original extent.
              */
-            std::map<uint64_t, std::vector<ExtentPtr>> _extent_map;
-
-            /**
-             * Holds the full list of mutated on-disk extents.  If a Page grows large, or other Page
-             * mutations fill the cache, it's underlying data extents may be flushed to disk.  In
-             * that case, the newly written extent locations are kept in this index.
-             */
-            TempBTreePtr _index;
-
-            /** A pointer to the table that this Page is from. */
-            std::shared_ptr<MutableTable> _table;
+            std::vector<ExtentPtr> _extents;
 
             /** The original extent ID of the underlying data. */
             uint64_t _id;
+
+            /** A pointer to the table that this Page is from. */
+            std::shared_ptr<MutableTable> _table;
 
             FieldPtr _extent_id_f;
 
@@ -234,14 +195,9 @@ namespace springtail {
         void release(PagePtr page);
 
         /**
-         * Flush all of the pages associated with a given table.
+         * Evict all of the pages associated with a given table.  Optionally evict without flushing them to disk.
          */
-        void flush(std::shared_ptr<Table> table);
-
-        /**
-         * Discard all of the pages associated with a given table.
-         */
-        void discard(std::shared_ptr<Table> table);
+        void evict(std::shared_ptr<Table> table, bool flush = true);
 
     private:
         typedef std::tuple<PagePtr, std::list<PagePtr>::iterator, uint32_t> CacheEntry;
