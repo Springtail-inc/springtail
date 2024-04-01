@@ -1,4 +1,8 @@
+#include <common/filesystem.hh>
+
 #include <garbage_collector/log_parser.hh>
+
+#include <pg_log_mgr/pg_xact_handler.hh>
 
 #include <storage/constants.hh>
 #include <storage/table_mgr.hh>
@@ -363,7 +367,9 @@ namespace springtail {
                     done = true;
                 } else {
                     // XXX how to get the next file?
-                    _state->entry->begin_path = next_file(_state->entry->begin_path);
+                    _state->entry->begin_path = fs::get_next_file(_state->entry->begin_path,
+                                                                  PgXactHandler::LOG_PREFIX,
+                                                                  PgXactHandler::LOG_SUFFIX);
                     begin_offset = 0;
                     commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
                         ? _state->entry->commit_offset
@@ -449,6 +455,8 @@ namespace springtail {
         _state->mutation_count->increment();
         auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id);
         _parser_queue->push(entry);
+
+        return false;
     }
 
     const std::vector<char> GCLogParser::Reader::START_FILTER = {
@@ -506,7 +514,7 @@ namespace springtail {
                     // generate an extent tuple from the pg log data
                     auto schema = table->extent_schema();
                     auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
-                    auto &&tuple = _pack_extent(extent, insert_msg.new_tuple);
+                    auto tuple = _pack_extent(extent, insert_msg.new_tuple);
 
                     // extract the primary key from the tuple
                     auto pkey_tuple = schema->tuple_subset(tuple, table->primary_key());
@@ -562,10 +570,10 @@ namespace springtail {
                     auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
                     auto old_extent = std::make_shared<Extent>(pkey_schema, ExtentType(), entry->xid);
-                    auto &&old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple);
+                    auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple);
 
                     auto new_extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
-                    auto &&new_tuple = _pack_extent(new_extent, update_msg.new_tuple);
+                    auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple);
 
                     // extract the primary key from the new data tuple
                     auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
@@ -601,13 +609,15 @@ namespace springtail {
                         insert_data.data = new_extent->serialize();
                         insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                        _write_cache->add_rows(table->id(), old_extent_id, { delete_data, insert_data });
+                        _write_cache->add_rows(table->id(), old_extent_id, { delete_data });
+                        _write_cache->add_rows(table->id(), new_extent_id, { insert_data });
                     }
                     break;
                 }
                 case PgMsgEnum::TRUNCATE: {
                     // record the truncate into the write cache look-aside
-                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn, WriteCacheClient::TableOp::TRUNCATE };
+                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                                                          WriteCacheClient::TableOp::TRUNCATE };
                     _write_cache->add_table_change(table->id(), change);
                     break;
                 }
@@ -622,17 +632,16 @@ namespace springtail {
                 // note: it might make sense to special-case tables without primary keys?  No need to do
                 //       the lookup until we are making the actual mutation, would be better for a
                 //       reader to scan the mutations to see if they impact the query
+                uint64_t extent_id = constant::UNKNOWN_EXTENT;
 
                 if (msg->msg_type == PgMsgEnum::INSERT) {
-                    uint64_t extent_id = constant::UNKNOWN_EXTENT;
-
                     // get the message details
                     auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
                     // generate an extent with a row holding the PG tuple data
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
                     auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
-                    auto &&tuple = _pack_extent(extent, insert_msg.new_tuple);
+                    auto tuple = _pack_extent(extent, insert_msg.new_tuple);
 
                     // send the insert to the write cache
                     WriteCacheClient::RowData data;
@@ -644,56 +653,45 @@ namespace springtail {
                     _write_cache->add_rows(table->id(), extent_id, { data });
 
                 } else if (msg->msg_type == PgMsgEnum::DELETE) {
-                    uint64_t extent_id = constant::UNKNOWN_EXTENT;
-
                     // get the message details
                     auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
                     // generate an extent with a row holding the PG tuple data
                     auto schema = table->extent_schema();
-                    auto extent = std::make_shared<Extent>(schema);
-
-                    // populate the row from the pg tuple data
-                    auto fields = schema->get_mutable_fields();
-                    auto pg_fields = _gen_pg_fields(fields);
-
-                    MutableTuple tuple(fields, extent->append());
-                    tuple.assign(FieldTuple(pg_fields, delete_msg.tuple));
+                    auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
+                    auto tuple = _pack_extent(extent, delete_msg.tuple);
 
                     WriteCacheClient::RowData delete_data;
                     delete_data.xid = entry->xid;
                     delete_data.xid_seq = entry->lsn;
-                    delete_data.pkey = extent->seralize();
+                    delete_data.pkey = extent->serialize();
                     delete_data.op = WriteCacheClient::RowOp::DELETE;
 
                     // send the delete to the write cache
                     _write_cache->add_rows(table->id(), extent_id, { delete_data });
 
                 } else if (msg->msg_type == PgMsgEnum::UPDATE) {
+                    // get the message details
+                    auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
+
                     // generate an extent with a row holding the PG tuple data for the delete and the insert
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
+                    auto old_extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
+                    auto old_tuple = _pack_extent(old_extent, update_msg.old_tuple);
 
-                    auto fields = schema->get_mutable_fields();
-                    auto pg_fields = _gen_pg_fields(fields);
-
-                    auto old_extent = std::make_shared<Extent>(schema);
-                    MutableTuple old_tuple(fields, extent->append());
-                    old_tuple.assign(FieldTuple(pg_fields, update_msg.old_tuple));
-
-                    auto new_extent = std::make_shared<Extent>(schema);
-                    MutableTuple new_tuple(fields, extent->append());
-                    new_tuple.assign(FieldTuple(pg_fields, update_msg.new_tuple));
+                    auto new_extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
+                    auto new_tuple = _pack_extent(old_extent, update_msg.new_tuple);
 
                     WriteCacheClient::RowData delete_data;
                     delete_data.xid = entry->xid;
                     delete_data.xid_seq = entry->lsn;
-                    delete_data.pkey = old_extent->seralize();
+                    delete_data.pkey = old_extent->serialize();
                     delete_data.op = WriteCacheClient::RowOp::DELETE;
 
                     WriteCacheClient::RowData insert_data;
                     insert_data.xid = entry->xid;
                     insert_data.xid_seq = entry->lsn;
-                    insert_data.data = new_extent->seralize();
+                    insert_data.data = new_extent->serialize();
                     insert_data.op = WriteCacheClient::RowOp::INSERT;
 
                     // do an insert and a delete
@@ -701,10 +699,12 @@ namespace springtail {
 
                 } else if (msg->msg_type == PgMsgEnum::TRUNCATE) {
                     // record the truncate into the write cache look-aside
-                    _write_cache->add_table_change(table->id(), { xid, lsn, TableOp::TRUNCATE });
+                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                                                          WriteCacheClient::TableOp::TRUNCATE };
+                    _write_cache->add_table_change(table->id(), change);
                 } else {
                     // XXX invalid message type
-                    SPDLOG_ERROR("Invalid message type: {}", msg->msg_type);
+                    SPDLOG_ERROR("Invalid message type: {}", static_cast<uint8_t>(msg->msg_type));
                 }
             }
 
@@ -713,11 +713,11 @@ namespace springtail {
         }
     }
 
-    MutableTuple
+    std::shared_ptr<MutableTuple>
     GCLogParser::Parser::_pack_extent(ExtentPtr extent,
                                       const PgMsgTupleData &data)
     {
-        auto fields = extent->schema->get_mutable_fields();
+        auto fields = extent->schema()->get_mutable_fields();
 
         // generate a tuple from the pg log data
         FieldArrayPtr pg_fields = std::make_shared<FieldArray>();
@@ -726,8 +726,8 @@ namespace springtail {
         }
 
         // assign the pg data to the extent tuple
-        MutableTuple tuple(fields, extent->append());
-        tuple.assign(FieldTuple(pg_fields, &data));
+        auto tuple = std::make_shared<MutableTuple>(fields, extent->append());
+        tuple->assign(FieldTuple(pg_fields, &data));
 
         return tuple;
     }

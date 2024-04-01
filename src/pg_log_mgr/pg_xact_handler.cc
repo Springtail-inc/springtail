@@ -17,7 +17,8 @@ namespace springtail {
 
     PgXactHandler::PgXactHandler(const std::filesystem::path &base_dir)
         : _base_dir(base_dir),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
+          _oid_set(redis::SET_PG_OID_XIDS)
     {
         _create_logger();
 
@@ -64,7 +65,7 @@ namespace springtail {
 
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            _oid_set.add(redis::SET_PG_OID_XIDS, PgRedisOidValue(oid, xid), xid);
+            _oid_set.add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC

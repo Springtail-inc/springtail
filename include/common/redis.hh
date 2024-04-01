@@ -139,7 +139,7 @@ namespace springtail {
             // note: blmove() not available yet in redis++
             // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_secs);
             if (res) {
-                return std::make_shared<T>(res->second);
+                return std::make_shared<T>(*res);
             }
             return nullptr;
         }

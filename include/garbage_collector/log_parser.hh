@@ -45,16 +45,16 @@ namespace springtail {
             : _readers(reader_count),
               _parsers(parser_count)
         {
+            _backlog = std::make_shared<Backlog>(redis::SET_PG_OID_XIDS);
+            _parser_queue = std::make_shared<ParserQueue>();
+
             for (auto &reader : _readers) {
-                reader = std::make_shared<Reader>(redis::QUEUE_PG_TRANSACTIONS, _parser_queue);
+                reader = std::make_shared<Reader>(redis::QUEUE_PG_TRANSACTIONS, _backlog, _parser_queue);
             }
 
             for (auto &parser : _parsers) {
                 parser = std::make_shared<Parser>(_parser_queue);
             }
-
-            _parser_queue = std::make_shared<ParserQueue>();
-            _backlog = std::make_shared<Backlog>(redis::SET_PG_OID_XIDS);
         }
 
         void run()
@@ -197,6 +197,10 @@ namespace springtail {
             uint64_t xid;
             uint64_t lsn;
             uint64_t table_id;
+
+            ParserEntry(PgMsgPtr msg, CounterPtr counter, uint64_t xid, uint64_t lsn, uint64_t table_id)
+                : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id)
+            { }
         };
 
         typedef ConcurrentQueue<ParserEntry> ParserQueue;
@@ -318,7 +322,7 @@ namespace springtail {
              * Packs the provided Postgres tuple into an Extent with a single row containing the data.
              * 
              */
-            MutableTuple _pack_extent(ExtentPtr extent, const PgMsgTupleData &data);
+            std::shared_ptr<MutableTuple> _pack_extent(ExtentPtr extent, const PgMsgTupleData &data);
 
         private:
             ParserQueuePtr _parser_queue;
