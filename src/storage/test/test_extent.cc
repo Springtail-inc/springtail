@@ -103,6 +103,29 @@ namespace {
         ASSERT_TRUE(extent->empty());
     }
 
+    TEST_F(Extent_Test, SerializeDeserialize) {
+        // create a populated extent
+        ExtentPtr extent = _create_and_populate();
+
+        FieldPtr variable_f = _schema->get_field("variable");
+        FieldPtr fixed_f = _schema->get_field("fixed");
+        FieldPtr bit_f = _schema->get_field("bit");
+        FieldPtr nullable_f = _schema->get_field("nullable");
+
+        // serialize
+        std::string temp = extent->serialize();
+        
+        // create an empty extent
+        ExtentPtr new_extent = std::make_shared<Extent>(_schema, ExtentType{false}, 0);
+        new_extent->deserialize(temp);
+
+        // make sure that the data matches exepctations
+        EXPECT_FALSE(new_extent->empty());
+        EXPECT_EQ(_schema->row_size(), new_extent->row_size());
+        EXPECT_TRUE(new_extent->byte_count() > 0);
+        EXPECT_EQ(new_extent->row_count(), 3);
+    }
+
     TEST_F(Extent_Test, WriteAndRead) {
         // create a populated extent
         ExtentPtr extent = _create_and_populate();
