@@ -1,5 +1,7 @@
 #include <garbage_collector/log_parser.hh>
-#include <storage/table_manager.hh>
+
+#include <storage/constants.hh>
+#include <storage/table_mgr.hh>
 
 namespace springtail {
 
@@ -260,10 +262,28 @@ namespace springtail {
                     case PgMsgEnum::TRUNCATE: {
                         auto &truncate_msg = std::get<PgMsgTruncate>(msg->msg);
 
-                        // XXX truncate has a list of rel_ids?
-                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
-                                                    truncate_msg.rel_id, msg,
-                                                    _state->entry->begin_path, offset);
+                        // check if we should skip processing this message
+                        if (_state->process_as_stream && !_check_xid(_state->entry->pg_xid)) {
+                            // skip the entry
+                            blocked = false;
+                        } else {
+                            // check all of the tables referenced by the truncate
+                            // note: there may be multiple due to CASCADE
+                            for (auto rel_id : truncate_msg.rel_ids) {
+                                blocked = _check_backlog(_state->entry->xid, rel_id, _state->entry->begin_path, offset);
+                                if (blocked) {
+                                    break;
+                                }
+                            }
+
+                            if (!blocked) {
+                                for (auto rel_id : truncate_msg.rel_ids) {
+                                    _state->mutation_count->increment();
+                                    auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, rel_id);
+                                    _parser_queue->push(entry);
+                                }
+                            }
+                        }
                         break;
                     }
 
@@ -276,7 +296,7 @@ namespace springtail {
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->create_table(_state->entry->xid, _state->entry->lsn, table_msg);
+                            TableMgr::get_instance()->create_table(_state->entry->xid, _state->lsn, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -295,7 +315,7 @@ namespace springtail {
                             // XXX need to stall the pipeline in some cases, eg type change
 
                             // apply the schema change
-                            TableMgr::get_instance()->alter_table(_state->entry->xid, _state->entry->lsn, table_msg);
+                            TableMgr::get_instance()->alter_table(_state->entry->xid, _state->lsn, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -308,15 +328,15 @@ namespace springtail {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
+                        blocked = _check_backlog(_state->entry->xid, drop_msg.oid,
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->drop_table(_state->entry->pg_xid, _state->entry->lsn, drop_msg);
+                            TableMgr::get_instance()->drop_table(_state->entry->pg_xid, _state->lsn, drop_msg);
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();
-                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn);
+                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, drop_msg.oid);
                             _parser_queue->push(entry);
 
                             // note: we don't notify the backlog until the entire XID is
@@ -427,7 +447,7 @@ namespace springtail {
 
         // otherwise we queue this message for processing
         _state->mutation_count->increment();
-        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn);
+        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id);
         _parser_queue->push(entry);
     }
 
@@ -474,7 +494,7 @@ namespace springtail {
             PgMsgPtr msg = entry->msg;
 
             // get the table information for the mutation
-            auto table = TableMgr::get_instance()->get_table(msg->table_id);
+            auto table = TableMgr::get_instance()->get_table(entry->table_id, entry->xid, entry->lsn);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
             if (table->has_primary()) {
@@ -484,7 +504,7 @@ namespace springtail {
                     auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
                     // generate an extent tuple from the pg log data
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
                     auto extent = std::make_shared<Extent>(schema, ExtentType(), entry->xid);
                     auto &&tuple = _pack_extent(extent, insert_msg.new_tuple);
 
@@ -501,7 +521,7 @@ namespace springtail {
                     data.data = extent->serialize();
                     data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { data });
+                    _write_cache->add_rows(table->id(), extent_id, { data });
                     break;
                 }
                 case PgMsgEnum::DELETE: {
@@ -512,7 +532,7 @@ namespace springtail {
                     assert(delete_msg.type == 'K');
 
                     // generate an extent with a row holding the PG tuple data
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
                     auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
                     auto extent = std::make_shared<Extent>(pkey_schema, ExtentType(), entry->xid);
@@ -525,10 +545,10 @@ namespace springtail {
                     WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
-                    data.data = extent->seralize();
+                    data.data = extent->serialize();
                     data.op = WriteCacheClient::RowOp::DELETE;
 
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { data });
+                    _write_cache->add_rows(table->id(), extent_id, { data });
                     break;
                 }
                 case PgMsgEnum::UPDATE: {
@@ -538,7 +558,7 @@ namespace springtail {
                     assert(update_msg.old_type == 'K');
 
                     // generate extents for the delete data and insert data
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
                     auto pkey_schema = schema->create_schema(table->primary_key(), {});
 
                     auto old_extent = std::make_shared<Extent>(pkey_schema, ExtentType(), entry->xid);
@@ -563,7 +583,7 @@ namespace springtail {
                         data.data = new_extent->serialize();
                         data.op = WriteCacheClient::RowOp::UPDATE;
                                 
-                        _write_cache->add_rows(table->id(), old_extent_id, WriteCacheClient::RowOp::UPDATE, { data });
+                        _write_cache->add_rows(table->id(), old_extent_id, { data });
                     } else {
                         // lookup the extent for the new key
                         uint64_t new_extent_id = table->primary_lookup(new_pkey_tuple);
@@ -572,23 +592,23 @@ namespace springtail {
                         WriteCacheClient::RowData delete_data;
                         delete_data.xid = entry->xid;
                         delete_data.xid_seq = entry->lsn;
-                        delete_data.pkey = old_extent->seralize();
+                        delete_data.pkey = old_extent->serialize();
                         delete_data.op = WriteCacheClient::RowOp::DELETE;
 
                         WriteCacheClient::RowData insert_data;
                         insert_data.xid = entry->xid;
                         insert_data.xid_seq = entry->lsn;
-                        insert_data.data = new_extent->seralize();
+                        insert_data.data = new_extent->serialize();
                         insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                        _write_cache->add_rows(table->id(), old_extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
-                        _write_cache->add_rows(table->id(), new_extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
+                        _write_cache->add_rows(table->id(), old_extent_id, { delete_data, insert_data });
                     }
                     break;
                 }
                 case PgMsgEnum::TRUNCATE: {
                     // record the truncate into the write cache look-aside
-                    _write_cache->add_table_change(table->id(), { entry->xid, entry->lsn, WriteCacheClient::TableOp::TRUNCATE });
+                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn, WriteCacheClient::TableOp::TRUNCATE };
+                    _write_cache->add_table_change(table->id(), change);
                     break;
                 }
                 default:
@@ -604,7 +624,7 @@ namespace springtail {
                 //       reader to scan the mutations to see if they impact the query
 
                 if (msg->msg_type == PgMsgEnum::INSERT) {
-                    uint64_t extent_id = UNKNOWN_EXTENT; // XXX
+                    uint64_t extent_id = constant::UNKNOWN_EXTENT;
 
                     // get the message details
                     auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
@@ -621,13 +641,16 @@ namespace springtail {
                     data.data = extent->serialize();
                     data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
+                    _write_cache->add_rows(table->id(), extent_id, { data });
 
                 } else if (msg->msg_type == PgMsgEnum::DELETE) {
-                    uint64_t extent_id = UNKNOWN_EXTENT; // XXX
+                    uint64_t extent_id = constant::UNKNOWN_EXTENT;
+
+                    // get the message details
+                    auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
                     // generate an extent with a row holding the PG tuple data
-                    auto schema = table->schema(entry->xid);
+                    auto schema = table->extent_schema();
                     auto extent = std::make_shared<Extent>(schema);
 
                     // populate the row from the pg tuple data
@@ -644,7 +667,7 @@ namespace springtail {
                     delete_data.op = WriteCacheClient::RowOp::DELETE;
 
                     // send the delete to the write cache
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
+                    _write_cache->add_rows(table->id(), extent_id, { delete_data });
 
                 } else if (msg->msg_type == PgMsgEnum::UPDATE) {
                     // generate an extent with a row holding the PG tuple data for the delete and the insert
@@ -674,8 +697,7 @@ namespace springtail {
                     insert_data.op = WriteCacheClient::RowOp::INSERT;
 
                     // do an insert and a delete
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::DELETE, { delete_data });
-                    _write_cache->add_rows(table->id(), extent_id, WriteCacheClient::RowOp::INSERT, { insert_data });
+                    _write_cache->add_rows(table->id(), extent_id, { delete_data, insert_data });
 
                 } else if (msg->msg_type == PgMsgEnum::TRUNCATE) {
                     // record the truncate into the write cache look-aside

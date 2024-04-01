@@ -458,32 +458,34 @@ namespace springtail {
             return handle->async_append({header, _fixed_data, _variable_data}, nullptr);
         }
 
-        std::shared_ptr<std::vector<char>> serialize()
+        std::string serialize()
         {
-            auto data = std::make_shared<std::vector<char>>();
-            data->resize(sizeof(uint32_t) * 2 + _fixed_data->size() + _variable_data->size());
+            size_t size = sizeof(uint32_t) * 2 + _fixed_data->size() + _variable_data->size();
+            std::string data(size, 0);
 
-            uint32_t fsize = _fixed_data->size(), vsize = _variable_data->size();
-            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data->data());
-            std::copy_n(_fixed_data->data(), fsize, data->data() + 4);
-            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data->data() + 4 + fsize);
-            std::copy_n(_variable_data->data(), vsize, data->data() + 4 + fsize + 4);
+            uint32_t fsize = _fixed_data->size();
+            uint32_t vsize = _variable_data->size();
+
+            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data());
+            std::copy_n(_fixed_data->data(), fsize, data.data() + 4);
+            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data() + 4 + fsize);
+            std::copy_n(_variable_data->data(), vsize, data.data() + 4 + fsize + 4);
 
             return data;
         }
 
-        void deserialize(std::shared_ptr<std::vector<char>> data)
+        void deserialize(const std::string &data)
         {
             uint32_t fsize, vsize;
-            std::copy_n(data->data(), 4, reinterpret_cast<char *>(&fsize));
+            std::copy_n(data.data(), 4, reinterpret_cast<char *>(&fsize));
 
             _fixed_data->resize(fsize);
-            std::copy_n(data->data() + 4, fsize, _fixed_data->data());
+            std::copy_n(data.data() + 4, fsize, _fixed_data->data());
 
-            std::copy_n(data->data() + 4 + fsize, 4, reinterpret_cast<char *>(&vsize));
+            std::copy_n(data.data() + 4 + fsize, 4, reinterpret_cast<char *>(&vsize));
 
             _variable_data->resize(vsize);
-            std::copy_n(data->data() + 4 + fsize + 4, vsize, _variable_data->data());
+            std::copy_n(data.data() + 4 + fsize + 4, vsize, _variable_data->data());
         }
     };
 

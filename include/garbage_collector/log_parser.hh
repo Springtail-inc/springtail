@@ -196,6 +196,7 @@ namespace springtail {
             CounterPtr counter;
             uint64_t xid;
             uint64_t lsn;
+            uint64_t table_id;
         };
 
         typedef ConcurrentQueue<ParserEntry> ParserQueue;
