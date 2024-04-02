@@ -166,7 +166,7 @@ namespace springtail {
 
                 // iterate up until we are no longer at a begin()
                 uint32_t depth = 0;
-                while (_node->row_i != _node->extent->begin()) {
+                while (_node->row_i == _node->extent->begin()) {
                     // iterate up to the parent
                     ++depth;
                     _node = _node->parent;

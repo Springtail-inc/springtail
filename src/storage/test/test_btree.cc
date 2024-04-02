@@ -37,6 +37,7 @@ namespace {
             // remove any files created during the run
             IOMgr::get_instance()->remove("/tmp/test_btree_Insert10");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAll");
+            IOMgr::get_instance()->remove("/tmp/test_btree_Search");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemove");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemoveAll");
             IOMgr::get_instance()->remove("/tmp/test_btree_InsertSame");
@@ -97,6 +98,16 @@ namespace {
             std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::READ, true);
             return std::make_shared<BTree>(handle, _file_id_map[name], _keys, _schema,
                                            _read_cache, 1, extent_id);
+        }
+
+        std::shared_ptr<Tuple>
+        _create_key(const std::string &name,
+                    uint64_t table_id)
+        {
+            auto key_fields = std::make_shared<FieldArray>(2);
+            key_fields->at(0) = std::make_shared<ConstTypeField<std::string>>(name);
+            key_fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            return std::make_shared<FieldTuple>(key_fields, nullptr);
         }
 
         /**
@@ -230,6 +241,138 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
+    }
+
+    TEST_F(BTree_Test, Search) {
+        // get a mutable btree to perform inserts
+        auto btree = _create_mutable_btree("/tmp/test_btree_Search", 0);
+
+        // set the XID
+        btree->set_xid(1);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
+        csv::CSVReader reader("test_btree_simple.csv");
+
+        for (auto &&r : reader) {
+            // insert data to the tree
+            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
+        }
+
+        // finalize the tree
+        uint64_t offset = btree->finalize();
+
+        // get a pointer to the read-only btree
+        auto tree = _get_btree("/tmp/test_btree_Search", offset);
+        auto begin_i = tree->begin(1);
+        auto end_i = tree->end();
+
+        auto table_id_f = _schema->get_field("table_id");
+        auto name_f = _schema->get_field("name");
+        auto offset_f = _schema->get_field("offset");
+
+        // search for an entry before all of the keys
+        {
+            auto tuple = _create_key("aaaa", 0);
+
+            auto find_i = tree->find(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple, 1);
+            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+
+            ASSERT_TRUE(find_i == end_i);
+            ASSERT_TRUE(lb_i == begin_i);
+            ASSERT_TRUE(ffu_i == begin_i);
+            ASSERT_TRUE(iub_i == end_i);
+        }
+
+        // search for the first entry in the tree
+        {
+            auto tuple = _create_key("aabbatini8y", 323);
+
+            auto find_i = tree->find(tuple, 1);
+
+            ASSERT_EQ(name_f->get_text(*find_i), "aabbatini8y");
+            ASSERT_EQ(table_id_f->get_uint64(*find_i), 323);
+            ASSERT_EQ(offset_f->get_uint64(*find_i), 6448);
+
+            auto lb_i = tree->lower_bound(tuple, 1);
+            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+
+            ASSERT_EQ(lb_i, find_i);
+            ASSERT_EQ(ffu_i, find_i);
+            ASSERT_EQ(iub_i, end_i);
+        }
+
+        // search for an existing entry in the middle
+        {
+            auto tuple = _create_key("mplainu", 31);
+
+            auto find_i = tree->find(tuple, 1);
+
+            ASSERT_EQ(table_id_f->get_uint64(*find_i), 31);
+            ASSERT_EQ(name_f->get_text(*find_i), "mplainu");
+            ASSERT_EQ(offset_f->get_uint64(*find_i), 30122);
+
+            auto lb_i = tree->lower_bound(tuple, 1);
+            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+
+            ASSERT_EQ(lb_i, find_i);
+            ASSERT_EQ(ffu_i, find_i);
+
+            --find_i;
+            ASSERT_EQ(iub_i, find_i);
+        }
+
+        // search for a non-existing entry before the last entry
+        {
+            auto tuple = _create_key("m", 0);
+
+            auto find_i = tree->find(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple, 1);
+            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+
+            ASSERT_EQ(find_i, end_i);
+
+            ASSERT_EQ(table_id_f->get_uint64(*lb_i), 526);
+            ASSERT_EQ(name_f->get_text(*lb_i), "mabrahimel");
+            ASSERT_EQ(offset_f->get_uint64(*lb_i), 33466);
+
+            ASSERT_EQ(ffu_i, lb_i);
+
+            ASSERT_EQ(table_id_f->get_uint64(*iub_i), 997);
+            ASSERT_EQ(name_f->get_text(*iub_i), "lzipsellro");
+            ASSERT_EQ(offset_f->get_uint64(*iub_i), 86407);
+        }
+
+        // search for a non-existing entry past the last entry
+        {
+            auto tuple = _create_key("zzzzzzzzzz", 0);
+
+            auto find_i = tree->find(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple, 1);
+            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+
+            ASSERT_EQ(find_i, end_i);
+            ASSERT_EQ(lb_i, end_i);
+
+            ASSERT_EQ(table_id_f->get_uint64(*ffu_i), 430);
+            ASSERT_EQ(name_f->get_text(*ffu_i), "zwoolertonbx");
+            ASSERT_EQ(offset_f->get_uint64(*ffu_i), 92729);
+
+            ASSERT_EQ(iub_i, ffu_i);
+        }
     }
 
     TEST_F(BTree_Test, InsertAndRemove) {
