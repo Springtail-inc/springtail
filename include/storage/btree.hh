@@ -217,16 +217,14 @@ namespace springtail {
         /**
          * Constructs a new BTree object.
          *
-         * @param handle The handle to the underlying file data.
-         * @param file_id A unique ID for the file, used to differentiate records in the shared cache.
+         * @param file The path to the file, used to differentiate records in the shared cache.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
          * @param schema The schema of the leaf entries of the tree.
          * @param cache A pointer to the shared cache of extents.
          * @param min_xid The earliest XID referencable by this BTree.
          * @param root_offset The offset of the root extent in the file.
          */
-        BTree(std::shared_ptr<IOHandle> handle,
-              uint64_t file_id,
+        BTree(const std::filesystem::path &file,
               const std::vector<std::string> &keys,
               std::shared_ptr<ExtentSchema> schema,
               std::shared_ptr<ExtentCache> cache,
@@ -315,8 +313,8 @@ namespace springtail {
         /** The underlying data file. */
         std::shared_ptr<IOHandle> _handle;
 
-        /** The ID of the file. */
-        uint64_t _file_id;
+        /** The path to the file. */
+        std::filesystem::path _file;
 
         /** The column names of the sort keys. */
         std::vector<std::string> _keys;
@@ -333,7 +331,7 @@ namespace springtail {
         /** The roots of the tree.  Maps from XID -> Extent. */
         std::map<uint64_t, ExtentPtr, ReverseCompare> _roots;
 
-        /** A cache for extents of the BTree. Maps from <file_id, extent_id> => Extent. */
+        /** A cache for extents of the BTree. Maps from <file, extent_id> => Extent. */
         mutable std::shared_ptr<ExtentCache> _cache;
 
     private:

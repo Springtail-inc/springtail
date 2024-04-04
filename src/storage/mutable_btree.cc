@@ -3,18 +3,19 @@
 
 namespace springtail {
 
-    MutableBTree::MutableBTree(std::shared_ptr<IOHandle> handle,
-                               uint64_t file_id,
+    MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                PageCachePtr cache,
                                ExtentSchemaPtr schema)
         : _cache(cache),
-          _handle(handle),
-          _file_id(file_id),
+          _file(file),
           _sort_keys(keys),
           _xid(0),
           _finalized(true)
     {
+        // create a file handle
+        _handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
+
         // initialize the schema information
         _init_schemas(schema, keys);
     }
@@ -504,7 +505,7 @@ namespace springtail {
     MutableBTree::_cache_get(uint64_t extent_id)
     {
         // find the entry if it exists
-        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        auto &&i = _cache->lookup.find({_file, extent_id});
         if (i == _cache->lookup.end()) {
             return nullptr;
         }
@@ -668,7 +669,7 @@ namespace springtail {
     MutableBTree::_cache_evict(uint64_t extent_id)
     {
         // find the entry if it exists
-        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        auto &&i = _cache->lookup.find({_file, extent_id});
         if (i == _cache->lookup.end()) {
             return; // not an error since someone else may have evicted
         }

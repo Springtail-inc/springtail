@@ -492,7 +492,7 @@ namespace springtail {
     /** Pointer typedef for Extent. */
     typedef std::shared_ptr<Extent> ExtentPtr;
 
-    /** Cache of <file_id, extent_id> -> Extent */
-    typedef ObjectCache<std::pair<uint64_t, uint64_t>, Extent> ExtentCache;
+    /** Cache of <file, extent_id> -> Extent */
+    typedef ObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent> ExtentCache;
     typedef std::shared_ptr<ExtentCache> ExtentCachePtr;
 }

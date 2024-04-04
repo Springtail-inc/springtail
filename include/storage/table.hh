@@ -95,15 +95,43 @@ namespace springtail {
     public:
         Table(uint64_t table_id,
               uint64_t xid,
-              uint64_t root_offset,
+              const std::filesystem::path &table_dir,
               const std::vector<std::string> &primary_key,
+              const std::vector<std::vector<std::string>> &secondary_keys,
+              std::vector<uint64_t> root_offsets,
+              ExtentSchemaPtr schema,
               ExtentCachePtr cache)
             : _id(table_id),
               _xid(xid),
               _primary_key(primary_key),
+              _secondary_keys(secondary_keys),
+              _schema(schema),
               _cache(cache)
         {
-            // XXX need to initialize the _primary_index
+            _handle = IOMgr::get_instance()->open(table_dir / "raw", IOMgr::IO_MODE::READ, true);
+
+            SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+            auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+            _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
+                                                     _primary_key,
+                                                     primary_schema,
+                                                     _cache,
+                                                     xid,
+                                                     root_offsets[0]);
+
+            _primary_extent_id_f = primary_schema->get_field("extent_id");
+
+            for (int i = 0; i < secondary_keys.size(); i++) {
+                auto &secondary_key = secondary_keys[i];
+                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c });
+                auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
+                                                     secondary_key,
+                                                     secondary_schema,
+                                                     _cache,
+                                                     xid,
+                                                     root_offsets[i + 1]);
+                _secondary_indexes.push_back(btree);
+            }
         }
 
         /** Returns true if the table has a primary key.  False otherwise. */
@@ -170,12 +198,14 @@ namespace springtail {
 
         uint64_t _xid;
         std::vector<std::string> _primary_key;
+        std::vector<std::vector<std::string>> _secondary_keys;
+        ExtentSchemaPtr _schema;
         ExtentCachePtr _cache;
-        std::shared_ptr<IOHandle> _handle;
 
         FieldArrayPtr _pkey_fields;
         FieldPtr _primary_extent_id_f;
-        ExtentSchemaPtr _schema;
+
+        std::shared_ptr<IOHandle> _handle;
 
         /** The primary index of the table. */
         BTreePtr _primary_index;
@@ -187,8 +217,63 @@ namespace springtail {
     /**
      * Interface for mutating a table at the most recent XID.
      */
-    class MutableTable {
+    class MutableTable : public std::enable_shared_from_this<MutableTable> {
     public:
+        MutableTable(uint64_t id,
+                     uint64_t target_xid,
+                     uint64_t root_extent_id,
+                     const std::filesystem::path &table_dir,
+                     const std::vector<std::string> &primary_key,
+                     const std::vector<std::vector<std::string>> &secondary_keys,
+                     ExtentSchemaPtr schema,
+                     DataCachePtr cache,
+                     MutableBTree::PageCachePtr page_cache,
+                     ExtentCachePtr read_cache)
+            : _id(id),
+              _target_xid(target_xid),
+              _data_file(table_dir / "raw"),
+              _primary_key(primary_key),
+              _secondary_keys(secondary_keys),
+              _schema(schema),
+              _cache(cache)
+        {
+            SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+            auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+            _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
+                                                            primary_key,
+                                                            page_cache,
+                                                            primary_schema);
+            if (root_extent_id != constant::UNKNOWN_EXTENT) {
+                _primary_index->init(root_extent_id);
+            } else {
+                _primary_index->init_empty();
+            }
+            _primary_index->set_xid(_target_xid);
+
+            _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
+                                                      _primary_key,
+                                                      primary_schema,
+                                                      read_cache,
+                                                      _target_xid,
+                                                      root_extent_id);
+
+            _primary_extent_id_f = primary_schema->get_field("extent_id");
+
+            for (int i = 0; i < secondary_keys.size(); i++) {
+                auto &secondary_key = secondary_keys[i];
+
+                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c });
+                auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", (i + 1)),
+                                                            secondary_key, page_cache, secondary_schema);
+                btree->set_xid(_target_xid);
+                _secondary_indexes.push_back(btree);
+            }
+        }
+
+        std::filesystem::path data_file() const {
+            return _data_file;
+        }
+
         /**
          * Add a row to the table.  The data extent ID is provided externally by the write cache, or
          * if the extent_id is UNKNOWN, then it will utilize the tuple data to determine where the
@@ -229,6 +314,12 @@ namespace springtail {
          */
         void populate_indexes(uint64_t extent_id, ExtentPtr extent);
 
+        /**
+         * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
+         * system tables.
+         */
+        std::vector<uint64_t> finalize();
+
         ExtentSchemaPtr schema() const {
             return _schema;
         }
@@ -244,6 +335,10 @@ namespace springtail {
 
         void _insert_by_lookup(TuplePtr value, uint64_t xid);
 
+        void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+
+        void _upsert_by_lookup(TuplePtr value, uint64_t xid);
+
         void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
         void _remove_by_lookup(TuplePtr key, uint64_t xid);
@@ -258,14 +353,22 @@ namespace springtail {
         /** The ID of the table. */
         uint64_t _id;
 
-        std::vector<std::string> _primary_key;
+        uint64_t _target_xid;
+        std::filesystem::path _data_file;
 
-        DataCachePtr _cache;
+        std::vector<std::string> _primary_key;
+        std::vector<std::vector<std::string>> _secondary_keys;
+
+        /** A lookup version of the primary index.  Pinned to the most recent XID. */
+        BTreePtr _primary_lookup;
+        FieldPtr _primary_extent_id_f;
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index;
         std::vector<MutableBTreePtr> _secondary_indexes;
         ExtentSchemaPtr _schema;
+
+        DataCachePtr _cache;
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

@@ -57,6 +57,8 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXTENT_ID = 3;
             static constexpr uint32_t ROW_ID = 4;
 
+            static const std::vector<SchemaColumn> SCHEMA;
+
             static TuplePtr
             key_tuple(uint64_t table_id,
                       uint64_t xid,

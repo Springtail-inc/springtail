@@ -59,7 +59,8 @@ namespace springtail {
         /**
          * @brief Construct a new TableMgr object
          */
-        TableMgr();
+        TableMgr()
+        { }
 
         /**
          * @brief Destroy the TableMgr object

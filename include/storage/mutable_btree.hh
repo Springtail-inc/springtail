@@ -52,8 +52,8 @@ namespace springtail {
             /** Cache entry typedef, tuple of PagePtr, LRU iterator, usage count, page size */
             typedef std::tuple<PagePtr, typename std::list<PagePtr>::iterator, int, uint32_t> LookupEntry;
 
-            /** The ID type for the lookup is <file_id, extent_id> */
-            typedef std::pair<uint64_t, uint64_t> LookupID;
+            /** The ID type for the lookup is <file, extent_id> */
+            typedef std::pair<std::filesystem::path, uint64_t> LookupID;
 
             /** A map from extent ID to LookupEntry. */
             std::unordered_map<LookupID, LookupEntry, boost::hash<LookupID>> lookup;
@@ -94,8 +94,7 @@ namespace springtail {
          * @param cache_size The maximum size of the in-memory cache of pages.
          * @param schema The schema of the leaf entries of the tree.
          */
-        MutableBTree(std::shared_ptr<IOHandle> handle,
-                     uint64_t file_id,
+        MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      PageCachePtr cache,
                      ExtentSchemaPtr schema);
@@ -363,7 +362,7 @@ namespace springtail {
             PageCache::LookupID
             get_lookup_id()
             {
-                return PageCache::LookupID{_btree->_file_id, extent_id};
+                return PageCache::LookupID{_btree->_file, extent_id};
             }
 
             /**
@@ -492,8 +491,8 @@ namespace springtail {
         /** The handle to the underlying on-disk data. */
         std::shared_ptr<IOHandle> _handle;
 
-        /** The file ID for the underlying on-disk data. */
-        uint64_t _file_id;
+        /** The file for the underlying on-disk data. */
+        std::filesystem::path _file;
 
         /** The set of keys that form the sort order of the tree. */
         std::vector<std::string> _sort_keys;

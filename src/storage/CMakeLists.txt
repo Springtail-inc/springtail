@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc table_mgr.cc schema_mgr.cc data_cache.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc table_mgr.cc schema_mgr.cc data_cache.cc table.cc system_tables.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -41,6 +41,13 @@ target_link_libraries(test_btree
     PUBLIC springtail_common springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
 
+add_executable(test_table test/test_table.cc)
+target_include_directories(test_table PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_table PRIVATE "--coverage")
+
+target_link_libraries(test_table
+    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
 
 
 add_executable(test_extent test/test_extent.cc)
@@ -50,4 +57,6 @@ target_link_libraries(test_extent PUBLIC springtail_common springtail_storage GT
 gtest_discover_tests(test_extent)
 gtest_discover_tests(test_btree
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
-# gtest_discover_tests(test_io)
+gtest_discover_tests(test_table
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
+gtest_discover_tests(test_io)

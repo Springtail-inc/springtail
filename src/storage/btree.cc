@@ -2,19 +2,19 @@
 #include <storage/btree.hh>
 
 namespace springtail {
-    BTree::BTree(std::shared_ptr<IOHandle> handle,
-                 uint64_t file_id,
+    BTree::BTree(const std::filesystem::path &file,
                  const std::vector<std::string> &keys,
                  std::shared_ptr<ExtentSchema> schema,
                  std::shared_ptr<ExtentCache> cache,
                  uint64_t min_xid,
                  uint64_t root_offset)
-        : _handle(handle),
-          _file_id(file_id),
+        : _file(file),
           _keys(keys),
           _leaf_schema(schema),
           _cache(cache)
     {
+        _handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::READ, true);
+          
         // construct the field tuples for the leaf nodes
         _leaf_keys = _leaf_schema->get_fields(keys);
 
@@ -233,7 +233,7 @@ namespace springtail {
     ExtentPtr
     BTree::_read_extent(uint64_t extent_id) const
     {
-        std::pair<uint64_t, uint64_t> cache_id(_file_id, extent_id);
+        std::pair<std::filesystem::path, uint64_t> cache_id(_file, extent_id);
 
         // first check the cache
         ExtentPtr extent = _cache->get(cache_id);

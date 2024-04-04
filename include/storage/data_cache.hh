@@ -24,6 +24,8 @@ namespace springtail {
          */
         class Page {
         public:
+            class Iterator;
+
             /**
              * Constructor.
              */
@@ -42,12 +44,28 @@ namespace springtail {
             void insert(TuplePtr value);
 
             /**
+             * Adds a new row to the end of the Page.
+             */
+            void append(TuplePtr value);
+
+            /**
+             * Adds a new row to the Page with the provided value, if a row with a matching key
+             * doesn't already exist.  If a row with the key already exists, then replace it.
+             */
+            void upsert(TuplePtr value);
+
+            /**
              * Removes a row from the Page with the provided primary key.
              */
             void remove(TuplePtr key);
 
             /**
-             * Removes a row from the Page with the provided primary key.
+             * Removes a row from the Page at the provided position.
+             */
+            void remove(const Iterator &pos);
+
+            /**
+             * Updates a row in the Page with the provided value, using the primary key in the value.
              */
             void update(TuplePtr value);
 
@@ -137,13 +155,15 @@ namespace springtail {
             }
 
         protected:
+            void _remove(const Iterator &pos);
+
             Iterator _lower_bound(TuplePtr search_key);
 
             ExtentPtr _read_extent(uint64_t extent_id);
 
             uint64_t _write_extent(ExtentPtr extent);
 
-            void _check_split(Iterator pos_i);
+            void _check_split(std::vector<ExtentPtr>::iterator extent_i);
 
         private:
             /** Protects the page against incorrect concurrent access. */
@@ -197,7 +217,7 @@ namespace springtail {
         /**
          * Evict all of the pages associated with a given table.  Optionally evict without flushing them to disk.
          */
-        void evict(std::shared_ptr<Table> table, bool flush = true);
+        void evict(std::shared_ptr<MutableTable> table, bool flush = true);
 
     private:
         typedef std::tuple<PagePtr, std::list<PagePtr>::iterator, uint32_t> CacheEntry;
@@ -205,8 +225,6 @@ namespace springtail {
 
         /** Protects the cache against incorrect concurrent access. */
         boost::shared_mutex _mutex;
-
-        std::shared_ptr<IOHandle> _handle;
 
         std::list<PagePtr> _lru;
         std::map<CacheKey, CacheEntry> _cache;

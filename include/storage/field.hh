@@ -175,6 +175,74 @@ namespace springtail {
                 throw TypeError();
             }
         }
+
+        bool
+        equal(const std::any &lhs_row,
+              std::shared_ptr<Field> rhs,
+              const std::any &rhs_row)
+        {
+            // types must match
+            assert(this->get_type() == rhs->get_type());
+
+            // cannot call equal() on undefined fields
+            assert(!(this->is_undefined(lhs_row) || rhs->is_undefined(rhs_row)));
+
+            // handle nulls
+            if (this->is_null(lhs_row)) {
+                if (rhs->is_null(rhs_row)) {
+                    return true; // both null, so equal
+                } else {
+                    return false; // lhs is null, rhs is not
+                }
+            } else {
+                if (rhs->is_null(rhs_row)) {
+                    return false; // lhs is not null, rhs is null
+                }
+            }
+
+            // handle values
+            switch (this->get_type()) {
+            case SchemaType::BOOLEAN:
+                return (this->get_bool(lhs_row) == rhs->get_bool(rhs_row));
+
+            case SchemaType::UINT8:
+                return (this->get_uint8(lhs_row) == rhs->get_uint8(rhs_row));
+
+            case SchemaType::INT8:
+                return (this->get_int8(lhs_row) == rhs->get_int8(rhs_row));
+
+            case SchemaType::UINT16:
+                return (this->get_uint16(lhs_row) == rhs->get_uint16(rhs_row));
+
+            case SchemaType::INT16:
+                return (this->get_int16(lhs_row) == rhs->get_int16(rhs_row));
+
+            case SchemaType::UINT32:
+                return (this->get_uint32(lhs_row) == rhs->get_uint32(rhs_row));
+
+            case SchemaType::INT32:
+                return (this->get_int32(lhs_row) == rhs->get_int32(rhs_row));
+
+            case SchemaType::UINT64:
+                return (this->get_uint64(lhs_row) == rhs->get_uint64(rhs_row));
+
+            case SchemaType::INT64:
+                return (this->get_int64(lhs_row) == rhs->get_int64(rhs_row));
+
+            case SchemaType::FLOAT32:
+                return (this->get_float32(lhs_row) == rhs->get_float32(rhs_row));
+
+            case SchemaType::FLOAT64:
+                return (this->get_float64(lhs_row) == rhs->get_float64(rhs_row));
+
+            case SchemaType::TEXT:
+                return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
+
+            default:
+                SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
+                throw TypeError();
+            }
+        }
     };
 
     /** Pointer typedef for Field. */
@@ -1091,6 +1159,25 @@ namespace springtail {
 
             // all values are equal, so not less than
             return false;
+        }
+
+        bool equal(const Tuple &rhs) const {
+            // check the tuple lengths and types using assert()
+            // we assume correct usage in production
+            assert(this->size() == rhs.size());
+            for (int i = 0; i < this->size(); i++) {
+                assert(this->field(i)->get_type() == rhs.field(i)->get_type());
+            }
+
+            // XXX switch everything to compare()?
+            for (int i = 0; i < this->size(); i++) {
+                if (!this->field(i)->equal(this->row(), rhs.field(i), rhs.row())) {
+                    return false;
+                }
+            }
+
+            // all values are equal
+            return true;
         }
 
     protected:

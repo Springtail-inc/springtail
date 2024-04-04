@@ -28,7 +28,46 @@ namespace springtail {
         MutableTuple(_fields, row).assign(value);
 
         // check if we need to split the extent
-        _check_split(pos_i);
+        _check_split(pos_i.extent_i);
+    }
+
+    void
+    DataCache::Page::append(TuplePtr value)
+    {
+        // lock the page
+        boost::unique_lock lock(_mutex);
+
+        // append the new row
+        ExtentPtr e = _extents.back();
+        Extent::Row row = e->append();
+        MutableTuple(_fields, row).assign(value);
+
+        // check if we need to split the extent
+        _check_split(--(_extents.end()));
+    }
+
+    void
+    DataCache::Page::upsert(TuplePtr value)
+    {
+        // lock the page
+        boost::unique_lock lock(_mutex);
+
+        auto key = _schema->tuple_subset(value, _keys);
+        auto pos_i = _lower_bound(key);
+
+        // check if it's an exact match
+        if (key->less_than(MutableTuple(_key_fields, *pos_i))) {
+            // key doesn't exist, do a regular insert
+            ExtentPtr e = *(pos_i.extent_i);
+            Extent::Row row = e->insert(pos_i.row_i);
+            MutableTuple(_fields, row).assign(value);
+        } else {
+            // key exists, replace it
+            MutableTuple(_fields, *pos_i).assign(value);
+        }
+
+        // check if we need to split the extent
+        _check_split(pos_i.extent_i);
     }
 
     void
@@ -37,20 +76,25 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // find the entry
-        auto pos_i = _lower_bound(key);
+        auto pos = _lower_bound(key);
 
         // make sure we got an exact match
-        if (key->less_than(MutableTuple(_key_fields, *pos_i))) {
+        if (key->less_than(MutableTuple(_key_fields, *pos))) {
             SPDLOG_ERROR("Tried to remove non-existant key");
             return;
         }
 
-        // remove the row
-        ExtentPtr e = *(pos_i.extent_i);
-        e->remove(pos_i.row_i);
+        // call the internal remove
+        _remove(pos);
+    }
 
-        // note: we currently rely on the GC-3 to perform all data merging, but it would
-        //       make sense to merge in-memory extents here
+    void
+    DataCache::Page::remove(const Iterator &pos)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // call the internal remove
+        _remove(pos);
     }
 
     void
@@ -73,7 +117,7 @@ namespace springtail {
         MutableTuple(_fields, *(pos_i.row_i)).assign(value);
 
         // check if we need to split the extent
-        _check_split(pos_i);
+        _check_split(pos_i.extent_i);
     }
 
     void
@@ -119,6 +163,17 @@ namespace springtail {
         return *this;
     }
 
+    void
+    DataCache::Page::_remove(const Iterator &pos)
+    {
+        // remove the row
+        ExtentPtr e = *(pos.extent_i);
+        e->remove(pos.row_i);
+
+        // note: we currently rely on the GC-3 to perform all data merging, but it would
+        //       make sense to merge in-memory extents here
+    }
+
     DataCache::Page::Iterator
     DataCache::Page::_lower_bound(TuplePtr search_key)
     {
@@ -145,7 +200,9 @@ namespace springtail {
     DataCache::Page::_read_extent(uint64_t extent_id)
     {
         // read the extent from disk and create a page for it
-        auto response = _cache->_handle->read(extent_id);
+        auto handle = IOMgr::get_instance()->open(_table->data_file(),
+                                                  IOMgr::IO_MODE::READ, true);
+        auto response = handle->read(extent_id);
             
         // unpack the header to determine the extent type
         ExtentHeader header(response->data[0]);
@@ -167,16 +224,18 @@ namespace springtail {
     {
         // write the extent to disk
         // XXX when not performing GC we should keep these extents in a look-aside file; how to track?
-        auto &&response = extent->async_flush(_cache->_handle).get();
+        auto handle = IOMgr::get_instance()->open(_table->data_file(),
+                                                  IOMgr::IO_MODE::APPEND, true);
+        auto &&response = extent->async_flush(handle).get();
         auto extent_id = response->offset;
 
         return extent_id;
     }
 
     void
-    DataCache::Page::_check_split(Iterator pos_i)
+    DataCache::Page::_check_split(std::vector<ExtentPtr>::iterator extent_i)
     {
-        ExtentPtr e = *(pos_i.extent_i);
+        ExtentPtr e = *extent_i;
 
         // check the size of the extent
         if (e->byte_count() < constant::MAX_EXTENT_SIZE) {
@@ -187,10 +246,10 @@ namespace springtail {
         auto &&pair = e->split();
         _size -= e->byte_count();
 
-        // XXX remove the existing entry and insert the two new ones
-        auto pos = pos_i.page->_extents.erase(pos_i.extent_i);
-        pos = pos_i.page->_extents.insert(pos, pair.second);
-        pos_i.page->_extents.insert(pos, pair.first);
+        // remove the existing entry and insert the two new ones
+        auto pos = _extents.erase(extent_i);
+        pos = _extents.insert(pos, pair.second);
+        _extents.insert(pos, pair.first);
 
         _size += pair.first->byte_count() + pair.second->byte_count();
 
@@ -250,7 +309,7 @@ namespace springtail {
     }
 
     void
-    DataCache::evict(std::shared_ptr<Table> table,
+    DataCache::evict(std::shared_ptr<MutableTable> table,
                      bool flush)
     {
         boost::unique_lock lock(_mutex);

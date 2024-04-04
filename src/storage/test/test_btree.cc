@@ -26,11 +26,10 @@ namespace {
                     { "offset", 2, SchemaType::UINT64, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
-            _read_cache = std::make_shared<LruObjectCache<std::pair<uint64_t, uint64_t>, Extent>>(1024*1024);
+            _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
             _keys = std::vector<std::string>({"name", "table_id"});
 
             _write_cache = MutableBTree::create_cache(2*1024*1024);
-            _file_id = 1;
         }
 
         void TearDown() override {
@@ -53,21 +52,13 @@ namespace {
         std::shared_ptr<ExtentCache> _read_cache;
         MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _keys;
-        uint64_t _file_id;
-        std::map<std::filesystem::path, uint64_t> _file_id_map;
 
         std::shared_ptr<MutableBTree>
         _create_mutable_btree(const std::filesystem::path &name,
                               uint64_t xid)
         {
-            auto iomgr = IOMgr::get_instance();
-
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::APPEND, true);
-            
-            auto btree = std::make_shared<MutableBTree>(handle, _file_id, _keys, _write_cache, _schema);
-            _file_id_map[name] = _file_id;
-            ++_file_id;
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
 
             btree->init_empty();
             return btree;
@@ -78,12 +69,8 @@ namespace {
                            uint64_t xid,
                            uint64_t extent_id)
         {
-            auto iomgr = IOMgr::get_instance();
-
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::APPEND, true);
-
-            auto btree = std::make_shared<MutableBTree>(handle, _file_id_map[name], _keys, _write_cache, _schema);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
             btree->init(extent_id);
             return btree;
         }
@@ -92,12 +79,8 @@ namespace {
         _get_btree(const std::filesystem::path &name,
                    uint64_t extent_id)
         {
-            auto iomgr = IOMgr::get_instance();
-
             // construct a mutable b-tree for inserting data
-            std::shared_ptr<IOHandle> handle = iomgr->open(name, IOMgr::IO_MODE::READ, true);
-            return std::make_shared<BTree>(handle, _file_id_map[name], _keys, _schema,
-                                           _read_cache, 1, extent_id);
+            return std::make_shared<BTree>(name, _keys, _schema, _read_cache, 1, extent_id);
         }
 
         std::shared_ptr<Tuple>
