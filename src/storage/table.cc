@@ -279,6 +279,7 @@ namespace springtail {
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
+            // if the primary index is not empty, get the target extent
             extent_id = _primary_extent_id_f->get_uint64(*i);
         }
 
@@ -307,8 +308,13 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid);
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        auto i = _primary_lookup->find_for_update(search_key, xid);
+
+        uint64_t extent_id = constant::UNKNOWN_EXTENT;
+        if (i != _primary_lookup->end()) {
+            // if the primary index is not empty, get the target extent
+            extent_id = _primary_extent_id_f->get_uint64(*i);
+        }
 
         // then we can do a direct insert
         _upsert_direct(value, xid, extent_id);
@@ -335,8 +341,14 @@ namespace springtail {
                                     uint64_t xid)
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_lookup->lower_bound(key, xid);
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        auto i = _primary_lookup->find_for_update(key, xid);
+
+        // if the key isn't available, then it may be in the 
+        uint64_t extent_id = constant::UNKNOWN_EXTENT;
+        if (i != _primary_lookup->end()) {
+            // if the primary index is not empty, get the target extent
+            extent_id = _primary_extent_id_f->get_uint64(*i);
+        }
 
         // then we can do a direct removal
         _remove_direct(key, xid, extent_id);
@@ -404,8 +416,13 @@ namespace springtail {
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid);
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        auto i = _primary_lookup->find_for_update(search_key, xid);
+
+        uint64_t extent_id = constant::UNKNOWN_EXTENT;
+        if (i != _primary_lookup->end()) {
+            // if the primary index is not empty, get the target extent
+            extent_id = _primary_extent_id_f->get_uint64(*i);
+        }
 
         // then we can do a direct update
         _update_direct(value, xid, extent_id);

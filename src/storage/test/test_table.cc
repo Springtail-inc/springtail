@@ -230,6 +230,17 @@ namespace {
         }
 
         // XXX remove some rows
+        auto make_key = [](const std::string &key) {
+            auto k = std::make_shared<ConstTypeField<std::string>>(key);
+            std::vector<ConstFieldPtr> v({ k });
+            return std::make_shared<ValueTuple>(v);
+        };
+
+        mtable->remove(make_key("iclausnerc5"), 1, constant::UNKNOWN_EXTENT);
+        mtable->remove(make_key("cmiltonwhitecb"), 1, constant::UNKNOWN_EXTENT);
+        mtable->remove(make_key("rllorentecf"), 1, constant::UNKNOWN_EXTENT);
+        mtable->remove(make_key("hdotsonbn"), 1, constant::UNKNOWN_EXTENT);
+        mtable->remove(make_key("bbootellbj"), 1, constant::UNKNOWN_EXTENT);
 
         // XXX update some rows
 
@@ -258,7 +269,7 @@ namespace {
             prev = fields->at(1)->get_text(row);
             ++count;
         }
-        ASSERT_EQ(count, 5000); // XXX
+        ASSERT_EQ(count, 5000 - 5);
 
         // XXX verify the secondary index
     }
