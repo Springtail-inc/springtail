@@ -229,20 +229,71 @@ namespace {
             mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), 1, constant::UNKNOWN_EXTENT);
         }
 
-        // XXX remove some rows
+        // helper to make a key tuple
         auto make_key = [](const std::string &key) {
             auto k = std::make_shared<ConstTypeField<std::string>>(key);
             std::vector<ConstFieldPtr> v({ k });
             return std::make_shared<ValueTuple>(v);
         };
 
-        mtable->remove(make_key("iclausnerc5"), 1, constant::UNKNOWN_EXTENT);
-        mtable->remove(make_key("cmiltonwhitecb"), 1, constant::UNKNOWN_EXTENT);
-        mtable->remove(make_key("rllorentecf"), 1, constant::UNKNOWN_EXTENT);
-        mtable->remove(make_key("hdotsonbn"), 1, constant::UNKNOWN_EXTENT);
-        mtable->remove(make_key("bbootellbj"), 1, constant::UNKNOWN_EXTENT);
+        // helper to make a value tuple
+        auto make_value = [](uint64_t table_id, const std::string &name, uint64_t offset) {
+            auto t = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            auto n = std::make_shared<ConstTypeField<std::string>>(name);
+            auto o = std::make_shared<ConstTypeField<uint64_t>>(offset);
+            std::vector<ConstFieldPtr> v({ t, n, o });
+            return std::make_shared<ValueTuple>(v);
+        };
 
-        // XXX update some rows
+        // remove rows with unknown positions
+        // note: rows with table_id == 1
+        std::vector<std::string> keys = {
+            "cibeson0",
+            "pnisard0",
+            "unardi0",
+            "asineath0",
+            "sfrankland0"
+        };
+        for (auto &key : keys) {
+            mtable->remove(make_key(key), 1, constant::UNKNOWN_EXTENT);
+        }
+
+        // update some row data with unknown positions
+        // note: rows with table_id = 6
+        std::vector<TuplePtr> update_values = {
+            make_value(6, "ctipton5", 100),
+            make_value(6, "callsepp5" , 100),
+            make_value(6, "mpinwell5" , 100),
+            make_value(6, "oblackborn5", 100),
+            make_value(6, "gnatte5", 100)
+        };
+        for (auto &value : update_values) {
+            mtable->update(value, 1, constant::UNKNOWN_EXTENT);
+        }
+
+        // upsert some missing rows with unknown positions
+        std::vector<TuplePtr> upsert_values = {
+            make_value(1500, "cibeson0", 1),
+            make_value(1500, "pnisard0", 1),
+            make_value(1500, "unardi0", 1),
+            make_value(1500, "asineath0", 1),
+            make_value(1500, "sfrankland0", 1)
+        };
+        for (auto &value : upsert_values) {
+            mtable->upsert(value, 1, constant::UNKNOWN_EXTENT);
+        }
+
+        // upsert some existing rows with unknown positions
+        upsert_values = {
+            make_value(3, "tcases2", 103),
+            make_value(3, "lharback2", 103),
+            make_value(3, "ehalpeine2", 103),
+            make_value(3, "astenner2", 103),
+            make_value(3, "dhaggleton2", 103)
+        };
+        for (auto &value : upsert_values) {
+            mtable->upsert(value, 1, constant::UNKNOWN_EXTENT);
+        }
 
         // finalize the table
         roots = mtable->finalize();
@@ -266,14 +317,28 @@ namespace {
                 ASSERT_GT(fields->at(1)->get_text(row), prev);
             }
 
+            // check that the removes and updates occurred correctly
+            uint64_t table_id = fields->at(0)->get_uint64(row);
+            ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
+            if (table_id == 6) {
+                ASSERT_EQ(fields->at(2)->get_uint64(row), 100); // updates
+            }
+            if (table_id == 1500) {
+                ASSERT_EQ(fields->at(2)->get_uint64(row), 1); // upsert inserts
+            }
+            if (table_id == 3) {
+                ASSERT_EQ(fields->at(2)->get_uint64(row), 103); // upsert updates
+            }
+
             prev = fields->at(1)->get_text(row);
             ++count;
         }
-        ASSERT_EQ(count, 5000 - 5);
+        ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
         // XXX verify the secondary index
     }
 
+#if 0
     TEST_F(Table_Test, MultiXactMutations) {
         // create a mutable table
 
@@ -283,7 +348,69 @@ namespace {
 
         // create a new mutable table with a later XID target
 
-        // remove some rows
+        // remove rows with unknown positions
+        // note: rows with table_id == 1
+        std::vector<std::string> keys = {
+            "cibeson0",
+            "pnisard0",
+            "unardi0",
+            "asineath0",
+            "sfrankland0"
+        };
+        for (auto &key : keys) {
+            mtable->remove(make_key(key), 1, constant::UNKNOWN_EXTENT);
+        }
+
+        // remove rows with known positions
+        // note: rows with table_id == 2
+        keys = {
+            "tdockrell1",
+            "gatwater1",
+            "llandon1",
+            "nmingardi1",
+            "lstrapp1"
+        };
+        for (auto &key : keys) {
+            auto &&search_key = make_key(key);
+            uint64_t extent_id = mtable->primary_lookup(search_key);
+            mtable->remove(search_key, 1, extent_id);
+        }
+
+        // update some row data with unknown positions
+        // note: rows with table_id = 6
+        std::vector<TuplePtr> update_values = {
+            make_value(6, "ctipton5", 100),
+            make_value(6, "callsepp5" , 100),
+            make_value(6, "mpinwell5" , 100),
+            make_value(6, "oblackborn5", 100),
+            make_value(6, "gnatte5", 100)
+        };
+        for (auto &value : update_values) {
+            mtable->update(value, 1, constant::UNKNOWN_EXTENT);
+        }
+
+        // update some row data with known positions
+        // note: rows with table_id = 7
+        update_values = {
+            make_value(7, "dgrgic6", 101);
+            make_value(7, "nbeaglehole6", 101);
+            make_value(7, "trosendorf6", 101);
+            make_value(7, "ldana6", 101);
+            make_value(7, "gridulfo6", 101);
+        };
+        std::vector<std::string> update_keys = {
+            "dgrgic6",
+            "nbeaglehole6",
+            "trosendorf6",
+            "ldana6",
+            "gridulfo6"
+        };
+        for (int i = 0; i < update_keys.size(); i++) {
+            auto &&search_key = make_key(update_keys[i]);
+            uint64_t extent_id = mtable->primary_lookup(search_key);
+            mtable->update(update_values[i], 1, extent_id);
+        }
+
 
         // update some rows
 
@@ -294,6 +421,7 @@ namespace {
         // ensure that it has all of the expected rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
     }
+#endif
 
 
     TEST_F(Table_Test, MultiThreadMutations) {
