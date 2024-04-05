@@ -34,11 +34,15 @@ namespace {
             _secondary_keys = { std::vector<std::string>({"table_id"}) };
 
             _data_cache = std::make_shared<DataCache>(true);
+
+            std::filesystem::create_directories("/tmp/test_table/1000");
+            std::filesystem::create_directory("/tmp/test_table/1001");
+            std::filesystem::create_directory("/tmp/test_table/1002");
         }
 
         void TearDown() override {
             // remove any files created during the run
-            IOMgr::get_instance()->remove("/tmp/test_btree_Insert10");
+            std::filesystem::remove_all("/tmp/test_table");
         }
 
         ExtentSchemaPtr _schema;
@@ -100,10 +104,11 @@ namespace {
 
     TEST_F(Table_Test, CreateEmpty) {
         // create a mutable table
+        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
         auto mtable = std::make_shared<MutableTable>(1000,
                                                      1,
-                                                     constant::UNKNOWN_EXTENT,
-                                                     "/tmp/test_table/",
+                                                     roots,
+                                                     "/tmp/test_table/1000",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -112,12 +117,12 @@ namespace {
                                                      _read_cache);
 
         // finalize the empty table
-        auto &&roots = mtable->finalize();
+        roots = mtable->finalize();
 
         // create an access table
         auto table = std::make_shared<Table>(1000,
                                              1,
-                                             "/tmp/test_table/",
+                                             "/tmp/test_table/1000",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -136,10 +141,11 @@ namespace {
 
     TEST_F(Table_Test, Inserts) {
         // create a mutable table
+        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
         auto mtable = std::make_shared<MutableTable>(1001,
                                                      1,
-                                                     constant::UNKNOWN_EXTENT,
-                                                     "/tmp/test_table/",
+                                                     roots,
+                                                     "/tmp/test_table/1001",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -164,12 +170,12 @@ namespace {
         }
 
         // finalize the table
-        auto &&roots = mtable->finalize();
+        roots = mtable->finalize();
 
         // create an access table
         auto table = std::make_shared<Table>(1001,
                                              1,
-                                             "/tmp/test_table/",
+                                             "/tmp/test_table/1001",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -195,10 +201,11 @@ namespace {
 
     TEST_F(Table_Test, SingleXactMutations) {
         // create a mutable table
+        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
         auto mtable = std::make_shared<MutableTable>(1002,
                                                      1,
-                                                     constant::UNKNOWN_EXTENT,
-                                                     "/tmp/test_table/",
+                                                     roots,
+                                                     "/tmp/test_table/1002",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -227,12 +234,12 @@ namespace {
         // XXX update some rows
 
         // finalize the table
-        auto &&roots = mtable->finalize();
+        roots = mtable->finalize();
 
         // create an access table
         auto table = std::make_shared<Table>(1002,
                                              1,
-                                             "/tmp/test_table/",
+                                             "/tmp/test_table/1002",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,

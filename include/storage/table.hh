@@ -221,7 +221,7 @@ namespace springtail {
     public:
         MutableTable(uint64_t id,
                      uint64_t target_xid,
-                     uint64_t root_extent_id,
+                     std::vector<uint64_t> root_extent_ids,
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
@@ -243,8 +243,8 @@ namespace springtail {
                                                             primary_key,
                                                             page_cache,
                                                             primary_schema);
-            if (root_extent_id != constant::UNKNOWN_EXTENT) {
-                _primary_index->init(root_extent_id);
+            if (root_extent_ids[0] != constant::UNKNOWN_EXTENT) {
+                _primary_index->init(root_extent_ids[0]);
             } else {
                 _primary_index->init_empty();
             }
@@ -255,16 +255,24 @@ namespace springtail {
                                                       primary_schema,
                                                       read_cache,
                                                       _target_xid,
-                                                      root_extent_id);
+                                                      root_extent_ids[0]);
 
             _primary_extent_id_f = primary_schema->get_field("extent_id");
 
             for (int i = 0; i < secondary_keys.size(); i++) {
+                int idx = i + 1;
+
                 auto &secondary_key = secondary_keys[i];
 
                 auto secondary_schema = _schema->create_schema(secondary_key, { extent_c });
-                auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", (i + 1)),
+                auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
                                                             secondary_key, page_cache, secondary_schema);
+
+                if (root_extent_ids[idx] != constant::UNKNOWN_EXTENT) {
+                    btree->init(root_extent_ids[idx]);
+                } else {
+                    btree->init_empty();
+                }
                 btree->set_xid(_target_xid);
                 _secondary_indexes.push_back(btree);
             }

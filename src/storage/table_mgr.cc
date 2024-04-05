@@ -151,6 +151,8 @@ namespace springtail {
         // XXX 4) Secondary indexes??  unclear when to create them.
 
         // XXX notify the schema manager of the new schema?
+
+        // XXX create the table's directory?  create empty index files?
     }
 
     void

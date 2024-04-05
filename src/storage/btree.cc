@@ -1,5 +1,5 @@
-#include <storage/btree_common.hh>
 #include <storage/btree.hh>
+#include <storage/constants.hh>
 
 namespace springtail {
     BTree::BTree(const std::filesystem::path &file,
@@ -19,26 +19,28 @@ namespace springtail {
         _leaf_keys = _leaf_schema->get_fields(keys);
 
         // construct the schema for the branches
-        SchemaColumn child(BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
         _branch_schema = _leaf_schema->create_schema(keys, { child });
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_fields(keys);
-        _branch_child_f = _branch_schema->get_field(BTREE_CHILD_FIELD);
+        _branch_child_f = _branch_schema->get_field(constant::BTREE_CHILD_FIELD);
 
         // read the roots back to the min XID
-        ExtentPtr root;
-        uint64_t prev_offset;
-        do {
-            root = _read_extent(root_offset);
-            _roots[root->header().xid] = root;
+        if (root_offset != constant::UNKNOWN_EXTENT) {
+            ExtentPtr root;
+            uint64_t prev_offset;
+            do {
+                root = _read_extent(root_offset);
+                _roots[root->header().xid] = root;
 
-            prev_offset = root_offset;
-            root_offset = root->header().prev_offset;
+                prev_offset = root_offset;
+                root_offset = root->header().prev_offset;
 
-            // note: the first available XID will point to itself, so we know we can't go earlier
-            //       when we see that case
-        } while (root->header().xid > min_xid && root_offset != prev_offset);
+                // note: the first available XID will point to itself, so we know we can't go earlier
+                //       when we see that case
+            } while (root->header().xid > min_xid && root_offset != prev_offset);
+        }
     }
 
     void
@@ -54,6 +56,10 @@ namespace springtail {
     void
     BTree::set_min_xid(uint64_t min_xid)
     {
+        if (_roots.empty()) {
+            return; // this means the btree is empty and has no roots
+        }
+
         // note: we keep the _roots in reverse order to allow for use of lower_bound() when
         // searching and removing entries
 
@@ -72,12 +78,13 @@ namespace springtail {
     {
         // find the root
         auto root = _find_root(xid);
-        uint64_t tree_xid = root->header().xid;
 
         // if the root doesn't exist or is empty, return end()
         if (root == nullptr || root->empty()) {
             return end();
         }
+
+        uint64_t tree_xid = root->header().xid;
 
         // create a node for the root
         auto node = std::make_shared<Node>(root);

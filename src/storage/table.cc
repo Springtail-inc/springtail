@@ -61,6 +61,10 @@ namespace springtail {
     Table::begin()
     {
         auto &&index_i = _primary_index->begin(_xid);
+        if (index_i == _primary_index->end()) {
+            return end();
+        }
+
         auto extent = _read_extent_via_primary(index_i);
         return Iterator(this, _primary_index, index_i, extent, extent->begin());
     }

@@ -2,6 +2,7 @@
 
 #include <boost/thread.hpp>
 
+#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
@@ -230,7 +231,7 @@ namespace springtail {
             Page(std::shared_ptr<MutableBTree> btree,
                  ExtentPtr extent,
                  MutableFieldArrayPtr key_fields)
-                : extent_id(0),
+                : extent_id(constant::UNKNOWN_EXTENT),
                   type(false, true),
                   flushed(false),
                   _btree(btree),

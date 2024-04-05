@@ -1,4 +1,4 @@
-#include <storage/btree_common.hh>
+#include <storage/constants.hh>
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
@@ -1144,11 +1144,11 @@ namespace springtail {
         _leaf_keys = _leaf_schema->get_mutable_fields(keys);
 
         // construct the schema for the branches
-        SchemaColumn child(BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
         _branch_schema = _leaf_schema->create_schema(keys, { child });
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_mutable_fields(keys);
-        _branch_child_f = _branch_schema->get_mutable_field(BTREE_CHILD_FIELD);
+        _branch_child_f = _branch_schema->get_mutable_field(constant::BTREE_CHILD_FIELD);
     }
 }
