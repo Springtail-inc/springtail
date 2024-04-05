@@ -29,7 +29,7 @@ namespace springtail {
             /**
              * Constructor.
              */
-            Page(uint64_t extent_id, std::shared_ptr<MutableTable> table);
+            Page(DataCache *cache, uint64_t extent_id, std::shared_ptr<MutableTable> table);
 
             void
             set_target_xid(uint64_t xid)
@@ -174,19 +174,16 @@ namespace springtail {
              */
             std::vector<ExtentPtr> _extents;
 
+            DataCache *_cache;
+
             /** The original extent ID of the underlying data. */
             uint64_t _id;
 
             /** A pointer to the table that this Page is from. */
             std::shared_ptr<MutableTable> _table;
 
-            FieldPtr _extent_id_f;
-
-            ExtentSchemaPtr _schema;
-            std::vector<std::string> _keys;
             MutableFieldArrayPtr _fields;
             MutableFieldArrayPtr _key_fields;
-            DataCache *_cache;
             uint64_t _size;
         };
         typedef std::shared_ptr<Page> PagePtr;

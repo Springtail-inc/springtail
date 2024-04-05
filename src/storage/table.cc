@@ -275,8 +275,12 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid);
-        uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
+        auto i = _primary_lookup->find_for_update(search_key, xid);
+
+        uint64_t extent_id = constant::UNKNOWN_EXTENT;
+        if (i != _primary_lookup->end()) {
+            extent_id = _primary_extent_id_f->get_uint64(*i);
+        }
 
         // then we can do a direct insert
         _insert_direct(value, xid, extent_id);
@@ -291,7 +295,7 @@ namespace springtail {
         auto page = _cache->get(extent_id, shared_from_this());
 
         // add the row to the page
-        page->insert(value);
+        page->upsert(value);
 
         // release the page back to the write cache
         _cache->release(page);
@@ -359,15 +363,18 @@ namespace springtail {
 
             // XXX need a way to get a clean page that can be preferentially released if it doesn't contain the row
             auto page = _cache->get(extent_id, shared_from_this());
+
             auto &&j = page->begin();
             while (!found && j != page->end()) {
                 if (value->equal(FieldTuple(fields, *j))) {
                     page->remove(j);
                     found = true;
-                    continue;
+                } else {
+                    ++j;
                 }
-                ++j;
             }
+
+            _cache->release(page);
 
             if (!found) {
                 ++i;

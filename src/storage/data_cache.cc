@@ -2,15 +2,25 @@
 #include <storage/table.hh>
 
 namespace springtail {
-    DataCache::Page::Page(uint64_t extent_id,
+    DataCache::Page::Page(DataCache *cache,
+                          uint64_t extent_id,
                           std::shared_ptr<MutableTable> table)
-        : _id(extent_id),
+        : _cache(cache),
+          _id(extent_id),
           _table(table)
     {
         // read the initial extent
-        auto extent = _read_extent(_id);
+        ExtentPtr extent;
+        if (extent_id == constant::UNKNOWN_EXTENT) {
+            extent = std::make_shared<Extent>(_table->schema(), ExtentType(), _table->target_xid());
+        } else {
+            extent = _read_extent(_id);
+        }
         _extents.push_back(extent);
         _size += extent->byte_count();
+
+        _key_fields = _table->schema()->get_mutable_fields(_table->primary_key());
+        _fields = _table->schema()->get_mutable_fields();
     }
 
     void
@@ -19,13 +29,23 @@ namespace springtail {
         // lock the page
         boost::unique_lock lock(_mutex);
 
-        auto key = _schema->tuple_subset(value, _keys);
+        auto key = _table->schema()->tuple_subset(value, _table->primary_key());
         auto pos_i = _lower_bound(key);
 
-        // insert the new row
-        ExtentPtr e = *(pos_i.extent_i);
-        Extent::Row row = e->insert(pos_i.row_i);
-        MutableTuple(_fields, row).assign(value);
+        if (pos_i == end()) {
+            // if this value is past the end, append it instead
+            ExtentPtr e = _extents.back();
+            Extent::Row row = e->append();
+            MutableTuple(_fields, row).assign(value);
+
+            // move the iterator back to the last entry
+            --pos_i.extent_i;
+        } else {
+            // insert the new row
+            ExtentPtr e = *(pos_i.extent_i);
+            Extent::Row row = e->insert(pos_i.row_i);
+            MutableTuple(_fields, row).assign(value);
+        }
 
         // check if we need to split the extent
         _check_split(pos_i.extent_i);
@@ -52,7 +72,7 @@ namespace springtail {
         // lock the page
         boost::unique_lock lock(_mutex);
 
-        auto key = _schema->tuple_subset(value, _keys);
+        auto key = _table->schema()->tuple_subset(value, _table->primary_key());
         auto pos_i = _lower_bound(key);
 
         // check if it's an exact match
@@ -103,7 +123,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // find the entry
-        auto key = _schema->tuple_subset(value, _keys);
+        auto key = _table->schema()->tuple_subset(value, _table->primary_key());
         auto pos_i = _lower_bound(key);
 
         // make sure we got an exact match
@@ -177,10 +197,16 @@ namespace springtail {
     DataCache::Page::Iterator
     DataCache::Page::_lower_bound(TuplePtr search_key)
     {
+        // check for empty page
+        if (_extents.size() == 1 && _extents[0]->empty()) {
+            return end();
+        }
+
         // search the extent vector
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), search_key,
                                          [this](const ExtentPtr &extent, TuplePtr key) {
-                                             return MutableTuple(this->_key_fields, extent->back()).less_than(key);
+                                             MutableTuple tuple(this->_key_fields, extent->back());
+                                             return tuple.less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
@@ -190,7 +216,8 @@ namespace springtail {
         ExtentPtr e = *extent_i;
         auto row_i = std::lower_bound(e->begin(), e->end(), search_key,
                                       [this](const Extent::Row &row, TuplePtr key) {
-                                          return MutableTuple(this->_key_fields, row).less_than(key);
+                                          MutableTuple tuple(this->_key_fields, row);
+                                          return tuple.less_than(key);
                                       });
 
         return Iterator(this, extent_i, row_i);
@@ -273,16 +300,18 @@ namespace springtail {
             ++std::get<2>(page_i->second);
 
             // remove from the LRU list
-            _lru.erase(std::get<1>(page_i->second));
-            std::get<1>(page_i->second) = _lru.end();
+            if (std::get<1>(page_i->second) != _lru.end()) {
+                _lru.erase(std::get<1>(page_i->second));
+                std::get<1>(page_i->second) = _lru.end();
+            }
 
             // return the page
             return std::get<0>(page_i->second);
         }
 
         // create and populate the page
-        auto page = std::make_shared<Page>(extent_id, table);
-        _cache.insert({ { table->id(), extent_id }, { page, _lru.end(), 0 } });
+        auto page = std::make_shared<Page>(this, extent_id, table);
+        _cache.insert({ { table->id(), extent_id }, { page, _lru.end(), 1 } });
 
         // XXX how / when do we flush pages out of the cache?  Pages increase when being mutated...
 

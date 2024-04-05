@@ -282,6 +282,10 @@ namespace springtail {
             return _data_file;
         }
 
+        uint64_t target_xid() const {
+            return _target_xid;
+        }
+
         /**
          * Add a row to the table.  The data extent ID is provided externally by the write cache, or
          * if the extent_id is UNKNOWN, then it will utilize the tuple data to determine where the
@@ -330,6 +334,12 @@ namespace springtail {
 
         ExtentSchemaPtr schema() const {
             return _schema;
+        }
+
+        /** Retrieves the ordered set of columns that form the primary key. */
+        std::vector<std::string> primary_key() const
+        {
+            return _primary_key;
         }
 
         uint64_t id() const {
