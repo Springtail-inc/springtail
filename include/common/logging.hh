@@ -28,6 +28,7 @@ namespace springtail {
         LOG_STORAGE = 0x10,
         LOG_XID_MGR = 0x20,
         LOG_COMMON = 0x40,
+        LOG_PROXY = 0x80,
         LOG_ALL = 0xFFFFFFFF
     };
 

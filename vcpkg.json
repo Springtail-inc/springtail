@@ -4,6 +4,7 @@
         "libpq",
         "boost-program-options",
         "boost-container-hash",
+        "boost-asio",
         "fmt",
         "backward-cpp",
         "xxhash",
