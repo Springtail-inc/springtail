@@ -329,7 +329,7 @@ namespace springtail {
              *
              * @param search_key The key to remove.
              */
-            void remove(TuplePtr search_key);
+            void remove(TuplePtr search_key, bool is_root = false);
 
             /**
              * Flushes the contents of the page and updates the parent with the new pages.  Assumes

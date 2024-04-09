@@ -111,6 +111,7 @@ namespace springtail {
             _handle = IOMgr::get_instance()->open(table_dir / "raw", IOMgr::IO_MODE::READ, true);
 
             SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+            SchemaColumn row_c("row_id", 0, SchemaType::UINT32, false);
             auto primary_schema = _schema->create_schema(primary_key, { extent_c });
             _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
                                                      _primary_key,
@@ -122,8 +123,13 @@ namespace springtail {
             _primary_extent_id_f = primary_schema->get_field("extent_id");
 
             for (int i = 0; i < secondary_keys.size(); i++) {
-                auto &secondary_key = secondary_keys[i];
-                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c });
+                auto secondary_key = secondary_keys[i];
+                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
+
+                // add the additional secondary key columns
+                secondary_key.push_back("extent_id");
+                secondary_key.push_back("row_id");
+
                 auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
                                                      secondary_key,
                                                      secondary_schema,
@@ -238,6 +244,7 @@ namespace springtail {
               _cache(cache)
         {
             SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+            SchemaColumn row_c("row_id", 1, SchemaType::UINT32, false);
             auto primary_schema = _schema->create_schema(primary_key, { extent_c });
             _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
                                                             primary_key,
@@ -262,9 +269,12 @@ namespace springtail {
             for (int i = 0; i < secondary_keys.size(); i++) {
                 int idx = i + 1;
 
-                auto &secondary_key = secondary_keys[i];
+                auto secondary_key = secondary_keys[i];
 
-                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c });
+                auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
+                secondary_key.push_back("extent_id");
+                secondary_key.push_back("row_id");
+
                 auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
                                                             secondary_key, page_cache, secondary_schema);
 

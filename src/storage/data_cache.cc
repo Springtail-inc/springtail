@@ -100,7 +100,8 @@ namespace springtail {
 
         // make sure we got an exact match
         if (key->less_than(MutableTuple(_key_fields, *pos))) {
-            SPDLOG_ERROR("Tried to remove non-existant key");
+            SPDLOG_ERROR("Tried to remove non-existant key: {} != {}",
+                         key->to_string(), MutableTuple(_key_fields, *pos).to_string());
             return;
         }
 
@@ -353,11 +354,12 @@ namespace springtail {
                 std::get<0>(i->second)->flush();
             }
 
-            // clear the page from the LRU list?
-            _lru.erase(std::get<1>(i->second));
+            // move to the next entry, prepare to remove current entry
+            auto j = i++;
 
-            // move to the next entry
-            ++i;
+            // clear the page from the cache
+            _lru.erase(std::get<1>(j->second));
+            _cache.erase(j);
         }
     }
 

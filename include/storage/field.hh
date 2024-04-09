@@ -1180,6 +1180,66 @@ namespace springtail {
             return true;
         }
 
+        std::string to_string() const {
+            std::string value;
+            for (int i = 0; i < this->size(); i++) {
+                switch (this->field(i)->get_type()) {
+                case SchemaType::BOOLEAN:
+                    value += fmt::format("{}:", this->field(i)->get_bool(this->row()));
+                    break;
+
+                case SchemaType::UINT8:
+                    value += fmt::format("{}:", this->field(i)->get_uint8(this->row()));
+                    break;
+
+                case SchemaType::INT8:
+                    value += fmt::format("{}:", this->field(i)->get_int8(this->row()));
+                    break;
+
+                case SchemaType::UINT16:
+                    value += fmt::format("{}:", this->field(i)->get_uint16(this->row()));
+                    break;
+
+                case SchemaType::INT16:
+                    value += fmt::format("{}:", this->field(i)->get_int16(this->row()));
+                    break;
+
+                case SchemaType::UINT32:
+                    value += fmt::format("{}:", this->field(i)->get_uint32(this->row()));
+                    break;
+
+                case SchemaType::INT32:
+                    value += fmt::format("{}:", this->field(i)->get_int32(this->row()));
+                    break;
+
+                case SchemaType::UINT64:
+                    value += fmt::format("{}:", this->field(i)->get_uint64(this->row()));
+                    break;
+
+                case SchemaType::INT64:
+                    value += fmt::format("{}:", this->field(i)->get_int64(this->row()));
+                    break;
+
+                case SchemaType::FLOAT32:
+                    value += fmt::format("{}:", this->field(i)->get_float32(this->row()));
+                    break;
+
+                case SchemaType::FLOAT64:
+                    value += fmt::format("{}:", this->field(i)->get_float64(this->row()));
+                    break;
+
+                case SchemaType::TEXT:
+                    value += fmt::format("{}:", this->field(i)->get_text(this->row()));
+                    break;
+
+                default:
+                    SPDLOG_ERROR("Unsupported data type: {}", (int)this->field(i)->get_type());
+                    throw TypeError();
+                }
+            }
+            return value.substr(0, value.size() - 1);
+        }
+
     protected:
         std::any _row;
     };

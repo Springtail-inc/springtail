@@ -146,7 +146,6 @@ namespace springtail {
 
         // get the search key for this value
         TuplePtr search_key = _leaf_schema->tuple_subset(value, _sort_keys);
-        // auto &&search_key = value.get_fields(_sort_key);
 
         // traverse the tree to find the appropriate page to remove from
         NodePtr node = _find_leaf(search_key);
@@ -374,12 +373,12 @@ namespace springtail {
     }
 
     void
-    MutableBTree::Page::remove(TuplePtr search_key)
+    MutableBTree::Page::remove(TuplePtr search_key, bool is_root)
     {
         // find the position to perform the remove
         auto &&i = this->find(search_key);
         if (i == this->end()) {
-            SPDLOG_INFO("Failed to remove entry");
+            SPDLOG_INFO("Failed to remove entry: {}", search_key->to_string());
             return; // no such entry found
         }
         ExtentPtr e = *(i._extent_i);
@@ -403,6 +402,15 @@ namespace springtail {
             if (_extents.size() > 1) {
                 _extents.erase(i._extent_i);
             }
+        }
+
+        // changes the root to a branch when it has no more children
+        // XXX it would be better if the root re-positioned down a level once it had only one entry
+        //     in it
+        if (is_root && _extents.size() == 1 && _extents.front()->empty()) {
+            // reset the root to an empty leaf
+            _extents[0] = std::make_shared<Extent>(_btree->_leaf_schema, ExtentType(false, true), _btree->_xid);
+            this->type = ExtentType(false, true);
         }
 
         // XXX re-merge extents if possible?
@@ -1071,7 +1079,7 @@ namespace springtail {
         boost::unique_lock lock(parent->mutex);
 
         // remove the page from the parent
-        parent->remove(page->prev_key);
+        parent->remove(page->prev_key, (parent == _root));
 
         // remove the page from the parent's children
         parent->remove_child(page->extent_id);

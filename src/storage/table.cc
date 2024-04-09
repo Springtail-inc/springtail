@@ -164,23 +164,26 @@ namespace springtail {
                                      ExtentPtr extent)
     {
         // get the key from the last row of the extent and remove it from the primary index
-        FieldArrayPtr key_fields = _primary_index->get_key_fields();
+        FieldArrayPtr key_fields = _schema->get_fields(_primary_key);
             
         // remove the primary index entry
         auto &&pkey = std::make_shared<FieldTuple>(key_fields, extent->back());
         _primary_index->remove(pkey);
+
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "invalidate primary key: {}", pkey->to_string());
 
         // setup the value fields for the secondary indexes
         FieldArrayPtr value_fields = std::make_shared<FieldArray>(2);
         value_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
 
         // go through each row and pass the relevant key to each of the secondary indexes for removal
-        uint32_t row_id;
+        uint32_t row_id = 0;
         for (auto &&row : *extent) {
             value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            for (auto &&secondary : _secondary_indexes) {
-                key_fields = secondary->get_key_fields();
+            for (int i = 0; i < _secondary_indexes.size(); ++i) {
+                auto &secondary = _secondary_indexes[i];
+                key_fields = _schema->get_fields(_secondary_keys[i]);
 
                 auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 secondary->remove(skey);
@@ -188,6 +191,8 @@ namespace springtail {
 
             ++row_id;
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Invalidated {} secondary rows", extent->row_count());
     }
 
     void
@@ -195,26 +200,33 @@ namespace springtail {
                                    ExtentPtr extent)
     {
         // get the key from the last row of the extent and add it to the primary index
-        FieldArrayPtr key_fields = _primary_index->get_key_fields();
+        FieldArrayPtr key_fields = _schema->get_fields(_primary_key);
         FieldArrayPtr value_fields = std::make_shared<FieldArray>(1);
         (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
 
         auto &&pvalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, extent->back());
         _primary_index->insert(pvalue);
 
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "populate primary key: {}", pvalue->to_string());
+
         // go through each row and pass the relevant key to each of the secondary indexes for insertion
         value_fields->resize(2);
-        uint32_t row_id;
+        uint32_t row_id = 0;
         for (auto &&row : *extent) {
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            for (auto &&secondary : _secondary_indexes) {
-                key_fields = secondary->get_key_fields();
+            for (int i = 0; i < _secondary_indexes.size(); ++i) {
+                auto &secondary = _secondary_indexes[i];
+                key_fields = _schema->get_fields(_secondary_keys[i]);
 
                 auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                 secondary->insert(svalue);
             }
+
+            ++row_id;
         }
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", extent->row_count());
     }
 
     std::vector<uint64_t>
