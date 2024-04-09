@@ -41,6 +41,7 @@ namespace {
             std::filesystem::create_directory("/tmp/test_table/1001");
             std::filesystem::create_directory("/tmp/test_table/1002");
             std::filesystem::create_directory("/tmp/test_table/1003");
+            std::filesystem::create_directory("/tmp/test_table/1004");
         }
 
         void TearDown() override {
@@ -80,17 +81,15 @@ namespace {
          */
         class Request {
         public:
-            enum Type {
-                INSERT,
-                REMOVE
-            };
-
-        public:
             /** add row constructor */
-            Request(std::shared_ptr<MutableBTree> btree, const Type &type, TuplePtr tuple)
-                : _btree(btree),
-                  _type(type),
-                  _tuple(tuple)
+            Request(MutableTablePtr table,
+                    uint64_t xid,
+                    uint64_t extent_id,
+                    std::vector<TuplePtr> &&tuples)
+                : _table(table),
+                  _xid(xid),
+                  _extent_id(extent_id),
+                  _tuples(tuples)
             { }
 
             /**
@@ -98,20 +97,16 @@ namespace {
              *        Main entry from worker thread
              */
             void operator()() {
-                switch (_type) {
-                case(Type::INSERT):
-                    _btree->insert(_tuple);
-                    break;
-                case (Type::REMOVE):
-                    _btree->remove(_tuple);
-                    break;
+                for (auto &tuple : _tuples) {
+                    _table->update(tuple, _xid, _extent_id);
                 }
             }
 
         private:
-            std::shared_ptr<MutableBTree> _btree;
-            Type _type;
-            TuplePtr _tuple;
+            MutableTablePtr _table;
+            uint64_t _xid;
+            uint64_t _extent_id;
+            std::vector<TuplePtr> _tuples;
         };
         typedef std::shared_ptr<Request> RequestPtr;
     };
@@ -383,8 +378,6 @@ namespace {
         // finalize the table
         roots = mtable->finalize();
         access_xid = target_xid;
-
-        SPDLOG_INFO("Roots: {} {}", roots[0], roots[1]);
 
         // create an access table for lookup
         auto table = std::make_shared<Table>(1003,
@@ -740,8 +733,6 @@ namespace {
         roots = mtable->finalize();
         access_xid = target_xid;
 
-        SPDLOG_INFO("Roots 2: {} {}", roots[0], roots[1]);
-
         // create an access table
         table = std::make_shared<Table>(1003,
                                         access_xid,
@@ -805,24 +796,140 @@ namespace {
 
 
     TEST_F(Table_Test, MultiThreadMutations) {
-        // create a mutable table
+        uint64_t target_xid = 1;
 
-        // insert a large number of rows
+        // create a mutable table
+        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = std::make_shared<MutableTable>(1004,
+                                                     target_xid,
+                                                     roots,
+                                                     "/tmp/test_table/1004",
+                                                     _primary_keys,
+                                                     _secondary_keys,
+                                                     _schema,
+                                                     _data_cache,
+                                                     _write_cache,
+                                                     _read_cache);
+
+        // pull data to insert
+        FieldArrayPtr fields = _schema->get_fields();
+
+        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < fields->size(); i++) {
+            auto &&field = fields->at(i);
+            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+        }
+
+        // insert a number of rows
+        csv::CSVReader reader("test_btree_simple.csv");
+        for (auto &&r : reader) {
+            // insert data to the tree
+            mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), target_xid, constant::UNKNOWN_EXTENT);
+        }
 
         // finalize the table
+        roots = mtable->finalize();
+        uint64_t access_xid = target_xid;
 
         // create an access table and identify extents to be mutated
+        auto table = std::make_shared<Table>(1004,
+                                             access_xid,
+                                             "/tmp/test_table/1004",
+                                             _primary_keys,
+                                             _secondary_keys,
+                                             roots,
+                                             _schema,
+                                             _read_cache);
+
+        std::map<uint64_t, std::vector<TuplePtr>> tuple_map;
+
+        csv::CSVReader reader2("test_btree_simple.csv");
+        int count = 0;
+        for (auto &&r : reader2) {
+            auto csvtuple = std::make_shared<FieldTuple>(csv_fields, r);
+            auto search_key = _schema->tuple_subset(csvtuple, _primary_keys);
+
+            uint64_t extent_id = table->primary_lookup(search_key);
+
+            auto value = _create_value(count++,
+                                       search_key->field(0)->get_text(search_key->row()),
+                                       20000);
+
+            tuple_map[extent_id].push_back(value);
+        }
 
         // create a new mutable table with a later XID target
+        ++target_xid;
+        mtable = std::make_shared<MutableTable>(1004,
+                                                target_xid,
+                                                roots,
+                                                "/tmp/test_table/1004",
+                                                _primary_keys,
+                                                _secondary_keys,
+                                                _schema,
+                                                _data_cache,
+                                                _write_cache,
+                                                _read_cache);
 
-        // mutate the extents in separate concurrent threads
+        // mutate the individual extents in separate concurrent threads
+        PhasedThreadTest<Request> tester;
 
-        // finalize the table
+        for (auto &entry : tuple_map) {
+            auto request = std::make_shared<Request>(mtable, target_xid, entry.first, std::move(entry.second));
+            tester.add_request(request);
+        }
 
-        // create an access table
+        // finalize and verify the table
+        tester.set_verify([this, mtable, target_xid]() {
+            // create an access table
+            auto roots = mtable->finalize();
 
-        // ensure that it has all of the expected rows through both the primary and secondary index
-        // and that everything else works as expected (find, lower_bound, etc)
+            auto table = std::make_shared<Table>(1004,
+                                                 target_xid,
+                                                 "/tmp/test_table/1004",
+                                                 _primary_keys,
+                                                 _secondary_keys,
+                                                 roots,
+                                                 _schema,
+                                                 _read_cache);
+
+            // ensure that it has all of the expected rows through both the primary and secondary index
+            // and that everything else works as expected (find, lower_bound, etc)
+            FieldArrayPtr fields = _schema->get_fields();
+
+            int count = 0;
+            std::string prev = "";
+            for (auto &row : *table) {
+                if (prev != "") {
+                    ASSERT_GT(fields->at(1)->get_text(row), prev);
+                }
+                prev = fields->at(1)->get_text(row);
+
+                uint64_t offset = fields->at(2)->get_uint64(row);
+                ASSERT_EQ(offset, 20000);
+
+                ++count;
+            }
+            ASSERT_EQ(count, 5000);
+
+            // verify the secondary index
+            auto secondary = table->secondary(0);
+
+            count = 0;
+            uint64_t table_id = 0;
+            auto table_id_f = secondary->get_schema()->get_field("table_id");
+            for (auto row_i = secondary->begin(target_xid); row_i != secondary->end(); ++row_i) {
+                auto current = table_id_f->get_uint64(*row_i);
+                ASSERT_LE(table_id, current);
+                table_id = current;
+                ++count;
+            }
+            ASSERT_EQ(count, 5000);
+
+        });
+
+        // run the phase using 4 threads (just one phase here)
+        tester.run(4);
     }
 
 }
