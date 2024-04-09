@@ -12,10 +12,9 @@
  *-------------------------------------------------------------------------
  */
 
-#include "system.h"
-#include "postgres_compat.h"
-
-#include "base64.h"
+#include "proxy/auth/system.h"
+#include "proxy/auth/postgres_compat.h"
+#include "proxy/auth/base64.h"
 
 /*
  * BASE64

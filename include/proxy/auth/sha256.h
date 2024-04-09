@@ -25,8 +25,6 @@
 #ifndef _USUAL_CRYPTO_SHA256_H_
 #define _USUAL_CRYPTO_SHA256_H_
 
-//#include <usual/base.h>
-
 #include <stdlib.h>
 #include <arpa/inet.h>
 

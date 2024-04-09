@@ -13,14 +13,10 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "system.h"
-#include "postgres_compat.h"
-
-//#include "usual/crypto/sha256.h"
-//#include "usual/endian.h"
-
-#include "base64.h"
-#include "scram-common.h"
+#include "proxy/auth/system.h"
+#include "proxy/auth/postgres_compat.h"
+#include "proxy/auth/base64.h"
+#include "proxy/auth/scram-common.h"
 
 #define HMAC_IPAD 0x36
 #define HMAC_OPAD 0x5C

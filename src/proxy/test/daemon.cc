@@ -10,7 +10,7 @@ int main(int argc, char* argv[])
 {
     springtail_init();
 
-    ProxyServer server("127.0.0.1", "8888", 4);
+    ProxyServer server("127.0.0.1", 8888);
 
     server.run();
 }

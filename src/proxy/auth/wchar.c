@@ -10,10 +10,9 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "system.h"
-#include "postgres_compat.h"
-
-#include "pg_wchar.h"
+#include "proxy/auth/system.h"
+#include "proxy/auth/postgres_compat.h"
+#include "proxy/auth/pg_wchar.h"
 
 /*
  * Map a Unicode code point to UTF-8.  utf8string must have 4 bytes of

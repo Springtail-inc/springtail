@@ -23,7 +23,7 @@
 #define _SCRAM_H_
 
 #include <stdbool.h>
-#include "sha256.h"
+#include "proxy/auth/sha256.h"
 
 typedef struct ScramState {
 		char *client_nonce;

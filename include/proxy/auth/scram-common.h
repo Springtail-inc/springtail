@@ -13,9 +13,8 @@
 #ifndef SCRAM_COMMON_H
 #define SCRAM_COMMON_H
 
-#include "postgres_compat.h"
-//#include "usual/crypto/sha256.h"
-#include "sha256.h"
+#include "proxy/auth/postgres_compat.h"
+#include "proxy/auth/sha256.h"
 
 /* Name of SCRAM mechanisms per IANA */
 #define SCRAM_SHA_256_NAME "SCRAM-SHA-256"

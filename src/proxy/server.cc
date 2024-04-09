@@ -1,98 +1,169 @@
-#include <signal.h>
+#include <iostream>
 #include <thread>
-#include <utility>
-#include <vector>
 
-#include <boost/asio.hpp>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include <common/logging.hh>
 
 #include <proxy/server.hh>
 #include <proxy/client_session.hh>
 
-/** NOTE: heavily borrowed from: https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio/example/cpp11/http/server3/server.cpp */
+#ifndef MSG_MORE
+#define MSG_MORE 0 // not defined for OSX
+#endif
 
 namespace springtail {
-
-    ProxyServer::ProxyServer(const std::string& address,
-                             const std::string& port,
-                             int thread_pool_size)
-      : _thread_pool_size(thread_pool_size),
-        _signals(_io_context),
-        _acceptor(_io_context),
-        _request_handler()
+    ProxyServer::ProxyServer(const std::string &address,
+                             int port)
+      : _request_handler(std::make_shared<ProxyRequestHandler>())
     {
-        // Register to handle the signals that indicate when the server should exit.
-        // It is safe to register for the same signal multiple times in a program,
-        // provided all registration for the specified signal is made through Asio.
-        _signals.add(SIGINT);
-        _signals.add(SIGTERM);
-        #if defined(SIGQUIT)
-        _signals.add(SIGQUIT);
-        #endif // defined(SIGQUIT)
+        _socket = socket(AF_INET, SOCK_STREAM, 0);
 
-        do_await_stop();
+        struct sockaddr_in serv_addr;
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_addr.s_addr = inet_addr(address.c_str());
+        serv_addr.sin_port = htons(port);
 
-        SPDLOG_DEBUG("Starting proxy server: {}:{}", address, port);
+        int flags = 1;
+        if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
+            std::cerr << "Error setting socket options: SO_REUSEADDR" << std::endl;
+            close(_socket);
+            exit(1);
+        }
 
-        // Open the acceptor with the option to reuse the address (i.e. SO_REUSEADDR).
-        boost::asio::ip::tcp::resolver resolver(_io_context);
-        boost::asio::ip::tcp::endpoint endpoint = *resolver.resolve(address, port).begin();
+        if (bind(_socket, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+            std::cerr << "Error binding to socket" << std::endl;
+            close(_socket);
+            exit(1);
+        }
 
-        _acceptor.open(endpoint.protocol());
-        _acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-        _acceptor.bind(endpoint);
-        _acceptor.listen();
+        if (listen(_socket, 16) < 0) {
+            std::cerr << "Error listening on socket" << std::endl;
+            close(_socket);
+            exit(1);
+        }
 
-        do_accept();
+        SPDLOG_INFO("Proxy server listening on {}:{}", address, port);
     }
 
     void
     ProxyServer::run()
     {
-        _thread_pool_size = 1;
-        // Create a pool of threads to run the io_context.
-        std::vector<std::thread> threads;
-        for (int i = 0; i < _thread_pool_size; ++i) {
-            threads.emplace_back([this]{ _io_context.run(); });
-        }
+        while (true) {
+            struct sockaddr_in client_address;
+            socklen_t client_address_size = sizeof(client_address);
 
-        // Wait for all threads in the pool to exit.
-        for (int i = 0; i < threads.size(); ++i) {
-            threads[i].join();
-        }
-    }
-
-    void
-    ProxyServer::do_accept()
-    {
-        SPDLOG_DEBUG("Do accept");
-        // The newly accepted socket is put into its own strand to ensure that all
-        // completion handlers associated with the connection do not run concurrently.
-        _acceptor.async_accept(boost::asio::make_strand(_io_context),
-            [this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
-            // Check whether the server was stopped by a signal before this
-            // completion handler had a chance to run.
-            SPDLOG_DEBUG("Got a connection");
-
-            if (!_acceptor.is_open()) {
+            // Accept a new connection
+            int client_socket = accept(_socket, (struct sockaddr*)&client_address, &client_address_size);
+            if (client_socket == -1) {
+                std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
                 return;
             }
 
-            if (!ec) {
-                std::make_shared<ClientSession>(std::move(socket), _io_context, _request_handler)->start();
+            int flags = 1;
+            if (setsockopt(client_socket, IPPROTO_TCP, TCP_NODELAY, &flags, sizeof(int))) {
+                std::cerr << "Error setting socket options: TCP_NODELAY" << std::endl;
+                close(client_socket);
+                continue;
             }
 
-            do_accept();
-        });
+            // Get client IP address
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
+
+            std::cout << "Client connected from: " << client_ip << std::endl;
+
+            ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
+
+            std::thread client_thread(&ProxyServer::_handle_connection, this, connection);
+            client_thread.detach();
+        }
     }
 
     void
-    ProxyServer::do_await_stop()
+    ProxyServer::_handle_connection(ProxyConnectionPtr connection)
     {
-        _signals.async_wait(
-            [this](boost::system::error_code /*ec*/, int /*signo*/) {
-                _io_context.stop();
-        });
+        // thread entry for new connection
+        ClientSessionPtr session = std::make_shared<ClientSession>(connection, _request_handler);
+        session->start();
     }
+
+    ssize_t
+    ProxyConnection::write(const char *buffer, int size, bool more)
+    {
+        ssize_t bytes_written = 0;
+        do {
+            ssize_t n = send(_socket, buffer, size, more ? MSG_MORE : 0);
+
+            if (n > 0) {
+                bytes_written += n;
+                buffer += n;
+                size -= n;
+            } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            } else {
+                SPDLOG_ERROR("Error writing to socket: {}", strerror(errno));
+                close();
+                return -1;
+            }
+        } while (size > 0);
+
+        return bytes_written;
+    }
+
+    ssize_t
+    ProxyConnection::read(char *buffer, int max_size, int at_least)
+    {
+        ssize_t bytes_read = 0;
+        do {
+            ssize_t n = recv(_socket, buffer, max_size, 0);
+            if (n > 0) {
+                bytes_read += n;
+                buffer += n;
+                max_size -= n;
+                at_least -= n;
+            } else if (n == 0) {
+                // Connection closed by the client
+                SPDLOG_DEBUG("Connection closed by client");
+                close();
+                return 0;
+            } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            } else {
+                // Error occurred
+                SPDLOG_ERROR("Error reading from socket: {}", strerror(errno));
+                close();
+                return -1;
+            }
+        } while (at_least > 0);
+
+        return bytes_read;
+    }
+
+    ssize_t
+    ProxyConnection::read(ProxyBuffer &buffer, int at_least)
+    {
+        buffer.reset();
+        ssize_t n = read(buffer.data(), buffer.capacity(), at_least);
+        if (n > 0) {
+            buffer.set_read(n);
+        }
+        return n;
+    }
+
+    ssize_t
+    ProxyConnection::read_fully(ProxyBuffer &buffer, int size)
+    {
+        ssize_t n = read(buffer.next_data(), size, size);
+        if (n > 0) {
+            buffer.set_read(n);
+        }
+        return n;
+    }
+
 }

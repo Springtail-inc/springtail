@@ -15,9 +15,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#include "system.h"
-#include "sha256.h"
-#include "bits.h"
+#include "proxy/auth/system.h"
+#include "proxy/auth/sha256.h"
+#include "proxy/auth/bits.h"
 
 //#include <usual/crypto/digest.h>
 
@@ -194,33 +194,3 @@ void sha224_final(struct sha256_ctx *ctx, uint8_t *dst)
 	memset(buf, 0, sizeof(buf));
 }
 
-/*
- * DigestInfo
- */
-#if 0
-const struct DigestInfo *digest_SHA224(void)
-{
-	static const struct DigestInfo info = {
-		(DigestInitFunc *)sha224_reset,
-		(DigestUpdateFunc *)sha224_update,
-		(DigestFinalFunc *)sha224_final,
-		sizeof(struct sha256_ctx),
-		SHA224_DIGEST_LENGTH,
-		SHA224_BLOCK_SIZE
-	};
-	return &info;
-}
-
-const struct DigestInfo *digest_SHA256(void)
-{
-	static const struct DigestInfo info = {
-		(DigestInitFunc *)sha256_reset,
-		(DigestUpdateFunc *)sha256_update,
-		(DigestFinalFunc *)sha256_final,
-		sizeof(struct sha256_ctx),
-		SHA256_DIGEST_LENGTH,
-		SHA256_BLOCK_SIZE
-	};
-	return &info;
-}
-#endif

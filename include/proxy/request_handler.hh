@@ -1,6 +1,5 @@
 #pragma once
-
-#include <boost/asio.hpp>
+#include <memory>
 
 namespace springtail {
     class ProxyRequestHandler {
@@ -9,4 +8,5 @@ namespace springtail {
 
         void process(const char *buffer, std::size_t size);
     };
+    using ProxyRequestHandlerPtr = std::shared_ptr<ProxyRequestHandler>;
 }

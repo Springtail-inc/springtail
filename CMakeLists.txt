@@ -66,7 +66,7 @@ else()
 endif()
 
 ## include external projects
-#include(ExternalProjects)
+include(ExternalProjects)
 
 ## source modules
 add_subdirectory(src/common)

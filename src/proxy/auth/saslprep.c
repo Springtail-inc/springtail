@@ -19,14 +19,12 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "system.h"
-#include "postgres_compat.h"
+#include "proxy/auth/system.h"
+#include "proxy/auth/postgres_compat.h"
 
-#include "saslprep.h"
-#include "unicode_norm.h"
-#include "pg_wchar.h"
-
-//typedef unsigned int pg_wchar;
+#include "proxy/auth/saslprep.h"
+#include "proxy/auth/unicode_norm.h"
+#include "proxy/auth/pg_wchar.h"
 
 /*
  * Limit on how large password's we will try to process.  A password

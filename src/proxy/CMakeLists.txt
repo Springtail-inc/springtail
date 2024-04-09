@@ -8,7 +8,7 @@ set(PROXY_SOURCES
     server.cc
     client_session.cc
     request_handler.cc
-#    parser.cc
+    parser.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
@@ -19,20 +19,21 @@ target_include_directories(springtail_proxy
 target_link_libraries(springtail_proxy
     PUBLIC springtail_pg springtail_common
     PRIVATE ${Boost_LIBRARIES}
-#    PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
+    PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt
+    PRIVATE auth
 )
 
 # test parser executable
-#add_executable(parser test/parser.cc)
-#target_include_directories(parser
-#    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
-#    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
-#    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
-#    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
-#)
-#target_link_libraries(parser PRIVATE pg_query)
+add_executable(parser test/parser.cc)
+target_include_directories(parser
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+)
+target_link_libraries(parser PRIVATE pg_query)
 
 
 # test server daemon executable
@@ -53,6 +54,7 @@ target_include_directories(client
 )
 target_link_libraries(client
     PRIVATE springtail_proxy
-    PRIVATE fmt::fmt
 )
+
+add_subdirectory(auth)
 

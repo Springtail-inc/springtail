@@ -14,23 +14,14 @@
 namespace springtail {
     static int id=0;
 
-    ClientSession::ClientSession(boost::asio::ip::tcp::socket socket,
-                                 boost::asio::io_context &context,
-                                 ProxyRequestHandler &handler)
+    ClientSession::ClientSession(ProxyConnectionPtr connection,
+                                 ProxyRequestHandlerPtr handler)
 
-        : _socket(std::move(socket)),
+        : _connection(connection),
           _request_handler(handler),
-          _strand(context.get_executor()),
           _id(id++)
     {
-        SPDLOG_DEBUG("Client connected: {}", _get_remote_endpoint());
-
-        boost::system::error_code ec;
-        _socket.set_option(boost::asio::ip::tcp::no_delay(true), ec);
-        if (ec) {
-            SPDLOG_WARN("Error setting no delay on socket: {} {}\n",
-                        ec.value(), ec.message());
-        }
+        SPDLOG_DEBUG("Client connected: {}", connection->get_endpoint());
     }
 
     ClientSession::~ClientSession()
@@ -41,150 +32,142 @@ namespace springtail {
     void
     ClientSession::start()
     {
-        // entry point for connection
-        boost::asio::co_spawn(_strand, _startup(shared_from_this()), boost::asio::detached);
-        // _do_read();
+        // send startup message, do SSL and authentication
+        _do_startup();
+
+        // ready for query -- handle requests
+        _handle_requests();
     }
 
-    boost::asio::awaitable<void>
-    ClientSession::_startup(std::shared_ptr<ClientSession> self)
+    void
+    ClientSession::_do_startup()
     {
-        _read_buffer.reset();
-        std::size_t n = co_await boost::asio::async_read(_socket, boost::asio::buffer(_read_buffer.data(), _read_buffer.capacity()),
-                                                         boost::asio::transfer_at_least(8),
-                                                         boost::asio::use_awaitable);
-
+        ssize_t n = _connection->read(_read_buffer, 8);
         int32_t msg_length = _read_buffer.get32();
         int32_t code = _read_buffer.get32();
 
         assert(n == msg_length);
 
+        SPDLOG_DEBUG("Startup message: msg_length={}, code={}", msg_length, code);
+
         // check for SSL negotiation
-        if (code == 80877103) {
+        if (code == SSL_NEG) {
+            SPDLOG_DEBUG("SSL negotiation requested");
             _write_buffer.reset();
             _write_buffer.put('N');
 
-            co_await boost::asio::async_write(_socket,
-                                              boost::asio::buffer(_write_buffer.data(), 1),
-                                              boost::asio::use_awaitable);
+            _connection->write(_write_buffer.data(), 1);
 
-            _read_buffer.reset();
-            n = co_await boost::asio::async_read(_socket, boost::asio::buffer(_read_buffer.data(), _read_buffer.capacity()),
-                                                 boost::asio::transfer_at_least(8),
-                                                 boost::asio::use_awaitable);
-
+            n = _connection->read(_read_buffer, 8);
             msg_length = _read_buffer.get32();
             code = _read_buffer.get32();
 
             assert(n == msg_length);
         }
 
-        if (code == 196608) {
-            // proto version 3.0
-            _state = AUTH;
+        SPDLOG_DEBUG("Startup message: msg_length={}, code={}", msg_length, code);
+
+        // proto version 3.0
+        if (code == PROTO_V3) {
+            SPDLOG_DEBUG("Proto version 3.0 requested");
+
+            // read parameter strings
+            std::string key;
+            std::string value;
+            // seems to be a trailing null byte on the end
+            while (_read_buffer.remaining() > 1) {
+                key = _read_buffer.getString();
+                value = _read_buffer.getString();
+
+                SPDLOG_DEBUG("Parameter: {}={}", key, value);
+            }
+
             _write_buffer.reset();
 
+            // authentication request -- auth ok, no auth needed
             _write_buffer.put('R');
+            _write_buffer.put32(8);
             _write_buffer.put32(0);
 
+            // parameter status
+            _encode_parameter_status("server_encoding", "UTF8");
+            _encode_parameter_status("client_encoding", "UTF8");
+            _encode_parameter_status("server_version", SERVER_VERSION);
+
+            // backend key data -- for cancellation
             _write_buffer.put('K');
             _write_buffer.put32(12);
             _write_buffer.put32(_pid);
             _write_buffer.put32(_key);
 
+            // ready for query
+            _write_buffer.put('Z');
+            _write_buffer.put32(5);
+            _write_buffer.put('I');
 
-            co_await boost::asio::async_write(_socket,
-                                              boost::asio::buffer(_write_buffer.data(), _write_buffer.size()),
-                                              boost::asio::use_awaitable);
+            n = _connection->write(_write_buffer.data(), _write_buffer.size());
+            assert(n == _write_buffer.size());
+        } else {
+            SPDLOG_ERROR("Unsupported protocol version: {}", code);
+            _connection->close();
+            throw std::runtime_error("Unsupported protocol version");
         }
-
-        co_await _main_loop(self);
     }
 
-
-    boost::asio::awaitable<void>
-    ClientSession::_main_loop(std::shared_ptr<ClientSession> self)
+    void
+    ClientSession::_encode_parameter_status(const std::string &key, const std::string &value)
     {
-        while (_socket.is_open()) {
-            try {
-                SPDLOG_DEBUG("Mainloop doing async read: id={}", _id);
+        _write_buffer.put('S');
+        _write_buffer.put32(key.size() + value.size() + 6); // 4B len + 2B nulls
+        _write_buffer.putString(key);
+        _write_buffer.putString(value);
+    }
 
-                // read some data and let the _handle_read() handler handle it
-                std::size_t n = co_await _socket.async_read_some(boost::asio::buffer(_read_buffer.data(), _read_buffer.capacity()),
-                                                                 boost::asio::use_awaitable);
+    void
+    ClientSession::_handle_requests()
+    {
+        while (!_connection->closed()) {
+            ssize_t n = _connection->read(_read_buffer, 5);
+            if (n <= 0) {
+                break;
+            }
 
-                SPDLOG_DEBUG("Read data to process: id={}, bytes={}", _id, n);
+            // op code
+            char code = _read_buffer.get();
+            // message length including length itself but not code
+            // so really msg_length -= 4
+            int32_t msg_length = _read_buffer.get32();
 
-                _request_handler.process(_read_buffer.data(), n);
+            SPDLOG_DEBUG("Request: msg_length={}/{}, code={}", n, msg_length, code);
 
-                SPDLOG_DEBUG("Writing response to client: id={}", _id);
+            // if we didn't read the whole message, read the rest
+            if (msg_length + 1 < n) {
+                SPDLOG_DEBUG("Need to read more data for message");
+                _connection->read_fully(_read_buffer, msg_length + 1);
+            }
 
-                n = co_await boost::asio::async_write(_socket, boost::asio::buffer(_read_buffer.data(), n),
-                                                      boost::asio::use_awaitable);
+            // handle request
+            switch (code) {
+            case 'Q': {
+                // query
+                std::string query = _read_buffer.getString();
+                SPDLOG_DEBUG("Query: {}", query);
 
-                SPDLOG_DEBUG("Wrote response to client: id={}, bytes={}", _id, n);
-
-            } catch (boost::system::system_error const &se) {
-                if (se.code() == boost::asio::error::operation_aborted ||
-                    se.code() == boost::asio::error::eof) {
-                    SPDLOG_DEBUG("Client closed connection");
-                    break;
-                } else {
-                    SPDLOG_ERROR("Caught exception in connection main loop: {}", se.what());
-                    throw se;
-                }
+                //_request_handler->handle_query(shared_from_this(), query);
+                break;
+            }
+            case 'X': {
+                // terminate
+                SPDLOG_DEBUG("Terminate request");
+                _connection->close();
+                return;
+            }
+            default:
+                SPDLOG_ERROR("Unsupported request code: {}", code);
+                _connection->close();
+                return;
             }
         }
     }
 
-    void
-    ClientSession::_do_read()
-    {
-        // read some data and let the _handle_read() handler handle it
-        _socket.async_read_some(boost::asio::buffer(_read_buffer.data(), _read_buffer.capacity()),
-            boost::bind(&ClientSession::_handle_read, shared_from_this(),
-            boost::asio::placeholders::error,
-            boost::asio::placeholders::bytes_transferred));
-
-        SPDLOG_DEBUG("After do_read cowait");
-    }
-
-
-    void
-    ClientSession::_handle_read(const boost::system::error_code &error,
-                                std::size_t length)
-    {
-        if (error) {
-            std::string remote_addr = _get_remote_endpoint();
-
-            if (error == boost::asio::error::misc_errors::eof){
-                SPDLOG_ERROR("Client disconnected: addr={}\n", remote_addr);
-            } else {
-                SPDLOG_ERROR("Client error: addr={}, error={}, msg={}\n",
-                             remote_addr, error.value(), error.message());
-            }
-            return;
-        }
-
-        // handle the read
-        _request_handler.process(_read_buffer.data(), length);
-
-        //_do_read();
-    }
-
-
-
-    void
-    ClientSession::async_write()
-    {
-
-    }
-
-    std::string
-    ClientSession::_get_remote_endpoint()
-    {
-        std::stringstream ss;
-        ss << _socket.remote_endpoint();
-        return ss.str();
-    }
 }
