@@ -828,6 +828,7 @@ namespace springtail {
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["position"].get_to(column.position);
+            json["is_generated"].get_to(column.is_generated);
 
             if (!json["pk_pos"].is_null()) {
                 json["pk_pos"].get_to(column.pk_position);
@@ -866,7 +867,6 @@ namespace springtail {
         table_msg.lsn = message.lsn;
         json["schema"].get_to(table_msg.schema);
         json["oid"].get_to(table_msg.oid);
-        json["is_generated"].get_to(table_msg.is_generated);
 
         // identity in form: schema.table; parse out table; no object_name in trigger
         std::string identity;
