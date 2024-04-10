@@ -100,9 +100,7 @@ namespace springtail {
         /** Set shutdown flag */
         void shutdown() {
             _shutdown = true;
-            _writer_thread.join();
-            _reader_thread.join();
-            _xact_thread.join();
+            join();
         }
 
         /** for testing: get list of redis xactions from redis queue */

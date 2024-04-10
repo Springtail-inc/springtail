@@ -90,7 +90,7 @@ namespace springtail
         // end streaming if started, this will close streaming connection
         try {
             end_streaming();
-        } catch (...) {}
+        } catch (...) {} // we are ending streaming, catch all exceptions
 
         // free the libpq standard connection if open
         if (_connection.get() != nullptr) {
