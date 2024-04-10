@@ -25,7 +25,8 @@ int main(int argc, char* argv[])
     std::string pub_name;
     std::string slot_name;
     std::filesystem::path outfile;
-    LSN_t lsn = INVALID_LSN, restart_lsn;
+    LSN_t lsn = INVALID_LSN;
+    LSN_t restart_lsn;
 
     bool create_slot = false;
     int port;

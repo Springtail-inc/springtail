@@ -28,6 +28,7 @@ namespace {
      */
     class TestLogMgr : public PgLogMgr {
     public:
+        using PgLogMgr::PgLogMgr;
         TestLogMgr(const std::filesystem::path &repl_log_path,
                    const std::filesystem::path &xact_log_path)
             : PgLogMgr(repl_log_path, xact_log_path)

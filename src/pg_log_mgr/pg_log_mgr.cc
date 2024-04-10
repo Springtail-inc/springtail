@@ -1,3 +1,4 @@
+#include <thread>
 #include <sys/time.h>
 
 #include <fmt/core.h>
@@ -51,7 +52,7 @@ namespace springtail {
         // these are transactions with springtail XIDs that are > than last committed XID
         // XXX clear out Redis first???  Assume we start pipeline from scratch, GC is stopped
         std::vector<PgTransactionPtr> xact_list = xact_reader.get_xact_list();
-        for (auto &xact : xact_list) {
+        for (const auto &xact : xact_list) {
             _push_xact_to_redis(xact);
         }
 
@@ -208,7 +209,8 @@ namespace springtail {
         }
 
         // first allocate an xid for this xact
-        uint64_t xid = _next_xid++;
+        uint64_t xid = _next_xid;
+        _next_xid++;
 
         // next log the data
         assert (xact->type == PgTransaction::TYPE_COMMIT);

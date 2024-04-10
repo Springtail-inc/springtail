@@ -88,7 +88,9 @@ namespace springtail
     PgReplConnection::close()
     {
         // end streaming if started, this will close streaming connection
-        end_streaming();
+        try {
+            end_streaming();
+        } catch (...) {}
 
         // free the libpq standard connection if open
         if (_connection.get() != nullptr) {
@@ -1035,7 +1037,7 @@ namespace springtail
      * @param lsn LSN indicating safe point to truncate log up to
      */
     void
-    PgReplConnection::set_last_flushed_LSN(LSN_t lsn) noexcept
+    PgReplConnection::set_last_flushed_LSN(LSN_t lsn)
     {
         if (lsn == INVALID_LSN) {
             return;

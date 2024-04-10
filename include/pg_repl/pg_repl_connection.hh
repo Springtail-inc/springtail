@@ -174,7 +174,7 @@ namespace springtail
     public:
 
         /** Stub for tests */
-        PgReplConnection() {}
+        PgReplConnection() = default;
 
         /**
          * @brief Constructor -- does not connect to db
@@ -278,7 +278,7 @@ namespace springtail
          *
          * @param lsn LSN to set as latest flushed
          */
-        void set_last_flushed_LSN(LSN_t lsn) noexcept;
+        void set_last_flushed_LSN(LSN_t lsn);
 
         /**
          * @brief Get server version

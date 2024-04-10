@@ -55,7 +55,7 @@ namespace springtail {
          * @brief Get the max springtail xid in log file
          * @return uint64_t max springtail xid
          */
-        uint64_t get_max_sp_xid() {
+        uint64_t get_max_sp_xid() const {
             return _max_sp_xid;
         }
 
