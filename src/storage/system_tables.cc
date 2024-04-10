@@ -21,12 +21,25 @@ namespace springtail::sys_tbl {
         { "extent_id", 4, SchemaType::UINT64, false }
     };
 
+    const std::vector<std::string> TableNames::Primary::KEY = {
+        "namespace",
+        "name",
+        "xid",
+        "lsn"
+    };
+
     const std::vector<SchemaColumn> TableNames::Secondary::SCHEMA = {
         { "table_id", 0, SchemaType::UINT64, false },
         { "xid", 1, SchemaType::UINT64, false },
         { "lsn", 2, SchemaType::UINT64, false },
         { "extent_id", 3, SchemaType::UINT64, false },
         { "row_id", 4, SchemaType::UINT32, false }
+    };
+
+    const std::vector<std::string> TableNames::Secondary::KEY = {
+        "table_id",
+        "xid",
+        "lsn"
     };
 
     // TableRoots
@@ -45,6 +58,12 @@ namespace springtail::sys_tbl {
         { "extent_id", 3, SchemaType::UINT64, false }
     };
 
+    const std::vector<std::string> TableRoots::Primary::KEY = {
+        "table_id",
+        "index_id",
+        "xid"
+    };
+
     // Indexes
 
     const std::vector<SchemaColumn> Indexes::Data::SCHEMA = {
@@ -61,6 +80,13 @@ namespace springtail::sys_tbl {
         { "xid", 2, SchemaType::UINT64, false },
         { "position", 3, SchemaType::UINT32, false },
         { "extent_id", 4, SchemaType::UINT64, false }
+    };
+
+    const std::vector<std::string> Indexes::Primary::KEY = {
+        "table_id",
+        "index_id",
+        "xid",
+        "position"
     };
 
     // Schemas
@@ -84,5 +110,12 @@ namespace springtail::sys_tbl {
         { "xid", 2, SchemaType::UINT64, false },
         { "lsn", 3, SchemaType::UINT64, false },
         { "extent_id", 4, SchemaType::UINT64, false }
+    };
+
+    const std::vector<std::string> Schemas::Primary::KEY = {
+        "table_id",
+        "position",
+        "xid",
+        "lsn"
     };
 }

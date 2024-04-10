@@ -2,6 +2,90 @@
 
 namespace springtail {
 
+    namespace {
+        const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
+            { 0, 0, "root", 0, SchemaType::UINT64, true, false }
+        };
+    }
+
+    Table::Table(uint64_t table_id,
+                 uint64_t xid,
+                 const std::filesystem::path &table_dir,
+                 const std::vector<std::string> &primary_key,
+                 const std::vector<std::vector<std::string>> &secondary_keys,
+                 std::vector<uint64_t> root_offsets,
+                 ExtentSchemaPtr schema,
+                 ExtentCachePtr cache)
+        : _id(table_id),
+          _xid(xid),
+          _table_dir(table_dir),
+          _primary_key(primary_key),
+          _secondary_keys(secondary_keys),
+          _schema(schema),
+          _cache(cache)
+    {
+        // make sure that the table directory exists
+        std::filesystem::create_directory(_table_dir);
+
+        // store the roots schema / field
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
+        _roots_root_f = _roots_schema->get_field("root");
+
+        // handle if the roots were not provided
+        if (root_offsets.empty()) {
+            if (std::filesystem::exists(table_dir / "roots")) {
+                // read the roots from the look-aside file
+                auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
+                auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
+                auto response = root_handle->read(0);
+                auto extent = std::make_shared<Extent>(_roots_schema, response->data);
+                for (auto &row : *extent) {
+                    root_offsets.push_back(_roots_root_f->get_uint64(row));
+                }
+
+                // XXX is this the right thing to do?  forces the XID to the known XID of the roots
+                xid = extent->header().xid;
+            } else {
+                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
+                root_offsets.push_back(constant::UNKNOWN_EXTENT);
+                for (auto secondary : secondary_keys) {
+                    root_offsets.push_back(constant::UNKNOWN_EXTENT);
+                }
+            }
+        }
+
+        _handle = IOMgr::get_instance()->open(table_dir / "raw", IOMgr::IO_MODE::READ, true);
+
+        SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+        SchemaColumn row_c("row_id", 0, SchemaType::UINT32, false);
+        auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+        _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
+                                                 _primary_key,
+                                                 primary_schema,
+                                                 _cache,
+                                                 xid,
+                                                 root_offsets[0]);
+
+        _primary_extent_id_f = primary_schema->get_field("extent_id");
+
+        for (int i = 0; i < secondary_keys.size(); i++) {
+            auto secondary_key = secondary_keys[i];
+            auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
+
+            // add the additional secondary key columns
+            secondary_key.push_back("extent_id");
+            secondary_key.push_back("row_id");
+
+            auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
+                                                 secondary_key,
+                                                 secondary_schema,
+                                                 _cache,
+                                                 xid,
+                                                 root_offsets[i + 1]);
+            _secondary_indexes.push_back(btree);
+        }
+    }
+
     bool
     Table::has_primary()
     {
@@ -91,6 +175,96 @@ namespace springtail {
         return std::make_shared<Extent>(_schema, response->data);
     }
 
+
+    MutableTable::MutableTable(uint64_t id,
+                               uint64_t target_xid,
+                               std::vector<uint64_t> root_offsets,
+                               const std::filesystem::path &table_dir,
+                               const std::vector<std::string> &primary_key,
+                               const std::vector<std::vector<std::string>> &secondary_keys,
+                               ExtentSchemaPtr schema,
+                               DataCachePtr cache,
+                               MutableBTree::PageCachePtr page_cache,
+                               ExtentCachePtr read_cache)
+    : _id(id),
+      _target_xid(target_xid),
+      _table_dir(table_dir),
+      _data_file(table_dir / "raw"),
+      _primary_key(primary_key),
+      _secondary_keys(secondary_keys),
+      _schema(schema),
+      _cache(cache)
+    {
+        // store the roots schema / field
+        _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
+        _roots_root_f = _roots_schema->get_mutable_field("root");
+
+        // handle if the roots were not provided
+        if (root_offsets.empty()) {
+            if (std::filesystem::exists(table_dir / "roots")) {
+                // read the roots from the look-aside file
+                auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
+                auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
+                auto response = root_handle->read(0);
+                auto extent = std::make_shared<Extent>(_roots_schema, response->data);
+                for (auto &row : *extent) {
+                    root_offsets.push_back(_roots_root_f->get_uint64(row));
+                }
+            } else {
+                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
+                root_offsets.push_back(constant::UNKNOWN_EXTENT);
+                for (auto secondary : secondary_keys) {
+                    root_offsets.push_back(constant::UNKNOWN_EXTENT);
+                }
+            }
+        }
+
+        // construct the primary index btree
+        SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
+        SchemaColumn row_c("row_id", 1, SchemaType::UINT32, false);
+        auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+        _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
+                                                        primary_key,
+                                                        page_cache,
+                                                        primary_schema);
+        if (root_offsets[0] != constant::UNKNOWN_EXTENT) {
+            _primary_index->init(root_offsets[0]);
+        } else {
+            _primary_index->init_empty();
+        }
+        _primary_index->set_xid(_target_xid);
+
+        _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
+                                                  _primary_key,
+                                                  primary_schema,
+                                                  read_cache,
+                                                  _target_xid,
+                                                  root_offsets[0]);
+
+        _primary_extent_id_f = primary_schema->get_field("extent_id");
+
+        // construct the secondary index btrees
+        for (int i = 0; i < secondary_keys.size(); i++) {
+            int idx = i + 1;
+
+            auto secondary_key = secondary_keys[i];
+
+            auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
+            secondary_key.push_back("extent_id");
+            secondary_key.push_back("row_id");
+
+            auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
+                                                        secondary_key, page_cache, secondary_schema);
+
+            if (root_offsets[idx] != constant::UNKNOWN_EXTENT) {
+                btree->init(root_offsets[idx]);
+            } else {
+                btree->init_empty();
+            }
+            btree->set_xid(_target_xid);
+            _secondary_indexes.push_back(btree);
+        }
+    }
 
     void
     MutableTable::insert(TuplePtr value,
@@ -235,13 +409,32 @@ namespace springtail {
         // flush the dirty pages of the table to disk
         _cache->evict(shared_from_this());
 
-        // now flush the indexes, storing the roots
+        // now flush the indexes, capturing the roots
         std::vector<uint64_t> roots;
         roots.push_back(_primary_index->finalize());
 
         for (auto secondary : _secondary_indexes) {
             roots.push_back(secondary->finalize());
         }
+
+        // store the roots into a look-aside root file
+        auto extent = std::make_shared<Extent>(_roots_schema, ExtentType(), _target_xid);
+        for (auto root : roots) {
+            auto &&row = extent->append();
+            _roots_root_f->set_uint64(row, root);
+        }
+        auto filename = fmt::format("roots.{}", _target_xid);
+        auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
+                                                       IOMgr::IO_MODE::APPEND, true);
+
+        // flush and wait for completion
+        extent->async_flush(root_handle).wait();
+        root_handle->sync();
+        SPDLOG_DEBUG_MODULE(LOG_BTREE, "{}", "foo");
+
+        // swap the symlink
+        std::filesystem::create_symlink(_table_dir / filename, _table_dir / "roots.new");
+        std::filesystem::rename(_table_dir / "roots.new", _table_dir / "roots");
 
         return roots;
     }

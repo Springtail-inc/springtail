@@ -48,6 +48,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXTENT_ID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
         };
 
         struct Secondary {
@@ -58,6 +59,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t ROW_ID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
 
             static TuplePtr
             key_tuple(uint64_t table_id,
@@ -123,6 +125,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXTENT_ID = 3;
 
             static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
 
             static TuplePtr
             key_tuple(uint64_t table_id, uint64_t index_id, uint64_t xid) {
@@ -176,6 +179,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXTENT_ID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
 
             static TuplePtr
             key_tuple(uint64_t table_id, uint64_t index_id, uint64_t xid, uint32_t position) {
@@ -248,6 +252,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXTENT_ID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
 
             static TuplePtr
             key_tuple(uint64_t table_id, uint32_t position, uint64_t xid, uint64_t lsn) {
@@ -260,6 +265,5 @@ namespace springtail::sys_tbl {
             }
         };
     };
-
 
 }
