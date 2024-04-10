@@ -25,18 +25,12 @@
 #ifndef _USUAL_CRYPTO_SHA256_H_
 #define _USUAL_CRYPTO_SHA256_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdlib.h>
-#include <arpa/inet.h>
-
-#define be32toh ntohl
-#define htobe32 htonl
-
-/** Write big-endian 32-bit int to memory */
-static inline void be32enc(void *p, uint32_t x)
-{
-	uint32_t tmp = htobe32(x);
-	memcpy(p, &tmp, sizeof(tmp));
-}
+#include <proxy/auth/endian.h>
 
 /** SHA224 block size in bytes */
 #define SHA224_BLOCK_SIZE (16*4)
@@ -79,5 +73,9 @@ void sha224_update(struct sha256_ctx *ctx, const void *data, unsigned int len);
 
 /** Calculate final result */
 void sha224_final(struct sha256_ctx *ctx, uint8_t *dst);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif

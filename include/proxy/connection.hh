@@ -20,7 +20,10 @@ namespace springtail {
         ssize_t write(const char *buffer, int size, bool more = false);
 
         void close() {
-            ::close(_socket);
+            if (!_closed) {
+                ::close(_socket);
+                _closed = true;
+            }
         }
 
         int get_socket() {

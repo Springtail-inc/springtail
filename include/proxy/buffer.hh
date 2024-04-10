@@ -67,6 +67,12 @@ namespace springtail {
             _offset += s.size() + 1;
         }
 
+        void putBytes(const char *bytes, int size) {
+            assert(_offset + size <= _capacity);
+            memcpy(_buffer.data() + _offset, bytes, size);
+            _offset += size;
+        }
+
         int8_t get() {
             int8_t i = recvint8(_buffer.data() + _offset);
             _offset++;

@@ -7,8 +7,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 
 #include <common/logging.hh>
+#include <common/thread_pool.hh>
 
 #include <proxy/server.hh>
 #include <proxy/client_session.hh>
@@ -19,8 +21,10 @@
 
 namespace springtail {
     ProxyServer::ProxyServer(const std::string &address,
-                             int port)
-      : _request_handler(std::make_shared<ProxyRequestHandler>())
+                             int port,
+                             int thread_pool_size)
+      : _request_handler(std::make_shared<ProxyRequestHandler>()),
+        _thread_pool(thread_pool_size)
     {
         _socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -42,9 +46,29 @@ namespace springtail {
             exit(1);
         }
 
+        if (fcntl(_socket, F_SETFL, O_NONBLOCK) < 0) {
+            std::cerr << "Error setting socket non-blocking" << std::endl;
+            close(_socket);
+            exit(1);
+        }
+
         if (listen(_socket, 16) < 0) {
             std::cerr << "Error listening on socket" << std::endl;
             close(_socket);
+            exit(1);
+        }
+
+        if (pipe(_pipe) < 0) {
+            std::cerr << "Error creating pipe" << std::endl;
+            close(_socket);
+            exit(1);
+        }
+        // set pipe read non-blocking
+        if (fcntl(_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
+            std::cerr << "Error setting pipe read non-blocking" << std::endl;
+            close(_socket);
+            close(_pipe[0]);
+            close(_pipe[1]);
             exit(1);
         }
 
@@ -52,16 +76,20 @@ namespace springtail {
     }
 
     void
-    ProxyServer::run()
+    ProxyServer::_do_accept()
     {
-        while (true) {
+        while (true) { // accept is non-blocking and will return when no more connections
+            SPDLOG_DEBUG("Accepting new connection");
+
             struct sockaddr_in client_address;
             socklen_t client_address_size = sizeof(client_address);
 
             // Accept a new connection
             int client_socket = accept(_socket, (struct sockaddr*)&client_address, &client_address_size);
             if (client_socket == -1) {
-                std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
+                }
                 return;
             }
 
@@ -69,28 +97,122 @@ namespace springtail {
             if (setsockopt(client_socket, IPPROTO_TCP, TCP_NODELAY, &flags, sizeof(int))) {
                 std::cerr << "Error setting socket options: TCP_NODELAY" << std::endl;
                 close(client_socket);
-                continue;
+                return;
             }
 
             // Get client IP address
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
 
-            std::cout << "Client connected from: " << client_ip << std::endl;
+            SPDLOG_DEBUG("Client connected from: {} on socket {}", client_ip, client_socket);
 
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
+            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this());
 
-            std::thread client_thread(&ProxyServer::_handle_connection, this, connection);
-            client_thread.detach();
+            // add session to the waiting sessions list and to the session map
+            std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+            _sessions.insert(std::make_pair(client_socket, session));
+            _waiting_sessions.insert(client_socket);
+            lock.unlock();
         }
     }
 
     void
-    ProxyServer::_handle_connection(ProxyConnectionPtr connection)
+    ProxyServer::run()
     {
-        // thread entry for new connection
-        ClientSessionPtr session = std::make_shared<ClientSession>(connection, _request_handler);
-        session->start();
+        while (true) {
+            // poll for readable sockets
+            // lock the waiting sessions mutex
+            std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+
+            struct pollfd fds[2 + _waiting_sessions.size()];
+            fds[0].fd = _socket;
+            fds[0].events = POLLIN;
+
+            fds[1].fd = _pipe[0];
+            fds[1].events = POLLIN;
+
+            int i = 2;
+            for (auto &session_socket : _waiting_sessions) {
+                SPDLOG_DEBUG("Adding socket to poll list: {}", session_socket);
+                fds[i].fd = session_socket;
+                fds[i].events = POLLIN;
+                i++;
+            }
+
+            lock.unlock();
+
+            SPDLOG_DEBUG("Polling for sockets: size={}", _waiting_sessions.size());
+
+            int n = poll(fds, 2 + _sessions.size(), -1);
+            if (n == -1) {
+                std::cerr << "Error polling sockets: " << strerror(errno) << std::endl;
+                break;
+            }
+            SPDLOG_DEBUG("Poll returned: {}", n);
+
+            // handle any new accepts
+            if (fds[0].revents & POLLIN) {
+                _do_accept();
+                n--;
+            }
+
+            // read from the pipe; drain it
+            if (fds[1].revents & POLLIN) {
+                char buf[128];
+                while (read(_pipe[0], buf, 128) > 0) {
+                    // drain the pipe (we don't care about the data, just the signal)
+                }
+                n--;
+            }
+
+            // go through fds and find the sessions that are now runnable
+            // remove them from waiting sessions list, insert them into runnable sessions list
+            std::set<ClientSessionPtr> runnable_sessions;
+
+            std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
+            for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
+                if (fds[i].revents & POLLIN) {
+                    auto session = _sessions.find(fds[i].fd);
+                    SPDLOG_DEBUG("Socket {} is now runnable", fds[i].fd);
+                    if (session != _sessions.end()) {
+                        runnable_sessions.insert(session->second);
+                        _waiting_sessions.erase(fds[i].fd);
+                    } else {
+                        SPDLOG_ERROR("Socket {} not found in sessions map", fds[i].fd);
+                    }
+                    n--;
+                }
+            }
+            lock2.unlock();
+
+            // queue the sessions that are now runnable
+            SPDLOG_DEBUG("Queueing {} sessions", runnable_sessions.size());
+            for (auto &session : runnable_sessions) {
+                _thread_pool.queue(session);
+            }
+        }
+    }
+
+    void
+    ProxyServer::signal(ProxyConnectionPtr connection)
+    {
+        std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+        _waiting_sessions.insert(connection->get_socket());
+        lock.unlock();
+
+        char buf[1] = {0};
+        write(_pipe[1], buf, 1);
+
+        SPDLOG_DEBUG("Signaled server waiting on socket {}", connection->get_socket());
+    }
+
+    void
+    ProxyServer::shutdown(ClientSession *session)
+    {
+        std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+        _sessions.erase(session->get_connection()->get_socket());
+        _waiting_sessions.erase(session->get_connection()->get_socket());
     }
 
     ssize_t

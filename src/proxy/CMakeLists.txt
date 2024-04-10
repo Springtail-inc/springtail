@@ -44,6 +44,7 @@ target_include_directories(daemon
 )
 target_link_libraries(daemon
     PRIVATE springtail_proxy
+    PRIVATE auth
 )
 
 # test client executable

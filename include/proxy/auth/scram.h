@@ -22,6 +22,10 @@
 #ifndef _SCRAM_H_
 #define _SCRAM_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include "proxy/auth/sha256.h"
 
@@ -104,4 +108,9 @@ bool verify_client_proof(ScramState *state, const char *ClientProof);
 bool scram_verify_plain_password(
 				 const char *username, const char *password,
 				 const char *secret);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
 #endif

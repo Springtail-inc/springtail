@@ -11,6 +11,7 @@ set(SOURCES
     scram-common.c
     sha256.c
     wchar.c
+    md5.c
 )
 
 # Create the library target

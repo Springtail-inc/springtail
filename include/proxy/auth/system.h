@@ -14,7 +14,7 @@
 #define MD5_PASSWD_LEN  35
 
 /* wrapped for getting random bytes */
-void get_random_bytes(uint8_t *dest, int len)
+static inline void get_random_bytes(uint8_t *dest, int len)
 {
 	arc4random_buf(dest, len);
 }
