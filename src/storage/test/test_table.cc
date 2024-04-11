@@ -17,7 +17,7 @@ namespace {
     class Table_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init(LOG_BTREE);
+            springtail_init();
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({

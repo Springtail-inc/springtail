@@ -67,6 +67,7 @@ namespace springtail {
                                                  root_offsets[0]);
 
         _primary_extent_id_f = primary_schema->get_field("extent_id");
+        _pkey_fields = primary_schema->get_fields();
 
         for (int i = 0; i < secondary_keys.size(); i++) {
             auto secondary_key = secondary_keys[i];
@@ -195,6 +196,9 @@ namespace springtail {
       _schema(schema),
       _cache(cache)
     {
+        // make sure that the table directory exists
+        std::filesystem::create_directory(_table_dir);
+
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
         _roots_root_f = _roots_schema->get_mutable_field("root");

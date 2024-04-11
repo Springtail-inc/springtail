@@ -75,15 +75,25 @@ namespace springtail {
         auto key = _table->schema()->tuple_subset(value, _table->primary_key());
         auto pos_i = _lower_bound(key);
 
-        // check if it's an exact match
-        if (key->less_than(MutableTuple(_key_fields, *pos_i))) {
-            // key doesn't exist, do a regular insert
-            ExtentPtr e = *(pos_i.extent_i);
-            Extent::Row row = e->insert(pos_i.row_i);
+        if (pos_i == end()) {
+            // if this value is past the end, append it instead
+            ExtentPtr e = _extents.back();
+            Extent::Row row = e->append();
             MutableTuple(_fields, row).assign(value);
+
+            // move the iterator back to the last entry
+            --pos_i.extent_i;
         } else {
-            // key exists, replace it
-            MutableTuple(_fields, *pos_i).assign(value);
+            // check if it's an exact match
+            if (key->less_than(MutableTuple(_key_fields, *pos_i))) {
+                // key doesn't exist, do a regular insert
+                ExtentPtr e = *(pos_i.extent_i);
+                Extent::Row row = e->insert(pos_i.row_i);
+                MutableTuple(_fields, row).assign(value);
+            } else {
+                // key exists, replace it
+                MutableTuple(_fields, *pos_i).assign(value);
+            }
         }
 
         // check if we need to split the extent

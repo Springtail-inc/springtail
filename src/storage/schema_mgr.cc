@@ -141,6 +141,8 @@ namespace springtail {
 
             // place the column into the map
             _column_map[column.position][column.xid].push_back(column);
+
+            ++table_i;
         }
     }
 
@@ -181,6 +183,8 @@ namespace springtail {
             } else {
                 _secondary_indexes[index_id][xid].push_back(column_id);
             }
+
+            ++table_i;
         }
     }
 

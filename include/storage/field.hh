@@ -1142,13 +1142,13 @@ namespace springtail {
         bool less_than(const Tuple &rhs, bool nulls_last=false) const {
             // check the tuple lengths and types using assert()
             // we assume correct usage in production
-            assert(this->size() == rhs.size());
-            for (int i = 0; i < this->size(); i++) {
+            assert(this->size() >= rhs.size());
+            for (int i = 0; i < rhs.size(); i++) {
                 assert(this->field(i)->get_type() == rhs.field(i)->get_type());
             }
 
             // XXX switch everything to compare()?
-            for (int i = 0; i < this->size(); i++) {
+            for (int i = 0; i < rhs.size(); i++) {
                 if (this->field(i)->less_than(this->row(), rhs.field(i), rhs.row(), nulls_last)) {
                     return true;
                 }
@@ -1183,6 +1183,11 @@ namespace springtail {
         std::string to_string() const {
             std::string value;
             for (int i = 0; i < this->size(); i++) {
+                if (this->field(i)->is_null(this->row())) {
+                    value += "NULL:";
+                    continue;
+                }
+
                 switch (this->field(i)->get_type()) {
                 case SchemaType::BOOLEAN:
                     value += fmt::format("{}:", this->field(i)->get_bool(this->row()));

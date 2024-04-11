@@ -36,7 +36,7 @@ namespace springtail {
         _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(64 * 1024 * 1024);
         _write_cache = MutableBTree::create_cache(64 * 1024 * 1024);
         _data_cache = std::make_shared<DataCache>(true);
-        _table_base = "/tmp/table";
+        _table_base = "/tmp/springtail/table";
 
         // make sure that the base directory for tables exists
         std::filesystem::create_directories(_table_base);
@@ -116,14 +116,16 @@ namespace springtail {
         // add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, xid);
         auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
-        table_names_t->insert(tuple, xid, lsn);
+        table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
+        table_names_t->finalize();
 
-        // add a table_id -> nullptr extent ID mapping that indicates an empty primary index at the given XID/LSN
+        // add a table_id -> UNKNOWN_EXTENT extent ID mapping that indicates an empty primary index at the given XID/LSN
         // note: we perform an upsert because the table records at the XID level and there may have
         //       been an earlier DROP within the same XID, and we can't insert the same entry twice
         auto table_roots_t = get_mutable_table(sys_tbl::TableRoots::ID, xid);
-        tuple = sys_tbl::TableRoots::Data::tuple(msg.oid, 0, xid);
-        table_roots_t->upsert(tuple, xid, lsn);
+        tuple = sys_tbl::TableRoots::Data::tuple(msg.oid, 0, xid, constant::UNKNOWN_EXTENT);
+        table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
+        table_roots_t->finalize();
 
         // track the primary index keys using an ordered map of position -> column_id
         std::map<uint32_t, uint32_t> primary_keys;
@@ -138,13 +140,14 @@ namespace springtail {
                                                        static_cast<uint8_t>(_convert_pg_type(column.udt_type)),
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
-            schemas_t->insert(tuple, xid, lsn);
+            schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
 
             // record the primary key columns and order
             if (column.is_pkey) {
                 primary_keys[column.pk_position] = column.position;
             }
         }
+        schemas_t->finalize();
 
         // 3) if there's a primary key, add a row to "indexes" for each key column of the primary key
         if (!primary_keys.empty()) {
@@ -155,8 +158,9 @@ namespace springtail {
                 fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
                 fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
                 
-                indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr), xid, lsn);
+                indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr), xid, constant::UNKNOWN_EXTENT);
             }
+            indexes_t->finalize();
         }
 
         // XXX 4) Secondary indexes??  unclear when to create them.
@@ -180,11 +184,14 @@ namespace springtail {
 
             // insert the new name with this oid
             auto new_tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
-            table_names_t->insert(new_tuple, xid, lsn);
+            table_names_t->insert(new_tuple, xid, constant::UNKNOWN_EXTENT);
 
             // insert the old name with exists = false
             auto old_tuple = sys_tbl::TableNames::Data::tuple(old_name.first, old_name.second, msg.oid, xid, lsn, false);
-            table_names_t->insert(old_tuple, xid, lsn);
+            table_names_t->insert(old_tuple, xid, constant::UNKNOWN_EXTENT);
+
+            // sync the changes to disk
+            table_names_t->finalize();
         } else {
             // 2) determine the set of changes between the provided schema and the prior schema
             auto &&old_columns = SchemaMgr::get_instance()->get_columns(msg.oid, xid, lsn);
@@ -205,7 +212,10 @@ namespace springtail {
                                                        (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
                                                        col.name, static_cast<uint8_t>(col.type),
                                                        col.nullable, col.default_value, static_cast<uint8_t>(update.update_type));
-            schemas_t->insert(tuple, xid, lsn);
+            schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
+
+            // sync the changes to disk
+            schemas_t->finalize();
 
             // XXX notify the schema manager somehow to update it's cached schema information?
 
@@ -222,8 +232,9 @@ namespace springtail {
         //    note: the GC-3 should evict these entries once the data has been brought forward and
         //          we can assume the table_id won't be re-used until that operation is complete
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, xid);
-        auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
-        table_names_t->insert(tuple, xid, lsn);
+        auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, false);
+        table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
+        table_names_t->finalize();
 
         // note: we don't update the "table_roots" with a null entry because a truncate will utilize
         //       an empty extent as the root.  This allows us to maintain the reverse linking of
@@ -405,13 +416,13 @@ namespace springtail {
         // read the row from the extent and retrieve the FQN
         auto secondary_fields = table_names_t->secondary(0)->get_schema()->get_fields();
         auto extent_id = secondary_fields->at(sys_tbl::TableNames::Secondary::EXTENT_ID)->get_uint64(*row_i);
-        auto row_id = secondary_fields->at(sys_tbl::TableNames::Secondary::ROW_ID)->get_uint64(*row_i);
+        auto row_id = secondary_fields->at(sys_tbl::TableNames::Secondary::ROW_ID)->get_uint32(*row_i);
         auto extent = table_names_t->read_extent(extent_id);
         auto row = extent->at(row_id);
 
         std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
         std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        return { old_name, old_namespace };
+        return { old_namespace, old_name };
     }
 
     SchemaType
