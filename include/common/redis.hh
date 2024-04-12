@@ -127,17 +127,17 @@ namespace springtail {
          * return the work item to the primary queue.
          *
          * @param worker_id The unique ID of the worker.
-         * @param timeout_secs timeout in seconds (0=block forever)
+         * @param timeout_sec timeout in seconds (0=block forever)
          * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop(const std::string &worker_id, uint64_t timeout_secs=0)
+        std::shared_ptr<T> pop(const std::string &worker_id, uint64_t timeout_sec=0)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
 
             // remove from the main queue and move to the worker queue
-            auto &&res = _redis->brpoplpush(worker_key, _key);
+            auto &&res = _redis->brpoplpush(_key, worker_key, timeout_sec);
             // note: blmove() not available yet in redis++
-            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_secs);
+            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
             if (res) {
                 return std::make_shared<T>(*res);
             }
@@ -177,7 +177,7 @@ namespace springtail {
         /**
          * @brief Logically performs a pop() and complete() in a single operation.
          *
-         * @param timeout_secs timeout in seconds (0=block forever)
+         * @param timeout_sec timeout in seconds (0=block forever)
          * @return A pointer to the value if a value was received, nullptr if timedout
          */
         std::shared_ptr<T> pop_and_commit(uint64_t timeout_sec=0)
@@ -190,7 +190,11 @@ namespace springtail {
             return nullptr;
         }
 
-        /** list all values in redis queue */
+        /**
+         * List all the values in redis queue.  Note that they are returned in reverse insert order
+         * due to the use of brpoplpush().  We can change this behavior if redisplusplus implements
+         * lmove() and blmove() calls available in Redis 6.2.
+         */
         std::vector<T> range(long long start=0, long long end=-1)
         {
             std::vector<std::string> values;
@@ -207,6 +211,10 @@ namespace springtail {
         std::shared_ptr<RedisClient> _redis; ///< A connection to Redis.
     };
 
+    /**
+     * Implements an interface to maintain a sorted set of unique values within Redis.  Each value
+     * is assigned a score when added, which defines it's position within the set.
+     */
     template<typename T>
     class RedisSortedSet {
     public:

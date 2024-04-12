@@ -1,6 +1,6 @@
 #include <common/filesystem.hh>
 
-#include <garbage_collector/log_parser.hh>
+#include <garbage_collector/gc_log_parser.hh>
 
 #include <pg_log_mgr/pg_xact_handler.hh>
 
