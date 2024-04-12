@@ -200,6 +200,7 @@ namespace {
 
         // fetch the redis xacts and compare
         std::vector<PgRedisXactValue> xacts = xact_handler.get_redis_xacts();
+        std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
         EXPECT_EQ(xact_list.size(), xacts.size());
 
         for (int i = 0; i < xact_list.size(); i++) {

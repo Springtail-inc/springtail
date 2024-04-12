@@ -70,6 +70,7 @@ namespace {
         };
     };
 
+    // tests the basic RedisQueue functionality
     TEST_F(Redis_Test, SimpleQueue) {
         RedisQueue<QueueEntry> queue("test_queue");
 
@@ -89,6 +90,7 @@ namespace {
         ASSERT_EQ(queue.pop_and_commit(1), nullptr);
     }
 
+    // tests the two-phase commit RedisQueue functionality
     TEST_F(Redis_Test, SimpleTwoPhaseQueue) {
         RedisQueue<QueueEntry> queue("test_queue");
 
@@ -133,6 +135,7 @@ namespace {
         ASSERT_EQ(queue.pop("a", 1), nullptr);
     }
 
+    // tests the basic RedisSortedSet functionality
     TEST_F(Redis_Test, SimpleSortedSet) {
         RedisSortedSet<SetEntry> set("test_set");
 
