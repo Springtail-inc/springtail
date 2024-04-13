@@ -102,6 +102,12 @@ namespace springtail {
             return s;
         }
 
+        std::string getBytes(int32_t len) {
+            std::string s(_buffer.data() + _offset, len);
+            _offset += len;
+            return s;
+        }
+
     private:
         std::vector<char> _buffer;
         int _offset = 0;

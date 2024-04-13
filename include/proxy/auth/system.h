@@ -9,14 +9,20 @@
 #ifndef _SYSTEM_H_
 #define _SYSTEM_H_
 
-#define Assert(x) assert(x)
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define MD5_PASSWD_LEN  35
+#define Assert(x) assert(x)
 
 /* wrapped for getting random bytes */
 static inline void get_random_bytes(uint8_t *dest, int len)
 {
 	arc4random_buf(dest, len);
 }
+
+#ifdef __cplusplus
+}	/* extern "C" */
+#endif
 
 #endif

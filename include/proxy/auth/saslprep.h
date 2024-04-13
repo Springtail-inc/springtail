@@ -14,6 +14,10 @@
 #ifndef SASLPREP_H
 #define SASLPREP_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Return codes for pg_saslprep() function.
  */
@@ -26,5 +30,9 @@ typedef enum
 } pg_saslprep_rc;
 
 extern pg_saslprep_rc pg_saslprep(const char *input, char **output);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif							/* SASLPREP_H */

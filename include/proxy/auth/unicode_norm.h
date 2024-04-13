@@ -14,8 +14,12 @@
 #ifndef UNICODE_NORM_H
 #define UNICODE_NORM_H
 
-#include "proxy/auth/postgres_compat.h"
-#include "proxy/auth/pg_wchar.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <proxy/auth/postgres_compat.h>
+#include <proxy/auth/pg_wchar.h>
 
 typedef enum
 {
@@ -36,5 +40,9 @@ typedef enum
 extern pg_wchar *unicode_normalize(UnicodeNormalizationForm form, const pg_wchar *input);
 
 extern UnicodeNormalizationQC unicode_is_normalized_quickcheck(UnicodeNormalizationForm form, const pg_wchar *input);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif							/* UNICODE_NORM_H */

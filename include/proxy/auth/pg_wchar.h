@@ -19,7 +19,11 @@
 #ifndef PG_WCHAR_H
 #define PG_WCHAR_H
 
-#include "proxy/auth/postgres_compat.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <proxy/auth/postgres_compat.h>
 
 /*
  * The pg_wchar type
@@ -547,5 +551,9 @@ bool pg_utf8_islegal(const unsigned char *source, int length);
 int pg_utf_mblen(const unsigned char *s);
 
 unsigned char *unicode_to_utf8(pg_wchar c, unsigned char *utf8string);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif							/* PG_WCHAR_H */

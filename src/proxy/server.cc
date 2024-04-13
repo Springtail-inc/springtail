@@ -24,6 +24,7 @@ namespace springtail {
                              int port,
                              int thread_pool_size)
       : _request_handler(std::make_shared<ProxyRequestHandler>()),
+        _user_mgr(std::make_shared<UserMgr>()),
         _thread_pool(thread_pool_size)
     {
         _socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -168,7 +169,7 @@ namespace springtail {
 
             // go through fds and find the sessions that are now runnable
             // remove them from waiting sessions list, insert them into runnable sessions list
-            std::set<ClientSessionPtr> runnable_sessions;
+            std::set<SessionPtr> runnable_sessions;
 
             std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
             for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
@@ -208,7 +209,7 @@ namespace springtail {
     }
 
     void
-    ProxyServer::shutdown(ClientSession *session)
+    ProxyServer::shutdown_session(Session *session)
     {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.erase(session->get_connection()->get_socket());

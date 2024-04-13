@@ -26,6 +26,10 @@
 #ifndef _USUAL_BITS_H_
 #define _USUAL_BITS_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Single-eval and type-safe rol/ror
  */
@@ -54,5 +58,9 @@ static inline uint32_t ror32(uint32_t v, int s) { return rol32(v, 32 - s); }
 
 /** Rotate 64-bit int to right */
 static inline uint64_t ror64(uint64_t v, int s) { return rol64(v, 64 - s); }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

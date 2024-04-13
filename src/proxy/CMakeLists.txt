@@ -6,7 +6,10 @@ find_package(nlohmann_json REQUIRED)
 # source files
 set(PROXY_SOURCES
     server.cc
+    session.cc
     client_session.cc
+    server_session.cc
+    user_mgr.cc
     request_handler.cc
     parser.cc
 )

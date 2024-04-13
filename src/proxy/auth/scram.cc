@@ -20,12 +20,12 @@
  * SCRAM support
  */
 extern "C" {
-#include "proxy/auth/system.h"
-#include "proxy/auth/scram.h"
-#include "proxy/auth/base64.h"
-#include "proxy/auth/saslprep.h"
-#include "proxy/auth/scram-common.h"
+  #include "proxy/auth/system.h"
+  #include "proxy/auth/base64.h"
+  #include "proxy/auth/saslprep.h"
+  #include "proxy/auth/scram-common.h"
 }
+#include "proxy/auth/scram.hh"
 #include <common/logging.hh>
 
 
@@ -165,7 +165,7 @@ static char *read_any_attr(char **input, char *attr_p)
  *
  * Returns true if the SCRAM secret has been parsed, and false otherwise.
  */
-static bool parse_scram_secret(const char *secret, int *iterations, char **salt,
+bool parse_scram_secret(const char *secret, int *iterations, char **salt,
 			       uint8_t *stored_key, uint8_t *server_key)
 {
 	char *s;
@@ -855,7 +855,7 @@ char *build_server_first_message(ScramState *scram_state, const char *username, 
 		if (!build_mock_scram_secret(username, scram_state))
 			goto failed;
 	} else {
-		switch (get_password_type(stored_secret)) {
+		switch (get_password_type(stored_secret)) { // this is completely redundant...
 		case PASSWORD_TYPE_SCRAM_SHA_256:
 			if (!parse_scram_secret(stored_secret,
 						&scram_state->iterations,

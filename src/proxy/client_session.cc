@@ -14,6 +14,7 @@
 #include <proxy/server.hh>
 
 #include <proxy/auth/md5.h>
+#include <proxy/auth/scram.hh>
 
 namespace springtail {
     static int id=0;
@@ -21,11 +22,16 @@ namespace springtail {
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server)
 
-        : _connection(connection),
-          _server(server),
+        : Session(connection, server, CLIENT),
           _id(id++)
     {
-        SPDLOG_DEBUG("Client connected: {}", connection->get_endpoint());
+        SPDLOG_DEBUG("Client connected: {}, id={}", connection->get_endpoint(), _id);
+
+        // initialize pid and key for cancellation
+        get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
+        // clear top bit to make pid not signed, some historic issue
+        _pid &= 0x7FFFFFFF;
+        get_random_bytes(reinterpret_cast<uint8_t*>(&_cancel_key), 4);
     }
 
     ClientSession::~ClientSession()
@@ -38,6 +44,8 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Processing client session: state={}", (int8_t)_state);
 
+        // main entry point for thread processing
+        // resume from where we left off
         switch(_state) {
             case STARTUP:
                 _handle_startup();
@@ -50,16 +58,8 @@ namespace springtail {
                 break;
             default:
                 SPDLOG_ERROR("Invalid state: {}", (int8_t)_state);
-                _connection->close();
+                _state = ERROR;
                 break;
-        }
-
-        if (_state == ERROR) {
-            SPDLOG_ERROR("Error state, closing connection");
-            _connection->close();
-            _server->shutdown(this);
-        } else {
-            _server->signal(_connection);
         }
     }
 
@@ -127,31 +127,14 @@ namespace springtail {
 
         // get user login info and store it
         _login = _get_user_login();
+        if (_login == nullptr) {
+            SPDLOG_ERROR("User {} not found", _username);
+            _state = ERROR;
+            return;
+        }
 
         // handle authentication -- send auth request
         _send_auth_req();
-    }
-
-    ClientSession::UserLoginPtr
-    ClientSession::_get_user_login()
-    {
-        if (_username == "test") {
-            // TRUST no password
-            return std::make_shared<UserLogin>(UserLogin::TRUST);
-        } else {
-            // MD5 password
-            std::string passwd = "test";
-            std::string name = _username;
-
-            // md5sum('pwd'+'user') = md5+digest
-            char md5[36];
-            pg_md5_encrypt(passwd.c_str(), name.c_str(), strlen(name.c_str()), md5);
-
-            uint32_t salt;
-            get_random_bytes((uint8_t*)&salt, 4);
-
-            return std::make_shared<UserLogin>(UserLogin::MD5, md5+3, salt);
-        }
     }
 
     void
@@ -162,18 +145,18 @@ namespace springtail {
         _write_buffer.reset();
 
         switch(_login->_type) {
-            case UserLogin::TRUST:
+            case TRUST:
                 SPDLOG_DEBUG("User {} authenticated with trust", _username);
-                _send_auth_done();
+                _send_auth_done(false);
                 return; // did send above so we return here
 
-            case UserLogin::MD5:
-                SPDLOG_DEBUG("User {} authenticated with md5", _username);
+            case MD5:
+                SPDLOG_DEBUG("User {} authenticating with md5", _username);
                 _encode_auth_md5();
                 break;
 
-            case UserLogin::SCRAM:
-                SPDLOG_DEBUG("User {} authenticated with scram", _username);
+            case SCRAM:
+                SPDLOG_DEBUG("User {} authenticating with scram", _username);
                 _encode_auth_scram();
                 break;
 
@@ -199,8 +182,10 @@ namespace springtail {
 
         assert(code == 'p');
 
+        SPDLOG_DEBUG("Auth continue: msg_length={}", msg_length);
+
         switch(_login->_type) {
-            case UserLogin::MD5: {
+            case MD5: {
                 char md5[MD5_PASSWD_LEN + 1];
 
                 std::string client_passwd = _read_buffer.getString();
@@ -210,31 +195,52 @@ namespace springtail {
                     return;
                 }
 
-                // calculate md5 hash
-                if (!pg_md5_encrypt(_login->_password.c_str(), reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
+                // calculate md5 hash; skip the 'md5' prefix on the password
+                if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
                     SPDLOG_ERROR("Failed to calculate MD5 hash");
                     _state = ERROR;
                     return;
                 }
 
-                if (strcmp(md5, client_passwd.c_str()) == 0) {
-                    SPDLOG_DEBUG("MD5 password match");
-                    _send_auth_done();
+                if (strcmp(md5, client_passwd.c_str()) != 0) {
+                    SPDLOG_ERROR("MD5 password mismatch: : {} <> {}", md5, client_passwd);
+                    ProxyError::encode_error(_write_buffer, ProxyError::INVALID_PASSWORD, "password authentication failed");
+                    _connection->write(_write_buffer.data(), _write_buffer.size());
+                    _state = ERROR;
                     return;
                 }
 
-                SPDLOG_ERROR("MD5 password mismatch: : {} <> {}", md5, client_passwd);
-                ProxyError::encode_error(_write_buffer, ProxyError::INVALID_PASSWORD, "password authentication failed");
-                _connection->write(_write_buffer.data(), _write_buffer.size());
-                _state = ERROR;
+                SPDLOG_DEBUG("MD5 password match");
+                _send_auth_done();
+
+                return;
+            }
+
+            case SCRAM: {
+                // see if this is the first or second message
+                if (_login->scram_state.server_nonce == nullptr) {
+                    SPDLOG_DEBUG("Handling SCRAM SASL initial response");
+
+                    // process as SASLInitialResponse
+                    std::string scram_type = _read_buffer.getString();
+                    if (scram_type != "SCRAM-SHA-256") {
+                        SPDLOG_ERROR("Unsupported scram type: {}", scram_type);
+                        _state = ERROR;
+                        return;
+                    }
+
+                    int32_t len = _read_buffer.get32();
+                    std::string data = _read_buffer.getBytes(len);
+                    _handle_scram_auth(data);
+                } else {
+                    SPDLOG_DEBUG("Handling SCRAM SASL response");
+                    // process as SASLResponse
+                    std::string data = _read_buffer.getBytes(msg_length);
+                    _handle_scram_auth_continue(data);
+                }
 
                 break;
             }
-
-            case UserLogin::SCRAM:
-                // not implemented
-                SPDLOG_ERROR("SCRAM authentication not implemented");
-                break;
 
             default:
                 SPDLOG_ERROR("Invalid auth continue state");
@@ -244,9 +250,101 @@ namespace springtail {
     }
 
     void
-    ClientSession::_send_auth_done()
+    ClientSession::_handle_scram_auth(const std::string &data)
     {
+        char *raw = ::strdup(data.c_str()); // copy to remove constness
+        if (!read_client_first_message(raw,
+                                        &_login->scram_state.cbind_flag,
+                                        &_login->scram_state.client_first_message_bare,
+                                        &_login->scram_state.client_nonce)) {
+            SPDLOG_ERROR("Failed to read client first message");
+            _state = ERROR;
+            free (raw);
+            return;
+        }
+
+        // note: some code inside of here could be optimized based on how the password is stored
+        if (!build_server_first_message(&_login->scram_state, _username.c_str(), _login->_password.c_str())) {
+            SPDLOG_ERROR("Failed to build server first message");
+            _state = ERROR;
+            free (raw);
+            return;
+        }
+
+        // Send SASL continue message
         _write_buffer.reset();
+        _write_buffer.put('R');
+        _write_buffer.put32(strlen(_login->scram_state.server_first_message)+8);
+        _write_buffer.put32(11); // 11 == SASL continue
+        _write_buffer.putBytes(_login->scram_state.server_first_message,
+                                strlen(_login->scram_state.server_first_message));
+
+        free (raw);
+
+        ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
+        assert(n == _write_buffer.size());
+    }
+
+    void
+    ClientSession::_handle_scram_auth_continue(const std::string &data)
+    {
+        char *raw = ::strdup(data.c_str()); // copy to remove constness
+        const char *client_final_nonce = nullptr;
+	    char *proof = nullptr;
+
+        // decode the final message from client
+        if (!read_client_final_message(&_login->scram_state,
+                                        reinterpret_cast<const uint8_t *>(data.c_str()),
+                                        raw, &client_final_nonce, &proof)) {
+            SPDLOG_ERROR("Failed to read client final message");
+            _state = ERROR;
+            free (raw);
+            return;
+        }
+
+        // verify the nonce and the proof from client
+        if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
+            !verify_client_proof(&_login->scram_state, proof)) {
+		    SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
+            _state = ERROR;
+            free (raw);
+            free (proof);
+            return;
+	    }
+
+        // after verifying the client proof, we now have the client key
+        UserPtr user = _server->get_user_mgr()->get_user(_username, _database);
+        user->set_client_scram_key(_login->scram_state.ClientKey);
+
+        // finally send the final message to the client
+        char *server_final_message = build_server_final_message(&_login->scram_state);
+        if (server_final_message == nullptr) {
+            SPDLOG_ERROR("Failed to build server final message");
+            _state = ERROR;
+            free (raw);
+            free (proof);
+            return;
+        }
+
+        _write_buffer.reset();
+        _write_buffer.put('R');
+        _write_buffer.put32(strlen(server_final_message)+8);
+        _write_buffer.put32(12); // 12 == SASL final
+        _write_buffer.putBytes(server_final_message, strlen(server_final_message));
+
+        free (raw);
+        free (server_final_message);
+        free (proof);
+
+        _send_auth_done(false);
+    }
+
+    void
+    ClientSession::_send_auth_done(bool reset)
+    {
+        if (reset) {
+            _write_buffer.reset();
+        }
 
         // encode auth ok
         _encode_auth_ok();
@@ -261,7 +359,7 @@ namespace springtail {
         _write_buffer.put('K');
         _write_buffer.put32(12);
         _write_buffer.put32(_pid);
-        _write_buffer.put32(_key);
+        _write_buffer.put32(_cancel_key);
 
         // ready for query
         _write_buffer.put('Z');
@@ -271,6 +369,10 @@ namespace springtail {
         ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
         assert(n == _write_buffer.size());
 
+        // free login info
+        _login.reset();
+
+        SPDLOG_DEBUG("Authentication complete, setting READY state");
         _state = READY;
     }
 
@@ -286,8 +388,8 @@ namespace springtail {
     ClientSession::_encode_auth_md5()
     {
         _write_buffer.put('R');
-        _write_buffer.put32(12);
-        _write_buffer.put32(5); // 5 == md5
+        _write_buffer.put32(12); // length
+        _write_buffer.put32(5);  // 5 == md5
         _write_buffer.putBytes(reinterpret_cast<char*>(&_login->_salt), 4);
     }
 
@@ -295,9 +397,10 @@ namespace springtail {
     ClientSession::_encode_auth_scram()
     {
         _write_buffer.put('R');
-        _write_buffer.put32(12);
+        _write_buffer.put32(23); // length
         _write_buffer.put32(10); // 10 == scram
         _write_buffer.putString("SCRAM-SHA-256");
+        _write_buffer.put(0);
     }
 
     void
@@ -307,33 +410,6 @@ namespace springtail {
         _write_buffer.put32(key.size() + value.size() + 6); // 4B len + 2B nulls
         _write_buffer.putString(key);
         _write_buffer.putString(value);
-    }
-
-    std::pair<char,int32_t>
-    ClientSession::_read_msg()
-    {
-        _read_buffer.reset();
-        ssize_t n = _connection->read(_read_buffer, 5);
-        if (n <= 0) {
-            _state = ERROR;
-            return {'X', -1};
-        }
-
-        // op code
-        char code = _read_buffer.get();
-        // message length including length itself but not code
-        // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32();
-
-        SPDLOG_DEBUG("Request: msg_length={}/{}, code={}", n, msg_length, code);
-
-        // if we didn't read the whole message, read the rest
-        if (msg_length + 1 < n) {
-            SPDLOG_DEBUG("Need to read more data for message");
-            _connection->read_fully(_read_buffer, msg_length + 1);
-        }
-
-        return {code, msg_length-4};
     }
 
     void
@@ -358,12 +434,12 @@ namespace springtail {
         case 'X': {
             // terminate
             SPDLOG_DEBUG("Terminate request");
-            _connection->close();
+            _state = ERROR;
             return;
         }
         default:
             SPDLOG_ERROR("Unsupported request code: {}", code);
-            _connection->close();
+            _state = ERROR;
             return;
         }
     }

@@ -22,12 +22,10 @@
 #ifndef _SCRAM_H_
 #define _SCRAM_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdbool.h>
-#include "proxy/auth/sha256.h"
+#include <proxy/auth/sha256.h>
+
+#define MD5_PASSWD_LEN  35
 
 typedef struct ScramState {
 		char *client_nonce;
@@ -47,8 +45,8 @@ typedef struct ScramState {
 
 typedef struct PgUser {
     char passwd[1024];
-	uint8_t scram_ClientKey[32];
-	uint8_t scram_ServerKey[32];
+	const uint8_t *scram_ClientKey; // size [32] pointer into ScramState
+	const uint8_t *scram_ServerKey; // size [32], pointer into ScramState
 	bool has_scram_keys;		/* true if the above two are valid */
 } PgUser;
 
@@ -63,6 +61,9 @@ typedef enum PasswordType {
 
 
 PasswordType get_password_type(const char *shadow_pass);
+
+bool parse_scram_secret(const char *secret, int *iterations, char **salt,
+			    uint8_t *stored_key, uint8_t *server_key);
 
 /*
  * Functions for communicating as a client with the server
@@ -81,7 +82,6 @@ bool read_server_first_message(ScramState *scram_state, char *input,
 bool read_server_final_message(char *input, char *ServerSignature);
 
 bool verify_server_signature(ScramState *scram_state, const PgUser *user, const char *ServerSignature);
-
 
 /*
  * Functions for communicating as a server to the client
@@ -108,9 +108,5 @@ bool verify_client_proof(ScramState *state, const char *ClientProof);
 bool scram_verify_plain_password(
 				 const char *username, const char *password,
 				 const char *secret);
-
-#ifdef __cplusplus
-} // extern "C"
-#endif
 
 #endif

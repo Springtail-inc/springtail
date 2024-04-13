@@ -13,8 +13,12 @@
 #ifndef SCRAM_COMMON_H
 #define SCRAM_COMMON_H
 
-#include "proxy/auth/postgres_compat.h"
-#include "proxy/auth/sha256.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <proxy/auth/postgres_compat.h>
+#include <proxy/auth/sha256.h>
 
 /* Name of SCRAM mechanisms per IANA */
 #define SCRAM_SHA_256_NAME "SCRAM-SHA-256"
@@ -67,5 +71,9 @@ extern void scram_ServerKey(const uint8 *salted_password, uint8 *result);
 
 extern char *scram_build_secret(const char *salt, int saltlen, int iterations,
 								const char *password);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif							/* SCRAM_COMMON_H */

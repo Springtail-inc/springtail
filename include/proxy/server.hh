@@ -9,7 +9,8 @@
 
 #include <proxy/connection.hh>
 #include <proxy/request_handler.hh>
-#include <proxy/client_session.hh>
+#include <proxy/session.hh>
+#include <proxy/user_mgr.hh>
 
 namespace springtail {
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
@@ -22,7 +23,11 @@ namespace springtail {
 
         void signal(ProxyConnectionPtr connection);
 
-        void shutdown(ClientSession *session);
+        void shutdown_session(Session *session);
+
+        UserMgrPtr get_user_mgr() {
+            return _user_mgr;
+        }
 
     private:
         int _socket;
@@ -31,9 +36,11 @@ namespace springtail {
 
         ProxyRequestHandlerPtr _request_handler;
 
-        ThreadPool<ClientSession> _thread_pool;
+        UserMgrPtr _user_mgr;
 
-        std::map<int, ClientSessionPtr> _sessions;
+        ThreadPool<Session> _thread_pool;
+
+        std::map<int, SessionPtr> _sessions;
 
         std::mutex _waiting_sessions_mutex;
         std::set<int> _waiting_sessions;

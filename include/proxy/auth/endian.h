@@ -25,6 +25,11 @@
 
 #include <string.h>
 #include <proxy/auth/system.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Need to include OS headers even if unused, so our
  * definitions stay in use.
@@ -384,5 +389,8 @@ static inline void h64enc(void *p, uint64_t x)
 
 /** @} */
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif	/* _USUAL_ENDIAN_H_ */
