@@ -75,10 +75,4 @@ namespace springtail {
         // XXX need to add customer ID
         _redis_queue.push(redis_xact);
     }
-
-    std::vector<PgRedisXactValue>
-    PgXactHandler::get_redis_xacts(long long start, long long end)
-    {
-        return _redis_queue.range(start, end);
-    }
 }

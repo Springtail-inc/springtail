@@ -35,14 +35,6 @@ namespace springtail {
             return fs::get_next_file(path, LOG_PREFIX, LOG_SUFFIX);
         }
 
-        /**
-         * @brief Get the redis xacts object -- for testing
-         * @param start start index (0)
-         * @param end   end index (-1)
-         * @return std::vector<PgRedisXactValue>
-         */
-        std::vector<PgRedisXactValue> get_redis_xacts(long long start=0, long long end=-1);
-
     private:
         std::filesystem::path _base_dir;
         std::filesystem::path _current_logfile;
