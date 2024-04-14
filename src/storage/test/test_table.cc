@@ -35,18 +35,19 @@ namespace {
 
             _data_cache = std::make_shared<DataCache>(true);
 
-            std::filesystem::remove_all("/tmp/test_table");
+            _base_dir = std::filesystem::temp_directory_path() / "test_table";
+            std::filesystem::remove_all(_base_dir);
 
-            std::filesystem::create_directories("/tmp/test_table/1000");
-            std::filesystem::create_directory("/tmp/test_table/1001");
-            std::filesystem::create_directory("/tmp/test_table/1002");
-            std::filesystem::create_directory("/tmp/test_table/1003");
-            std::filesystem::create_directory("/tmp/test_table/1004");
+            std::filesystem::create_directories(_base_dir / "1000");
+            std::filesystem::create_directory(_base_dir / "1001");
+            std::filesystem::create_directory(_base_dir / "1002");
+            std::filesystem::create_directory(_base_dir / "1003");
+            std::filesystem::create_directory(_base_dir / "1004");
         }
 
         void TearDown() override {
             // remove any files created during the run
-            std::filesystem::remove_all("/tmp/test_table");
+            std::filesystem::remove_all(_base_dir);
         }
 
         ExtentSchemaPtr _schema;
@@ -56,6 +57,8 @@ namespace {
         std::vector<std::vector<std::string>> _secondary_keys;
 
         DataCachePtr _data_cache;
+
+        std::filesystem::path _base_dir;
 
         std::shared_ptr<Tuple>
         _create_key(const std::string &name)
@@ -117,7 +120,7 @@ namespace {
         auto mtable = std::make_shared<MutableTable>(1000,
                                                      1,
                                                      roots,
-                                                     "/tmp/test_table/1000",
+                                                     _base_dir / "1000",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -131,7 +134,7 @@ namespace {
         // create an access table
         auto table = std::make_shared<Table>(1000,
                                              1,
-                                             "/tmp/test_table/1000",
+                                             _base_dir / "1000",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -154,7 +157,7 @@ namespace {
         auto mtable = std::make_shared<MutableTable>(1001,
                                                      1,
                                                      roots,
-                                                     "/tmp/test_table/1001",
+                                                     _base_dir / "1001",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -184,7 +187,7 @@ namespace {
         // create an access table
         auto table = std::make_shared<Table>(1001,
                                              1,
-                                             "/tmp/test_table/1001",
+                                             _base_dir / "1001",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -214,7 +217,7 @@ namespace {
         auto mtable = std::make_shared<MutableTable>(1002,
                                                      1,
                                                      roots,
-                                                     "/tmp/test_table/1002",
+                                                     _base_dir / "1002",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -294,7 +297,7 @@ namespace {
         // create an access table
         auto table = std::make_shared<Table>(1002,
                                              1,
-                                             "/tmp/test_table/1002",
+                                             _base_dir / "1002",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -351,7 +354,7 @@ namespace {
         auto mtable = std::make_shared<MutableTable>(1003,
                                                      target_xid,
                                                      roots,
-                                                     "/tmp/test_table/1003",
+                                                     _base_dir / "1003",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -382,7 +385,7 @@ namespace {
         // create an access table for lookup
         auto table = std::make_shared<Table>(1003,
                                              access_xid,
-                                             "/tmp/test_table/1003",
+                                             _base_dir / "1003",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -395,7 +398,7 @@ namespace {
         mtable = std::make_shared<MutableTable>(1003,
                                                 target_xid,
                                                 roots,
-                                                "/tmp/test_table/1003",
+                                                _base_dir / "1003",
                                                 _primary_keys,
                                                 _secondary_keys,
                                                 _schema,
@@ -438,7 +441,7 @@ namespace {
         // create an access table
         table = std::make_shared<Table>(1003,
                                         access_xid,
-                                        "/tmp/test_table/1003",
+                                        _base_dir / "1003",
                                         _primary_keys,
                                         _secondary_keys,
                                         roots,
@@ -482,7 +485,7 @@ namespace {
         mtable = std::make_shared<MutableTable>(1003,
                                                 target_xid,
                                                 roots,
-                                                "/tmp/test_table/1003",
+                                                _base_dir / "1003",
                                                 _primary_keys,
                                                 _secondary_keys,
                                                 _schema,
@@ -533,7 +536,7 @@ namespace {
         // create an access table
         table = std::make_shared<Table>(1003,
                                         access_xid,
-                                        "/tmp/test_table/1003",
+                                        _base_dir / "1003",
                                         _primary_keys,
                                         _secondary_keys,
                                         roots,
@@ -582,7 +585,7 @@ namespace {
         mtable = std::make_shared<MutableTable>(1003,
                                                 target_xid,
                                                 roots,
-                                                "/tmp/test_table/1003",
+                                                _base_dir / "1003",
                                                 _primary_keys,
                                                 _secondary_keys,
                                                 _schema,
@@ -632,7 +635,7 @@ namespace {
         // create an access table
         table = std::make_shared<Table>(1003,
                                         access_xid,
-                                        "/tmp/test_table/1003",
+                                        _base_dir / "1003",
                                         _primary_keys,
                                         _secondary_keys,
                                         roots,
@@ -686,7 +689,7 @@ namespace {
         mtable = std::make_shared<MutableTable>(1003,
                                                 target_xid,
                                                 roots,
-                                                "/tmp/test_table/1003",
+                                                _base_dir / "1003",
                                                 _primary_keys,
                                                 _secondary_keys,
                                                 _schema,
@@ -736,7 +739,7 @@ namespace {
         // create an access table
         table = std::make_shared<Table>(1003,
                                         access_xid,
-                                        "/tmp/test_table/1003",
+                                        _base_dir / "1003",
                                         _primary_keys,
                                         _secondary_keys,
                                         roots,
@@ -803,7 +806,7 @@ namespace {
         auto mtable = std::make_shared<MutableTable>(1004,
                                                      target_xid,
                                                      roots,
-                                                     "/tmp/test_table/1004",
+                                                     _base_dir / "1004",
                                                      _primary_keys,
                                                      _secondary_keys,
                                                      _schema,
@@ -834,7 +837,7 @@ namespace {
         // create an access table and identify extents to be mutated
         auto table = std::make_shared<Table>(1004,
                                              access_xid,
-                                             "/tmp/test_table/1004",
+                                             _base_dir / "1004",
                                              _primary_keys,
                                              _secondary_keys,
                                              roots,
@@ -863,7 +866,7 @@ namespace {
         mtable = std::make_shared<MutableTable>(1004,
                                                 target_xid,
                                                 roots,
-                                                "/tmp/test_table/1004",
+                                                _base_dir / "1004",
                                                 _primary_keys,
                                                 _secondary_keys,
                                                 _schema,
@@ -886,7 +889,7 @@ namespace {
 
             auto table = std::make_shared<Table>(1004,
                                                  target_xid,
-                                                 "/tmp/test_table/1004",
+                                                 _base_dir / "1004",
                                                  _primary_keys,
                                                  _secondary_keys,
                                                  roots,

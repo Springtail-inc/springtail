@@ -30,21 +30,14 @@ namespace {
             _keys = std::vector<std::string>({"name", "table_id"});
 
             _write_cache = MutableBTree::create_cache(2*1024*1024);
+
+            _base_dir = std::filesystem::temp_directory_path() / "test_btree";
+            std::filesystem::create_directories(_base_dir);
         }
 
         void TearDown() override {
             // remove any files created during the run
-            IOMgr::get_instance()->remove("/tmp/test_btree_Insert10");
-            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAll");
-            IOMgr::get_instance()->remove("/tmp/test_btree_Search");
-            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemove");
-            IOMgr::get_instance()->remove("/tmp/test_btree_InsertAndRemoveAll");
-            IOMgr::get_instance()->remove("/tmp/test_btree_InsertSame");
-            IOMgr::get_instance()->remove("/tmp/test_btree_InsertMany");
-            IOMgr::get_instance()->remove("/tmp/test_btree_ThreadedInserts");
-            IOMgr::get_instance()->remove("/tmp/test_btree_ThreadedInsertAndRemove");
-            IOMgr::get_instance()->remove("/tmp/test_btree_ThreadedInsertsOne");
-            IOMgr::get_instance()->remove("/tmp/test_btree_ThreadedInsertsTwo");
+            std::filesystem::remove_all(_base_dir);
         }
 
         ExtentSchemaPtr _schema;
@@ -52,6 +45,8 @@ namespace {
         std::shared_ptr<ExtentCache> _read_cache;
         MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _keys;
+
+        std::filesystem::path _base_dir;
 
         std::shared_ptr<MutableBTree>
         _create_mutable_btree(const std::filesystem::path &name,
@@ -136,7 +131,7 @@ namespace {
 
     TEST_F(BTree_Test, Insert10) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_Insert10", 0);
+        auto btree = _create_mutable_btree(_base_dir / "Insert10", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -167,7 +162,7 @@ namespace {
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
-        auto tree = _get_btree("/tmp/test_btree_Insert10", offset);
+        auto tree = _get_btree(_base_dir / "Insert10", offset);
         int count = 0;
         std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
@@ -183,7 +178,7 @@ namespace {
 
     TEST_F(BTree_Test, InsertAll) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_InsertAll", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAll", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -212,7 +207,7 @@ namespace {
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
-        auto tree = _get_btree("/tmp/test_btree_InsertAll", offset);
+        auto tree = _get_btree(_base_dir / "InsertAll", offset);
         int count = 0;
         std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
@@ -228,7 +223,7 @@ namespace {
 
     TEST_F(BTree_Test, Search) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_Search", 0);
+        auto btree = _create_mutable_btree(_base_dir / "Search", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -253,7 +248,7 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // get a pointer to the read-only btree
-        auto tree = _get_btree("/tmp/test_btree_Search", offset);
+        auto tree = _get_btree(_base_dir / "Search", offset);
         auto begin_i = tree->begin(1);
         auto end_i = tree->end();
 
@@ -360,7 +355,7 @@ namespace {
 
     TEST_F(BTree_Test, InsertAndRemove) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_InsertAndRemove", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemove", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -410,7 +405,7 @@ namespace {
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
-        auto tree = _get_btree("/tmp/test_btree_InsertAndRemove", offset);
+        auto tree = _get_btree(_base_dir / "InsertAndRemove", offset);
 
         // check XID 1 for all entries
         int count = 0;
@@ -441,7 +436,7 @@ namespace {
 
     TEST_F(BTree_Test, InsertAndRemoveAll) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_InsertAndRemoveAll", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemoveAll", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -483,7 +478,7 @@ namespace {
         auto name_f = _schema->get_field("name");
         auto offset_f = _schema->get_field("offset");
 
-        auto tree = _get_btree("/tmp/test_btree_InsertAndRemoveAll", offset);
+        auto tree = _get_btree(_base_dir / "InsertAndRemoveAll", offset);
 
         // check XID 1 for all entries
         int count = 0;
@@ -508,7 +503,7 @@ namespace {
 
     TEST_F(BTree_Test, InsertSame) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_InsertSame", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertSame", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -534,7 +529,7 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = _get_btree("/tmp/test_btree_InsertSame", offset);
+        auto tree = _get_btree(_base_dir / "InsertSame", offset);
 
         auto table_id_f = _schema->get_field("table_id");
         auto name_f = _schema->get_field("name");
@@ -556,7 +551,7 @@ namespace {
 
     TEST_F(BTree_Test, InsertMany) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_InsertMany", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertMany", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -582,7 +577,7 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = _get_btree("/tmp/test_btree_InsertMany", offset);
+        auto tree = _get_btree(_base_dir / "InsertMany", offset);
 
         auto table_id_f = _schema->get_field("table_id");
         auto name_f = _schema->get_field("name");
@@ -606,7 +601,7 @@ namespace {
         PhasedThreadTest<Request> tester;
 
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_ThreadedInserts", 0);
+        auto btree = _create_mutable_btree(_base_dir / "ThreadedInserts", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -636,7 +631,7 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = _get_btree("/tmp/test_btree_ThreadedInserts", offset);
+            auto tree = _get_btree(_base_dir / "ThreadedInserts", offset);
 
             auto table_id_f = _schema->get_field("table_id");
             auto name_f = _schema->get_field("name");
@@ -676,7 +671,7 @@ namespace {
         PhasedThreadTest<Request> tester;
 
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree("/tmp/test_btree_ThreadedInsertAndRemove", 0);
+        auto btree = _create_mutable_btree(_base_dir / "ThreadedInsertAndRemove", 0);
 
         // set the XID
         btree->set_xid(1);
@@ -704,7 +699,7 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = _get_btree("/tmp/test_btree_ThreadedInsertAndRemove", offset);
+            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
 
             auto table_id_f = _schema->get_field("table_id");
             auto name_f = _schema->get_field("name");
@@ -757,7 +752,7 @@ namespace {
             uint64_t offset = btree->finalize();
             std::cout << offset << std::endl;
 
-            auto tree = _get_btree("/tmp/test_btree_ThreadedInsertAndRemove", offset);
+            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
 
             auto table_id_f = _schema->get_field("table_id");
             auto name_f = _schema->get_field("name");
@@ -779,8 +774,8 @@ namespace {
         PhasedThreadTest<Request> tester;
 
         // get mutable btrees to perform inserts
-        auto btree1 = _create_mutable_btree("/tmp/test_btree_ThreadedInsertsOne", 0);
-        auto btree2 = _create_mutable_btree("/tmp/test_btree_ThreadedInsertsTwo", 0);
+        auto btree1 = _create_mutable_btree(_base_dir / "ThreadedInsertsOne", 0);
+        auto btree2 = _create_mutable_btree(_base_dir / "ThreadedInsertsTwo", 0);
 
         // set the XID
         btree1->set_xid(1);
@@ -816,7 +811,7 @@ namespace {
             uint64_t offset2 = btree2->finalize();
 
             // check the first file
-            auto tree = _get_btree("/tmp/test_btree_ThreadedInsertsOne", offset1);
+            auto tree = _get_btree(_base_dir / "ThreadedInsertsOne", offset1);
 
             auto table_id_f = _schema->get_field("table_id");
             auto name_f = _schema->get_field("name");
@@ -848,7 +843,7 @@ namespace {
             ASSERT_EQ(count, 50000);
 
             // check the second file
-            tree = _get_btree("/tmp/test_btree_ThreadedInsertsTwo", offset2);
+            tree = _get_btree(_base_dir / "ThreadedInsertsTwo", offset2);
 
             // check for all entries
             count = 0;

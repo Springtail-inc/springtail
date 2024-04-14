@@ -1,3 +1,6 @@
+#include <common/json.hh>
+#include <common/properties.hh>
+
 #include <storage/table_mgr.hh>
 #include <storage/system_tables.hh>
 
@@ -36,7 +39,11 @@ namespace springtail {
         _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(64 * 1024 * 1024);
         _write_cache = MutableBTree::create_cache(64 * 1024 * 1024);
         _data_cache = std::make_shared<DataCache>(true);
-        _table_base = "/tmp/springtail/table";
+
+        // get the base directory for table data
+        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+        Json::get_to<std::filesystem::path>(json, "table_dir", _table_base,
+                                            "/tmp/springtail/table");
 
         // make sure that the base directory for tables exists
         std::filesystem::create_directories(_table_base);
