@@ -1,4 +1,5 @@
 #include "common/common.hh"
+#include "pg_repl/pg_repl_msg.hh"
 #include "pg_repl/pg_stream_table.hh"
 #include "storage/constants.hh"
 #include "storage/field.hh"
@@ -17,7 +18,6 @@ namespace springtail
         std::string pg_xids = source->get_xact_xids();
         PgTableSchema pg_schema = source->get_schema()
 
-        //TODO: split this block out into separate function
         std::vector<std::string> xids;
         boost::split(xids, pg_xids, boost::is_any_of(":"));
         //TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
@@ -28,9 +28,15 @@ namespace springtail
 
         populate_rows(schema, extent);
 
-        // TODO make PgMsgTable entry and call create_table
-        // springtail/src/storage/table_mgr.cc
-        // TableMgr::get_instance()->create_table()
+        // make PgMsgTable entry and call create_table
+        TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
+            0,
+            pg_schema.table_oid,
+            xids.at(1),
+            pg_schema.schema_name,
+            pg_schema.table_name,
+            schema
+        });
     }
 
     std::vector<SchemaColumn> Ingest::populate_schema(std::vector<PgColumn> pg_columns) {
@@ -56,5 +62,6 @@ namespace springtail
             // btree->insert(insert_tuple)
             // TODO check extent length, create new if over constant::MAX_EXTENT_SIZE
             // then add row from extent::back()'s' primary key into btree
+        }
     }
 }
