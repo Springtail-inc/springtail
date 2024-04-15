@@ -10,13 +10,20 @@
 #include <atomic>
 
 #include <common/concurrent_queue.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
+#include <common/filesystem.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_xact_handler.hh>
+
+#include <pg_log_mgr/pg_xact_log_reader.hh>
+#include <pg_log_mgr/pg_xact_log_writer.hh>
+
+#include <pg_log_mgr/pg_redis_xact.hh>
 
 namespace springtail {
     /**
@@ -31,9 +38,26 @@ namespace springtail {
      */
     class PgLogMgr {
     public:
+        /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
 
-        /** Constructor */
+        /** replication and transaction log prefixes and suffix */
+        static constexpr char const * const LOG_PREFIX_REPL = "pg_log_repl_";
+        static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
+        static constexpr char const * const LOG_SUFFIX = ".log";
+
+        /**
+         * @brief Construct a new Pg Log Mgr object
+         * @param repl_log_path replication log base path
+         * @param xact_log_path transaction log base path
+         * @param host postgres host
+         * @param db_name postgres db name
+         * @param user_name postgres user name
+         * @param password postgres password
+         * @param pub_name publication name
+         * @param slot_name replication slot name
+         * @param port postgres port
+         */
         PgLogMgr(const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path,
                  const std::string &host, const std::string &db_name,
@@ -48,8 +72,23 @@ namespace springtail {
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
         {}
 
+        /**
+         * @brief Construct a new Pg Log Mgr object (for testing only)
+         * @param repl_log_path replication log base path
+         * @param xact_log_path transaction log base path
+         */
+        PgLogMgr(const std::filesystem::path &repl_log_path,
+                 const std::filesystem::path &xact_log_path)
+        : _repl_log_path(repl_log_path),
+          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
+          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
+        {}
+
+        /** Start the pipeline; setup the log reader/writer log files etc. */
+        void startup();
+
         /** Setup streaming and startup threads */
-        void start_streaming();
+        void start_streaming(uint64_t lsn = INVALID_LSN);
 
         /** Wait for threads */
         void join() {
@@ -61,7 +100,23 @@ namespace springtail {
         /** Set shutdown flag */
         void shutdown() {
             _shutdown = true;
+            join();
         }
+
+        /** for testing: get list of redis xactions from redis queue */
+        std::vector<PgRedisXactValue> get_redis_xacts(long long start=0, long long end=-1);
+
+    protected:
+        /** for testing */
+
+        /** Helper to create log writer -- one per log file */
+        PgLogWriterPtr _create_repl_logger();
+
+        /** Create xact log writer */
+        PgXactLogWriterPtr _create_xact_logger();
+
+        /** Process transaction record -- write it to log and to Redis queue */
+        void _process_xact(const PgTransactionPtr xact, const PgXactLogWriterPtr logger);
 
     private:
         /** minimum size for log rollover */
@@ -76,60 +131,43 @@ namespace springtail {
         std::string _slot_name;
         int _port;
 
-        /** postgres connection */
-        PgReplConnection _pg_conn;
+        PgReplConnection _pg_conn;            ///< postgres replication connection
+        int _proto_version;                   ///< postgres protocol version
+        std::atomic<bool> _shutdown = false;  ///< shutdown flag
 
-        /** postgres protocol version */
-        int _proto_version;
-
-        /** shutdown flag */
-        std::atomic<bool> _shutdown = false;
-
-        /// Stage 1 of pipeline, writing replication log to disk
+        ///// Stage 1 of pipeline, writing replication log to disk
+        std::thread _writer_thread;           ///< log writer thread
+        std::filesystem::path _repl_log_path; ///< replication log base path
+        PgLogQueue _logger_queue;             ///< queue between writer and reader
 
         /** Process data from replication stream in loop, queue path, offsets */
-        void _log_writer();
-
-        /** log writer thread */
-        std::thread _writer_thread;
-
-        /** Helper to create log writer -- one per log file */
-        PgLogWriterPtr _create_logger();
-
-        /** replication log base path */
-        std::filesystem::path _repl_log_path;
-
-        /** queue shared between writer (producer) and reader (consumer threads )*/
-        PgLogQueue _logger_queue;
+        void _log_writer_thread();
 
         /** callback from log writer class to update lsn from fsync thread*/
         void _lsn_callback(LSN_t lsn);
 
-        /// Stage 2 of pipeline, reading replication log and parsing xacts
+        ///// Stage 2 of pipeline, reading replication log and parsing xacts
+        std::thread _reader_thread;         ///< log reader thread
+        PgTransactionQueuePtr _xact_queue;  ///< queue between reader and xact thread
+        PgLogReader _pg_log_reader;         ///< log reader
 
         /** Consume data from queue, scan log entries and notify GC */
-        void _log_reader();
+        void _log_reader_thread();
 
-        /** log reader thread */
-        std::thread _reader_thread;
+        ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
+        std::filesystem::path _xact_log_path; ///< xact log base path
+        std::thread _xact_thread;             ///< xact worker thread
+        uint64_t _db_id=1;                    ///< db id
+        uint64_t _next_xid=0;                 ///< next xid in xid range
 
-        /** queue shared between reader and xact_worker; contains PgReplMsgStream::PgTransactionPtr */
-        PgTransactionQueuePtr _xact_queue;
-
-        /** log reader */
-        PgLogReader _pg_log_reader;
-
-
-        /// Stage 3 of pipeline, mapping pg xids to xids; notify GC
-
-        /** base path for storing transaction log files */
-        std::filesystem::path _xact_log_path;
-
-        /** transaction notification/logging thread */
-        std::thread _xact_thread;
+        RedisQueue<PgRedisXactValue> _redis_queue; ///< redis queue for GC
+        RedisSortedSet<PgRedisOidValue> _oid_set;  ///< redis sorted set for oid to xid mapping
 
         /** transaction worker -- thread fn */
-        void _xact_worker();
+        void _xact_handler_thread();
+
+        /** push transaction to redis queue */
+        void _push_xact_to_redis(const PgTransactionPtr xact);
     };
 
 } // namespace springtail

@@ -42,7 +42,7 @@ namespace springtail {
                    magic[1] == PgXactLogWriter::PG_XLOG_MAGIC[1] &&
                    magic[2] == PgXactLogWriter::PG_XLOG_MAGIC[2]);
 
-            std::cout << "Read header: msg_len=" << msg_len << ", type=" << (int)type << std::endl;
+            SPDLOG_DEBUG("Scan xact log: hdr msg_len={}, type={}\n", msg_len, (int)type);
 
             msg_len -= 8; // subtract header length
 
@@ -102,6 +102,7 @@ namespace springtail {
         // 4B oid count + oid list (8B each oid)
         // 4B xid count + xid list (4B each xid)
 
+        // read in entire record
         std::vector<char> buffer(msg_len);
         _stream.read(buffer.data(), msg_len);
 
@@ -118,7 +119,13 @@ namespace springtail {
 
         // if xid is less than or equal to committed_xid, then skip
         if (springtail_xid <= committed_xid) {
+            // it is safe to return since we read in entire record
             return;
+        }
+
+        // update max springtail xid
+        if (_max_sp_xid < springtail_xid) {
+            _max_sp_xid = springtail_xid;
         }
 
         PgTransactionPtr xact= std::make_shared<PgTransaction>();

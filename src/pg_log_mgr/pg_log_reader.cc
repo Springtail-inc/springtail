@@ -30,9 +30,10 @@ namespace springtail {
 
         _current_path = path;
 
-        // consume messages from log
-        for (int i = 0; i < num_messages; i++) {
-            bool eob=false, eos=false;
+        // consume messages from log; num_messages of -1 means go until eos
+        bool eos = false; // end of stream
+        while (num_messages != 0 && !eos) {
+            bool eob=false; // end of block
 
             // while not at end of message block (or stream) process
             while (!eob && !eos) {
@@ -81,6 +82,10 @@ namespace springtail {
                         SPDLOG_WARN("Unknown message type\n");
                         break;
                 }
+            }
+
+            if (num_messages > 0) {
+                num_messages--;
             }
         }
     }

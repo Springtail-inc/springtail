@@ -29,6 +29,7 @@ include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
+set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 
 ## add checks for thread data races: https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -O2")

@@ -33,26 +33,26 @@ namespace springtail {
          * @brief Process next set of messages from log file
          * @param path file path
          * @param start_offset starting file offset
-         * @param num_messages number of messages to process
+         * @param num_messages number of messages to process (-1 read until end of file)
          */
         void process_log(const std::filesystem::path &path,
                          uint64_t start_offset,
                          int num_messages);
+
+        /**
+         * @brief Set the xact map object; moves contents of xact_map to _xact_map
+         * @param xact_map xact map -- will be empty after call
+         */
+        void set_xact_map(std::map<uint32_t, PgTransactionPtr> &xact_map) {
+            _xact_map.swap(xact_map);
+        }
+
     private:
-        /** current file path */
-        std::filesystem::path _current_path;
-
-        /** postgres replication stream log parser */
-        PgMsgStreamReader _reader;
-
-        /** transaction queue -- pg xids extracted from log entries */
-        PgTransactionQueuePtr _queue;
-
-        /** current transaction */
-        PgTransactionPtr _current_xact;
-
-        /** Map of in progress transactions if in streaming mode */
-        std::map<uint32_t, PgTransactionPtr> _xact_map;
+        std::filesystem::path _current_path; ///< current log file path
+        PgMsgStreamReader _reader;           ///< msg stream reader for log file
+        PgTransactionQueuePtr _queue;        ///< shared queue for xactions
+        PgTransactionPtr _current_xact;      ///< current transaction
+        std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map
 
         /** Process begin message */
         void _process_begin(const PgMsgBegin &begin_msg);

@@ -89,6 +89,7 @@ namespace springtail {
             col["is_pkey"] = c.is_pkey;
             col["position"] = c.position;
             col["pk_position"] = c.pk_position;
+            col["is_generated"] = false;
             columns_json.push_back(col);
 
             assert(c.udt_type == PG_SCHEMA_TYPE_BOOL ||
