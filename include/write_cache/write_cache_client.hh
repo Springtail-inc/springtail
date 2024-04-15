@@ -39,9 +39,9 @@ namespace springtail {
         struct RowData {
             uint64_t xid;
             uint64_t xid_seq;
-            std::shared_ptr<std::string_view> pkey;
-            std::shared_ptr<std::string_view> old_pkey; // only for update that updates pkey
-            std::shared_ptr<std::string_view> data;
+            std::string pkey;
+            std::string old_pkey; // only for update that updates pkey
+            std::string data;
             RowOp op;
         };
 
@@ -100,7 +100,7 @@ namespace springtail {
          * @param eid  Extent ID
          * @param rows Set of rows
          */
-        void add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> rows);
+        void add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> &&rows);
 
         /**
          * @brief Fetch list of table IDs that have been dirtied prior to and up to XID

@@ -69,7 +69,9 @@ namespace springtail {
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
+          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
+          _oid_set(redis::SET_PG_OID_XIDS)
         {}
 
         /**
@@ -81,7 +83,9 @@ namespace springtail {
                  const std::filesystem::path &xact_log_path)
         : _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path)
+          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
+          _oid_set(redis::SET_PG_OID_XIDS)
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -102,9 +106,6 @@ namespace springtail {
             _shutdown = true;
             join();
         }
-
-        /** for testing: get list of redis xactions from redis queue */
-        std::vector<PgRedisXactValue> get_redis_xacts(long long start=0, long long end=-1);
 
     protected:
         /** for testing */

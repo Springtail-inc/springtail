@@ -227,7 +227,7 @@ namespace springtail {
 
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            _oid_set.add(redis::SET_PG_OID_XIDS, PgRedisOidValue(oid, xid), xid);
+            _oid_set.add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC
@@ -235,12 +235,6 @@ namespace springtail {
                                     xact->commit_offset, xact->xact_lsn, xid, xact->xid, xact->aborted_xids);
 
         // XXX need to add customer ID
-        _redis_queue.push(redis::QUEUE_PG_TRANSACTIONS, redis_xact);
-    }
-
-    std::vector<PgRedisXactValue>
-    PgLogMgr::get_redis_xacts(long long start, long long end)
-    {
-        return _redis_queue.range(redis::QUEUE_PG_TRANSACTIONS, start, end);
+        _redis_queue.push(redis_xact);
     }
 }

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <filesystem>
+#include <set>
 #include <vector>
 #include <cassert>
 

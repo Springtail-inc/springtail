@@ -43,7 +43,7 @@ namespace {
         MutableFieldPtr _nullable_f;
 
         void
-        _populate(Extent::MutableRow row,
+        _populate(Extent::Row row,
                   const std::string &variable,
                   uint64_t fixed,
                   bool bit,
@@ -103,6 +103,29 @@ namespace {
         ASSERT_TRUE(extent->empty());
     }
 
+    TEST_F(Extent_Test, SerializeDeserialize) {
+        // create a populated extent
+        ExtentPtr extent = _create_and_populate();
+
+        FieldPtr variable_f = _schema->get_field("variable");
+        FieldPtr fixed_f = _schema->get_field("fixed");
+        FieldPtr bit_f = _schema->get_field("bit");
+        FieldPtr nullable_f = _schema->get_field("nullable");
+
+        // serialize
+        std::string temp = extent->serialize();
+        
+        // create an empty extent
+        ExtentPtr new_extent = std::make_shared<Extent>(_schema, ExtentType{false}, 0);
+        new_extent->deserialize(temp);
+
+        // make sure that the data matches exepctations
+        EXPECT_FALSE(new_extent->empty());
+        EXPECT_EQ(_schema->row_size(), new_extent->row_size());
+        EXPECT_TRUE(new_extent->byte_count() > 0);
+        EXPECT_EQ(new_extent->row_count(), 3);
+    }
+
     TEST_F(Extent_Test, WriteAndRead) {
         // create a populated extent
         ExtentPtr extent = _create_and_populate();
@@ -125,7 +148,7 @@ namespace {
         EXPECT_EQ(fixed_f->get_uint64(*i), 321837248973189LL);
         EXPECT_TRUE(bit_f->get_bool(*i));
         EXPECT_FALSE(nullable_f->is_null(*i));
-        EXPECT_EQ(nullable_f->get_uint32(*i), 15);
+        EXPECT_EQ(nullable_f->get_int32(*i), 15);
 
         ++i; // test increment
         i += 2; // test addition
@@ -144,7 +167,7 @@ namespace {
         EXPECT_EQ(fixed_f->get_uint64(back_row), 4372895);
         EXPECT_TRUE(bit_f->get_bool(back_row));
         EXPECT_FALSE(nullable_f->is_null(back_row));
-        EXPECT_EQ(nullable_f->get_uint32(back_row), 12);
+        EXPECT_EQ(nullable_f->get_int32(back_row), 12);
     }
 
     TEST_F(Extent_Test, WriteAndReadViaDisk) {
@@ -174,8 +197,8 @@ namespace {
         for (auto i = extent->begin(); i != extent->end(); ++i, ++j)
         {
             // compare less_than() both directions to check for equality
-            ASSERT_FALSE(fs->bind(*i)->less_than(fs->bind(*j)));
-            ASSERT_FALSE(fs->bind(*j)->less_than(fs->bind(*i)));
+            ASSERT_FALSE(FieldTuple(fs, *i).less_than(FieldTuple(fs, *j)));
+            ASSERT_FALSE(FieldTuple(fs, *j).less_than(FieldTuple(fs, *i)));
         }
     }
 
@@ -249,8 +272,8 @@ namespace {
                 i = pair.second->begin();
             }
 
-            ASSERT_FALSE(fs->bind(row)->less_than(fs->bind(*i)));
-            ASSERT_FALSE(fs->bind(*i)->less_than(fs->bind(row)));
+            ASSERT_FALSE(FieldTuple(fs, row).less_than(FieldTuple(fs, *i)));
+            ASSERT_FALSE(FieldTuple(fs, *i).less_than(FieldTuple(fs, row)));
 
             ++i;
         }
