@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# The hook should exit with non-zero status after issuing an appropriate message if
+# it wants to stop the commit.
+#
+
+# Check 1. If 'gh' command line is installed
+GITHUB_CLI=gh
+
+# shellcheck disable=SC2039
+if ! command -v $GITHUB_CLI  &> /dev/null
+then
+    echo "Commit denied. $GITHUB_CLI could not be found. Please follow the instructions at"
+    echo "https://github.com/cli/cli?tab=readme-ov-file#macos to install it."
+    exit 1
+fi
+
+# Check 2. Checks if the message contains a pattern "(#<number>)" in the subject line that
+# references a valid GitHub issue.
+# - 2.1: Makes sure we are logged in
+# shellcheck disable=SC2039
+if ! gh auth status &> /dev/null
+then
+    echo "Commit denied. GitHub not logged in. Please use 'gh auth login' to login."
+    echo "Please choose 'github.com' and use SSH mode when prompted."
+    exit 1
+fi
+
+# - 2.2 Parses out the issue number from the commit message
+# Retrieves the last git commit message
+message=$(git log -1 --pretty=%B | head -n 1)
+# Extracts the issue number from the commit message, this works on both Linux and macOs
+issue_num=$(echo "$message" | grep -o -E '#[0-9]+' | sed 's/#//')
+
+if [ -z "$issue_num" ]
+then
+   echo "Commit denied. The issue number is missing in the last commit message."
+   exit 1
+fi
+
+# - 2.3 Checks if the issue exists
+# shellcheck disable=SC2039
+if ! gh issue view "$issue_num" &> /dev/null
+then
+    echo "Commit denied. The referenced issue $issue_num does not exist."
+    exit 1
+fi
+
+
+
