@@ -1,8 +1,8 @@
 #pragma once
 
-#include <shared_mutex>
 #include <boost/thread.hpp>
 
+#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
@@ -53,8 +53,8 @@ namespace springtail {
             /** Cache entry typedef, tuple of PagePtr, LRU iterator, usage count, page size */
             typedef std::tuple<PagePtr, typename std::list<PagePtr>::iterator, int, uint32_t> LookupEntry;
 
-            /** The ID type for the lookup is <file_id, extent_id> */
-            typedef std::pair<uint64_t, uint64_t> LookupID;
+            /** The ID type for the lookup is <file, extent_id> */
+            typedef std::pair<std::filesystem::path, uint64_t> LookupID;
 
             /** A map from extent ID to LookupEntry. */
             std::unordered_map<LookupID, LookupEntry, boost::hash<LookupID>> lookup;
@@ -95,8 +95,7 @@ namespace springtail {
          * @param cache_size The maximum size of the in-memory cache of pages.
          * @param schema The schema of the leaf entries of the tree.
          */
-        MutableBTree(std::shared_ptr<IOHandle> handle,
-                     uint64_t file_id,
+        MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
                      PageCachePtr cache,
                      ExtentSchemaPtr schema);
@@ -141,6 +140,15 @@ namespace springtail {
          * @return The offset of the root for the target XID we just finalized.
          */
         uint64_t finalize();
+
+        /**
+         * Helper function to return the key fields of the btree leaf extents.
+         */
+        // XXX is this really necessary?
+        FieldArrayPtr get_key_fields()
+        {
+            return std::make_shared<FieldArray>(_leaf_keys->begin(), _leaf_keys->end());
+        }
 
     private:
         /** The maximum size of an extent before we split it in half. */
@@ -223,7 +231,7 @@ namespace springtail {
             Page(std::shared_ptr<MutableBTree> btree,
                  ExtentPtr extent,
                  MutableFieldArrayPtr key_fields)
-                : extent_id(0),
+                : extent_id(constant::UNKNOWN_EXTENT),
                   type(false, true),
                   flushed(false),
                   _btree(btree),
@@ -321,7 +329,7 @@ namespace springtail {
              *
              * @param search_key The key to remove.
              */
-            void remove(TuplePtr search_key);
+            void remove(TuplePtr search_key, bool is_root = false);
 
             /**
              * Flushes the contents of the page and updates the parent with the new pages.  Assumes
@@ -355,14 +363,14 @@ namespace springtail {
             PageCache::LookupID
             get_lookup_id()
             {
-                return PageCache::LookupID{_btree->_file_id, extent_id};
+                return PageCache::LookupID{_btree->_file, extent_id};
             }
 
             /**
              * Return the current key of the last entry in the page.
              */
             TuplePtr index_key() const {
-                return _key_fields->bind(back());
+                return std::make_shared<MutableTuple>(_key_fields, back());
             }
 
             /**
@@ -484,8 +492,8 @@ namespace springtail {
         /** The handle to the underlying on-disk data. */
         std::shared_ptr<IOHandle> _handle;
 
-        /** The file ID for the underlying on-disk data. */
-        uint64_t _file_id;
+        /** The file for the underlying on-disk data. */
+        std::filesystem::path _file;
 
         /** The set of keys that form the sort order of the tree. */
         std::vector<std::string> _sort_keys;
@@ -733,4 +741,6 @@ namespace springtail {
          */
         void _init_schemas(ExtentSchemaPtr schema, const std::vector<std::string> &keys);
     };
+    typedef std::shared_ptr<MutableBTree> MutableBTreePtr;
+
 }

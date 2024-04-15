@@ -89,93 +89,171 @@ namespace springtail {
 
     /**
      * @brief Redis queue, uses RedisMgr client
+     *
+     * Implements a producer / consumer queue in Redis with optional two-phase commit.  The
+     * producer(s) calls push() to add entries to the queue.  Consumer(s) call pop() to consume an
+     * entry off of the queue.  Once processing of the entry is complete, the consumer calls
+     * commit() to complete the operation or abort() to fail the operation and return it to the
+     * queue.  If two-phase commit is not required, a consumer can also call pop_and_commit() which
+     * will atomically perform a pop() and commit().
+     *
      * @tparam T value type, should implement std::string serialize().
      */
     template<typename T>
     class RedisQueue {
     public:
+        RedisQueue(const std::string &key)
+            : _key(key),
+              _redis(RedisMgr::get_instance()->get_client())
+        { }
+
         /**
-         * @brief Push item onto queue (list)
+         * @brief Push item onto queue.
          * @param key list key
          * @param value value to queue
          * @return uint64_t items on list
          */
-        uint64_t push(const std::string &key, const T &value)
+        uint64_t push(const T &value)
         {
-            std::string value_string = value.serialize();
-            std::cout << "Pushing: key=" << key << ", value=" << value_string << "\n";
-            return RedisMgr::get_instance()->get_client()->rpush(key, value_string);
+            return _redis->lpush(_key, value.serialize());
         }
 
         /**
-         * @brief Pop item from queue (list)
-         * @param key list key
-         * @param timeout_secs timeout in seconds (0=block forever)
-         * @return true if value was received, false if timedout
+         * @brief Pop item from queue (list).
+         *
+         * To support a two-phase commit, we move the item from the primary queue to separate list
+         * for the specific worker.  When the work for an item is complete, then the worker must
+         * call commit() to commit the work item and remove it from it's list.  Or call abort() to
+         * return the work item to the primary queue.
+         *
+         * @param worker_id The unique ID of the worker.
+         * @param timeout_sec timeout in seconds (0=block forever)
+         * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop(const std::string &key, uint64_t timeout_secs=0)
+        std::shared_ptr<T> pop(const std::string &worker_id, uint64_t timeout_sec=0)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+
+            // remove from the main queue and move to the worker queue
+            auto &&res = _redis->brpoplpush(_key, worker_key, timeout_sec);
+            // note: blmove() not available yet in redis++
+            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
+            if (res) {
+                return std::make_shared<T>(*res);
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Commit a worker's active item.
+         *
+         * Removes the worker's item from it's separate list to complete the two-phase commit.
+         *
+         * @param worker_id The unique ID of the worker.
+         */
+        void commit(const std::string &worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->rpop(worker_key);
+        }
+
+        /**
+         * @brief Abort a worker's active item.
+         *
+         * Removes the worker's item from it's separate list and returns it to the central queue to
+         * be re-processed.  Places the work item at the front of the queue to ensure it is worked
+         * on next.
+         *
+         * @param worker_id The unique ID of the worker.
+         */
+        void abort(const std::string &worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->rpoplpush(worker_key, _key);
+            // note: lmove() not available yet in redis++
+            // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");
+        }
+
+        /**
+         * @brief Logically performs a pop() and complete() in a single operation.
+         *
+         * @param timeout_sec timeout in seconds (0=block forever)
+         * @return A pointer to the value if a value was received, nullptr if timedout
+         */
+        std::shared_ptr<T> pop_and_commit(uint64_t timeout_sec=0)
         {
             // returns an optional pair, no value if timeout first=key, second=value
-            auto &&res = RedisMgr::get_instance()->get_client()->blpop(key, timeout_secs);
+            auto &&res = _redis->brpop(_key, timeout_sec);
             if (res) {
                 return std::make_shared<T>(res->second);
             }
             return nullptr;
         }
 
-        /** list all values in redis queue */
-        std::vector<T> range(const std::string &key, long long start=0, long long end=-1)
+        /**
+         * List all the values in redis queue.  Note that they are returned in reverse insert order
+         * due to the use of brpoplpush().  We can change this behavior if redisplusplus implements
+         * lmove() and blmove() calls available in Redis 6.2.
+         */
+        std::vector<T> range(long long start=0, long long end=-1)
         {
             std::vector<std::string> values;
-            RedisMgr::get_instance()->get_client()->lrange(key, start, end, std::back_inserter(values));
+            _redis->lrange(_key, start, end, std::back_inserter(values));
             std::vector<T> result;
             for (auto &value: values) {
                 result.push_back(T(value));
             }
             return result;
         }
+
+    private:
+        std::string _key; ///< The unique key within Redis for this queue.
+        std::shared_ptr<RedisClient> _redis; ///< A connection to Redis.
     };
 
+    /**
+     * Implements an interface to maintain a sorted set of unique values within Redis.  Each value
+     * is assigned a score when added, which defines it's position within the set.
+     */
     template<typename T>
     class RedisSortedSet {
     public:
+        RedisSortedSet(const std::string &key)
+            : _key(key)
+        { }
+
         /**
          * @brief Add item to set
-         * @param key set key
          * @param value value to add
          * @return uint64_t number of items in set
          */
-        #include <vector>
-
-        uint64_t add(const std::string &key, const T &value, const uint64_t score=0)
+        uint64_t add(const T &value, const uint64_t score=0)
         {
             std::string value_string = value.serialize();
-            return RedisMgr::get_instance()->get_client()->zadd(key, value_string, score);
+            return RedisMgr::get_instance()->get_client()->zadd(_key, value_string, score);
         }
 
         /**
          * @brief Remove item from set
-         * @param key set key
          * @param value value to remove
          * @return uint64_t number of items removed
          */
-        uint64_t remove(const std::string &key, const T &value)
+        uint64_t remove(const T &value)
         {
             std::string value_string = value.serialize();
-            return RedisMgr::get_instance()->get_client()->zrem(key, value_string);
+            return RedisMgr::get_instance()->get_client()->zrem(_key, value_string);
         }
 
         /**
          * @brief Get items in set by index
-         * @param key set key
          * @param start start index (0 for first item, -1 for last item)
          * @param stop stop index (inclusive, -1 for all items)
          * @return std::vector<T> set items
          */
-        std::vector<T> get(const std::string &key, const uint64_t start=0, uint64_t stop=-1)
+        std::vector<T> get(const uint64_t start=0, uint64_t stop=-1)
         {
             std::vector<std::string> values;
-            RedisMgr::get_instance()->get_client()->zrange(key, 0, -1, std::back_inserter(values));
+            RedisMgr::get_instance()->get_client()->zrange(_key, start, stop, std::back_inserter(values));
             std::vector<T> result;
             for (auto &value: values) {
                 result.push_back(T(value));
@@ -185,22 +263,31 @@ namespace springtail {
 
         /**
          * @brief Get items in a set by score
-         * @param key set key
          * @param min minimum score (inclusive)
          * @param max maximum score (inclusive)
          * @return std::vector<T>
          */
-        std::vector<T> get_by_score(const std::string &key, const uint64_t min, const uint64_t max)
+        std::vector<T> get_by_score(const uint64_t min, const uint64_t max=-1)
         {
             std::vector<std::string> values;
-            sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
-            RedisMgr::get_instance()->get_client()->zrangebyscore(key, interval, std::back_inserter(values));
+
+            if (max >= 0) {
+                sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
+                RedisMgr::get_instance()->get_client()->zrangebyscore(_key, interval, std::back_inserter(values));
+            } else {
+                sw::redis::LeftBoundedInterval<double> interval(min, sw::redis::BoundType::RIGHT_OPEN);
+                RedisMgr::get_instance()->get_client()->zrangebyscore(_key, interval, std::back_inserter(values));
+            }
+
             std::vector<T> result;
             for (auto &value: values) {
                 result.push_back(T(value));
             }
             return result;
         }
+
+    private:
+        std::string _key; ///< The key of the sorted set.
     };
 
 }

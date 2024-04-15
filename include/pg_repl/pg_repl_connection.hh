@@ -47,7 +47,7 @@ namespace springtail
         };
 
         /** timeout between keep alive messages */
-        static inline constexpr int64_t STANDBY_MSG_INTERVAL_MSEC = 30000L;
+        static inline constexpr int64_t STANDBY_MSG_INTERVAL_MSEC = 10000L;
         /** timeout for an idle slot -- no lsn received; fast forward stream */
         static inline constexpr int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
         /** read timeout for copy data */
@@ -173,6 +173,9 @@ namespace springtail
 
     public:
 
+        /** Stub for tests */
+        PgReplConnection() = default;
+
         /**
          * @brief Constructor -- does not connect to db
          *
@@ -275,7 +278,7 @@ namespace springtail
          *
          * @param lsn LSN to set as latest flushed
          */
-        void set_last_flushed_LSN(LSN_t lsn) noexcept;
+        void set_last_flushed_LSN(LSN_t lsn);
 
         /**
          * @brief Get server version

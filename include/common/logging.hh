@@ -2,6 +2,7 @@
 #include <vector>
 #include <optional>
 #include <utility>
+#include <memory>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
@@ -10,7 +11,7 @@
 #include <spdlog/spdlog.h>
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
-    #define SPDLOG_DEBUG_MODULE(module,fmt, ...) springtail::logging::debug(module, fmt, __func__, __FILE__, __LINE__, __VA_ARGS__)
+    #define SPDLOG_DEBUG_MODULE(module,fmt, ...) springtail::logging::debug(module, fmt, __func__, __FILE__, __LINE__, ##__VA_ARGS__)
 #else
     #define SPDLOG_DEBUG_MODULE(module, ...) (void)0
 #endif

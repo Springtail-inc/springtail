@@ -37,5 +37,8 @@
             "connections": 8,
             "server" : "localhost"
         }
+    },
+    "storage": {
+	"table_dir": "/tmp/springtail/table"
     }
 }

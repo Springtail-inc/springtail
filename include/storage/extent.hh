@@ -119,54 +119,13 @@ namespace springtail {
      */
     class Extent {
     public:
-        // pre-declarations
-        class Row;
+        // forward declaration
+        class Iterator;
 
-        /** Interface to write to a row in an extent. */
-        class MutableRow {
-            // grant Row access to the _extent pointer for it's converstion constructor
-            friend Row;
-
-        private:
-            Extent * const _extent;
-
-        public:
-            uint32_t offset;
-
-            MutableRow(Extent *e, uint32_t o)
-                : _extent(e), offset(o)
-            { }
-
-            virtual ~MutableRow()
-            { }
-
-            /** Store text into the variable data and return the offset. */
-            uint32_t set_text(const std::string &value) {
-                return _extent->add_variable(reinterpret_cast<const char *>(value.data()), value.size());
-            }
-
-            /** Store binary data into the variable data and return the offset. */
-            uint32_t set_binary(const std::vector<char> &value) {
-                return _extent->add_variable(value.data(), value.size());
-            }
-
-            /** Finalize the row by writing any outstanding untyped data to the extent. */
-            void finalize() {
-                // currently empty, could be used later for any cross-row compression techniques
-            }
-
-            char * const data() const {
-                return _extent->_fixed_data->data() + offset;
-            }
-        };
-
-        /** Interface to read a row in an extent. */
+        /** Interface to access a row in an extent. */
         class Row {
         public:
-            const Extent * extent;
-            uint32_t offset;
-
-            Row(const Extent *e, uint32_t o)
+            Row(Extent *e, uint32_t o)
                 : extent(e), offset(o)
             { }
 
@@ -174,13 +133,37 @@ namespace springtail {
                 : extent(r.extent), offset(r.offset)
             { }
 
-            Row(const MutableRow &r)
-                : extent(r._extent), offset(r.offset)
-            { }
+            /** Retrieve text from the variable data. */
+            std::string get_text(uint32_t offset) {
+                return extent->get_text(offset);
+            }
 
-            const char * const data() const {
+            /** Store text into the variable data and return the offset. */
+            uint32_t set_text(const std::string &value) {
+                return extent->add_variable(reinterpret_cast<const char *>(value.data()), value.size());
+            }
+
+            /** Retrieve binary data from the variable data. */
+            std::vector<char> get_binary(uint32_t offset) {
+                return extent->get_binary(offset);
+            }
+
+            /** Store binary data into the variable data and return the offset. */
+            uint32_t set_binary(const std::vector<char> &value) {
+                return extent->add_variable(value.data(), value.size());
+            }
+
+            char *data() const {
                 return extent->_fixed_data->data() + offset;
             }
+
+        private:
+            // grant Iterator access to the Row internals
+            friend Iterator;
+            friend Extent;
+
+            Extent * extent;
+            uint32_t offset;
         };
 
         /** Iterator over the rows in an extent. */
@@ -191,11 +174,15 @@ namespace springtail {
         private:
             Row _row;
 
-            Iterator(const Extent *extent, uint32_t offset)
+            Iterator(Extent *extent, uint32_t offset)
                 : _row(extent, offset)
             { }
 
         public:
+            Iterator()
+                : _row(nullptr, 0)
+            { }
+
             Iterator(const Iterator &i)
                 : _row(i._row)
             { }
@@ -228,12 +215,17 @@ namespace springtail {
         };
 
         /** Returns an iterator to the first row of the extent. */
-        Iterator begin() const {
+        Iterator begin() {
             return Iterator(this, 0);
         }
 
+        /** Returns an iterator to the last row of the extent. */
+        Iterator last() {
+            return Iterator(this, _fixed_data->size() - _row_size);
+        }
+
         /** Returns an iterator that matches the end of the extent. */
-        Iterator end() const {
+        Iterator end() {
             return Iterator(this, _fixed_data->size());
         }
 
@@ -321,34 +313,28 @@ namespace springtail {
         }
 
         /** Return the last row in the extent. */
-        Row back() const {
+        Row back() {
             return Row(this, _fixed_data->size() - _row_size);
         }
 
         /** Find an existing row in the extent. */
-        Row at(uint32_t index) const {
+        Row at(uint32_t index) {
             assert(index * _row_size < _fixed_data->size());
             return Row(this, index * _row_size);
         }
 
-        /** Find an existing row in the extent for update. */
-        MutableRow at(uint32_t index) {
-            assert(index * _row_size < _fixed_data->size());
-            return MutableRow(this, index * _row_size);
-        }
-
         /** Allocates space for a row to the end of the extent and returns an accessor to set the data in the row. */
-        MutableRow append() {
+        Row append() {
             uint32_t offset = _fixed_data->size();
             _fixed_data->resize(offset + _row_size);
 
-            return MutableRow(this, offset);
+            return Row(this, offset);
         }
 
         /** Allocates space for a new row at a specific existing position in the extent, shifting
             other rows further in the extent.
             Note: Unstable Interface */
-        MutableRow insert(const Iterator &pos) {
+        Row insert(const Iterator &pos) {
             // if the position is the end of the extent, just append()
             if (pos == end()) {
                 return append();
@@ -366,7 +352,7 @@ namespace springtail {
             std::fill(_fixed_data->data() + pos->offset,
                       _fixed_data->data() + pos->offset + _row_size, char(0));
 
-            return MutableRow(this, pos->offset);
+            return Row(this, pos->offset);
         }
 
         /**
@@ -377,7 +363,7 @@ namespace springtail {
                 return;
             }
 
-            // XXX how to clean up variable data from the row?
+            // XXX how to clean up variable data from the row?  need some kind of reference counting
 
             // shift the existing data forward to the current position to remove the row
             const char *start = _fixed_data->data() + pos->offset + (_row_size * count);
@@ -463,7 +449,7 @@ namespace springtail {
          * Extent is the second half.  This should only be called if there are sufficient entries in
          * the extent to warrant a split.
          */
-        std::pair<std::shared_ptr<Extent>, std::shared_ptr<Extent>> split() const;
+        std::pair<std::shared_ptr<Extent>, std::shared_ptr<Extent>> split();
 
         std::future<std::shared_ptr<IOResponseAppend>>
         async_flush(std::shared_ptr<IOHandle> handle)
@@ -471,8 +457,42 @@ namespace springtail {
             std::shared_ptr<std::vector<char>> header = std::make_shared<std::vector<char>>(_header.pack());
             return handle->async_append({header, _fixed_data, _variable_data}, nullptr);
         }
+
+        std::string serialize()
+        {
+            size_t size = sizeof(uint32_t) * 2 + _fixed_data->size() + _variable_data->size();
+            std::string data(size, 0);
+
+            uint32_t fsize = _fixed_data->size();
+            uint32_t vsize = _variable_data->size();
+
+            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data());
+            std::copy_n(_fixed_data->data(), fsize, data.data() + 4);
+            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data() + 4 + fsize);
+            std::copy_n(_variable_data->data(), vsize, data.data() + 4 + fsize + 4);
+
+            return data;
+        }
+
+        void deserialize(const std::string &data)
+        {
+            uint32_t fsize, vsize;
+            std::copy_n(data.data(), 4, reinterpret_cast<char *>(&fsize));
+
+            _fixed_data->resize(fsize);
+            std::copy_n(data.data() + 4, fsize, _fixed_data->data());
+
+            std::copy_n(data.data() + 4 + fsize, 4, reinterpret_cast<char *>(&vsize));
+
+            _variable_data->resize(vsize);
+            std::copy_n(data.data() + 4 + fsize + 4, vsize, _variable_data->data());
+        }
     };
 
     /** Pointer typedef for Extent. */
     typedef std::shared_ptr<Extent> ExtentPtr;
+
+    /** Cache of <file, extent_id> -> Extent */
+    typedef ObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent> ExtentCache;
+    typedef std::shared_ptr<ExtentCache> ExtentCachePtr;
 }

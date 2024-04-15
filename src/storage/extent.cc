@@ -8,7 +8,7 @@
 namespace springtail {
 
     std::pair<ExtentPtr, ExtentPtr>
-    Extent::split() const
+    Extent::split()
     {
         // determine a half-way point
         uint32_t half = row_count() / 2;
@@ -22,18 +22,23 @@ namespace springtail {
            this was easier to implement. */
 
         // copy each row by copying it into the appropriate extent
-        auto array = _schema->get_mutable_fields();
+        auto mutable_array = _schema->get_mutable_fields();
+        auto array = _schema->get_fields();
 
         // copy the rows from this extent to the first half extent
         for (auto i = 0; i < half; i++) {
-            MutableRow &&insert_row = first->append();
-            array->bind(insert_row)->assign(array->bind(this->at(i)));
+            Row &&insert_row = first->append();
+
+            MutableTuple tuple(mutable_array, insert_row);
+            tuple.assign(FieldTuple(array, this->at(i)));
         }
 
         // copy the remaining rows from this extent to the first half extent
         for (auto i = half; i < row_count(); i++) {
-            MutableRow &&insert_row = second->append();
-            array->bind(insert_row)->assign(array->bind(this->at(i)));
+            Row &&insert_row = second->append();
+
+            MutableTuple tuple(mutable_array, insert_row);
+            tuple.assign(FieldTuple(array, this->at(i)));
         }
 
         return std::pair<ExtentPtr, ExtentPtr>(first, second);

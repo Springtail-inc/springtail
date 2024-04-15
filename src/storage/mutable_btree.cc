@@ -1,20 +1,21 @@
-#include <storage/btree_common.hh>
+#include <storage/constants.hh>
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
 
-    MutableBTree::MutableBTree(std::shared_ptr<IOHandle> handle,
-                               uint64_t file_id,
+    MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                PageCachePtr cache,
                                ExtentSchemaPtr schema)
         : _cache(cache),
-          _handle(handle),
-          _file_id(file_id),
+          _file(file),
           _sort_keys(keys),
           _xid(0),
           _finalized(true)
     {
+        // create a file handle
+        _handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
+
         // initialize the schema information
         _init_schemas(schema, keys);
     }
@@ -145,7 +146,6 @@ namespace springtail {
 
         // get the search key for this value
         TuplePtr search_key = _leaf_schema->tuple_subset(value, _sort_keys);
-        // auto &&search_key = value.get_fields(_sort_key);
 
         // traverse the tree to find the appropriate page to remove from
         NodePtr node = _find_leaf(search_key);
@@ -246,7 +246,7 @@ namespace springtail {
         // find the extent that might contain the search key
         auto &&i = std::lower_bound(_extents.begin(), _extents.end(), search_key,
                                     [this](const ExtentPtr &extent, TuplePtr key) {
-                                        return this->_key_fields->bind(extent->back())->less_than(key);
+                                        return MutableTuple(this->_key_fields, extent->back()).less_than(key);
                                     });
         if (i == _extents.end()) {
             return this->end();
@@ -256,7 +256,7 @@ namespace springtail {
         ExtentPtr e = *i;
         auto &&row_i = std::lower_bound(e->begin(), e->end(), search_key,
                                         [this](const Extent::Row &row, TuplePtr key) {
-                                            return this->_key_fields->bind(row)->less_than(key);
+                                            return MutableTuple(this->_key_fields, row).less_than(key);
                                         });
         if (row_i == e->end()) {
             return this->end();
@@ -276,7 +276,8 @@ namespace springtail {
         }
 
         // if the key is < the returned row, then there is no matching entry, return end()
-        if (search_key->less_than(_key_fields->bind(*i))) {
+        auto key = std::make_shared<MutableTuple>(_key_fields, *i);
+        if (search_key->less_than(key)) {
             return this->end();
         }
 
@@ -310,9 +311,9 @@ namespace springtail {
 
             // add an entry at the current position
             this->size -= e->byte_count();
-            Extent::MutableRow row = e->insert(page_i._row_i);
+            Extent::Row row = e->insert(page_i._row_i);
 
-            _key_fields->bind(row)->assign(page->prev_key);
+            MutableTuple(_key_fields, row).assign(page->prev_key);
             offset_f->set_uint64(row, page->extent_id);
 
             this->size += e->byte_count();
@@ -339,10 +340,10 @@ namespace springtail {
             ExtentPtr e = _extents.front();
 
             // add a row
-            Extent::MutableRow row = e->append();
+            Extent::Row row = e->append();
                     
             // save the value into the row
-            fields->bind(row)->assign(value);
+            MutableTuple(fields, row).assign(value);
 
             // update the page size
             this->size = e->byte_count();
@@ -358,10 +359,10 @@ namespace springtail {
         uint32_t old_size = e->byte_count();
 
         // add a row, if at end() will append
-        Extent::MutableRow row = e->insert(i._row_i);
+        Extent::Row row = e->insert(i._row_i);
 
         // save the value into the row
-        fields->bind(row)->assign(value);
+        MutableTuple(fields, row).assign(value);
 
         // update the size of the page
         uint32_t new_size = e->byte_count();
@@ -372,13 +373,12 @@ namespace springtail {
     }
 
     void
-    MutableBTree::Page::remove(TuplePtr search_key)
+    MutableBTree::Page::remove(TuplePtr search_key, bool is_root)
     {
         // find the position to perform the remove
         auto &&i = this->find(search_key);
         if (i == this->end()) {
-            SPDLOG_INFO("Failed to remove entry");
-            search_key->print();
+            SPDLOG_INFO("Failed to remove entry: {}", search_key->to_string());
             return; // no such entry found
         }
         ExtentPtr e = *(i._extent_i);
@@ -402,6 +402,15 @@ namespace springtail {
             if (_extents.size() > 1) {
                 _extents.erase(i._extent_i);
             }
+        }
+
+        // changes the root to a branch when it has no more children
+        // XXX it would be better if the root re-positioned down a level once it had only one entry
+        //     in it
+        if (is_root && _extents.size() == 1 && _extents.front()->empty()) {
+            // reset the root to an empty leaf
+            _extents[0] = std::make_shared<Extent>(_btree->_leaf_schema, ExtentType(false, true), _btree->_xid);
+            this->type = ExtentType(false, true);
         }
 
         // XXX re-merge extents if possible?
@@ -462,9 +471,10 @@ namespace springtail {
         for (int i = 0; i < futures.size(); i++) {
             auto &&response = futures[i].get();
 
-            ValueTuplePtr key = std::make_shared<ValueTuple>(_key_fields->bind(_extents[i]->back()));
+            auto key = std::make_shared<MutableTuple>(_key_fields, _extents[i]->back());
+            ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
             PagePtr page = std::make_shared<Page>(_btree, response->offset,
-                                                  key, _extents[i], _key_fields);
+                                                  value_key, _extents[i], _key_fields);
 
             new_pages.push_back(page);
         }
@@ -494,7 +504,8 @@ namespace springtail {
         // if the page is not the root then we store the key of the entry we used to find this page
         if (!this->type.is_root()) {
             // force a copy of the values into a ValueTuple
-            this->prev_key = std::make_shared<ValueTuple>(key_fields->bind(extent->back()));
+            auto key = std::make_shared<MutableTuple>(key_fields, extent->back());
+            this->prev_key = std::make_shared<ValueTuple>(key);
         }
     }
 
@@ -502,7 +513,7 @@ namespace springtail {
     MutableBTree::_cache_get(uint64_t extent_id)
     {
         // find the entry if it exists
-        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        auto &&i = _cache->lookup.find({_file, extent_id});
         if (i == _cache->lookup.end()) {
             return nullptr;
         }
@@ -666,7 +677,7 @@ namespace springtail {
     MutableBTree::_cache_evict(uint64_t extent_id)
     {
         // find the entry if it exists
-        auto &&i = _cache->lookup.find({_file_id, extent_id});
+        auto &&i = _cache->lookup.find({_file, extent_id});
         if (i == _cache->lookup.end()) {
             return; // not an error since someone else may have evicted
         }
@@ -955,8 +966,8 @@ namespace springtail {
 
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
-                Extent::MutableRow row = extent->append();
-                _branch_keys->bind(row)->assign(child->index_key());
+                Extent::Row row = extent->append();
+                MutableTuple(_branch_keys, row).assign(child->index_key());
                 _branch_child_f->set_uint64(row, child->extent_id);
             }
 
@@ -965,8 +976,10 @@ namespace springtail {
 
             // construct a new root page based on the new extent
             uint64_t extent_id = future.get()->offset;
-            ValueTuplePtr key = std::make_shared<ValueTuple>(_branch_keys->bind(extent->back()));
-            new_root = std::make_shared<Page>(shared_from_this(), extent_id, key, extent, _branch_keys);
+            auto key = std::make_shared<MutableTuple>(_branch_keys, extent->back());
+            ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
+            new_root = std::make_shared<Page>(shared_from_this(), extent_id,
+                                              value_key, extent, _branch_keys);
 
             // note: we don't need to add these new pages as children because they are clean
             //       pages that haven't been traversed for modification
@@ -1066,7 +1079,7 @@ namespace springtail {
         boost::unique_lock lock(parent->mutex);
 
         // remove the page from the parent
-        parent->remove(page->prev_key);
+        parent->remove(page->prev_key, (parent == _root));
 
         // remove the page from the parent's children
         parent->remove_child(page->extent_id);
@@ -1139,11 +1152,11 @@ namespace springtail {
         _leaf_keys = _leaf_schema->get_mutable_fields(keys);
 
         // construct the schema for the branches
-        SchemaColumn child(BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
         _branch_schema = _leaf_schema->create_schema(keys, { child });
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_mutable_fields(keys);
-        _branch_child_f = _branch_schema->get_mutable_field(BTREE_CHILD_FIELD);
+        _branch_child_f = _branch_schema->get_mutable_field(constant::BTREE_CHILD_FIELD);
     }
 }

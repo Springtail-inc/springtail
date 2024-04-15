@@ -12,9 +12,9 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
-#include <pg_log_mgr/pg_xact_handler.hh>
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
@@ -22,6 +22,34 @@
 using namespace springtail;
 
 namespace {
+
+    /**
+     * @brief Wrapper class for testing
+     */
+    class TestLogMgr : public PgLogMgr {
+    public:
+        using PgLogMgr::PgLogMgr;
+        TestLogMgr(const std::filesystem::path &repl_log_path,
+                   const std::filesystem::path &xact_log_path)
+            : PgLogMgr(repl_log_path, xact_log_path)
+        {
+        }
+
+        PgLogWriterPtr create_log_writer()
+        {
+            return _create_repl_logger();
+        }
+
+        PgXactLogWriterPtr create_xact_log_writer()
+        {
+            return _create_xact_logger();
+        }
+
+        void process_xact(PgTransactionPtr xact, PgXactLogWriterPtr xact_writer)
+        {
+            _process_xact(xact, xact_writer);
+        }
+    };
 
     class LogReader_Test : public ::testing::Test {
     protected:
@@ -38,6 +66,10 @@ namespace {
 
             // make a directory in /tmp/
             std::filesystem::create_directory(XACT_LOG_DIR);
+
+            // init log mgr, must come after springtail_init() due to redis system
+            // property initialization
+            _log_mgr = std::make_shared<TestLogMgr>(XACT_LOG_DIR, XACT_LOG_DIR);
         }
 
         void TearDown() override {
@@ -113,6 +145,7 @@ namespace {
         PgLogReader::PgTransactionQueuePtr _queue = std::make_shared<ConcurrentQueue<PgTransaction>>();
         PgLogReader _log_reader{_queue};
         std::vector<PgTransactionPtr> _xact_list;
+        std::shared_ptr<TestLogMgr> _log_mgr;
     };
 
     TEST_F(LogReader_Test, ProcessLog)
@@ -169,8 +202,8 @@ namespace {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
-        // initialize the xact handler
-        PgXactHandler xact_handler{std::filesystem::path(XACT_LOG_DIR)};
+        // initialize the log mgr
+        PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 
         // create a new log file
         process_json_cmd_file(std::filesystem::path(JSON_FILE));
@@ -189,7 +222,7 @@ namespace {
                 PgTransactionPtr xact = _queue->pop();
 
                 // process the transaction
-                xact_handler.process(xact);
+                _log_mgr->process_xact(xact, xact_writer);
 
                 // store it for comparison if of type commit
                 if (xact->type == PgTransaction::TYPE_COMMIT) {
@@ -199,7 +232,10 @@ namespace {
         }
 
         // fetch the redis xacts and compare
-        std::vector<PgRedisXactValue> xacts = xact_handler.get_redis_xacts();
+        RedisQueue<PgRedisXactValue> queue(redis::QUEUE_PG_TRANSACTIONS);
+        auto xacts = queue.range(0, -1);
+        std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
+
         EXPECT_EQ(xact_list.size(), xacts.size());
 
         for (int i = 0; i < xact_list.size(); i++) {

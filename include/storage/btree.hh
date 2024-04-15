@@ -1,7 +1,5 @@
 #pragma once
 
-#include <shared_mutex>
-
 #include <boost/container_hash/hash.hpp>
 
 #include <storage/field.hh>
@@ -53,8 +51,6 @@ namespace springtail {
         typedef std::shared_ptr<Node> NodePtr;
 
     public:
-        typedef ObjectCache<std::pair<uint64_t, uint64_t>, Extent> ExtentCache;
-
         /**
          * An iterator object for traversing the BTree.
          */
@@ -71,7 +67,7 @@ namespace springtail {
             { }
 
         public:
-            using iterator_category = std::forward_iterator_tag;
+            using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;
             using pointer           = const Extent::Row *;  // or also value_type*
@@ -129,6 +125,76 @@ namespace springtail {
 
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
+            /**
+             * Moves to the previous entry in the tree. If currently at end() then moves to the last
+             * entry in the tree.  If currently at begin() then error.
+             */
+            Iterator &operator--() {
+                // special case for end()
+                if (_node == nullptr) {
+                    // find the root
+                    auto root = _btree->_find_root(_xid);
+
+                    // if the root doesn't exist or is empty, return end()
+                    if (root == nullptr || root->empty()) {
+                        return *this;
+                    }
+
+                    // create a node for the root
+                    _node = std::make_shared<Node>(root, root->last(), nullptr);
+
+                    // iterate down to the leaf
+                    while (_node->extent->type().is_branch()) {
+                        // get the offset for the child
+                        uint64_t child_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
+
+                        // read the extent
+                        ExtentPtr child = _btree->_read_extent(child_id);
+
+                        // create a node for the child an move to it
+                        _node = std::make_shared<Node>(child, child->last(), _node);
+                    }
+
+                    return *this;
+                }
+
+                // if this is not the first entry in the extent, go to the previous entry
+                if (_node->row_i != _node->extent->begin()) {
+                    --(_node->row_i);
+                    return *this;
+                }
+
+                // iterate up until we are no longer at a begin()
+                uint32_t depth = 0;
+                while (_node->row_i == _node->extent->begin()) {
+                    // iterate up to the parent
+                    ++depth;
+                    _node = _node->parent;
+
+                    // if we went past the root then we were already at begin(), so return end()
+                    if (_node == nullptr) {
+                        return *this;
+                    }
+                }
+
+                // move to the previous entry in the branch
+                --(_node->row_i);
+
+                // iterate down the last entry at each level
+                while (depth > 0) {
+                    // read the child's extent ID
+                    uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
+
+                    // read the child extent
+                    ExtentPtr child = _btree->_read_extent(extent_id);
+
+                    --depth;
+                    _node = std::make_shared<Node>(child, child->last(), _node);
+                }
+
+                return *this;
+            }
+
             friend bool operator==(const Iterator& a, const Iterator& b) {
                 if ((a._node == nullptr) != (b._node == nullptr)) {
                     return false;
@@ -151,16 +217,14 @@ namespace springtail {
         /**
          * Constructs a new BTree object.
          *
-         * @param handle The handle to the underlying file data.
-         * @param file_id A unique ID for the file, used to differentiate records in the shared cache.
+         * @param file The path to the file, used to differentiate records in the shared cache.
          * @param keys A list of keys from the schema that are used to sort the entries of the tree.
          * @param schema The schema of the leaf entries of the tree.
          * @param cache A pointer to the shared cache of extents.
          * @param min_xid The earliest XID referencable by this BTree.
          * @param root_offset The offset of the root extent in the file.
          */
-        BTree(std::shared_ptr<IOHandle> handle,
-              uint64_t file_id,
+        BTree(const std::filesystem::path &file,
               const std::vector<std::string> &keys,
               std::shared_ptr<ExtentSchema> schema,
               std::shared_ptr<ExtentCache> cache,
@@ -198,8 +262,19 @@ namespace springtail {
          *
          * @param search_key The key we are searching for in the tree.
          * @param xid The XID at which we are searching.
+
+         * @param for_update If true, then will return an iterator to the last element in the tree rather than end()
          */
-        Iterator lower_bound(TuplePtr search_key, uint64_t xid) const;
+        Iterator lower_bound(TuplePtr search_key, uint64_t xid, bool for_update = false) const;
+
+        /**
+         * Returns an iterator to the first entry at a given XID that has a key that is strictly
+         * less than the provided search_key.  Returns end() if there is no such entry.
+         *
+         * @param search_key The key we are searching for in the tree.
+         * @param xid The XID at which we are searching.
+         */
+        Iterator inverse_upper_bound(TuplePtr search_key, uint64_t xid) const;
 
         /**
          * Returns an iterator to the first entry at a given XID that has a key that is equal to the
@@ -210,6 +285,13 @@ namespace springtail {
          */
         Iterator find(TuplePtr search_key, uint64_t xid) const;
 
+        /**
+         * Returns the leaf schema of this tree.
+         */
+        ExtentSchemaPtr get_schema() const
+        {
+            return _leaf_schema;
+        }
 
     private:
         /** Inverted comparison to ensure XID map is sorted in descending order. */
@@ -223,8 +305,8 @@ namespace springtail {
         /** The underlying data file. */
         std::shared_ptr<IOHandle> _handle;
 
-        /** The ID of the file. */
-        uint64_t _file_id;
+        /** The path to the file. */
+        std::filesystem::path _file;
 
         /** The column names of the sort keys. */
         std::vector<std::string> _keys;
@@ -241,7 +323,7 @@ namespace springtail {
         /** The roots of the tree.  Maps from XID -> Extent. */
         std::map<uint64_t, ExtentPtr, ReverseCompare> _roots;
 
-        /** A cache for extents of the BTree. Maps from <file_id, extent_id> => Extent. */
+        /** A cache for extents of the BTree. Maps from <file, extent_id> => Extent. */
         mutable std::shared_ptr<ExtentCache> _cache;
 
     private:
@@ -261,4 +343,6 @@ namespace springtail {
          */
         ExtentPtr _find_root(uint64_t xid) const;
     };
+
+    typedef std::shared_ptr<BTree> BTreePtr;
 }

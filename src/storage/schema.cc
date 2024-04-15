@@ -62,143 +62,72 @@ namespace springtail {
             const SchemaColumn &column = pair.second;
 
             // construct based on the column type
-            std::shared_ptr<MutableField> field;
+            std::shared_ptr<ExtentField> field;
             switch (column.type) {
-            case (SchemaType::TEXT):
+            case (SchemaType::UINT64):
+            case (SchemaType::INT64):
+            case (SchemaType::FLOAT64):
+                field = std::make_shared<ExtentField>(column.type, byte_pos);
+
                 if (column.nullable) {
-                    field = std::make_shared<NullableTextField>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
                     ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<TextField>(byte_pos);
+                }
+
+                byte_pos += 8; // add the used bytes
+                break;
+
+            case (SchemaType::TEXT):
+            case (SchemaType::BINARY):
+            case (SchemaType::UINT32):
+            case (SchemaType::INT32):
+            case (SchemaType::FLOAT32):
+                field = std::make_shared<ExtentField>(column.type, byte_pos);
+
+                if (column.nullable) {
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
+                    ++bit_pos; // add the used null bit
                 }
                     
                 byte_pos += 4; // add the used bytes
                 break;
-            case (SchemaType::BINARY):
-                if (column.nullable) {
-                    field = std::make_shared<NullableBinaryField>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<BinaryField>(byte_pos);
-                }
 
-                byte_pos += 4; // add the used bytes
-                break;
-            case (SchemaType::UINT64):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<uint64_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<uint64_t>>(byte_pos);
-                }
-
-                byte_pos += 8; // add the used bytes
-                break;
-            case (SchemaType::INT64):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<int64_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<int64_t>>(byte_pos);
-                }
-
-                byte_pos += 8; // add the used bytes
-                break;
-            case (SchemaType::UINT32):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<uint32_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<uint32_t>>(byte_pos);
-                }
-
-                byte_pos += 4; // add the used bytes
-                break;
-            case (SchemaType::INT32):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<int32_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<int32_t>>(byte_pos);
-                }
-
-                byte_pos += 4; // add the used bytes
-                break;
             case (SchemaType::UINT16):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<uint16_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<uint16_t>>(byte_pos);
-                }
-
-                byte_pos += 2; // add the used bytes
-                break;
             case (SchemaType::INT16):
+                field = std::make_shared<ExtentField>(column.type, byte_pos);
+
                 if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<int16_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
                     ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<int16_t>>(byte_pos);
                 }
 
                 byte_pos += 2; // add the used bytes
                 break;
+
             case (SchemaType::UINT8):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<uint8_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<uint8_t>>(byte_pos);
-                }
-
-                byte_pos += 1; // add the used bytes
-                break;
             case (SchemaType::INT8):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<int8_t>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<int8_t>>(byte_pos);
-                }
+                field = std::make_shared<ExtentField>(column.type, byte_pos);
 
-                byte_pos += 1; // add the used bytes
-                break;
-            case (SchemaType::BOOLEAN):
                 if (column.nullable) {
-                    // save the bool position, and count it's bit
-                    uint64_t bool_pos = bit_pos++;
-
-                    field = std::make_shared<NullableBoolField>((bool_pos >> 3), (bool_pos & 0x7), (bit_pos >> 3), (bit_pos & 0x7));
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
                     ++bit_pos; // add the used null bit
-                } else {
-                    // save the bool position, and count it's bit
-                    uint64_t bool_pos = bit_pos++;
-
-                    field = std::make_shared<BoolField>((bool_pos >> 3), (bool_pos & 0x7));
-                }
-                break;
-            case (SchemaType::FLOAT64):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<double>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<double>>(byte_pos);
                 }
 
                 byte_pos += 1; // add the used bytes
                 break;
 
-            case (SchemaType::FLOAT32):
-                if (column.nullable) {
-                    field = std::make_shared<NullableNumberField<float>>(byte_pos, (bit_pos >> 3), (bit_pos & 0x7));
-                    ++bit_pos; // add the used null bit
-                } else {
-                    field = std::make_shared<NumberField<float>>(byte_pos);
-                }
+            case (SchemaType::BOOLEAN): {
+                // save the bool position, and count it's bit
+                uint64_t bool_pos = bit_pos++;
 
-                byte_pos += 1; // add the used bytes
+                field = std::make_shared<ExtentField>(column.type, (bool_pos >> 3), (bool_pos & 0x7));
+
+                if (column.nullable) {
+                    field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
+                    ++bit_pos; // add the used null bit
+                }
                 break;
+            }
 
             default:
                 throw TypeError();
@@ -233,7 +162,7 @@ namespace springtail {
                     column,
                     size,
                     i->second.first->get_type(),
-                    i->second.first->is_nullable()
+                    i->second.first->can_be_null()
                 });
         }
 
@@ -248,34 +177,40 @@ namespace springtail {
         return std::make_shared<ExtentSchema>(all_columns);
     }
 
-    FieldArrayPtr
+    std::shared_ptr<std::vector<FieldPtr>>
     ExtentSchema::get_fields() const
     {
-        return get_mutable_fields();
+        return get_fields(_column_order);
     }
 
-    MutableFieldArrayPtr
+    std::shared_ptr<std::vector<MutableFieldPtr>>
     ExtentSchema::get_mutable_fields() const
     {
         return get_mutable_fields(_column_order);
     }
 
-    FieldArrayPtr
+    std::shared_ptr<std::vector<FieldPtr>>
     ExtentSchema::get_fields(const std::vector<std::string> &columns) const
     {
-        return get_mutable_fields(columns);
-    }
-
-    MutableFieldArrayPtr
-    ExtentSchema::get_mutable_fields(const std::vector<std::string> &columns) const
-    {
-        std::vector<MutableFieldPtr> fields;
+        auto fields = std::make_shared<std::vector<FieldPtr>>();
 
         for (auto &&name : columns) {
-            fields.push_back(this->get_mutable_field(name));
+            fields->push_back(this->get_mutable_field(name));
         }
 
-        return std::make_shared<MutableFieldArray>(fields);
+        return fields;
+    }
+
+    std::shared_ptr<std::vector<MutableFieldPtr>>
+    ExtentSchema::get_mutable_fields(const std::vector<std::string> &columns) const
+    {
+        auto fields = std::make_shared<std::vector<MutableFieldPtr>>();
+
+        for (auto &&name : columns) {
+            fields->push_back(this->get_mutable_field(name));
+        }
+
+        return fields;
     }
 
     std::shared_ptr<Tuple>
@@ -287,14 +222,13 @@ namespace springtail {
         // 2) the types of the tuple match the schema columns
 
         // find the correct column indexes for the columns
-        std::vector<std::shared_ptr<Field>> fields;
+        auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
         for (auto &&column : columns) {
             auto &&i = _field_map.find(column);
-            fields.push_back(tuple->field(i->second.second));
+            fields->push_back(tuple->field(i->second.second));
         }
 
-        auto array = std::make_shared<ReadFieldArray>(fields);
-        return array->bind(tuple->row());
+        return std::make_shared<FieldTuple>(fields, tuple->row());
     }
 
     std::shared_ptr<Field>
@@ -303,43 +237,45 @@ namespace springtail {
     {
         switch(type) {
         case(SchemaType::TEXT):
-            return std::make_shared<ConstField<std::string>>(value);
+            return std::make_shared<ConstTypeField<std::string>>(value);
 
         case(SchemaType::UINT64):
-            return std::make_shared<ConstField<uint64_t>>(std::stoull(value, nullptr, 0));
+            return std::make_shared<ConstTypeField<uint64_t>>(std::stoull(value, nullptr, 0));
 
         case(SchemaType::INT64):
-            return std::make_shared<ConstField<int64_t>>(std::stoll(value, nullptr, 0));
+            return std::make_shared<ConstTypeField<int64_t>>(std::stoll(value, nullptr, 0));
 
         case(SchemaType::UINT32):
-            return std::make_shared<ConstField<uint32_t>>(std::stoul(value, nullptr, 0));
+            return std::make_shared<ConstTypeField<uint32_t>>(std::stoul(value, nullptr, 0));
 
         case(SchemaType::INT32):
-            return std::make_shared<ConstField<int32_t>>(std::stol(value, nullptr, 0));
+            return std::make_shared<ConstTypeField<int32_t>>(std::stol(value, nullptr, 0));
 
         case(SchemaType::UINT16):
-            return std::make_shared<ConstField<uint16_t>>(static_cast<uint16_t>(std::stoul(value, nullptr, 0)));
+            return std::make_shared<ConstTypeField<uint16_t>>(static_cast<uint16_t>(std::stoul(value, nullptr, 0)));
 
         case(SchemaType::INT16):
-            return std::make_shared<ConstField<int16_t>>(static_cast<uint16_t>(std::stoi(value, nullptr, 0)));
+            return std::make_shared<ConstTypeField<int16_t>>(static_cast<uint16_t>(std::stoi(value, nullptr, 0)));
+
         case(SchemaType::UINT8):
-            return std::make_shared<ConstField<uint8_t>>(static_cast<uint8_t>(std::stoul(value, nullptr, 0)));
+            return std::make_shared<ConstTypeField<uint8_t>>(static_cast<uint8_t>(std::stoul(value, nullptr, 0)));
+
         case(SchemaType::INT8):
-            return std::make_shared<ConstField<int8_t>>(static_cast<int8_t>(std::stoi(value, nullptr, 0)));
+            return std::make_shared<ConstTypeField<int8_t>>(static_cast<int8_t>(std::stoi(value, nullptr, 0)));
 
         case(SchemaType::BOOLEAN):
             // note: might need a more robust way to check the default value
-            return std::make_shared<ConstField<bool>>(value == "true");
+            return std::make_shared<ConstTypeField<bool>>(value == "true");
 
         case(SchemaType::FLOAT64):
-            return std::make_shared<ConstField<double>>(std::stod(value));
+            return std::make_shared<ConstTypeField<double>>(std::stod(value));
 
         case(SchemaType::FLOAT32):
-            return std::make_shared<ConstField<float>>(std::stof(value));
+            return std::make_shared<ConstTypeField<float>>(std::stof(value));
 
         case(SchemaType::BINARY):
             // note: this will currently cause two copies of the default value
-            return std::make_shared<ConstField<std::vector<char>>>(std::vector<char>(value.begin(), value.end()));
+            return std::make_shared<ConstTypeField<std::vector<char>>>(std::vector<char>(value.begin(), value.end()));
 
         default:
             throw SchemaError(fmt::format("Unsupported SchemaType: {}", static_cast<uint8_t>(type)));
@@ -347,47 +283,47 @@ namespace springtail {
     }
 
     std::shared_ptr<Field>
-    VirtualSchema::_make_null_wrapper(std::shared_ptr<Field> field,
-                                      const std::string &fallback)
+    VirtualSchema::_make_default_value(std::shared_ptr<Field> field,
+                                       const std::string &fallback)
     {
         switch(field->get_type()) {
         case(SchemaType::TEXT):
-            return std::make_shared<NullWrapperField<std::string>>(field, fallback);
+            return std::make_shared<DefaultValueField<std::string>>(field, fallback);
 
         case(SchemaType::UINT64):
-            return std::make_shared<NullWrapperField<uint64_t>>(field, std::stoull(fallback, nullptr, 0));
+            return std::make_shared<DefaultValueField<uint64_t>>(field, std::stoull(fallback, nullptr, 0));
 
         case(SchemaType::INT64):
-            return std::make_shared<NullWrapperField<int64_t>>(field, std::stoll(fallback, nullptr, 0));
+            return std::make_shared<DefaultValueField<int64_t>>(field, std::stoll(fallback, nullptr, 0));
 
         case(SchemaType::UINT32):
-            return std::make_shared<NullWrapperField<uint32_t>>(field, std::stoul(fallback, nullptr, 0));
+            return std::make_shared<DefaultValueField<uint32_t>>(field, std::stoul(fallback, nullptr, 0));
 
         case(SchemaType::INT32):
-            return std::make_shared<NullWrapperField<int32_t>>(field, std::stol(fallback, nullptr, 0));
+            return std::make_shared<DefaultValueField<int32_t>>(field, std::stol(fallback, nullptr, 0));
 
         case(SchemaType::UINT16):
-            return std::make_shared<NullWrapperField<uint16_t>>(field, static_cast<uint16_t>(std::stoul(fallback, nullptr, 0)));
+            return std::make_shared<DefaultValueField<uint16_t>>(field, static_cast<uint16_t>(std::stoul(fallback, nullptr, 0)));
 
         case(SchemaType::INT16):
-            return std::make_shared<NullWrapperField<int16_t>>(field, static_cast<uint16_t>(std::stoi(fallback, nullptr, 0)));
+            return std::make_shared<DefaultValueField<int16_t>>(field, static_cast<uint16_t>(std::stoi(fallback, nullptr, 0)));
         case(SchemaType::UINT8):
-            return std::make_shared<NullWrapperField<uint8_t>>(field, static_cast<uint8_t>(std::stoul(fallback, nullptr, 0)));
+            return std::make_shared<DefaultValueField<uint8_t>>(field, static_cast<uint8_t>(std::stoul(fallback, nullptr, 0)));
         case(SchemaType::INT8):
-            return std::make_shared<NullWrapperField<int8_t>>(field, static_cast<int8_t>(std::stoi(fallback, nullptr, 0)));
+            return std::make_shared<DefaultValueField<int8_t>>(field, static_cast<int8_t>(std::stoi(fallback, nullptr, 0)));
 
         case(SchemaType::BOOLEAN):
             // note: might need a more robust way to check the default value
-            return std::make_shared<NullWrapperField<bool>>(field, fallback == "true");
+            return std::make_shared<DefaultValueField<bool>>(field, fallback == "true");
 
         case(SchemaType::FLOAT64):
-            return std::make_shared<NullWrapperField<double>>(field, std::stod(fallback));
+            return std::make_shared<DefaultValueField<double>>(field, std::stod(fallback));
 
         case(SchemaType::FLOAT32):
-            return std::make_shared<NullWrapperField<float>>(field, std::stof(fallback));
+            return std::make_shared<DefaultValueField<float>>(field, std::stof(fallback));
 
         case(SchemaType::BINARY):
-            return std::make_shared<NullWrapperField<std::vector<char>>>(field, std::vector<char>(fallback.begin(), fallback.end()));
+            return std::make_shared<DefaultValueField<std::vector<char>>>(field, std::vector<char>(fallback.begin(), fallback.end()));
 
         default:
             throw SchemaError(fmt::format("Unsupported SchemaType: {}", static_cast<uint8_t>(field->get_type())));
@@ -396,7 +332,8 @@ namespace springtail {
 
     VirtualSchema::VirtualSchema(std::shared_ptr<ExtentSchema> extent_schema,
                                  const std::map<uint32_t, SchemaColumn> &columns,
-                                 const std::vector<SchemaUpdate> &updates)
+                                 const std::vector<SchemaColumn> &updates)
+        : _extent_schema(extent_schema)
     {
         std::map<uint32_t, std::string> name_map;
 
@@ -437,7 +374,7 @@ namespace springtail {
             case (SchemaUpdateType::NULLABLE_CHANGE):
                 if (!update.nullable) {
                     auto old_field = _field_map[update.name];
-                    _field_map[update.name] = _make_null_wrapper(old_field, *(update.default_value));
+                    _field_map[update.name] = _make_default_value(old_field, *(update.default_value));
                 }
                 break;
             case (SchemaUpdateType::TYPE_CHANGE):
@@ -446,28 +383,22 @@ namespace springtail {
         }
     }
 
-    FieldArrayPtr
+    std::shared_ptr<std::vector<FieldPtr>>
     VirtualSchema::get_fields() const
     {
-        std::vector<std::shared_ptr<Field>> _fields;
-
-        for (auto &&i : _field_map) {
-            _fields.push_back(i.second);
-        }
-
-        return std::make_shared<ReadFieldArray>(_fields);
+        return this->get_fields(_extent_schema->column_order());
     }
 
-    FieldArrayPtr
+    std::shared_ptr<std::vector<FieldPtr>>
     VirtualSchema::get_fields(const std::vector<std::string> &columns) const
     {
-        std::vector<std::shared_ptr<Field>> _fields;
+        auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
 
         for (auto &&name : columns) {
-            _fields.push_back(this->get_field(name));
+            fields->push_back(this->get_field(name));
         }
 
-        return std::make_shared<ReadFieldArray>(_fields);
+        return fields;
     }
 
 }

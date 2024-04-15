@@ -125,7 +125,7 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> rows)
+    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> &&rows)
     {
         ThriftClient c = _get_client();
 
@@ -136,15 +136,18 @@ namespace springtail {
         request.extent_id = eid;
 
         // marshall up rows
-        for (const auto &r: rows) {
+        for (auto &&r: rows) {
             thrift::Row row;
             row.xid = r.xid;
             row.xid_seq = r.xid_seq;
-            row.primary_key = *r.pkey;
+            row.primary_key = std::move(r.pkey);
 
             if (r.op != RowOp::DELETE) {
                 // update or insert
-                row.__set_data(std::move(std::string(*r.data)));
+                // note: setting __isset directly to avoid data copy
+                row.data = std::move(r.data);
+                row.__isset.data = true;
+
                 if (r.op == RowOp::INSERT) {
                     row.op = thrift::RowOpType::INSERT;
                 } else {
@@ -269,8 +272,8 @@ namespace springtail {
 
             row.xid = r.xid;
             row.xid_seq = r.xid_seq;
-            row.pkey = std::make_shared<std::string_view>(std::move(r.primary_key));
-            row.data = std::make_shared<std::string_view>(std::move(r.data));
+            row.pkey = std::move(r.primary_key);
+            row.data = std::move(r.data);
             if (r.op == thrift::RowOpType::UPDATE) {
                 row.op = RowOp::UPDATE;
             } else if (r.op == thrift::RowOpType::INSERT) {
