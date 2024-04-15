@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <limits>
 
 namespace springtail::constant {
     static constexpr uint64_t UNKNOWN_EXTENT = std::numeric_limits<uint64_t>::max();
