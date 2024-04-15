@@ -308,7 +308,8 @@ namespace springtail
 
             // NOTE: a length of -1 indicates a NULL value
             if (length == -1) {
-                fields->at(i) = std::make_shared<ConstTypeField<NULL>>(NULL);
+                // TODO implement this type
+                // fields->at(i) = std::make_shared<ConstTypeField<NULL>>(NULL);
             }
 
             // a length of 0 indicates empty string
@@ -363,14 +364,16 @@ namespace springtail
                     uint64_t ts = read_int64(row_stream);
                     uint64_t epoch_ms = ts/1000 + MSEC_SINCE_Y2K;
                     std::cout << ts << " : " << epoch_ms << std::endl;
-                    fields->at(i) = std::make_shared<ConstTypeField<TIME>>(ts);
+                    // TODO implement this type
+                    // fields->at(i) = std::make_shared<ConstTypeField<TIME>>(ts);
                 }
                 else if (type == "time") {
                     // micro seconds since day start
                     assert(length == 8);
                     uint64_t ts = read_int64(row_stream);
                     std::cout << ts << " : " << (ts/1000/1000/60/60) << " hrs\n";
-                    fields->at(i) = std::make_shared<ConstTypeField<TIME>>(ts);
+                    // TODO implement this type
+                    // fields->at(i) = std::make_shared<ConstTypeField<TIME>>(ts);
                 }
                 else if (type == "date") {
                     // days since 2000-01-01 00:00:00
@@ -378,7 +381,8 @@ namespace springtail
                     uint32_t dt = read_int32(row_stream);
                     uint64_t epoch_ms = dt * 24 * 60 * 60 * 1000L + MSEC_SINCE_Y2K;
                     std::cout << dt << " : " << epoch_ms << std::endl;
-                    fields->at(i) = std::make_shared<ConstTypeField<TIME>>(dt);
+                    // TODO implement this type
+                    // fields->at(i) = std::make_shared<ConstTypeField<TIME>>(dt);
                 }
                 else if (type == "_bpchar") {
                     // array of blank padded chars
@@ -386,6 +390,7 @@ namespace springtail
                 } else {
                     row_stream.seekg(length, std::ios_base::cur);
                 }
+                // TODO handle binary?
             }  // if (length > 0)
         }
         return fields;

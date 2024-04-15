@@ -10,7 +10,7 @@
 
 namespace springtail
 {
-    Ingest::Ingest(PgCopyTable &source,
+    Ingest::Ingest(PgStreamTable &source,
                    std::string &path) {
 
         springtail_init();
@@ -24,9 +24,7 @@ namespace springtail
 
         ExtentSchemaPtr schema = populate_schema(pg_schema.columns);
 
-        ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
-
-        populate_rows(schema, extent);
+        populate_rows(schema, source);
 
         // make PgMsgTable entry and call create_table
         TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
@@ -53,15 +51,19 @@ namespace springtail
         return std::make_shared<ExtentSchema>(columns);
     }
 
-    void Ingest::populate_rows(ExtentSchemaPtr schema, ExtentPtr extent, PgStreamTable table) {
+    void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table) {
+        ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
+
         MutableFieldArrayPtr fields = schema->get_mutable_fields()
         MutableFieldArrayPtr values;
         while(values = table.next_row()){
             Extent::Row row = extent->append();
-            auto insert_tuple = KeyValueTuple data(schema->get_fields(), values, row);
-            // btree->insert(insert_tuple)
-            // TODO check extent length, create new if over constant::MAX_EXTENT_SIZE
-            // then add row from extent::back()'s' primary key into btree
+            auto insert_tuple = KeyValueTuple(schema->get_fields(), values, row);
+            if(extent->size() >= constant::MAX_EXTENT_SIZE){
+                // TODO add row from extent::back()'s primary key into btree
+                // btree->insert(insert_tuple)
+                extent.reset(new Extent(schema, ExtentType{false}, 0));
+            }
         }
     }
 }
