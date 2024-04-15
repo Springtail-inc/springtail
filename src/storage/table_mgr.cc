@@ -43,7 +43,7 @@ namespace springtail {
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<std::filesystem::path>(json, "table_dir", _table_base,
-                                            "/tmp/springtail/table");
+                                            "/opt/springtail/table");
 
         // make sure that the base directory for tables exists
         std::filesystem::create_directories(_table_base);

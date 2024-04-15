@@ -97,7 +97,7 @@ namespace springtail {
     Table::primary_lookup(TuplePtr tuple)
     {
         // always returns an iterator to a leaf entry where the key *could* exist in the table
-        auto &&i = _primary_index->find_for_update(tuple, _xid);
+        auto &&i = _primary_index->lower_bound(tuple, _xid, true);
         if (i == _primary_index->end()) {
             // this can only happen if the table is empty, in which case we need to use a
             // special extent_id that indicates an append
@@ -484,7 +484,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->find_for_update(search_key, xid);
+        auto i = _primary_lookup->lower_bound(search_key, xid, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
@@ -517,7 +517,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->find_for_update(search_key, xid);
+        auto i = _primary_lookup->lower_bound(search_key, xid, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
@@ -550,7 +550,7 @@ namespace springtail {
                                     uint64_t xid)
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_lookup->find_for_update(key, xid);
+        auto i = _primary_lookup->lower_bound(key, xid, true);
 
         // if the key isn't available, then it may be in the 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
@@ -625,7 +625,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->find_for_update(search_key, xid);
+        auto i = _primary_lookup->lower_bound(search_key, xid, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {

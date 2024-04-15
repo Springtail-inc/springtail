@@ -262,7 +262,7 @@ namespace {
 
             auto find_i = tree->find(tuple, 1);
             auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto ffu_i = tree->lower_bound(tuple, 1, true);
             auto iub_i = tree->inverse_upper_bound(tuple, 1);
 
             ASSERT_TRUE(find_i == end_i);
@@ -282,7 +282,7 @@ namespace {
             ASSERT_EQ(offset_f->get_uint64(*find_i), 6448);
 
             auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto ffu_i = tree->lower_bound(tuple, 1, true);
             auto iub_i = tree->inverse_upper_bound(tuple, 1);
 
             ASSERT_EQ(lb_i, find_i);
@@ -301,7 +301,7 @@ namespace {
             ASSERT_EQ(offset_f->get_uint64(*find_i), 30122);
 
             auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto ffu_i = tree->lower_bound(tuple, 1, true);
             auto iub_i = tree->inverse_upper_bound(tuple, 1);
 
             ASSERT_EQ(lb_i, find_i);
@@ -317,7 +317,7 @@ namespace {
 
             auto find_i = tree->find(tuple, 1);
             auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto ffu_i = tree->lower_bound(tuple, 1, true);
             auto iub_i = tree->inverse_upper_bound(tuple, 1);
 
             ASSERT_EQ(find_i, end_i);
@@ -339,7 +339,7 @@ namespace {
 
             auto find_i = tree->find(tuple, 1);
             auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->find_for_update(tuple, 1);
+            auto ffu_i = tree->lower_bound(tuple, 1, true);
             auto iub_i = tree->inverse_upper_bound(tuple, 1);
 
             ASSERT_EQ(find_i, end_i);

@@ -262,8 +262,10 @@ namespace springtail {
          *
          * @param search_key The key we are searching for in the tree.
          * @param xid The XID at which we are searching.
+
+         * @param for_update If true, then will return an iterator to the last element in the tree rather than end()
          */
-        Iterator lower_bound(TuplePtr search_key, uint64_t xid) const;
+        Iterator lower_bound(TuplePtr search_key, uint64_t xid, bool for_update = false) const;
 
         /**
          * Returns an iterator to the first entry at a given XID that has a key that is strictly
@@ -273,16 +275,6 @@ namespace springtail {
          * @param xid The XID at which we are searching.
          */
         Iterator inverse_upper_bound(TuplePtr search_key, uint64_t xid) const;
-
-        /**
-         * Returns an iterator to the first entry at a given XID that has a key that is greater than
-         * or equal to the provided search_key.  Returns an iterator to the last row in the BTree if there is no
-         * such entry.
-         *
-         * @param search_key The key we are searching for in the tree.
-         * @param xid The XID at which we are searching.
-         */
-        Iterator find_for_update(TuplePtr search_key, uint64_t xid) const;
 
         /**
          * Returns an iterator to the first entry at a given XID that has a key that is equal to the
