@@ -53,7 +53,6 @@ namespace springtail
      * @param hostname DB hostname
      * @param username DB username
      * @param password DB password
-     * @param snapshot Snapshot ID
      * @param port     DB port
      * @throws PgQueryError
      */
@@ -107,6 +106,7 @@ namespace springtail
         _schema.xids = _connection.get_string(0, 0);
 
         _connection.clear();
+        return _schema.xids;
     }
 
 
@@ -135,7 +135,7 @@ namespace springtail
      *          and is_nullable flag for each table column.  Requires getTableOid() first.
      *
      */
-    void PgCopyTable::get_schema()
+    PgTableSchema PgCopyTable::get_schema()
     {
         std::unique_ptr<char[]> table_name = _connection.escape_string(_table_name);
         std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema_name);
@@ -204,6 +204,8 @@ namespace springtail
         }
 
         _connection.clear();
+
+        return _schema;
     }
 
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "storage/field.hh"
 #include <cstdio>
 #include <string>
 #include <memory>
@@ -35,7 +36,7 @@ namespace springtail
      * @brief Serialize data for a single table from a remote
      * Postgres server to a file, and de-serialize from a file
      */
-    class PgCopyTable {
+    class PgStreamTable {
 
     private:
         /** magic number for header of the file */
@@ -48,44 +49,36 @@ namespace springtail
         std::string _db_name;
         std::string _schema_name;
         std::string _table_name;
-        std::string _filename;
+        char *_buffer = nullptr;
 
         bool _oid_flag = false;
 
         PgTableSchema _schema;
 
-        std::FILE *_file = nullptr;
-
-        // helper functions
-        // write to file
-        void write_int32(const int32_t val);
-        void write_string(const std::string &str);
-        void write_string(const char *str, unsigned len);
-        void write_string(const std::optional<std::string> str);
-        void write_bool(const bool val);
-
-        // read from file
-        int64_t read_int64();
-        int32_t read_int32();
-        int16_t read_int16();
-        char read_char();
-        bool read_bool();
-        std::optional<std::string> read_string_optional();
-        std::string read_string();
-        std::string read_string(int length);
-
         // retrieve schema, write out schema and copy data
         PgTableSchema get_schema();
-        void get_xact_xids();
+        std::string get_xact_xids();
         void get_table_oid();
         void get_pkeys();
         void write_schema();
         void copy_data();
+        std::optional<FieldArrayPtr> next_row();
+        std::optional<FieldArrayPtr> parse_row();
 
         // read in schema, copy header, copy data
         void verify_copy_header();
         void read_schema();
         void read_copy_data();
+
+        // read fields
+        int64_t read_int64(std::stringstream &stream);
+        int32_t read_int32(std::stringstream &stream);
+        int16_t read_int16(std::stringstream &stream);
+        char read_char(std::stringstream &stream);
+        bool read_bool(std::stringstream &stream);
+        std::optional<std::string> read_string_optional(std::stringstream &stream);
+        std::string read_string(std::stringstream &stream);
+        std::string read_string(std::stringstream &stream, int length);
 
     public:
 
@@ -97,24 +90,17 @@ namespace springtail
          * @param table_name table name
          * @param filename output filename
          */
-        PgCopyTable(const std::string &db_name,
+        PgStreamTable(const std::string &db_name,
                     const std::string &schema_name,
                     const std::string &table_name,
                     const std::string filename) :
             _db_name(db_name),
             _schema_name(schema_name),
-            _table_name(table_name),
-            _filename(filename)
+            _table_name(table_name)
         {}
 
-        /**
-         * @brief Empty constructor for reading data back from file
-         * @param filename input filename
-         */
-        PgCopyTable(const std::string filename) : _filename(filename)
-        {}
 
-        ~PgCopyTable()
+        ~PgStreamTable()
         {
             // release underlying connection if connected
             _connection.disconnect();
