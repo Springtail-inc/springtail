@@ -84,7 +84,9 @@ namespace springtail {
                 }
             }
 
-            num_messages--;
+            if (num_messages > 0) {
+                num_messages--;
+            }
         }
     }
 

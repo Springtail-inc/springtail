@@ -90,7 +90,9 @@ namespace springtail
         // end streaming if started, this will close streaming connection
         try {
             end_streaming();
-        } catch (...) {} // we are ending streaming, catch all exceptions
+        } catch (const std::exception &exc) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Exception during close ending streaming: {}\n", exc.what());
+        } // we are ending streaming, catch all exceptions
 
         // free the libpq standard connection if open
         if (_connection.get() != nullptr) {
