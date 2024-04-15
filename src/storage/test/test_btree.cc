@@ -33,6 +33,10 @@ namespace {
 
             _base_dir = std::filesystem::temp_directory_path() / "test_btree";
             std::filesystem::create_directories(_base_dir);
+
+            _table_id_f = _schema->get_field("table_id");
+            _name_f = _schema->get_field("name");
+            _offset_f = _schema->get_field("offset");
         }
 
         void TearDown() override {
@@ -41,6 +45,8 @@ namespace {
         }
 
         ExtentSchemaPtr _schema;
+        FieldPtr _table_id_f, _name_f, _offset_f;
+
         std::shared_ptr<MutableBTree> _write_tree;
         std::shared_ptr<ExtentCache> _read_cache;
         MutableBTree::PageCachePtr _write_cache;
@@ -86,6 +92,52 @@ namespace {
             key_fields->at(0) = std::make_shared<ConstTypeField<std::string>>(name);
             key_fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
             return std::make_shared<FieldTuple>(key_fields, nullptr);
+        }
+
+        void
+        _verify_names(BTreePtr tree, uint64_t xid, int target) {
+            int count = 0;
+
+            std::string prev = "";
+            for (auto &&i = tree->begin(xid); i != tree->end(); ++i) {
+                if (prev != "") {
+                    ASSERT_GT(_name_f->get_text(*i), prev);
+                }
+
+                prev = _name_f->get_text(*i);
+                ++count;
+            }
+
+            ASSERT_EQ(count, target);
+        }
+
+        void
+        _verify_unique_names(BTreePtr tree, uint64_t xid, int target) {
+            int count = 0;
+
+            std::string prev = "";
+            std::map<std::string, int> counts;
+            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+                if (_name_f->get_text(*i) < prev) {
+                    SPDLOG_ERROR("{} < {}", _name_f->get_text(*i), prev);
+                }
+
+                if (prev != "") {
+                    ASSERT_GE(_name_f->get_text(*i), prev);
+                }
+
+                prev = _name_f->get_text(*i);
+                ++counts[prev];
+                ++count;
+            }
+
+            for (auto &&entry : counts) {
+                if (entry.second > 1) {
+                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
+                }
+            }
+
+            ASSERT_EQ(count, target);
         }
 
         /**
@@ -158,22 +210,8 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         auto tree = _get_btree(_base_dir / "Insert10", offset);
-        int count = 0;
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GT(name_f->get_text(*i), prev);
-            }
-
-            prev = name_f->get_text(*i);
-            ++count;
-        }
-        ASSERT_EQ(count, 10);
+        _verify_names(tree, 1, 10);
     }
 
     TEST_F(BTree_Test, InsertAll) {
@@ -203,22 +241,8 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         auto tree = _get_btree(_base_dir / "InsertAll", offset);
-        int count = 0;
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GT(name_f->get_text(*i), prev);
-            }
-
-            prev = name_f->get_text(*i);
-            ++count;
-        }
-        ASSERT_EQ(count, 5000);
+        _verify_names(tree, 1, 5000);
     }
 
     TEST_F(BTree_Test, Search) {
@@ -252,10 +276,6 @@ namespace {
         auto begin_i = tree->begin(1);
         auto end_i = tree->end();
 
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         // search for an entry before all of the keys
         {
             auto tuple = _create_key("aaaa", 0);
@@ -277,9 +297,9 @@ namespace {
 
             auto find_i = tree->find(tuple, 1);
 
-            ASSERT_EQ(name_f->get_text(*find_i), "aabbatini8y");
-            ASSERT_EQ(table_id_f->get_uint64(*find_i), 323);
-            ASSERT_EQ(offset_f->get_uint64(*find_i), 6448);
+            ASSERT_EQ(_name_f->get_text(*find_i), "aabbatini8y");
+            ASSERT_EQ(_table_id_f->get_uint64(*find_i), 323);
+            ASSERT_EQ(_offset_f->get_uint64(*find_i), 6448);
 
             auto lb_i = tree->lower_bound(tuple, 1);
             auto ffu_i = tree->lower_bound(tuple, 1, true);
@@ -296,9 +316,9 @@ namespace {
 
             auto find_i = tree->find(tuple, 1);
 
-            ASSERT_EQ(table_id_f->get_uint64(*find_i), 31);
-            ASSERT_EQ(name_f->get_text(*find_i), "mplainu");
-            ASSERT_EQ(offset_f->get_uint64(*find_i), 30122);
+            ASSERT_EQ(_table_id_f->get_uint64(*find_i), 31);
+            ASSERT_EQ(_name_f->get_text(*find_i), "mplainu");
+            ASSERT_EQ(_offset_f->get_uint64(*find_i), 30122);
 
             auto lb_i = tree->lower_bound(tuple, 1);
             auto ffu_i = tree->lower_bound(tuple, 1, true);
@@ -322,15 +342,15 @@ namespace {
 
             ASSERT_EQ(find_i, end_i);
 
-            ASSERT_EQ(table_id_f->get_uint64(*lb_i), 526);
-            ASSERT_EQ(name_f->get_text(*lb_i), "mabrahimel");
-            ASSERT_EQ(offset_f->get_uint64(*lb_i), 33466);
+            ASSERT_EQ(_table_id_f->get_uint64(*lb_i), 526);
+            ASSERT_EQ(_name_f->get_text(*lb_i), "mabrahimel");
+            ASSERT_EQ(_offset_f->get_uint64(*lb_i), 33466);
 
             ASSERT_EQ(ffu_i, lb_i);
 
-            ASSERT_EQ(table_id_f->get_uint64(*iub_i), 997);
-            ASSERT_EQ(name_f->get_text(*iub_i), "lzipsellro");
-            ASSERT_EQ(offset_f->get_uint64(*iub_i), 86407);
+            ASSERT_EQ(_table_id_f->get_uint64(*iub_i), 997);
+            ASSERT_EQ(_name_f->get_text(*iub_i), "lzipsellro");
+            ASSERT_EQ(_offset_f->get_uint64(*iub_i), 86407);
         }
 
         // search for a non-existing entry past the last entry
@@ -345,9 +365,9 @@ namespace {
             ASSERT_EQ(find_i, end_i);
             ASSERT_EQ(lb_i, end_i);
 
-            ASSERT_EQ(table_id_f->get_uint64(*ffu_i), 430);
-            ASSERT_EQ(name_f->get_text(*ffu_i), "zwoolertonbx");
-            ASSERT_EQ(offset_f->get_uint64(*ffu_i), 92729);
+            ASSERT_EQ(_table_id_f->get_uint64(*ffu_i), 430);
+            ASSERT_EQ(_name_f->get_text(*ffu_i), "zwoolertonbx");
+            ASSERT_EQ(_offset_f->get_uint64(*ffu_i), 92729);
 
             ASSERT_EQ(iub_i, ffu_i);
         }
@@ -401,37 +421,13 @@ namespace {
         offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         auto tree = _get_btree(_base_dir / "InsertAndRemove", offset);
 
         // check XID 1 for all entries
-        int count = 0;
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GT(name_f->get_text(*i), prev);
-            }
-
-            prev = name_f->get_text(*i);
-            ++count;
-        }
-        ASSERT_EQ(count, 5000);
+        _verify_names(tree, 1, 5000);
 
         // check XID 2 for half the entries
-        count = 0;
-        prev = "";
-        for (auto &&i = tree->begin(2); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GT(name_f->get_text(*i), prev);
-            }
-
-            prev = name_f->get_text(*i);
-            ++count;
-        }
-        ASSERT_EQ(count, 2500);
+        _verify_names(tree, 2, 2500);
     }
 
     TEST_F(BTree_Test, InsertAndRemoveAll) {
@@ -474,31 +470,13 @@ namespace {
         offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         auto tree = _get_btree(_base_dir / "InsertAndRemoveAll", offset);
 
         // check XID 1 for all entries
-        int count = 0;
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GT(name_f->get_text(*i), prev);
-            }
-
-            prev = name_f->get_text(*i);
-            ++count;
-        }
-        ASSERT_EQ(count, 5000);
+        _verify_names(tree, 1, 5000);
 
         // check XID 2 for no entries
-        count = 0;
-        for (auto &&i = tree->begin(2); i != tree->end(); ++i) {
-            ++count;
-        }
-        ASSERT_EQ(count, 0);
+        _verify_names(tree, 2, 0);
     }
 
     TEST_F(BTree_Test, InsertSame) {
@@ -531,21 +509,19 @@ namespace {
 
         auto tree = _get_btree(_base_dir / "InsertSame", offset);
 
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         // check for all entries
         int count = 0;
+
         std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
             if (prev != "") {
-                ASSERT_EQ(name_f->get_text(*i), prev);
+                ASSERT_EQ(_name_f->get_text(*i), prev);
             }
 
-            prev = name_f->get_text(*i);
+            prev = _name_f->get_text(*i);
             ++count;
         }
+
         ASSERT_EQ(count, 5000);
     }
 
@@ -579,21 +555,19 @@ namespace {
 
         auto tree = _get_btree(_base_dir / "InsertMany", offset);
 
-        auto table_id_f = _schema->get_field("table_id");
-        auto name_f = _schema->get_field("name");
-        auto offset_f = _schema->get_field("offset");
-
         // check for all entries
         int count = 0;
+
         std::string prev = "";
         for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
             if (prev != "") {
-                ASSERT_GE(name_f->get_text(*i), prev);
+                ASSERT_GE(_name_f->get_text(*i), prev);
             }
 
-            prev = name_f->get_text(*i);
+            prev = _name_f->get_text(*i);
             ++count;
         }
+
         ASSERT_EQ(count, 50000);
     }
 
@@ -633,24 +607,20 @@ namespace {
 
             auto tree = _get_btree(_base_dir / "ThreadedInserts", offset);
 
-            auto table_id_f = _schema->get_field("table_id");
-            auto name_f = _schema->get_field("name");
-            auto offset_f = _schema->get_field("offset");
-
             // check for all entries
             int count = 0;
             std::string prev = "";
             std::map<std::string, int> counts;
             for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", name_f->get_text(*i), prev);
+                if (_name_f->get_text(*i) < prev) {
+                    SPDLOG_ERROR("{} < {}", _name_f->get_text(*i), prev);
                 }
 
                 if (prev != "") {
-                    ASSERT_GE(name_f->get_text(*i), prev);
+                    ASSERT_GE(_name_f->get_text(*i), prev);
                 }
 
-                prev = name_f->get_text(*i);
+                prev = _name_f->get_text(*i);
                 ++counts[prev];
                 ++count;
             }
@@ -701,34 +671,8 @@ namespace {
 
             auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
 
-            auto table_id_f = _schema->get_field("table_id");
-            auto name_f = _schema->get_field("name");
-            auto offset_f = _schema->get_field("offset");
-
             // check for all entries
-            int count = 0;
-            std::string prev = "";
-            std::map<std::string, int> counts;
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", name_f->get_text(*i), prev);
-                }
-
-                if (prev != "") {
-                    ASSERT_GE(name_f->get_text(*i), prev);
-                }
-
-                prev = name_f->get_text(*i);
-                ++counts[prev];
-                ++count;
-            }
-
-            for (auto &&entry : counts) {
-                if (entry.second > 1) {
-                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
-                }
-            }
-            ASSERT_EQ(count, 5000);
+            _verify_unique_names(tree, 1, 5000);
 
             // set the next XID
             btree->set_xid(2);
@@ -754,16 +698,8 @@ namespace {
 
             auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
 
-            auto table_id_f = _schema->get_field("table_id");
-            auto name_f = _schema->get_field("name");
-            auto offset_f = _schema->get_field("offset");
-
             // check for all entries
-            int count = 0;
-            for (auto &&i = tree->begin(2); i != tree->end(); ++i) {
-                ++count;
-            }
-            ASSERT_EQ(count, 0);
+            _verify_names(tree, 2, 0);
         });
 
         // run the phases using 4 threads (just one phase here)
@@ -813,62 +749,14 @@ namespace {
             // check the first file
             auto tree = _get_btree(_base_dir / "ThreadedInsertsOne", offset1);
 
-            auto table_id_f = _schema->get_field("table_id");
-            auto name_f = _schema->get_field("name");
-            auto offset_f = _schema->get_field("offset");
-
             // check for all entries
-            int count = 0;
-            std::string prev = "";
-            std::map<std::string, int> counts;
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", name_f->get_text(*i), prev);
-                }
-
-                if (prev != "") {
-                    ASSERT_GE(name_f->get_text(*i), prev);
-                }
-
-                prev = name_f->get_text(*i);
-                ++counts[prev];
-                ++count;
-            }
-
-            for (auto &&entry : counts) {
-                if (entry.second < 10) {
-                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
-                }
-            }
-            ASSERT_EQ(count, 50000);
+            _verify_unique_names(tree, 1, 50000);
 
             // check the second file
             tree = _get_btree(_base_dir / "ThreadedInsertsTwo", offset2);
 
             // check for all entries
-            count = 0;
-            prev = "";
-            counts.clear();
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", name_f->get_text(*i), prev);
-                }
-
-                if (prev != "") {
-                    ASSERT_GE(name_f->get_text(*i), prev);
-                }
-
-                prev = name_f->get_text(*i);
-                ++counts[prev];
-                ++count;
-            }
-
-            for (auto &&entry : counts) {
-                if (entry.second < 10) {
-                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
-                }
-            }
-            ASSERT_EQ(count, 50000);
+            _verify_unique_names(tree, 1, 50000);
         });
 
         // run the phases using 4 threads (just one phase here)
