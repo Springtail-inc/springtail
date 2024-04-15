@@ -6,6 +6,7 @@
 
 #include <common/logging.hh>
 
+#include <proxy/pool.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
 
@@ -94,6 +95,8 @@ namespace springtail {
         std::string _database;
         std::string _password;
         uint32_t    _salt;
+
+        Pool        _pool;
 
         std::shared_ptr<ScramKeys> _scram_keys;
     };

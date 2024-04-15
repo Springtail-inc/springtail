@@ -79,6 +79,11 @@ namespace springtail {
          * thread entry, calls _process() */
         void operator()();
 
+        /** Less than operator for std::set */
+        bool operator<(const Session &rhs) {
+            return _connection->get_socket() < rhs._connection->get_socket();
+        }
+
         /** Process messages for session connection,
          * must be implemented by derived class */
         virtual void _process() = 0;

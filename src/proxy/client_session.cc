@@ -40,6 +40,12 @@ namespace springtail {
     }
 
     void
+    ClientSession::notify(ServerSessionPtr server_session)
+    {
+        // do something with the server session
+    }
+
+    void
     ClientSession::_process()
     {
         SPDLOG_DEBUG("Processing client session: state={}", (int8_t)_state);
@@ -125,13 +131,16 @@ namespace springtail {
             }
         }
 
-        // get user login info and store it
-        _login = _get_user_login();
-        if (_login == nullptr) {
+        // get user info and store it
+        _user = _server->get_user_mgr()->get_user(_username, _database);
+        if (_user == nullptr) {
             SPDLOG_ERROR("User {} not found", _username);
             _state = ERROR;
             return;
         }
+
+        // get login info for the user
+        _login = _user->get_user_login();
 
         // handle authentication -- send auth request
         _send_auth_req();

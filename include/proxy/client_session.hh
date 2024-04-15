@@ -29,8 +29,12 @@ namespace springtail {
 
         ~ClientSession();
 
+        void notify(ServerSessionPtr server_session);
+
     private:
         int _id;
+
+        UserPtr _user;
 
         void _process() override;
 

@@ -18,6 +18,8 @@ namespace springtail {
         void _process() override;
 
     private:
+        bool _is_pinned = false;
+
         /** Initial setup, SSL negotiation */
         void _handle_startup();
 
@@ -38,4 +40,5 @@ namespace springtail {
 
         void _handle_auth_scram_complete(const std::string &data);
     };
+    using ServerSessionPtr = std::shared_ptr<ServerSession>;
 }
