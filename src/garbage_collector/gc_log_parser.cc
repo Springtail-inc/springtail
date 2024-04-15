@@ -2,7 +2,7 @@
 
 #include <garbage_collector/gc_log_parser.hh>
 
-#include <pg_log_mgr/pg_xact_handler.hh>
+#include <pg_log_mgr/pg_log_mgr.hh>
 
 #include <storage/constants.hh>
 #include <storage/table_mgr.hh>
@@ -35,7 +35,7 @@ namespace springtail {
 
         return false;
     }
-    
+
     void
     GCLogParser::Backlog::push(uint64_t xid,
                                uint64_t oid,
@@ -66,7 +66,7 @@ namespace springtail {
         if (_ready.empty()) {
             return nullptr;
         }
-                
+
         auto request = _ready.back();
         _ready.pop_back();
         return request;
@@ -368,8 +368,8 @@ namespace springtail {
                 } else {
                     // XXX how to get the next file?
                     _state->entry->begin_path = fs::get_next_file(_state->entry->begin_path,
-                                                                  PgXactHandler::LOG_PREFIX,
-                                                                  PgXactHandler::LOG_SUFFIX);
+                                                                  PgLogMgr::LOG_PREFIX_REPL,
+                                                                  PgLogMgr::LOG_SUFFIX);
                     begin_offset = 0;
                     commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
                         ? _state->entry->commit_offset
@@ -590,7 +590,7 @@ namespace springtail {
                         data.pkey = old_extent->serialize();
                         data.data = new_extent->serialize();
                         data.op = WriteCacheClient::RowOp::UPDATE;
-                                
+
                         _write_cache->add_rows(table->id(), old_extent_id, { data });
                     } else {
                         // lookup the extent for the new key
