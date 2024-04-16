@@ -26,7 +26,7 @@ namespace springtail {
         TIMESTAMP
     };
 
-    SchemaType strToSchemaType(std::string string) {
+    inline SchemaType strToSchemaType(std::string string) {
         const std::map<std::string, SchemaType> map = {
             {"TEXT", SchemaType::TEXT},
             {"UINT64", SchemaType::UINT64},

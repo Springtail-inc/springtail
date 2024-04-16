@@ -54,6 +54,7 @@ namespace springtail
     void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table) {
         ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
+        table.copy_data();
         MutableFieldArrayPtr fields = schema->get_mutable_fields()
         MutableFieldArrayPtr values;
         while(values = table.next_row()){
