@@ -45,7 +45,6 @@ find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
-find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
 enable_testing()
 include(GoogleTest)
@@ -59,6 +58,8 @@ else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
 endif()
 
+set(VCPKG_INCLUDE_PATH "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+
 ## source modules
 add_subdirectory(src/common)
 add_subdirectory(src/storage)
@@ -71,12 +72,11 @@ add_subdirectory(src/xid_mgr)
 add_subdirectory(src/thrift)
 
 ## Messages keep at end of file
-message(STATUS "xxhash: " ${xxhash_DIR})
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
+message(STATUS "System name: " ${CMAKE_SYSTEM_NAME})
 message(STATUS "Compiler: " ${CMAKE_CXX_COMPILER})
 message(STATUS "Compiler flags: " ${CMAKE_CXX_COMPILE_FLAGS})
 message(STATUS "Compiler cxx debug flags: " ${CMAKE_CXX_FLAGS_DEBUG})
 message(STATUS "Compiler cxx release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 message(STATUS "Compiler cxx flags:" ${CMAKE_CXX_FLAGS})
 message(STATUS "Byte order for target: " ${CMAKE_CXX_BYTE_ORDER})
-

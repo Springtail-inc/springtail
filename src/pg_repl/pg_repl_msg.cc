@@ -111,7 +111,7 @@ namespace pg_msg {
                 ss << "  rel_name=" << relation.rel_name_str << std::endl;
 
                 ss << "  Columns" << std::endl;
-                for (int i = 0; i < relation.columns.size(); i++) {
+                for (std::size_t i = 0; i < relation.columns.size(); i++) {
                     ss << "  - name=" << relation.columns[i].column_name << std::endl;
                     ss << "  - key=" << (relation.columns[i].flags == 1) << std::endl;
                     ss << "  - oid=" << relation.columns[i].oid << std::endl;

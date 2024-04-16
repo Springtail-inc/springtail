@@ -4,20 +4,22 @@ set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
+find_package(Boost COMPONENTS thread REQUIRED)
 
 ## main library
 add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(springtail_storage PRIVATE lz4::lz4 xxHash::xxhash)
+target_link_libraries(springtail_storage PRIVATE lz4::lz4 xxHash::xxhash ${Boost_LIBRARIES})
 
 
 ## helpers
 add_executable(read_leaf test/read_leaf.cc)
-target_include_directories(read_leaf PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(read_leaf PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(read_leaf PUBLIC springtail_common springtail_storage)
 
 add_executable(read_branch test/read_branch.cc)
-target_include_directories(read_branch PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(read_branch PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(read_branch PUBLIC springtail_common springtail_storage)
 
 ## tests

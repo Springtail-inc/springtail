@@ -323,13 +323,13 @@ namespace springtail
         char *strbuf = new char[len + 1];
         int r = std::fread(strbuf, 1, len, _file);
         if (r != len) {
-            free(strbuf);
+            delete[](strbuf);
             throw PgIOError();
         }
         strbuf[len] = '\0';
 
         std::string str(strbuf);
-        free (strbuf);
+        delete[](strbuf);
 
         return str;
     }
@@ -388,7 +388,7 @@ namespace springtail
             return;
         }
 
-        int r = std::fwrite(str, 1, len, _file);
+        auto r = std::fwrite(str, 1, len, _file);
         if (r != len) {
             std::cerr << fmt::format("write_string: wrote {} bytes instead of {} bytes\n", r, len);
             throw PgIOError();
@@ -438,7 +438,7 @@ namespace springtail
         write_int32(_schema.table_oid);
 
         write_int32(_schema.columns.size());
-        for (int i = 0; i < _schema.columns.size(); i++) {
+        for (std::size_t i = 0; i < _schema.columns.size(); i++) {
             write_int32(_schema.columns[i].position);
             write_bool(_schema.columns[i].is_nullable);
             write_bool(_schema.columns[i].is_pkey);
@@ -515,7 +515,7 @@ namespace springtail
             throw PgQueryError();
         }
 
-        if (_connection.nfields() != _schema.columns.size()) {
+        if ((std::size_t)_connection.nfields() != _schema.columns.size()) {
             std::cerr << "Mismatch in copy fields\n";
             _connection.clear();
             throw PgQueryError();
@@ -547,7 +547,8 @@ namespace springtail
             // got a non-zero result, r indicates number of bytes
             // (shouldn't be null but check anyway)
             std::cout << fmt::format("Copy got: {} bytes\n", r);
-            if (std::fwrite(buffer, 1, r, _file) < r) {
+            std::size_t to_write = r;
+            if (std::fwrite(buffer, 1, to_write, _file) < to_write) {
                 std::cerr << "Error writing copy data\n";
                 _connection.free_copy_buffer();
                 throw PgIOError();
