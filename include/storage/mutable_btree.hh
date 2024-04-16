@@ -28,9 +28,6 @@ namespace springtail {
      * the new root of the tree.  After this operation, no further modifications can be made at the
      * current XID.
      *
-     * The MutableBTree also provides O(log n) interfaces for find(), lower_bound(), and
-     * upper_bound(), which all return forward iterators.
-     *
      * Because all modifications are done copy-on-write, it is safe to have (potentially multiple)
      * read-only BTree objects constructed against the same underlying file being used concurrently
      * with the MutableBTree.

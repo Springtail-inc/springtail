@@ -15,34 +15,15 @@ namespace springtail {
      */
     class Table : public std::enable_shared_from_this<Table> {
     public:
+        /**
+         * A forward iterator over the rows of a Table object.
+         */
         class Iterator {
+            friend Table;
+
         public:
-            /** Specifically for the end() iterator. */
-            Iterator(const Table *table, BTreePtr btree)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree->end()),
-                  _extent(nullptr)
-            { }
-
-            Iterator(const Table *table,
-                     BTreePtr btree, const BTree::Iterator &btree_i,
-                     ExtentPtr extent, const Extent::Iterator &extent_i)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree_i),
-                  _extent(extent),
-                  _extent_i(extent_i)
-            { }
-
-            Iterator(const Iterator &i)
-                : _table(i._table),
-                  _btree(i._btree),
-                  _btree_i(i._btree_i),
-                  _extent(i._extent),
-                  _extent_i(i._extent_i)
-            { }
-                  
+            /** Copy constructor. */
+            Iterator(const Iterator &i) = default;
 
             using iterator_category = std::forward_iterator_tag;
             using difference_type   = std::ptrdiff_t;
@@ -53,6 +34,9 @@ namespace springtail {
             reference operator*() const { return *(_extent_i); }
             pointer operator->() { return &(*(_extent_i)); }
 
+            /**
+             * Move the iterator forward to the next row.
+             */
             Iterator& operator++() {
                 // move to the next row in the data extent
                 ++_extent_i;
@@ -73,17 +57,46 @@ namespace springtail {
                 return *this;
             }
 
+            /**
+             * Returns a new iterator at the next row.
+             */
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
+            /**
+             * Compares two iterators for equality.
+             */
             friend bool operator==(const Iterator& a, const Iterator& b) {
                 return (a._btree_i == b._btree_i &&
                         (a._btree_i == a._btree->end() || a._extent_i == b._extent_i));
             }
 
+            /**
+             * Compares two iterators for inequality.
+             */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
         private:
-            const Table *_table;
+            /** Specifically for the end() iterator. */
+            Iterator(const Table *table, BTreePtr btree)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree->end()),
+                  _extent(nullptr)
+            { }
+
+            /** For constructing an Iterator from the Table functions. */
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     ExtentPtr extent, const Extent::Iterator &extent_i)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree_i),
+                  _extent(extent),
+                  _extent_i(extent_i)
+            { }
+
+        private:
+            const Table *_table; ///< A pointer to the Table object this iterator is for.
 
             BTreePtr _btree;
             BTree::Iterator _btree_i;
