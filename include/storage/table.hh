@@ -22,9 +22,6 @@ namespace springtail {
             friend Table;
 
         public:
-            /** Copy constructor. */
-            Iterator(const Iterator &i) = default;
-
             using iterator_category = std::forward_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;

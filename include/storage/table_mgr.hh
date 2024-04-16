@@ -61,11 +61,6 @@ namespace springtail {
         TableMgr();
 
         /**
-         * @brief Destroy the TableMgr object
-         */
-        ~TableMgr(){};
-
-        /**
          * Construct a system table.
          */
         TablePtr _get_system_table(uint64_t table_id, uint64_t xid);

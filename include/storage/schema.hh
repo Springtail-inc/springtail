@@ -8,8 +8,6 @@
 #include <storage/exception.hh>
 #include <storage/schema_type.hh>
 
-// #include <storage/schema_column.hh>
-
 namespace springtail {
     // pre-declare field classes
     class Field;
@@ -131,7 +129,7 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        ExtentSchema(const std::vector<SchemaColumn> &columns) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
@@ -145,13 +143,10 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        ExtentSchema(const std::map<uint32_t, SchemaColumn> columns)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns)
         {
             _populate(columns);
         }
-
-        /** Copy constructor. */
-        ExtentSchema(const ExtentSchema &schema) = default;
 
         /** Returns the fixed width for a single row. */
         uint32_t row_size() const {

@@ -31,11 +31,7 @@ namespace springtail {
             : _type(LEAF)
         { }
 
-        ExtentType(const ExtentType &type)
-            : _type(type._type)
-        { }
-
-        ExtentType(uint8_t type)
+        explicit ExtentType(uint8_t type)
             : _type(type)
         { }
 
@@ -43,7 +39,7 @@ namespace springtail {
             : _type(((branch) ? BRANCH : LEAF) | ((root) ? ROOT_MASK : 0))
         { }
 
-        operator uint8_t() const {
+        explicit operator uint8_t() const {
             return _type;
         }
 
@@ -73,9 +69,6 @@ namespace springtail {
               xid(xid),
               prev_offset(prev)
         { }
-
-        /** Copy constructor. */
-        ExtentHeader(const ExtentHeader &header) = default;
 
         /** Constructor that deserializes the header. */
         ExtentHeader(std::shared_ptr<std::vector<char>> data)
@@ -129,10 +122,6 @@ namespace springtail {
                 : extent(e), offset(o)
             { }
 
-            Row(const Row &r)
-                : extent(r.extent), offset(r.offset)
-            { }
-
             /** Retrieve text from the variable data. */
             std::string get_text(uint32_t offset) {
                 return extent->get_text(offset);
@@ -181,10 +170,6 @@ namespace springtail {
         public:
             Iterator()
                 : _row(nullptr, 0)
-            { }
-
-            Iterator(const Iterator &i)
-                : _row(i._row)
             { }
 
             using iterator_category = std::random_access_iterator_tag;

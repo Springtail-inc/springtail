@@ -67,12 +67,6 @@ namespace springtail {
          */
         SchemaMgr();
 
-        /**
-         * @brief Destroy the SchemaMgr object
-         */
-        ~SchemaMgr(){};
-
-
     private:
         /** A helper class that holds all of the information about a table schema in-memory. */
         class SchemaInfo {

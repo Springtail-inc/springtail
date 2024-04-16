@@ -69,7 +69,7 @@ namespace springtail {
             boost::shared_mutex mutex;
 
         public:
-            PageCache(uint64_t max_size)
+            explicit PageCache(uint64_t max_size)
                 : size(0),
                   max_size(max_size)
             { }

@@ -40,12 +40,6 @@ namespace springtail {
                   parent(p)
             { }
 
-            Node(const Node &n)
-                : extent(n.extent),
-                  row_i(n.row_i),
-                  parent(n.parent)
-            { }
-
             bool operator==(const Node& rhs) const { return (extent == rhs.extent && row_i == rhs.row_i); }
         };
         typedef std::shared_ptr<Node> NodePtr;

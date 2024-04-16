@@ -19,7 +19,7 @@ namespace springtail {
      */
     class Field {
     public:
-        virtual ~Field() { }
+        virtual ~Field() = default;
 
         virtual SchemaType get_type() const = 0;
 
@@ -255,8 +255,7 @@ namespace springtail {
      */
     class MutableField : public Field {
     public:
-        MutableField()
-        { }
+        MutableField() = default;
 
         // functions to set values
         virtual void set_undefined(const std::any &row, bool is_undefined) {
@@ -714,7 +713,7 @@ namespace springtail {
             sendint32(offset, fixed);
         }
 
-    protected:
+    private:
         bool
         _get_bit(const Extent::Row &row,
                  uint32_t offset,
@@ -740,7 +739,7 @@ namespace springtail {
             }
         }
 
-    protected:
+    private:
         SchemaType _type;
 
         bool _can_null;
@@ -776,7 +775,7 @@ namespace springtail {
         T _value;
 
     public:
-        ConstTypeField(T value)
+        explicit ConstTypeField(T value)
             : _value(value)
         { }
 
@@ -925,7 +924,7 @@ namespace springtail {
         SchemaType _type;
 
     public:
-        ConstNullField(SchemaType type)
+        explicit ConstNullField(SchemaType type)
             : _type(type)
         { }
 
@@ -1122,10 +1121,10 @@ namespace springtail {
      */
     class Tuple {
     public:
-        Tuple(const std::any &row)
+        explicit Tuple(const std::any &row)
             : _row(row)
         { }
-        virtual ~Tuple() { }
+        virtual ~Tuple() = default;
 
         std::any row() const
         {
@@ -1245,7 +1244,7 @@ namespace springtail {
             return value.substr(0, value.size() - 1);
         }
 
-    protected:
+    private:
         std::any _row;
     };
     typedef std::shared_ptr<Tuple> TuplePtr;
@@ -1259,7 +1258,7 @@ namespace springtail {
     class FieldTuple : public Tuple {
     public:
         FieldTuple(const FieldTuple &tuple) = default;
-        FieldTuple(FieldTuple &&tuple) = default;
+        FieldTuple(FieldTuple &&tuple) noexcept = default;
         FieldTuple(FieldArrayPtr array, const std::any &row)
             : Tuple(row),
               _array(array)
@@ -1515,7 +1514,7 @@ namespace springtail {
             : Tuple(nullptr)
         { }
 
-        ValueTuple(TuplePtr tuple)
+        explicit ValueTuple(TuplePtr tuple)
             : Tuple(nullptr)
         {
             // copy the data from the tuple into const fields
@@ -1572,7 +1571,7 @@ namespace springtail {
             }
         }
 
-        ValueTuple(const std::vector<ConstFieldPtr> &fields)
+        explicit ValueTuple(const std::vector<ConstFieldPtr> &fields)
             : Tuple(nullptr),
               _fields(fields)
         { }

@@ -99,7 +99,7 @@ namespace springtail {
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            State(std::shared_ptr<PgRedisXactValue> entry)
+            explicit State(std::shared_ptr<PgRedisXactValue> entry)
                 : entry(entry),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
@@ -118,7 +118,7 @@ namespace springtail {
          */
         class Backlog {
         public:
-            Backlog(const std::string &redis_key)
+            explicit Backlog(const std::string &redis_key)
                 : _oid_set(redis_key)
             { }
 
@@ -306,7 +306,7 @@ namespace springtail {
          */
         class Parser {
         public:
-            Parser(ParserQueuePtr parser_queue)
+            explicit Parser(ParserQueuePtr parser_queue)
                 : _parser_queue(parser_queue),
                   _write_cache(WriteCacheClient::get_instance())
             { }
