@@ -5,51 +5,60 @@ if(NOT DEFINED CMAKE_SYSTEM_NAME)
   message(FATAL_ERROR "Unsupported operating system!")
 endif()
 
-# Linux
-if(CMAKE_SYSTEM_NAME MATCHES Linux)
-  find_program(GCC_C_COMPILER gcc)
-  find_program(GCC_CXX_COMPILER g++)
+# Function to validate gcc compiler
+function(check_gcc_function RESULT_VAR COMPILER)
+    if(NOT COMPILER)
+        message(FATAL_ERROR "GCC compiler not found!")
+    endif()
 
-  # Verify GCC is the actual compiler (not Clang)
-  check_function_exists(main "" HAS_GCC_C_COMPILER)
+    # Get the version of the compiler using --version
+    execute_process(
+        COMMAND ${COMPILER} --version
+        OUTPUT_VARIABLE GCC_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
 
-  set(CMAKE_C_COMPILER ${GCC_C_COMPILER})
-  set(CMAKE_CXX_COMPILER ${GCC_CXX_COMPILER})
+    # make sure the output of --version does not contain "clang" and is >= 13.0
+    string(REGEX MATCH "clang" HAS_CLANG ${GCC_VERSION})
+    string(REGEX REPLACE "^.* ([0-9]+)\.[0-9]+.*$" "\\1" GCC_MAJOR_VERSION ${GCC_VERSION})
 
-# macOS (GCC version check)
-elseif(CMAKE_SYSTEM_NAME MATCHES Darwin)
-  find_program(CLANG_C_COMPILER clang)
-  find_program(GCC_C_COMPILER gcc-13)
-  find_program(GCC_CXX_COMPILER g++-13)
+    if(GCC_MAJOR_VERSION LESS 13)
+        set(${RESULT_VAR} FALSE PARENT_SCOPE)
+    endif()
 
-  # Ensure GCC is used, not Clang
-  if(CLANG_C_COMPILER AND NOT GCC_C_COMPILER)
-    message(FATAL_ERROR "Clang compiler found. Please install or use a compatible GCC version (>= 13).")
-  endif()
+    if(HAS_CLANG)
+        set(${RESULT_VAR} FALSE PARENT_SCOPE)
+    endif()
 
-  set(CMAKE_C_COMPILER ${GCC_C_COMPILER})
-  set(CMAKE_CXX_COMPILER ${GCC_CXX_COMPILER})
-endif()
+    message(STATUS "Compiler check: ${COMPILER}, ${GCC_VERSION}, ${RESULT_VAR}")
+endfunction()
 
-if(NOT GCC_C_COMPILER)
-  message(FATAL_ERROR "GCC compiler not found. Please install or use a compatible GCC version (>= 13). Use `brew install gcc@13` on MacOSX.")
-endif()
-
-# Verify GCC version is >= 13
-execute_process(
-    COMMAND ${GCC_CXX_COMPILER} --version
-    OUTPUT_VARIABLE GCC_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
+# Define the search paths
+set(SEARCH_PATHS
+  "/usr/bin"
+  "/usr/local/bin"
+  "/opt/bin"
+  "/opt/homebrew/bin"
 )
-string(REGEX MATCH "clang" HAS_CLANG ${GCC_VERSION})
-string(REGEX REPLACE "^.* ([0-9]+)\.[0-9]+.*$" "\\1" GCC_MAJOR_VERSION ${GCC_VERSION})
 
-if(HAS_CLANG)
-  message(FATAL_ERROR "Clang compiler found. Please install or use a compatible GCC version.")
+# Find the GCC compiler
+find_program(GCC_C_COMPILER
+    NAMES gcc gcc-13 gcc-14
+    HINTS ${SEARCH_PATHS} ENV PATH
+    VALIDATOR check_gcc_function
+)
+
+# Find the G++ compiler
+find_program(GCC_CXX_COMPILER
+    NAMES g++ g++-13 g++-14
+    HINTS ${SEARCH_PATHS} ENV PATH
+    VALIDATOR check_gcc_function
+)
+
+# Check if the GCC compiler was found
+if (NOT GCC_C_COMPILER OR NOT GCC_CXX_COMPILER)
+    message(FATAL_ERROR "GCC compiler >= 13.0 not found!")
+else()
+    message(STATUS "GCC compiler found: ${GCC_C_COMPILER}")
+    message(STATUS "GCC++ compiler found: ${GCC_CXX_COMPILER}")
 endif()
-
-if(GCC_MAJOR_VERSION LESS 13)
-  message(FATAL_ERROR "GCC version detected is less than 13. Please install or use a compatible GCC version (>= 13).")
-endif()
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare -std=c++20")
