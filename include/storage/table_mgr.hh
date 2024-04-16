@@ -90,15 +90,11 @@ namespace springtail {
         TableMgr(const TableMgr &) = delete;
         void operator=(const TableMgr &) = delete;
 
-        boost::shared_mutex _mutex;
-        std::map<uint64_t, TablePtr> _system_tables;
-        std::map<uint64_t, MutableTablePtr> _mutable_system_tables;
-        std::shared_ptr<ObjectCache<uint64_t, Table>> _table_cache;
-        std::shared_ptr<IOHandle> _handle;
+        boost::shared_mutex _mutex; ///< Protects access to the table manager.
 
-        ExtentCachePtr _read_cache;
-        DataCachePtr _data_cache;
-        MutableBTree::PageCachePtr _write_cache;
-        std::filesystem::path _table_base;
+        ExtentCachePtr _read_cache; ///< A cache of clean extents.
+        DataCachePtr _data_cache; ///< The cache of table data extents.
+        MutableBTree::PageCachePtr _write_cache; ///< The mutable btree cache.
+        std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
 }

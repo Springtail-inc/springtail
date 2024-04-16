@@ -98,14 +98,17 @@ namespace springtail {
         private:
             const Table *_table; ///< A pointer to the Table object this iterator is for.
 
-            BTreePtr _btree;
-            BTree::Iterator _btree_i;
+            BTreePtr _btree; ///< A pointer to the BTree of the primary index.
+            BTree::Iterator _btree_i; ///< An iterator into the BTree.
 
-            ExtentPtr _extent;
-            Extent::Iterator _extent_i;
+            ExtentPtr _extent; ///< A pointer to the data Extent currently being processed.
+            Extent::Iterator _extent_i; ///< An iterator into the Extent.
         };
 
     public:
+        /**
+         * Table constructor.
+         */
         Table(uint64_t table_id,
               uint64_t xid,
               const std::filesystem::path &table_dir,
@@ -162,40 +165,63 @@ namespace springtail {
             return Iterator(this, _primary_index);
         }
 
-        BTreePtr secondary(uint32_t idx) {
-            return _secondary_indexes[idx];
+        /**
+         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @return A BTree object of the requested index.
+         */
+        BTreePtr index(uint32_t idx) {
+            if (idx == 0) {
+                return _primary_index;
+            }
+            return _secondary_indexes[idx - 1];
         }
 
+        /**
+         * Reads an extent from the tree and returns it.
+         * @param extent_id The extent to read.
+         * @return A pointer to the requested extent.
+         */
         ExtentPtr read_extent(uint64_t extent_id) const;
 
     protected:
+        /**
+         * Reads a data extent using the provided iterator position within the primary index.
+         * @param pos The primary index btree iterator.
+         * @return A pointer to the requested extent.
+         */
         ExtentPtr _read_extent_via_primary(BTree::Iterator &pos) const;
 
+        /**
+         * Reads an extent from the tree and returns it.
+         * @param extent_id The extent to read.
+         * @return A pointer to the requested extent.
+         */
         ExtentPtr _read_extent(uint64_t extent_id) const;
 
     private:
         /** The ID of the table. */
         uint64_t _id;
 
-        uint64_t _xid;
-        std::filesystem::path _table_dir;
-        std::vector<std::string> _primary_key;
-        std::vector<std::vector<std::string>> _secondary_keys;
-        ExtentSchemaPtr _schema;
-        ExtentCachePtr _cache;
+        uint64_t _xid; ///< The XID at which this table is being accessed.
+        std::filesystem::path _table_dir; ///< The directory holding the table data.
+        std::vector<std::string> _primary_key; ///< The primary index key columns.
+        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns for each secondary index.
+        ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
+        ExtentCachePtr _cache; ///< The cache of clean extents.
 
-        FieldArrayPtr _pkey_fields;
-        FieldPtr _primary_extent_id_f;
+        FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
+        FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
-        std::shared_ptr<IOHandle> _handle;
+        std::shared_ptr<IOHandle> _handle; ///< The IO handle for the data file.
 
         /** The primary index of the table. */
         BTreePtr _primary_index;
 
-        std::vector<BTreePtr> _secondary_indexes;
+        std::vector<BTreePtr> _secondary_indexes; ///< The secondary indexes of the table.
 
-        ExtentSchemaPtr _roots_schema;
-        FieldPtr _roots_root_f;
+        ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
+        FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -204,6 +230,9 @@ namespace springtail {
      */
     class MutableTable : public std::enable_shared_from_this<MutableTable> {
     public:
+        /**
+         * Mutable table constructor.
+         */
         MutableTable(uint64_t id,
                      uint64_t target_xid,
                      std::vector<uint64_t> root_offsets,
@@ -215,10 +244,16 @@ namespace springtail {
                      MutableBTree::PageCachePtr page_cache,
                      ExtentCachePtr read_cache);
 
+        /**
+         * Returns the file of the raw data associated with the table.
+         */
         std::filesystem::path data_file() const {
             return _data_file;
         }
 
+        /**
+         * Returns the target XID of this table.
+         */
         uint64_t target_xid() const {
             return _target_xid;
         }
@@ -269,6 +304,9 @@ namespace springtail {
          */
         std::vector<uint64_t> finalize();
 
+        /**
+         * Returns the schema of the table.
+         */
         ExtentSchemaPtr schema() const {
             return _schema;
         }
@@ -279,55 +317,96 @@ namespace springtail {
             return _primary_key;
         }
 
+        /**
+         * Returns the table ID of this table.
+         */
         uint64_t id() const {
             return _id;
         }
 
     private:
+        /**
+         * Inserts a tuple directly into the provided extent at the given XID.
+         */
         void _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Inserts a tuple at the end of the last extent of the table at the given XID.
+         */
         void _insert_append(TuplePtr value, uint64_t xid);
 
+        /**
+         * Inserts a tuple at the given XID into the extent returned by a primary key lookup using
+         * the tuple.
+         */
         void _insert_by_lookup(TuplePtr value, uint64_t xid);
 
+        /**
+         * Inserts a tuple directly into the provided extent at the given XID, or updates an
+         * existing tuple with the same primary key value.
+         */
         void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
+         * value, using a primary key lookup to find the containing extent.
+         */
         void _upsert_by_lookup(TuplePtr value, uint64_t xid);
 
+        /**
+         * Removes a tuple from the provided extent at the given XID that has the same primary key
+         * value.
+         */
         void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Removes a tuple at the given XID that has the same primary key value by using a primary
+         * key lookup to find the containing extent.
+         */
         void _remove_by_lookup(TuplePtr key, uint64_t xid);
 
+        /**
+         * Removes a tuple at the given XID that has the same primary key value by using a table
+         * scan to find the containing extent.
+         */
         void _remove_by_scan(TuplePtr value, uint64_t xid);
 
+        /**
+         * Updates an existing row with the matching primary key value in the provided extent at the
+         * given XID.
+         */
         void _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Updates an existing row with the matching primary key value at the given XID, using a
+         * primary key lookup to find the containing extent.
+         */
         void _update_by_lookup(TuplePtr key, uint64_t xid);
 
     private:
         /** The ID of the table. */
         uint64_t _id;
 
-        uint64_t _target_xid;
-        std::filesystem::path _table_dir;
-        std::filesystem::path _data_file;
+        uint64_t _target_xid; ///< The final target XID for this set of mutations.
+        std::filesystem::path _table_dir; ///< The directory containing the table data.
+        std::filesystem::path _data_file; ///< The file containing the table data extents.
 
-        std::vector<std::string> _primary_key;
-        std::vector<std::vector<std::string>> _secondary_keys;
+        std::vector<std::string> _primary_key; ///< The key columns of the primary index.
+        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns of each secondary index.
 
         /** A lookup version of the primary index.  Pinned to the most recent XID. */
         BTreePtr _primary_lookup;
-        FieldPtr _primary_extent_id_f;
+        FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
-        MutableBTreePtr _primary_index;
-        std::vector<MutableBTreePtr> _secondary_indexes;
-        ExtentSchemaPtr _schema;
+        MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+        std::vector<MutableBTreePtr> _secondary_indexes; ///< The mutable secondary index btrees.
+        ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
 
-        DataCachePtr _cache;
+        DataCachePtr _cache; ///< The cache of table data extents.
 
-        ExtentSchemaPtr _roots_schema;
-        MutableFieldPtr _roots_root_f;
+        ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
+        MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

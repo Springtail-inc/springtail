@@ -179,7 +179,7 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->secondary(0)->begin(1) == table->secondary(0)->end());
+        ASSERT_TRUE(table->index(1)->begin(1) == table->index(1)->end());
     }
 
     TEST_F(Table_Test, Inserts) {
@@ -305,7 +305,7 @@ namespace {
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
         // verify the secondary index
-        auto secondary = table->secondary(0);
+        auto secondary = table->index(1);
 
         count = 0;
         uint64_t table_id = 0;
@@ -394,7 +394,7 @@ namespace {
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
         // verify the secondary index
-        auto secondary = table->secondary(0);
+        auto secondary = table->index(1);
 
         count = 0;
         uint64_t table_id = 0;
@@ -478,7 +478,7 @@ namespace {
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
@@ -566,7 +566,7 @@ namespace {
         ASSERT_EQ(count, 5000); // removed 10, upserted 10
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
@@ -662,7 +662,7 @@ namespace {
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
@@ -747,7 +747,7 @@ namespace {
             ASSERT_EQ(count, 5000);
 
             // verify the secondary index
-            auto secondary = table->secondary(0);
+            auto secondary = table->index(1);
 
             count = 0;
             uint64_t table_id = 0;

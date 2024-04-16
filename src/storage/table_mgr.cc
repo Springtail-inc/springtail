@@ -63,41 +63,6 @@ namespace springtail {
         }
 
         throw StorageError();
-
-#if 0
-        // check the table cache
-        // XXX Table vs. Mutable Table?  How to handle XID in Table?
-        auto table = _table_cache.get(table_id);
-        if (table != nullptr) {
-            return table;
-        }
-
-        // read the table metadata from the appropriate system table
-        auto table_roots_t = _system_tables.find(sys_tbl::TableRoots::ID)->second;
-        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, 0, xid);
-
-        // XXX specialized search that finds the entry directly before the lower_bound(search_key)
-        auto pos_i = table_roots_t->primary->inverted_upper_bound(search_key);
-        if (pos_i == table_roots_t->primary->end()) {
-            return nullptr;
-        }
-
-        auto schema = table_roots_t->get_schema(xid, lsn);
-        auto fields = schema->get_fields("table_id", "xid", "lsn");
-
-        // verify that the returned entry references the requested table
-        if (fields->at(0)->get_uint64(*pos_i) != table_id) {
-            // if not, then the table does not exist at the provided XID/LSN
-            return nullptr;
-        }
-
-        auto table = std::make_shared<Table>(table_id,
-                                             _cache,
-                                             fields->at(XID)->get_uint64(*pos_i),
-                                             fields->at(EXTENT_ID)->get_uint64(*pos_i));
-        _table_cache.insert(table_id, table);
-        return table;
-#endif
     }
 
     MutableTablePtr
@@ -413,15 +378,15 @@ namespace springtail {
         auto search_key = sys_tbl::TableNames::Secondary::key_tuple(table_id, xid, lsn);
 
         // find the row that matches the name of the table_id at the given XID/LSN
-        auto row_i = table_names_t->secondary(0)->inverse_upper_bound(search_key, xid);
-        if (row_i == table_names_t->secondary(0)->end() ||
+        auto row_i = table_names_t->index(1)->inverse_upper_bound(search_key, xid);
+        if (row_i == table_names_t->index(1)->end() ||
             schema->get_field("table_id")->get_uint64(*row_i) != table_id ||
             schema->get_field("exists")->get_bool(*row_i) == false) {
             // XXX error -- table_id doesn't exist at the provided XID
         }
 
         // read the row from the extent and retrieve the FQN
-        auto secondary_fields = table_names_t->secondary(0)->get_schema()->get_fields();
+        auto secondary_fields = table_names_t->index(1)->get_schema()->get_fields();
         auto extent_id = secondary_fields->at(sys_tbl::TableNames::Secondary::EXTENT_ID)->get_uint64(*row_i);
         auto row_id = secondary_fields->at(sys_tbl::TableNames::Secondary::ROW_ID)->get_uint32(*row_i);
         auto extent = table_names_t->read_extent(extent_id);
