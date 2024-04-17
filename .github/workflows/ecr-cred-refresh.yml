@@ -1,0 +1,37 @@
+# This is an automatically triggered workflow that runs every 8 hours to
+# refresh the ECR login credential. This is necessary because we are using a base builder image in ECRon:
+# to launch the GitHub Action container for tests and build.
+# The ECR login credential is valid for 12 hours by default
+on:
+#  schedule:
+#    # every 8 hours
+#    - cron: '0 */8 * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  update-ecr-pw:
+    runs-on: ubuntu-latest
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # need an Github Access token with Admin access to update secret
+      GH_TOKEN: ${{ secrets.GH_CLI }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::891377357651:role/example-role
+          role-session-name: tempSession
+          aws-region: us-east-1
+      - name: Get pw and update secret
+        run: |
+          export ECR_PW=`aws ecr get-login-password --region us-east-1 --output text`
+          echo $ECR_PW
+          # gh secret set <YOUR_SECRET> --org <your-org> --visibility all --body "$ECR_PW"
