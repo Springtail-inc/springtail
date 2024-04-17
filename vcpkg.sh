@@ -12,12 +12,17 @@ function find_compiler() {
 
         for path in $search_paths; do
             if [[ -x "$path/$program_name" ]]; then
+		# get version
                 program="$path/$program_name"
-                # echo "Found program '$program_name' at: $program"
                 out=$($program --version 2>&1)
+
                 if [[ ! "$out" =~ "Apple clang version" ]]; then
                     out=$($program -dumpversion 2>&1)
-                    if [[ "$out" -ge 13 ]]; then
+
+		    # Extract the major version using parameter expansion and slicing
+		    major_version=${out%%.*}
+
+                    if [[ "$major_version" -ge 13 ]]; then
                         echo "Found GCC version 13 or higher: $program"
                         found=true
                         break
