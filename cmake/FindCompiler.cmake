@@ -14,15 +14,21 @@ function(check_gcc_function RESULT_VAR COMPILER)
     # Get the version of the compiler using --version
     execute_process(
         COMMAND ${COMPILER} --version
-        OUTPUT_VARIABLE GCC_VERSION
+        OUTPUT_VARIABLE GCC_FULL_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
     # make sure the output of --version does not contain "clang" and is >= 13.0
-    string(REGEX MATCH "clang" HAS_CLANG ${GCC_VERSION})
-    string(REGEX REPLACE "^.* ([0-9]+)\.[0-9]+.*$" "\\1" GCC_MAJOR_VERSION ${GCC_VERSION})
+    string(REGEX MATCH "clang" HAS_CLANG ${GCC_FULL_VERSION})
 
-    if(GCC_MAJOR_VERSION LESS 13)
+    # use -dumpversion to get actual version number
+    execute_process(
+        COMMAND ${COMPILER} -dumpversion
+        OUTPUT_VARIABLE GCC_MAJOR_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    if(NOT GCC_MAJOR_VERSION OR GCC_MAJOR_VERSION LESS 13)
         set(${RESULT_VAR} FALSE PARENT_SCOPE)
     endif()
 
@@ -62,3 +68,6 @@ else()
     message(STATUS "GCC compiler found: ${GCC_C_COMPILER}")
     message(STATUS "GCC++ compiler found: ${GCC_CXX_COMPILER}")
 endif()
+
+set(CMAKE_C_COMPILER ${GCC_C_COMPILER})
+set(CMAKE_CXX_COMPILER ${GCC_CXX_COMPILER})
