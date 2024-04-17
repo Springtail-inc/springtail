@@ -498,10 +498,11 @@ namespace {
         csv::CSVReader reader("test_btree_simple.csv");
 
         // insert 5000 of the same row
-        auto &&r = *reader.begin();
+        auto csv_tuple = std::make_shared<FieldTuple>(csv_fields, *(reader.begin()));
+        auto const_tuple = std::make_shared<ValueTuple>(csv_tuple);
         for (int i = 0; i < 5000; ++i) {
             // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
+            btree->insert(const_tuple);
         }
 
         // finalize the tree

@@ -18,7 +18,9 @@ namespace {
             // See if redis is enabled
             try {
                 RedisMgr::get_instance()->get_client()->ping();
+                _skip_test = false;
             } catch (const std::exception &e) {
+                _skip_test = true;
                 GTEST_SKIP() << "Redis is not running, skipping test";
             }
 
@@ -27,10 +29,12 @@ namespace {
         }
 
         void TearDown() override {
-            RedisMgr::get_instance()->get_client()->del("test_queue");
-            RedisMgr::get_instance()->get_client()->del("test_queue:a");
-            RedisMgr::get_instance()->get_client()->del("test_queue:b");
-            RedisMgr::get_instance()->get_client()->del("test_set");
+            if (!_skip_test) {
+                RedisMgr::get_instance()->get_client()->del("test_queue");
+                RedisMgr::get_instance()->get_client()->del("test_queue:a");
+                RedisMgr::get_instance()->get_client()->del("test_queue:b");
+                RedisMgr::get_instance()->get_client()->del("test_set");
+            }
         }
 
         class QueueEntry {
@@ -68,6 +72,8 @@ namespace {
         private:
             std::string _value;
         };
+
+        bool _skip_test;
     };
 
     // tests the basic RedisQueue functionality
