@@ -18,6 +18,7 @@ target_include_directories(springtail_ingest
 target_link_libraries(springtail_ingest
     PUBLIC springtail_common
     PUBLIC springtail_pg
+    PUBLIC springtail_storage
 )
 
 # executables

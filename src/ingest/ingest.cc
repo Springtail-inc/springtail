@@ -1,22 +1,20 @@
 #include "common/common.hh"
-#include "pg_repl/pg_repl_msg.hh"
 #include "pg_repl/pg_stream_table.hh"
 #include "storage/constants.hh"
 #include "storage/field.hh"
-#include "storage/io_request.hh"
 #include "storage/schema.hh"
-#include "storage/schema_type.hh"
+#include "storage/table_mgr.hh"
 #include <boost/algorithm/string.hpp>
+#include <ingest/ingest.hh>
 
 namespace springtail
 {
-    Ingest::Ingest(PgStreamTable &source,
-                   std::string &path) {
+    Ingest::Ingest(PgStreamTable &source, std::string &path) {
 
         springtail_init();
 
-        std::string pg_xids = source->get_xact_xids();
-        PgTableSchema pg_schema = source->get_schema()
+        std::string pg_xids = source.get_xact_xids();
+        PgTableSchema pg_schema = source.get_schema();
 
         std::vector<std::string> xids;
         boost::split(xids, pg_xids, boost::is_any_of(":"));
@@ -33,18 +31,18 @@ namespace springtail
             xids.at(1),
             pg_schema.schema_name,
             pg_schema.table_name,
-            schema
+            pg_schema
         });
     }
 
-    std::vector<SchemaColumn> Ingest::populate_schema(std::vector<PgColumn> pg_columns) {
+    ExtentSchemaPtr Ingest::populate_schema(std::vector<PgColumn> pg_columns) {
         std::vector<SchemaColumn> columns;
         for(PgColumn &pg_col : pg_columns){
             columns.emplace_back(
                 0, //internal xid
                 pg_col.name, //name
-                strToSchemaType(pg_col.type) //SchemaType type
-                pg_col.is_nullable //nullable?
+                strToSchemaType(pg_col.type), //SchemaType type
+                pg_col.is_nullable, //nullable?
                 pg_col.default_value //default_value
             );
         }
@@ -55,7 +53,7 @@ namespace springtail
         ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
         table.copy_data();
-        MutableFieldArrayPtr fields = schema->get_mutable_fields()
+        MutableFieldArrayPtr fields = schema->get_mutable_fields();
         MutableFieldArrayPtr values;
         while(values = table.next_row()){
             Extent::Row row = extent->append();

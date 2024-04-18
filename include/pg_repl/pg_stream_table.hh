@@ -37,6 +37,12 @@ namespace springtail
      * Postgres server to a file, and de-serialize from a file
      */
     class PgStreamTable {
+    public:
+
+        std::string get_xact_xids();
+        PgTableSchema get_schema();
+        void copy_data();
+        std::optional<FieldArrayPtr> next_row();
 
     private:
         /** magic number for header of the file */
@@ -56,13 +62,9 @@ namespace springtail
         PgTableSchema _schema;
 
         // retrieve schema, write out schema and copy data
-        PgTableSchema get_schema();
-        std::string get_xact_xids();
         void get_table_oid();
         void get_pkeys();
         void write_schema();
-        void copy_data();
-        std::optional<FieldArrayPtr> next_row();
         std::optional<FieldArrayPtr> parse_row();
 
         // read in schema, copy header, copy data
