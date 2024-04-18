@@ -1,0 +1,45 @@
+# A reusable workflow that runs tests on the code.
+name: Test & Lint
+
+on:
+  workflow_call:
+    inputs:
+      builder_image_version_tag:
+        description: 'The image version tag for the base builder to pull.'
+        type: string
+        required: true
+    outputs:
+      github-short-sha:
+        description: "The short SHA"
+        value: ${{ jobs.test.outputs.github-short-sha }}
+      github-last-commit-message:
+        description: "The commit message."
+        value: ${{ jobs.test.outputs.github-last-commit-message }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    container:
+      image: ${ECR_REPO_URI}:${inputs.builder_image_version_tag}
+      credentials:
+        username: AWS
+        password: ${{ secrets.ECR_PW }}
+    outputs:
+      github-short-sha: ${{ steps.get-github-info.outputs.github-short-sha }}
+      github-last-commit-message: ${{ steps.get-github-info.outputs.github-last-commit-message }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run cmake (debug)
+        run: |
+          cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'
+
+      - name: Build code (debug)
+        run: |
+          make -j $(nproc) -C debug
+
+      - name: Run tests
+        run: |
+          make test -C debug

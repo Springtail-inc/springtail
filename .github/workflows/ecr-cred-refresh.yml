@@ -3,9 +3,8 @@
 # to launch the GitHub Action container for tests and build.
 # The ECR login credential is valid for 12 hours by default
 on:
-#  schedule:
-#    # every 8 hours
-#    - cron: '0 */8 * * *'
+  schedule:
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 
 permissions:
@@ -15,23 +14,18 @@ permissions:
 jobs:
   update-ecr-pw:
     runs-on: ubuntu-latest
-    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
-    permissions:
-      id-token: write
-      contents: read
     env:
       # need an Github Access token with Admin access to update secret
-      GH_TOKEN: ${{ secrets.GH_CLI }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::891377357651:role/example-role
+          role-to-assume: arn:aws:iam::891377357651:role/GitHubOIDCStack-GHDeploymentRolespringtail4901D08A-77JHxuAaXoIY
           role-session-name: tempSession
           aws-region: us-east-1
-      - name: Get pw and update secret
+      - name: Get ECR password and update secret
         run: |
-          export ECR_PW=`aws ecr get-login-password --region us-east-1 --output text`
-          echo $ECR_PW
-          # gh secret set <YOUR_SECRET> --org <your-org> --visibility all --body "$ECR_PW"
+          ECR_PW=$(aws ecr get-login-password --region us-east-1 --output text)
+          gh secret set ECR_PW --body "$ECR_PW"
