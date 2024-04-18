@@ -106,7 +106,6 @@ namespace springtail
         _schema.xids = _connection.get_string(0, 0);
 
         _connection.clear();
-        return _schema.xids;
     }
 
 
