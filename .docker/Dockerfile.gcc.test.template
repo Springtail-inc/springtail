@@ -1,0 +1,12 @@
+# An image that contains has Clang 17 + Gcc 13 + CMake 3.29.2 preinstalled to serve as the base of the builders.
+# Using Ubuntu 22.04 LTS distro. This image should stay relatively stable.
+FROM {{ BASE_IMAGE }} as Builder
+
+COPY ./ /springtail
+
+# We use an overridden file to provide the config for testing
+RUN rm -rf release debug
+COPY .docker/springtail.test.json /springtail/system.json
+RUN cmake -C debug -S . -D'CMAKE_BUILD_TYPE=Debug'
+RUN make -C debug && make test -C debug -j $(nproc)
+

@@ -1,0 +1,54 @@
+# An image that contains has Gcc 13 + CMake 3.29.2 preinstalled to serve as the base of the builders.
+# Using Ubuntu 22.04 LTS distro. This image should stay relatively stable.
+FROM --platform=linux/amd64 ubuntu:22.04 as BaseBuilder
+
+ENV _CMAKE_VERSION=3.29.2
+
+RUN apt-get update && apt-get install -y \
+    lsb-release wget software-properties-common gnupg \
+    build-essential autoconf libelf-dev \
+    bison pkg-config flex libdw-dev \
+    libdwarf-dev binutils-dev linux-libc-dev \
+    git curl zip unzip tar ninja-build \
+    && apt-get clean autoclean \
+    && apt-get autoremove --yes \
+    && rm -rf /var/lib/{apt,cache,log,dpkg}
+
+# Since we are using Clang compilers but linking against GNU libs (stdc++), we need to upgrade to the version 13.
+# Per the CPP feature matrix, only this GCC stdc++ lib >= 13 supports C++20 Text Formatting.
+# The one installed within the group "build-essential" is GCC 11.
+#
+# Ref: https://en.cppreference.com/w/cpp/compiler_support#C.2B.2B20_library_features
+RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+    && apt-get update \
+    && apt-get install -y gcc-13 g++-13 \
+    && apt-get clean autoclean \
+    && apt-get autoremove --yes
+
+
+# Update alternatives to use Clang 17. So for package installation that requires "cc" or "c++" will use Clang 17.
+RUN update-alternatives --install /usr/bin/c++ c++ $(which g++-13) 50 \
+    && update-alternatives --install /usr/bin/cc cc $(which gcc-13) 50
+
+ENV PATH="${PATH}:/opt/cmake-${_CMAKE_VERSION}-linux-x86_64/bin"
+RUN curl -L "https://github.com/Kitware/CMake/releases/download/v${_CMAKE_VERSION}/cmake-${_CMAKE_VERSION}-linux-x86_64.tar.gz" -o cmake.tar.gz \
+    && tar -xzf cmake.tar.gz -C /opt \
+    && rm cmake.tar.gz
+
+ENV ZIC=true
+ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+ENV _EXTERNAL_DIR=/springtail/external
+ENV _VCPKG_DIR=${_EXTERNAL_DIR}/vcpkg
+ENV PATH="${PATH}:${_VCPKG_DIR}"
+WORKDIR /springtail
+
+RUN mkdir -p ${_EXTERNAL_DIR} \
+    && cd ${_EXTERNAL_DIR} \
+    && git clone https://github.com/Microsoft/vcpkg.git \
+    && cd ${_VCPKG_DIR} \
+    && ./bootstrap-vcpkg.sh \
+    && vcpkg integrate install
+
+COPY vcpkg.json /springtail/vcpkg.json
+RUN vcpkg install --triplet x64-linux
+

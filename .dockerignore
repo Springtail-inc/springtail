@@ -5,3 +5,9 @@ external
 *~
 .vscode
 vcpkg_installed
+.idea
+.docker
+docker
+.github
+.githooks
+.scannerwork
