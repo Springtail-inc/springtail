@@ -2,39 +2,62 @@
 
 #include <memory>
 #include <utility>
+#include <functional>
+#include <string>
 
 #include <common/logging.hh>
 
 #include <proxy/connection.hh>
 #include <proxy/buffer.hh>
-#include <proxy/user_mgr.hh>
 #include <proxy/auth/scram.hh>
 
 namespace springtail {
+    // forward declarations to avoid circular dependencies
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
+
+    struct UserLogin;
+    using UserLoginPtr = std::shared_ptr<UserLogin>;
+
+    class User;
+    using UserPtr = std::shared_ptr<User>;
 
     /**
      * @brief Session base class.  Derived classes  include:
      * - ClientSession -- client session client connected to us
      * - ServerSession -- we connect to the server
      */
-    class Session {
+    class Session : public std::enable_shared_from_this<Session> {
     public:
+        using SessionPtr = std::shared_ptr<Session>;
+
         /** Type of session */
         enum Type : int8_t {
             CLIENT=0,
             PRIMARY=1,
-            SPRINGTAIL=2
+            REPLICA=2
         };
 
         /** State of session */
         enum State : int8_t {
             STARTUP=0,
             AUTH=1,
-            AUTH_DONE=2,
-            READY=3,
-            ERROR=4
+            AUTH_SERVER=2,
+            AUTH_DONE=3,
+            READY=4,
+            STREAMING_TO_SERVER=5,
+            STREAMING_TO_CLIENT=6,
+            ERROR=99
+        };
+
+        /** Messages between sessions */
+        enum SessionMsg : int8_t {
+            // client to server messages
+            MSG_CLIENT_SERVER_STARTUP=0,
+
+            // server to client messages
+            MSG_SERVER_CLIENT_AUTH_DONE=10,
+            MSG_SERVER_CLIENT_ERROR=99
         };
 
         constexpr static int32_t MSG_STARTUP_V2 =0x20000;
@@ -62,12 +85,11 @@ namespace springtail {
 
         explicit Session(ProxyConnectionPtr connection,
                          ProxyServerPtr server,
-                         const std::string &username,
-                         const std::string &database,
+                         UserPtr user,
                          Type type=CLIENT)
             : _connection(connection),
               _server(server), _type(type),
-              _username(username), _database(database) {}
+              _user(user) {}
 
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;
@@ -84,34 +106,94 @@ namespace springtail {
             return _connection->get_socket() < rhs._connection->get_socket();
         }
 
-        /** Process messages for session connection,
-         * must be implemented by derived class */
-        virtual void _process() = 0;
-
         ProxyConnectionPtr get_connection() {
             return _connection;
         }
 
+        /** set associated session */
+        void set_associated_session(std::shared_ptr<Session> remote_session) {
+            _associated_session = remote_session;
+            remote_session->_associated_session = shared_from_this();
+            _waiting_on_session = true;
+        }
+
+        /** clear waiting on session flag */
+        void clear_waiting_on_session() {
+            _waiting_on_session = false;
+        }
+
+        /** clear associated session from this and remote session */
+        void clear_associated_session() {
+            _associated_session->_associated_session = nullptr;
+            _associated_session = nullptr;
+        }
+
+        /** notify server session of message */
+        void notify_server(SessionMsg msg, SessionPtr remote_session) {
+            set_associated_session(remote_session);
+            remote_session->_process_msg(msg);
+        }
+
+        /** notify client session of message */
+        void notify_client(SessionMsg msg) {
+            assert(_associated_session != nullptr);
+            _associated_session->clear_waiting_on_session();
+            _associated_session->_process_msg(msg);
+        }
+
+        /** get error message */
+        const std::string_view get_err_msg() {
+            return _err_msg;
+        }
+
+        std::shared_ptr<Session> get_associated_session() {
+            return _associated_session;
+        }
+
+        bool is_waiting_on_session() {
+            return _waiting_on_session;
+        }
+
+        /** enable processing of msgs via server poll loop */
+        void enable_processing();
+
     protected:
-        ProxyConnectionPtr _connection;
-        ProxyServerPtr _server;
+        ProxyConnectionPtr _connection;   ///< connection associated with this session
+        ProxyServerPtr     _server;       ///< server associated with this session
 
-        State _state = STARTUP;
-        Type _type;
+        State        _state = STARTUP;    ///< state of session, governs process()
+        Type         _type;               ///< type of session
 
-        ProxyBuffer _read_buffer{1024};
-        ProxyBuffer _write_buffer{1024};
+        ProxyBuffer  _read_buffer{1024};
+        ProxyBuffer  _write_buffer{1024};
 
-        std::string _username;
-        std::string _database;
-        UserLoginPtr _login;
+        UserPtr      _user;        ///< user associated with this session
+        UserLoginPtr _login;       ///< user login creds, temporary
 
-        int32_t _pid;
-        int32_t _cancel_key;
+        int32_t      _pid;         ///< pid for cancel request
+        int32_t      _cancel_key;  ///< cancel key for cancel request
 
+        std::string_view _err_msg;  ///< error message
+
+        /** Process messages for session connection,
+         * must be implemented by derived class */
+        virtual void _process_connection() = 0;
+
+        virtual void _process_msg(SessionMsg msg) = 0;
+
+        /** Get user creds */
         UserLoginPtr _get_user_login();
 
+        /** Helper to read a message header, 1B code, 4B length, returns code, length pair */
         std::pair<char,int32_t> _read_msg();
+
+    private:
+        /** client/server session associated with this one */
+        std::shared_ptr<Session> _associated_session = nullptr;
+        /** waiting on associated session for data -- _associated_session should be set */
+        bool _waiting_on_session = false;
+
+        void _handle_error();
     };
     using SessionPtr = std::shared_ptr<Session>;
 }

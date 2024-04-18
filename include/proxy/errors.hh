@@ -1,15 +1,20 @@
+#pragma once
+
+#include <string>
 #include <proxy/buffer.hh>
 
 namespace springtail {
     class ProxyError {
     public:
-        constexpr static char INVALID_PASSWORD[] = "28P01";
+        constexpr static std::string_view INVALID_PASSWORD = "28P01";
 
-        static inline void encode_error(ProxyBuffer &buffer,
-                          const char *error_code,
-                          const std::string &error_message) {
+        static inline void
+        encode_error(ProxyBuffer &buffer,
+                     const std::string_view error_code,
+                     const std::string_view error_message)
+        {
             buffer.put('E');
-            buffer.put32(23 + strlen(error_code) + error_message.size());
+            buffer.put32(23 + error_code.size() + error_message.size());
             buffer.putString("SERROR");
             buffer.putString("VERROR");
             buffer.put('C');

@@ -11,17 +11,32 @@
 namespace springtail {
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server,
-                                 const std::string &username,
-                                 const std::string &database)
-        : Session(connection, server, username, database, PRIMARY)
+                                 UserPtr user)
+        : Session(connection, server, user, PRIMARY)
     {}
 
-    void ServerSession::_process() {
-        switch(_state) {
-        case STARTUP:
-            // startup packet handling
+    void
+    ServerSession::_process_msg(SessionMsg msg)
+    {
+        switch(msg) {
+        case MSG_CLIENT_SERVER_STARTUP:
+            // startup message from client
             _handle_startup();
             break;
+
+        default:
+            SPDLOG_WARN("Unknown message: {}", (int8_t)msg);
+            break;
+        }
+
+        enable_processing();
+    }
+
+    // entry point for connection message processing
+    void
+    ServerSession::_process_connection()
+    {
+        switch(_state) {
         case AUTH:
             // auth handling
             _handle_auth();
@@ -44,12 +59,12 @@ namespace springtail {
     {
         // Send startup message
         _write_buffer.reset();
-        _write_buffer.put32(4 + 5 + 9 + 17 + 11 + 16 + 5 + _username.size() + _database.size() + 3); // length
+        _write_buffer.put32(4 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _user->dbname().size() + 3); // length
         _write_buffer.put32(MSG_STARTUP_V3); // protocol version
         _write_buffer.putString("user");
-        _write_buffer.putString(_username);
+        _write_buffer.putString(_user->username());
         _write_buffer.putString("database");
-        _write_buffer.putString(_database);
+        _write_buffer.putString(_user->dbname());
         _write_buffer.putString("application_name");
         _write_buffer.putString("Springtail");
         _write_buffer.putString("client_encoding");
@@ -212,6 +227,12 @@ namespace springtail {
                 int32_t status = _read_buffer.get32(); // IDLE = 73
                 SPDLOG_DEBUG("Ready for query: {}", status);
                 _state = READY;
+
+                // at this point we should notify client session
+                // server authentication is done, and we can complete
+                // the client session authentication
+                notify_client(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
+
                 break;
             }
 
@@ -366,5 +387,14 @@ namespace springtail {
         free(input);
 
         _state = AUTH_DONE;
+    }
+
+    /** factory to create session */
+    std::shared_ptr<ServerSession>
+    ServerSession::create(ProxyServerPtr server, UserPtr user)
+    {
+        auto database = user->get_database();
+        auto connection = database->create_connection();
+        return std::make_shared<ServerSession>(connection, server, user);
     }
 }

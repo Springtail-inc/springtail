@@ -289,4 +289,31 @@ namespace springtail {
         return n;
     }
 
+    ProxyConnectionPtr
+    ProxyConnection::create(const std::string &hostname, int port)
+    {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock == -1) {
+            SPDLOG_ERROR("Error creating socket: {}", strerror(errno));
+            return nullptr;
+        }
+
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        if (inet_pton(AF_INET, hostname.c_str(), &addr.sin_addr) <= 0) {
+            SPDLOG_ERROR("Error converting hostname to address: {}", strerror(errno));
+            ::close(sock);
+            return nullptr;
+        }
+
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+            SPDLOG_ERROR("Error connecting to {}:{}", hostname, port);
+            ::close(sock);
+            return nullptr;
+        }
+
+        return std::make_shared<ProxyConnection>(sock, addr);
+    }
+
 }

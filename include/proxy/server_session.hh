@@ -10,15 +10,21 @@ namespace springtail {
 
         explicit ServerSession(ProxyConnectionPtr connection,
                                ProxyServerPtr server,
-                               const std::string &username,
-                               const std::string &database);
+                               UserPtr user);
 
-        ~ServerSession() override {};
+        ~ServerSession() {};
 
-        void _process() override;
+        /** factory to create session */
+        static std::shared_ptr<ServerSession>
+        create(ProxyServerPtr server, UserPtr user);
+
+    protected:
+        void _process_connection() override;
+
+        void _process_msg(SessionMsg msg) override;
 
     private:
-        bool _is_pinned = false;
+        //bool _is_pinned = false;
 
         /** Initial setup, SSL negotiation */
         void _handle_startup();

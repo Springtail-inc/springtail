@@ -29,14 +29,17 @@ namespace springtail {
 
         ~ClientSession();
 
-        void notify(ServerSessionPtr server_session);
+        /** notification from pool indicating server is free to use */
+        void notify_server_available(SessionPtr server);
+
+    protected:
+
+        void _process_connection() override;
+
+        void _process_msg(SessionMsg msg) override;
 
     private:
         int _id;
-
-        UserPtr _user;
-
-        void _process() override;
 
         void _process_startup_msg(int32_t code, int32_t msg_length);
 
@@ -46,14 +49,18 @@ namespace springtail {
         void _encode_auth_ok();
         void _encode_auth_scram();
 
+        void _do_server_auth();
+
         void _handle_request();
         void _handle_startup();
         void _handle_auth();
         void _handle_scram_auth(const std::string &data);
         void _handle_scram_auth_continue(const std::string &data);
 
+        void _handle_server_error(const std::string_view msg);
+
         void _send_auth_req();
-        void _send_auth_done(bool reset=true);
+        void _send_auth_done();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 }

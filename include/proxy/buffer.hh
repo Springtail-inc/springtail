@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <cassert>
+#include <string>
 
 #include <pg_repl/pg_types.hh>
 
@@ -60,10 +61,16 @@ namespace springtail {
             sendint32(i, _buffer.data() + _offset);
             _offset += 4;
         }
-
+/*
         void putString(const std::string &s) {
             assert(_offset + s.size() + 1 <= _capacity);
             memcpy(_buffer.data() + _offset, s.c_str(), s.size() + 1); // copy null byte
+            _offset += s.size() + 1;
+        } */
+
+        void putString(const std::string_view s) {
+            assert(_offset + s.size() + 1 <= _capacity);
+            memcpy(_buffer.data() + _offset, s.data(), s.size() + 1); // copy null byte
             _offset += s.size() + 1;
         }
 

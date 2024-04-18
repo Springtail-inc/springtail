@@ -1,12 +1,11 @@
 #include <iostream>
-#include <boost/asio.hpp>
 
 #include <common/logging.hh>
 
 #include <proxy/request_handler.hh>
 
 namespace springtail {
-    
+
     void
     ProxyRequestHandler::process(const char *buffer,
                                  std::size_t size)

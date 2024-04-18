@@ -50,15 +50,15 @@ target_link_libraries(daemon
     PRIVATE auth
 )
 
-# test client executable
-add_executable(client test/client.cc)
-target_include_directories(client
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${Boost_INCLUDES}
-)
-target_link_libraries(client
-    PRIVATE springtail_proxy
-)
+# test client executable -- boost::asio test, not used
+#add_executable(client test/client.cc)
+#target_include_directories(client
+#    PRIVATE ${CMAKE_SOURCE_DIR}/include
+#    PRIVATE ${Boost_INCLUDES}
+#)
+#target_link_libraries(client
+#    PRIVATE springtail_proxy
+#)
 
 add_subdirectory(auth)
 

@@ -6,9 +6,13 @@
 
 namespace springtail {
 
-    User::User(const std::string &username, const std::string &database,
-               const std::string &password, uint32_t salt)
-        : _username(username),
+    User::User(UserMgrPtr user_mgr,
+               const std::string &username,
+               const std::string &database,
+               const std::string &password,
+               uint32_t salt)
+        : _user_mgr(user_mgr),
+          _username(username),
           _database(database),
           _password(password),
           _salt(salt)
@@ -44,6 +48,12 @@ namespace springtail {
             memcpy(login->scram_state.ClientKey, _scram_keys->ClientKey, SCRAM_KEY_LEN);
         }
         return login;
+    }
+
+    const DatabasePtr
+    User::get_database() const
+    {
+        return _user_mgr->get_database(_database);
     }
 
     UserMgr::UserMgr()

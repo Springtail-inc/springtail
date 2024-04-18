@@ -9,6 +9,7 @@
 #include <proxy/buffer.hh>
 
 namespace springtail {
+    /** Connection object */
     class ProxyConnection : public std::enable_shared_from_this<ProxyConnection> {
     public:
         ProxyConnection(int socket, struct sockaddr_in &addr)
@@ -41,6 +42,10 @@ namespace springtail {
             inet_ntop(AF_INET, &_addr.sin_addr, ip, INET_ADDRSTRLEN);
             return std::string(ip) + ":" + std::to_string(ntohs(_addr.sin_port));
         }
+
+        /** factory method to create a connection */
+        static std::shared_ptr<ProxyConnection>
+        create(const std::string &hostname, int port);
 
     private:
         int _socket;

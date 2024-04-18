@@ -1,4 +1,5 @@
 #include <memory>
+#include <cassert>
 #include <poll.h>
 
 #include <proxy/session.hh>
@@ -11,18 +12,26 @@ namespace springtail {
     void
     Session::operator()()
     {
+        // thread entry point from server
         int pkt_count = 0;
         bool has_data = false;
 
         do {
             // thread entry point
-            _process();
+            _process_connection();
 
             // cleanup connection and remove from server list if closed or error
             if (_state == ERROR || _connection->closed()) {
-                SPDLOG_ERROR("Error state, closing connection");
-                _connection->close();
-                _server->shutdown_session(this);
+                _handle_error();
+                return;
+            }
+
+            if (_waiting_on_session) {
+                SPDLOG_DEBUG("Waiting on external session");
+                // note: this will not add the connection back to the server
+                // poll list. Once the associated session is done it will
+                // call back into this session to continue processing
+                // at that time it should be added back to the server poll list
                 return;
             }
 
@@ -46,11 +55,10 @@ namespace springtail {
     UserLoginPtr
     Session::_get_user_login()
     {
-        UserPtr user = _server->get_user_mgr()->get_user(_username, _database);
-        if (user == nullptr) {
+        if (_user == nullptr) {
             return nullptr;
         }
-        return user->get_user_login();
+        return _user->get_user_login();
     }
 
     std::pair<char,int32_t>
@@ -78,5 +86,46 @@ namespace springtail {
         }
 
         return {code, msg_length-4};
+    }
+
+    void
+    Session::enable_processing()
+    {
+        if (_waiting_on_session) {
+            // if we are waiting on a session, we should not be processing
+            // incoming data from our connection
+            assert(_associated_session != nullptr);
+            return;
+        }
+
+        assert(_associated_session == nullptr);
+
+        if (_state == ERROR || _connection->closed()) {
+            _handle_error();
+            return;
+        }
+        // add session connection to server poll list
+        _server->signal(_connection);
+    }
+
+    void
+    Session::_handle_error()
+    {
+        // general error handling
+        // cleanup this session and check for associated session
+        SPDLOG_ERROR("Error state, closing connection");
+
+        // close connection
+        _connection->close();
+
+        // let server handle full cleanup
+        _server->shutdown_session(this);
+
+        // check for associated client session, and notify of error
+        if ((_type == Type::PRIMARY || _type == Type::REPLICA) &&
+            _associated_session != nullptr) {
+            // notify client session of error
+            notify_client(SessionMsg::MSG_SERVER_CLIENT_ERROR);
+        }
     }
 }
