@@ -21,9 +21,13 @@ namespace springtail
         boost::split(xids, pg_xids, boost::is_any_of(":"));
         //TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
 
+        auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
+
+        btree->init_empty();
+
         ExtentSchemaPtr schema = populate_schema(pg_schema.columns);
 
-        populate_rows(schema, source);
+        populate_rows(schema, source, btree);
 
         // make PgMsgTable entry and call create_table
         TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
@@ -32,12 +36,27 @@ namespace springtail
             0, //xid
             pg_schema.schema_name,
             pg_schema.table_name,
-            map_to_pg_msg(pg_schema)
+            map_to_pg_msg(pg_schema.columns)
         });
     }
 
-    std::vector<PgMsgSchemaColumn> Ingest::map_to_pg_msg(PgTableSchema schema){
-        
+    std::vector<PgMsgSchemaColumn> Ingest::map_to_pg_msg(std::vector<PgColumn> pg_columns){
+        std::vector<PgMsgSchemaColumn> columns(pg_columns.size());
+        for(PgColumn &pg_col : pg_columns){
+            columns.emplace_back(
+                PgMsgSchemaColumn(
+                    pg_col.name,
+                    pg_col.type,
+                    pg_col.default_value,
+                    pg_col.position,
+                    pg_col.position, //XXX: pk_position
+                    pg_col.is_nullable,
+                    pg_col.is_pkey,
+                    false  // is_generated
+                )
+            );
+        }
+        return columns;
     }
 
     ExtentSchemaPtr Ingest::populate_schema(std::vector<PgColumn> pg_columns) {
@@ -59,19 +78,19 @@ namespace springtail
         return std::make_shared<ExtentSchema>(columns);
     }
 
-    void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table) {
+    void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table, std::shared_ptr<MutableBTree> btree) {
         auto extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
         table.copy_data();
         std::optional<FieldArrayPtr> values;
+        std::shared_ptr<KeyValueTuple> insert_tuple;
         while((values = table.next_row())){
             if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
-                // XXX add row from extent::back()'s primary key into btree
-                // btree->insert(insert_tuple)
+                btree->insert(insert_tuple);
                 extent.reset(new Extent(schema, ExtentType{false}, 0));
             }
             Extent::Row row = extent->append();
-            auto insert_tuple = KeyValueTuple(schema->get_fields(), values.value(), row);
+            insert_tuple.reset(new KeyValueTuple(schema->get_fields(), values.value(), row));
         }
     }
 }
