@@ -14,8 +14,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/{apt,cache,log,dpkg}
 
-# Since we are using Clang compilers but linking against GNU libs (stdc++), we need to upgrade to the version 13.
-# Per the CPP feature matrix, only this GCC stdc++ lib >= 13 supports C++20 Text Formatting.
+# Only this GCC stdc++ lib >= 13 supports C++20 Text Formatting.
 # The one installed within the group "build-essential" is GCC 11.
 #
 # Ref: https://en.cppreference.com/w/cpp/compiler_support#C.2B.2B20_library_features
@@ -26,14 +25,14 @@ RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get autoremove --yes
 
 
-# Update alternatives to use Clang 17. So for package installation that requires "cc" or "c++" will use Clang 17.
+# Update alternatives to use gcc-13.
 RUN update-alternatives --install /usr/bin/c++ c++ $(which g++-13) 50 \
     && update-alternatives --install /usr/bin/cc cc $(which gcc-13) 50
 
-ENV PATH="${PATH}:/opt/cmake-${_CMAKE_VERSION}-linux-aarch64/bin"
-RUN curl -L "https://github.com/Kitware/CMake/releases/download/v${_CMAKE_VERSION}/cmake-${_CMAKE_VERSION}-linux-aarch64.tar.gz" -o cmake.tar.gz \
-    && tar -xzf cmake.tar.gz -C /opt \
-    && rm cmake.tar.gz
+# Install the latest CMake
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
+RUN echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | tee /etc/apt/sources.list.d/kitware.list > /dev/null
+RUN apt-get update && apt-get install -y kitware-archive-keyring cmake
 
 ENV ZIC=true
 ENV VCPKG_FORCE_SYSTEM_BINARIES=1
@@ -51,10 +50,3 @@ RUN mkdir -p ${_EXTERNAL_DIR} \
 
 COPY vcpkg.json /springtail/vcpkg.json
 RUN vcpkg install
-
-COPY ./ /springtail
-
-RUN ./clean.sh
-#RUN cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'
-## Use number of CPUs - 1 to run tests in parallel
-#RUN make -C debug && make test -C debug -j $(nproc --ignore=1)
