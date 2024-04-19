@@ -26,7 +26,7 @@ namespace springtail
         std::string schema_name;
         std::string table_name;
         std::string xids;                // txid_current_snapshot(); xmin:xmax:xids
-        int32_t table_oid;
+        uint32_t table_oid;
         std::vector<PgColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
     };

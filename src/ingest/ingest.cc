@@ -1,4 +1,5 @@
 #include "common/common.hh"
+#include "pg_repl/pg_repl_msg.hh"
 #include "pg_repl/pg_stream_table.hh"
 #include "storage/constants.hh"
 #include "storage/field.hh"
@@ -26,43 +27,51 @@ namespace springtail
 
         // make PgMsgTable entry and call create_table
         TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
-            0,
+            0, //XXX: lsn
             pg_schema.table_oid,
-            xids.at(1),
+            0, //xid
             pg_schema.schema_name,
             pg_schema.table_name,
-            pg_schema
+            map_to_pg_msg(pg_schema)
         });
+    }
+
+    std::vector<PgMsgSchemaColumn> Ingest::map_to_pg_msg(PgTableSchema schema){
+        
     }
 
     ExtentSchemaPtr Ingest::populate_schema(std::vector<PgColumn> pg_columns) {
         std::vector<SchemaColumn> columns;
         for(PgColumn &pg_col : pg_columns){
             columns.emplace_back(
-                0, //internal xid
-                pg_col.name, //name
-                strToSchemaType(pg_col.type), //SchemaType type
-                pg_col.is_nullable, //nullable?
-                pg_col.default_value //default_value
+                SchemaColumn(
+                    0, //internal xid
+                    0, //XXX lsn
+                    pg_col.name, //name
+                    0, //XXX position
+                    strToSchemaType(pg_col.type), //SchemaType type
+                    true, //XXX: exists?
+                    pg_col.is_nullable, //nullable?
+                    pg_col.default_value //default_value
+                )
             );
         }
         return std::make_shared<ExtentSchema>(columns);
     }
 
     void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table) {
-        ExtentPtr extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
+        auto extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
         table.copy_data();
-        MutableFieldArrayPtr fields = schema->get_mutable_fields();
-        MutableFieldArrayPtr values;
-        while(values = table.next_row()){
-            Extent::Row row = extent->append();
-            auto insert_tuple = KeyValueTuple(schema->get_fields(), values, row);
-            if(extent->size() >= constant::MAX_EXTENT_SIZE){
+        std::optional<FieldArrayPtr> values;
+        while((values = table.next_row())){
+            if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
                 // TODO add row from extent::back()'s primary key into btree
                 // btree->insert(insert_tuple)
                 extent.reset(new Extent(schema, ExtentType{false}, 0));
             }
+            Extent::Row row = extent->append();
+            auto insert_tuple = KeyValueTuple(schema->get_fields(), values.value(), row);
         }
     }
 }
