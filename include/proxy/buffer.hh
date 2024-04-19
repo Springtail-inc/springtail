@@ -109,6 +109,11 @@ namespace springtail {
             return s;
         }
 
+        void getBytes(char *bytes, int32_t len) {
+            memcpy(bytes, _buffer.data() + _offset, len);
+            _offset += len;
+        }
+
         std::string getBytes(int32_t len) {
             std::string s(_buffer.data() + _offset, len);
             _offset += len;

@@ -19,33 +19,54 @@ namespace springtail {
                     int port,
                     int thread_pool_size = 16);
 
+        /** Start server main loop */
         void run();
 
+        /** Signal server main loop to reset poll fd set */
         void signal(ProxyConnectionPtr connection);
 
+        /** Register a new session, add to <socket, session> to _sessions map*/
+        void register_session(SessionPtr session);
+
+        /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
         void shutdown_session(Session *session);
 
+        /** Get the user mgr object */
         UserMgrPtr get_user_mgr() {
             return _user_mgr;
         }
 
-    private:
-        int _socket;
+        /** Add a user to the user manager -- trust authentication no password */
+        void add_user(const std::string &username, const std::string &database) {
+            _user_mgr->add_user(username, database);
+        }
 
-        int _pipe[2]; // 0 - read; 1 - write
+        /** Add a user to the user manager */
+        void add_user(const std::string &username, const std::string &database,
+                      const std::string &password, uint32_t salt=0) {
+            _user_mgr->add_user(username, database, password, salt);
+        }
+
+        /** Add a database hostname, port to user mgr */
+        void add_database(const std::string &dbname, const std::string &hostname, int port) {
+            _user_mgr->add_database(dbname, hostname, port);
+        }
+
+    private:
+        int _socket;   ///< server socket
+        int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
 
         ProxyRequestHandlerPtr _request_handler;
 
-        UserMgrPtr _user_mgr;
+        UserMgrPtr _user_mgr;                ///< user manager object
 
-        ThreadPool<Session> _thread_pool;
+        ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
 
-        std::map<int, SessionPtr> _sessions;
+        std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map
+        std::set<int> _waiting_sessions;     ///< set of connection sockets waiting for read data
+        std::map<int, SessionPtr> _sessions; ///< map of connection socket to session object
 
-        std::mutex _waiting_sessions_mutex;
-        std::set<int> _waiting_sessions;
-
-        void _do_accept();
+        void _do_accept();                   ///< accept new connection handler
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

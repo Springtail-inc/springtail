@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -145,7 +146,7 @@ namespace springtail {
 
             SPDLOG_DEBUG("Polling for sockets: size={}", _waiting_sessions.size());
 
-            int n = poll(fds, 2 + _sessions.size(), -1);
+            int n = poll(fds, i, -1);
             if (n == -1) {
                 std::cerr << "Error polling sockets: " << strerror(errno) << std::endl;
                 break;
@@ -181,6 +182,7 @@ namespace springtail {
                         _waiting_sessions.erase(fds[i].fd);
                     } else {
                         SPDLOG_ERROR("Socket {} not found in sessions map", fds[i].fd);
+                        _waiting_sessions.erase(fds[i].fd);
                     }
                     n--;
                 }
@@ -214,6 +216,13 @@ namespace springtail {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.erase(session->get_connection()->get_socket());
         _waiting_sessions.erase(session->get_connection()->get_socket());
+    }
+
+    void
+    ProxyServer::register_session(SessionPtr session)
+    {
+        std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+        _sessions.insert(std::make_pair(session->get_connection()->get_socket(), session));
     }
 
     ssize_t
@@ -289,6 +298,28 @@ namespace springtail {
         return n;
     }
 
+    static std::string hostname_to_ip(const std::string &hostname)
+    {
+	    struct hostent *he;
+	    struct in_addr **addr_list;
+	    int i;
+
+	    if ( (he = gethostbyname( hostname.c_str() ) ) == nullptr) {
+		    // get the host info
+		    SPDLOG_ERROR("gethostbyname");
+		    return {};
+	    }
+
+	    addr_list = (struct in_addr **) he->h_addr_list;
+
+	    for(i = 0; addr_list[i] != nullptr; i++) {
+		    // return the first one;
+		    return {inet_ntoa(*addr_list[i])};
+	    }
+
+    	return {};
+    }
+
     ProxyConnectionPtr
     ProxyConnection::create(const std::string &hostname, int port)
     {
@@ -298,11 +329,20 @@ namespace springtail {
             return nullptr;
         }
 
+        SPDLOG_DEBUG("Connecting to {}:{}", hostname, port);
+
+        std::string ip = hostname_to_ip(hostname);
+        if (ip.empty()) {
+            SPDLOG_ERROR("Error resolving hostname: {}", hostname);
+            ::close(sock);
+            return nullptr;
+        }
+
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
-        if (inet_pton(AF_INET, hostname.c_str(), &addr.sin_addr) <= 0) {
-            SPDLOG_ERROR("Error converting hostname to address: {}", strerror(errno));
+        if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) <= 0) {
+            SPDLOG_ERROR("Error converting hostname {} to address: {}", hostname, strerror(errno));
             ::close(sock);
             return nullptr;
         }
@@ -315,5 +355,4 @@ namespace springtail {
 
         return std::make_shared<ProxyConnection>(sock, addr);
     }
-
 }

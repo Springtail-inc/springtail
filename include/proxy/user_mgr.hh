@@ -3,6 +3,8 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <shared_mutex>
+#include <mutex>
 
 #include <common/logging.hh>
 
@@ -138,10 +140,14 @@ namespace springtail {
          */
         void set_client_scram_key(const uint8_t *client_key)
         {
+            std::unique_lock lock(_scram_mutex);
             if (!_scram_keys) {
-                _scram_keys = std::make_shared<ScramKeys>();
+               _scram_keys = std::make_shared<ScramKeys>();
             }
-            memcpy(_scram_keys->ClientKey, client_key, 32);
+            if (!_scram_keys->client_key_set) {
+                memcpy(_scram_keys->client_key, client_key, 32);
+                _scram_keys->client_key_set = true;
+            }
         }
 
         /**
@@ -151,10 +157,14 @@ namespace springtail {
          */
         void set_server_scram_key(const uint8_t *server_key)
         {
+            std::unique_lock lock(_scram_mutex);
             if (!_scram_keys) {
                 _scram_keys = std::make_shared<ScramKeys>();
             }
-            memcpy(_scram_keys->ServerKey, server_key, 32);
+            if (!_scram_keys->server_key_set) {
+                memcpy(_scram_keys->server_key, server_key, 32);
+                _scram_keys->server_key_set = true;
+            }
         }
 
         /** get username */
@@ -168,8 +178,10 @@ namespace springtail {
 
     private:
         struct ScramKeys {
-            uint8_t ClientKey[SCRAM_KEY_LEN];
-		    uint8_t ServerKey[SCRAM_KEY_LEN];
+            uint8_t client_key[SCRAM_KEY_LEN];
+		    uint8_t server_key[SCRAM_KEY_LEN];
+            bool client_key_set=false;
+            bool server_key_set=false;
         };
 
         UserMgrPtr  _user_mgr;
@@ -183,6 +195,7 @@ namespace springtail {
 
         Pool        _pool;
 
+        std::mutex _scram_mutex;
         std::shared_ptr<ScramKeys> _scram_keys;
     };
     using UserPtr = std::shared_ptr<User>;
@@ -192,7 +205,7 @@ namespace springtail {
      */
     class UserMgr : public std::enable_shared_from_this<UserMgr> {
     public:
-        UserMgr();
+        UserMgr() {};
 
         /**
          * @brief Lookup user by username and database name
@@ -202,6 +215,7 @@ namespace springtail {
          */
         UserPtr get_user(const std::string &username, const std::string &database)
         {
+            std::shared_lock lock(_mutex);
             auto it = _user_map.find(database);
             if (it != _user_map.end()) {
                 auto it2 = it->second.find(username);
@@ -222,6 +236,7 @@ namespace springtail {
         void add_user(const std::string &username, const std::string &database,
                       const std::string &password={}, uint32_t salt=0)
         {
+            std::unique_lock lock(_mutex);
             auto it = _user_map.find(database);
             if (it == _user_map.end()) {
                 _user_map[database] = std::map<std::string, UserPtr>();
@@ -244,6 +259,7 @@ namespace springtail {
          */
         DatabasePtr get_database(const std::string &name)
         {
+            std::shared_lock lock(_mutex);
             auto it = _database_map.find(name);
             if (it != _database_map.end()) {
                 return it->second;
@@ -251,7 +267,24 @@ namespace springtail {
             return nullptr;
         }
 
+        /**
+         * @brief Add new database to the database map
+         * @param name database name
+         * @param hostname hostname of the database
+         * @param port port of the database
+         */
+        void add_database(const std::string &name, const std::string &hostname, int port=5432)
+        {
+            std::unique_lock lock(_mutex);
+            auto it = _database_map.find(name);
+            if (it == _database_map.end()) {
+                _database_map[name] = std::make_shared<Database>(name, hostname, port);
+            }
+        }
+
     private:
+        std::shared_mutex _mutex;
+
         /** user map from database -> map username -> UserPtr */
         std::map<std::string, std::map<std::string, UserPtr>> _user_map;
 

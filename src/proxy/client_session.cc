@@ -24,7 +24,7 @@ namespace springtail {
         : Session(connection, server, CLIENT),
           _id(id++)
     {
-        SPDLOG_DEBUG("Client connected: {}, id={}", connection->get_endpoint(), _id);
+        SPDLOG_DEBUG("Client connected: {}, id={}", connection->endpoint(), _id);
 
         // initialize pid and key for cancellation
         get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
@@ -158,6 +158,7 @@ namespace springtail {
                 database = value;
             }
         }
+        _read_buffer.reset(); // skip null byte, reset buffer
 
         // get user info and store it
         _user = _server->get_user_mgr()->get_user(username, database);
@@ -238,6 +239,7 @@ namespace springtail {
                     _state = ERROR;
                     return;
                 }
+                md5[MD5_PASSWD_LEN] = '\0';
 
                 if (strcmp(md5, client_passwd.c_str()) != 0) {
                     SPDLOG_ERROR("MD5 password mismatch: : {} <> {}", md5, client_passwd);
@@ -383,6 +385,13 @@ namespace springtail {
     {
         // create a new server session; will initiate the connection to the server
         ServerSessionPtr server_session = ServerSession::create(_server, _user);
+        if (server_session == nullptr) {
+            SPDLOG_ERROR("Failed to create server session");
+            _state = ERROR;
+            return;
+        }
+        // register server session connection with server
+        _server->register_session(server_session);
 
         // link the server session to the client session
         set_associated_session(server_session);

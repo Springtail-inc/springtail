@@ -13,11 +13,15 @@ namespace springtail {
                                  ProxyServerPtr server,
                                  UserPtr user)
         : Session(connection, server, user, PRIMARY)
-    {}
+    {
+        _state = STARTUP;
+        SPDLOG_DEBUG("Server connected: {}", connection->endpoint());
+    }
 
     void
     ServerSession::_process_msg(SessionMsg msg)
     {
+        // entry point for message processing from client session
         switch(msg) {
         case MSG_CLIENT_SERVER_STARTUP:
             // startup message from client
@@ -29,13 +33,14 @@ namespace springtail {
             break;
         }
 
+        // re-enable processing, add socket to poll list
         enable_processing();
     }
 
-    // entry point for connection message processing
     void
     ServerSession::_process_connection()
     {
+        // entry point for connection message processing
         switch(_state) {
         case AUTH:
             // auth handling
@@ -59,7 +64,7 @@ namespace springtail {
     {
         // Send startup message
         _write_buffer.reset();
-        _write_buffer.put32(4 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _user->dbname().size() + 3); // length
+        _write_buffer.put32(8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _user->dbname().size() + 3); // length
         _write_buffer.put32(MSG_STARTUP_V3); // protocol version
         _write_buffer.putString("user");
         _write_buffer.putString(_user->username());
@@ -99,10 +104,16 @@ namespace springtail {
             case MSG_AUTH_MD5: {
                 SPDLOG_DEBUG("Auth type: MD5");
                 // read in the salt from the server
-                int32_t salt = _read_buffer.get32();
+                int32_t salt;
+                _read_buffer.getBytes(reinterpret_cast<char*>(&salt), 4);
 
                 // get user login info
-                _get_user_login();
+                _login = _get_user_login();
+                if (_login == nullptr) {
+                    SPDLOG_ERROR("Failed to get user login info");
+                    _state = ERROR;
+                    return;
+                }
                 _login->_salt = salt;
 
                 // encode md5 auth response
@@ -184,75 +195,76 @@ namespace springtail {
         // followed by 'S' messages for parameter status (may be multiple),
         // followed by 'K' message for backend key data,
         // followed by 'Z' for ready for query
-        auto [code, msg_length] = _read_msg();
-        if (code == 'E') {
-            SPDLOG_ERROR("Error response from server");
-            _state = ERROR;
-            return;
-        }
-
-        switch(code) {
-            case 'R': {
-                // auth response, at this point should be AUTH_OK
-                int32_t status = _read_buffer.get32();
-                if (status != 0) {
-                    SPDLOG_ERROR("Auth failed: {}", status);
-                    _state = ERROR;
-                    return;
-                }
-                // free auth data
-                _login = nullptr;
-                break;
-            }
-
-            case 'S': {
-                // Parameter status
-                std::string key = _read_buffer.getString();
-                std::string value = _read_buffer.getString();
-
-                // may want to store this to give back to client
-                SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
-
-                break;
-            }
-
-            case 'K':
-                // Backend key data
-                _pid = _read_buffer.get32();
-                _cancel_key = _read_buffer.get32();
-                break;
-
-            case 'Z': {
-                // Ready for query
-                int32_t status = _read_buffer.get32(); // IDLE = 73
-                SPDLOG_DEBUG("Ready for query: {}", status);
-                _state = READY;
-
-                // at this point we should notify client session
-                // server authentication is done, and we can complete
-                // the client session authentication
-                notify_client(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
-
-                break;
-            }
-
-            case 'N':
-                // Notice response
-                // ignore for now
-                break;
-
-            case 'E':
-                // Error response
+        do {
+            auto [code, msg_length] = _read_msg();
+            if (code == 'E') {
                 SPDLOG_ERROR("Error response from server");
                 _state = ERROR;
-                break;
+                return;
+            }
 
-            default:
-                SPDLOG_ERROR("Unexpected message: {}", code);
-                _state = ERROR;
-                break;
-        }
-        // nothing to send back
+            switch(code) {
+                case 'R': {
+                    // auth response, at this point should be AUTH_OK
+                    int32_t status = _read_buffer.get32();
+                    if (status != 0) {
+                        SPDLOG_ERROR("Auth failed: {}", status);
+                        _state = ERROR;
+                        return;
+                    }
+                    // free auth data
+                    _login = nullptr;
+                    break;
+                }
+
+                case 'S': {
+                    // Parameter status
+                    std::string key = _read_buffer.getString();
+                    std::string value = _read_buffer.getString();
+
+                    // may want to store this to give back to client
+                    SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
+
+                    break;
+                }
+
+                case 'K':
+                    // Backend key data
+                    _pid = _read_buffer.get32();
+                    _cancel_key = _read_buffer.get32();
+                    break;
+
+                case 'Z': {
+                    // Ready for query
+                    int32_t status = _read_buffer.get32(); // IDLE = 73
+                    SPDLOG_DEBUG("Ready for query: {}", status);
+                    _state = READY;
+
+                    // at this point we should notify client session
+                    // server authentication is done, and we can complete
+                    // the client session authentication
+                    notify_client(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
+
+                    break;
+                }
+
+                case 'N':
+                    // Notice response
+                    // ignore for now
+                    break;
+
+                case 'E':
+                    // Error response
+                    SPDLOG_ERROR("Error response from server");
+                    _state = ERROR;
+                    break;
+
+                default:
+                    SPDLOG_ERROR("Unexpected message: {}", code);
+                    _state = ERROR;
+                    break;
+            }
+        } while (_read_buffer.remaining() > 0);
     }
 
     void
@@ -262,15 +274,16 @@ namespace springtail {
         _write_buffer.put('p');
         _write_buffer.put32(40); // length
 
-        char md5[MD5_PASSWD_LEN];
+        char md5[MD5_PASSWD_LEN+1];
 
-        // calculate md5 hash; skip the 'md5' prefix on the password
+        // calculate md5 hash; skip the 'md5' prefix on the password; add salt and compute
         assert(_login->_password.starts_with("md5"));
         if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
             SPDLOG_ERROR("Failed to calculate MD5 hash");
             _state = ERROR;
             return;
         }
+        md5[MD5_PASSWD_LEN] = '\0';
 
         _write_buffer.putString(md5);
     }
@@ -394,7 +407,19 @@ namespace springtail {
     ServerSession::create(ProxyServerPtr server, UserPtr user)
     {
         auto database = user->get_database();
+        if (database == nullptr) {
+            SPDLOG_ERROR("Failed to get database for user");
+            return nullptr;
+        }
+
         auto connection = database->create_connection();
+        if (connection == nullptr) {
+            SPDLOG_ERROR("Failed to create connection for server db");
+            return nullptr;
+        }
+
+        SPDLOG_DEBUG("Created connection for server session, to: db={}", database->name());
+
         return std::make_shared<ServerSession>(connection, server, user);
     }
 }

@@ -27,7 +27,7 @@ namespace springtail {
             }
 
             if (_waiting_on_session) {
-                SPDLOG_DEBUG("Waiting on external session");
+                SPDLOG_DEBUG("Waiting on external session, socket: {}", _connection->get_socket());
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
@@ -49,6 +49,7 @@ namespace springtail {
         } while (pkt_count < PKT_ITER_MAX_COUNT && has_data);
 
         // signal server to wait on this connection
+        SPDLOG_DEBUG("Adding connection to server poll list: {}", _connection->get_socket());
         _server->signal(_connection);
     }
 
@@ -64,28 +65,31 @@ namespace springtail {
     std::pair<char,int32_t>
     Session::_read_msg()
     {
-        _read_buffer.reset();
-        ssize_t n = _connection->read(_read_buffer, 5);
-        if (n <= 0) {
-            _state = ERROR;
-            return {'X', -1};
+        SPDLOG_DEBUG("Reading message from connection: remaining={}B", _read_buffer.remaining());
+        if (_read_buffer.remaining() <= 0) {
+            _read_buffer.reset();
+            ssize_t n = _connection->read(_read_buffer, 5);
+            if (n <= 0) {
+                _state = ERROR;
+                return {'X', -1};
+            }
         }
 
         // op code
         char code = _read_buffer.get();
-        // message length including length itself but not code
+        // message length includes length field but not code byte
         // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32();
+        int32_t msg_length = _read_buffer.get32() - 4;
 
-        SPDLOG_DEBUG("Request: msg_length={}/{}, code={}", n, msg_length, code);
+        SPDLOG_DEBUG("Request: remaining={}B, msglen={}B, code={}", _read_buffer.remaining(), msg_length, code);
 
         // if we didn't read the whole message, read the rest
-        if (msg_length + 1 < n) {
-            SPDLOG_DEBUG("Need to read more data for message");
-            _connection->read_fully(_read_buffer, msg_length + 1);
+        if (msg_length > _read_buffer.remaining()) {
+            SPDLOG_DEBUG("Need to read more data for message, this may block");
+            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
         }
 
-        return {code, msg_length-4};
+        return {code, msg_length};
     }
 
     void
@@ -97,8 +101,6 @@ namespace springtail {
             assert(_associated_session != nullptr);
             return;
         }
-
-        assert(_associated_session == nullptr);
 
         if (_state == ERROR || _connection->closed()) {
             _handle_error();

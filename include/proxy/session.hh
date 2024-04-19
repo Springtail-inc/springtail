@@ -81,7 +81,11 @@ namespace springtail {
                          Type type=CLIENT)
             : _connection(connection),
               _server(server),
-              _type(type) {}
+              _type(type)
+        {
+            _read_buffer.reset();
+            _write_buffer.reset();
+        }
 
         explicit Session(ProxyConnectionPtr connection,
                          ProxyServerPtr server,
@@ -89,7 +93,11 @@ namespace springtail {
                          Type type=CLIENT)
             : _connection(connection),
               _server(server), _type(type),
-              _user(user) {}
+              _user(user)
+        {
+            _read_buffer.reset();
+            _write_buffer.reset();
+        }
 
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;

@@ -26,8 +26,8 @@ namespace springtail {
             uint8_t stored_key[SCRAM_KEY_LEN];
 
             // extract server key
-            parse_scram_secret(_password.c_str(), &iters, &saltp, stored_key, _scram_keys->ServerKey);
-            memset(_scram_keys->ClientKey, 0, SCRAM_KEY_LEN);
+            parse_scram_secret(_password.c_str(), &iters, &saltp, stored_key, _scram_keys->server_key);
+            memset(_scram_keys->client_key, 0, SCRAM_KEY_LEN);
 
             free (saltp);
         } else if (_password.starts_with("md5")) {
@@ -44,8 +44,9 @@ namespace springtail {
 
         // if scram type copy both the keys, although only serverkey may be set
         if (_auth_type == SCRAM) {
-            memcpy(login->scram_state.ServerKey, _scram_keys->ServerKey, SCRAM_KEY_LEN);
-            memcpy(login->scram_state.ClientKey, _scram_keys->ClientKey, SCRAM_KEY_LEN);
+            std::unique_lock lock(_scram_mutex);
+            memcpy(login->scram_state.ServerKey, _scram_keys->server_key, SCRAM_KEY_LEN);
+            memcpy(login->scram_state.ClientKey, _scram_keys->client_key, SCRAM_KEY_LEN);
         }
         return login;
     }
@@ -54,23 +55,5 @@ namespace springtail {
     User::get_database() const
     {
         return _user_mgr->get_database(_database);
-    }
-
-    UserMgr::UserMgr()
-    {
-        // add test user for test db with trust
-        add_user("test", "test");
-
-        // add test user for test db with md5
-        std::string username = "test_md5";
-        std::string passwd = "test";
-        char md5[36]; // md5sum('pwd'+'user') = md5+digest
-        pg_md5_encrypt(passwd.c_str(), username.c_str(), strlen(username.c_str()), md5);
-        uint32_t salt;
-        get_random_bytes((uint8_t*)&salt, 4);
-        add_user("test_md5", "test", md5, salt);
-
-        // add user for test db with scram
-        add_user("test_scram", "test", "SCRAM-SHA-256$4096:ELqGVsjLPt+bQ4cm7iyV3g==$5/DxDP2LghUcln0Xkkzq+8SDjC7AmJ6NLwt7lW1/ilY=:HBf0FAcuI5FNmasZ6qGZtKVkeGaGeLbYjFDd77tzBEk=");
     }
 }

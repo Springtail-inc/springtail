@@ -5,7 +5,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-
 #include <proxy/buffer.hh>
 
 namespace springtail {
@@ -37,7 +36,7 @@ namespace springtail {
             return _closed;
         }
 
-        std::string get_endpoint() {
+        std::string endpoint() {
             char ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &_addr.sin_addr, ip, INET_ADDRSTRLEN);
             return std::string(ip) + ":" + std::to_string(ntohs(_addr.sin_port));
