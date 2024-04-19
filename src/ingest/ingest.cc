@@ -27,7 +27,7 @@ namespace springtail
 
         // make PgMsgTable entry and call create_table
         TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
-            0, //XXX: lsn
+            0, //lsn
             pg_schema.table_oid,
             0, //xid
             pg_schema.schema_name,
@@ -46,11 +46,11 @@ namespace springtail
             columns.emplace_back(
                 SchemaColumn(
                     0, //internal xid
-                    0, //XXX lsn
+                    0, //lsn
                     pg_col.name, //name
-                    0, //XXX position
+                    pg_col.position,
                     strToSchemaType(pg_col.type), //SchemaType type
-                    true, //XXX: exists?
+                    true, //exists?
                     pg_col.is_nullable, //nullable?
                     pg_col.default_value //default_value
                 )
@@ -66,7 +66,7 @@ namespace springtail
         std::optional<FieldArrayPtr> values;
         while((values = table.next_row())){
             if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
-                // TODO add row from extent::back()'s primary key into btree
+                // XXX add row from extent::back()'s primary key into btree
                 // btree->insert(insert_tuple)
                 extent.reset(new Extent(schema, ExtentType{false}, 0));
             }
