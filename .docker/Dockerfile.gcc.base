@@ -2,8 +2,6 @@
 # Using Ubuntu 22.04 LTS distro. This image should stay relatively stable.
 FROM ubuntu:22.04
 
-ENV _CMAKE_VERSION=3.29.2
-
 RUN apt-get update && apt-get install -y \
     lsb-release wget software-properties-common gnupg \
     build-essential autoconf libelf-dev \
@@ -23,7 +21,6 @@ RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get install -y gcc-13 g++-13 \
     && apt-get clean autoclean \
     && apt-get autoremove --yes
-
 
 # Update alternatives to use gcc-13.
 RUN update-alternatives --install /usr/bin/c++ c++ $(which g++-13) 50 \
