@@ -20,11 +20,15 @@ namespace springtail {
             _capacity = size;
         }
 
-        int size() {
+        int offset() const {
             return _offset;
         }
 
-        int capacity() {
+        int size() const {
+            return _offset;
+        }
+
+        int capacity() const {
             return _capacity;
         }
 
@@ -32,7 +36,7 @@ namespace springtail {
             _data_size += n;
         }
 
-        int remaining() {
+        int remaining() const {
             return _data_size - _offset;
         }
 
@@ -42,6 +46,10 @@ namespace springtail {
 
         char *next_data() {
             return _buffer.data() + _data_size;
+        }
+
+        const char *current_data() {
+            return _buffer.data() + _offset;
         }
 
         void put(char byte) {
@@ -61,12 +69,6 @@ namespace springtail {
             sendint32(i, _buffer.data() + _offset);
             _offset += 4;
         }
-/*
-        void putString(const std::string &s) {
-            assert(_offset + s.size() + 1 <= _capacity);
-            memcpy(_buffer.data() + _offset, s.c_str(), s.size() + 1); // copy null byte
-            _offset += s.size() + 1;
-        } */
 
         void putString(const std::string_view s) {
             assert(_offset + s.size() + 1 <= _capacity);
@@ -81,18 +83,21 @@ namespace springtail {
         }
 
         int8_t get() {
+            assert(_offset + 1  <= _data_size);
             int8_t i = recvint8(_buffer.data() + _offset);
             _offset++;
             return i;
         }
 
         int16_t get16() {
+            assert(_offset + 2  <= _data_size);
             int16_t i = recvint16(_buffer.data() + _offset);
             _offset += 2;
             return i;
         }
 
         int32_t get32() {
+            assert(_offset + 4  <= _data_size);
             int32_t i = recvint32(_buffer.data() + _offset);
             _offset += 4;
             return i;
@@ -101,10 +106,13 @@ namespace springtail {
         std::string getString() {
             // read until we get a null byte
             std::string s;
+            assert(_offset < _data_size);
             while (_buffer[_offset] != 0) {
+                assert(_offset < _data_size);
                 s.push_back(_buffer[_offset]);
                 _offset++;
             }
+            assert(_offset < _data_size);
             _offset++; // skip null byte
             return s;
         }

@@ -18,6 +18,7 @@ namespace springtail {
 
         ssize_t read(char *buffer, int size, int at_least = 0);
         ssize_t read(ProxyBuffer &buffer, int at_least = 0);
+        ssize_t read(ProxyBuffer &buffer, int max_size, int at_least);
         ssize_t read_fully(ProxyBuffer &buffer, int size);
         ssize_t write(const char *buffer, int size, bool more = false);
 

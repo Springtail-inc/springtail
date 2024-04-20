@@ -42,26 +42,34 @@ namespace springtail {
     ClientSession::notify_server_available(SessionPtr server)
     {
         // called from pool indicating there is a server session available
+        assert(0);
     }
 
     void
-    ClientSession::_process_msg(SessionMsg msg)
+    ClientSession::_process_msg(SessionMsg &msg)
     {
+        ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
+        clear_associated_session();
+        _user->get_pool()->release_server_session(server_session);
+
         // entry point for messages from server session
-        switch(msg) {
-        case MSG_SERVER_CLIENT_AUTH_DONE:
-            SPDLOG_DEBUG("Client session got auth done from server session");
-            clear_associated_session();
-            _send_auth_done();
-            break;
+        switch(msg.type) {
+            case SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
+                SPDLOG_DEBUG("Client session got auth done from server session");
+                _send_auth_done();
+                break;
 
-        case MSG_SERVER_CLIENT_ERROR:
-            _handle_server_error(get_associated_session()->get_err_msg());
-            break;
+            case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
+                _state = ERROR;
+                break;
 
-        default:
-            SPDLOG_WARN("Invalid message recevied by client session: {}", (int8_t)msg);
-            break;
+            case SessionMsg::MSG_SERVER_CLIENT_READY:
+                SPDLOG_DEBUG("Client session got ready from server session");
+                break;
+
+            default:
+                SPDLOG_WARN("Invalid message recevied by client session: {}", (int8_t)msg.type);
+                break;
         }
 
         enable_processing();
@@ -393,11 +401,12 @@ namespace springtail {
         // register server session connection with server
         _server->register_session(server_session);
 
-        // link the server session to the client session
-        set_associated_session(server_session);
+        // add server to pool
+        _user->get_pool()->add_server_session(server_session);
 
-        // add callback to notify client session when server session is done
-        notify_server(SessionMsg::MSG_CLIENT_SERVER_STARTUP, server_session);
+        // notify server of client message, response comes in _process_msg()
+        SessionMsg msg(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        notify_server(msg, server_session);
 
         // at this point we'll return through process()
         // most likely with _waiting_on_session set, in which case this
@@ -487,33 +496,51 @@ namespace springtail {
     void
     ClientSession::_handle_request()
     {
-        auto [code, msg_length] = _read_msg();
+        do {
+            auto [code, msg_length] = _read_msg();
 
-        if (_state == ERROR) {
-            return;
-        }
+            if (_state == ERROR) {
+                return;
+            }
 
-        // handle request
-        switch (code) {
-        case 'Q': {
-            // query
-            std::string query = _read_buffer.getString();
-            SPDLOG_DEBUG("Query: {}", query);
+            // handle request
+            switch (code) {
+            case 'Q': {
+                // query
+                std::string query = _read_buffer.getString();
 
-            //_request_handler->handle_query(shared_from_this(), query);
-            break;
-        }
-        case 'X': {
-            // terminate
-            SPDLOG_DEBUG("Terminate request");
-            _state = ERROR;
-            return;
-        }
-        default:
-            SPDLOG_ERROR("Unsupported request code: {}", code);
-            _state = ERROR;
-            return;
-        }
+                // handle simple query
+                _handle_simple_query(query);
+
+                //_request_handler->handle_query(shared_from_this(), query);
+                break;
+            }
+            case 'X': {
+                // terminate
+                SPDLOG_DEBUG("Terminate request");
+                _state = ERROR;
+                return;
+            }
+            default:
+                SPDLOG_ERROR("Unsupported request code: {}", code);
+                _state = ERROR;
+                return;
+            }
+        } while (_read_buffer.remaining() > 0 && _state != ERROR);
+    }
+
+    void
+    ClientSession::_handle_simple_query(const std::string &query)
+    {
+        SPDLOG_DEBUG("Simple Query: {}", query);
+
+        // get a server session from the pool, there should be one (for now at least)
+        ServerSessionPtr server_session = _user->get_pool()->get_server_session(shared_from_this());
+        assert (server_session != nullptr);
+
+        // notify server of client message, response comes in _process_msg()
+        SessionMsg msg(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, query);
+        notify_server(msg, server_session);
     }
 
 }

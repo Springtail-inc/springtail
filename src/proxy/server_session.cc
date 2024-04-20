@@ -3,6 +3,7 @@
 #include <proxy/server_session.hh>
 #include <proxy/server.hh>
 #include <proxy/connection.hh>
+#include <proxy/errors.hh>
 
 #include <proxy/auth/md5.h>
 #include <proxy/auth/sha256.h>
@@ -19,17 +20,21 @@ namespace springtail {
     }
 
     void
-    ServerSession::_process_msg(SessionMsg msg)
+    ServerSession::_process_msg(SessionMsg &msg)
     {
         // entry point for message processing from client session
-        switch(msg) {
-        case MSG_CLIENT_SERVER_STARTUP:
+        switch(msg.type) {
+        case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
             // startup message from client
             _handle_startup();
             break;
 
+        case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
+            _handle_simple_query(std::get<std::string>(msg.data));
+            break;
+
         default:
-            SPDLOG_WARN("Unknown message: {}", (int8_t)msg);
+            SPDLOG_WARN("Unknown message: {}", (int8_t)msg.type);
             break;
         }
 
@@ -40,7 +45,10 @@ namespace springtail {
     void
     ServerSession::_process_connection()
     {
+        SPDLOG_DEBUG("Server session processing connection: state={}", (int8_t)_state);
+
         // entry point for connection message processing
+        // called from operator() in session
         switch(_state) {
         case AUTH:
             // auth handling
@@ -52,6 +60,7 @@ namespace springtail {
             break;
         case READY:
             // ready for query, handle requests
+            _handle_replies();
             break;
         default:
             _state = ERROR;
@@ -196,12 +205,7 @@ namespace springtail {
         // followed by 'K' message for backend key data,
         // followed by 'Z' for ready for query
         do {
-            auto [code, msg_length] = _read_msg();
-            if (code == 'E') {
-                SPDLOG_ERROR("Error response from server");
-                _state = ERROR;
-                return;
-            }
+            auto [code, msg_length] = _read_msg(); // read full message
 
             switch(code) {
                 case 'R': {
@@ -236,7 +240,7 @@ namespace springtail {
 
                 case 'Z': {
                     // Ready for query
-                    int32_t status = _read_buffer.get32(); // IDLE = 73
+                    int8_t status = _read_buffer.get(); // IDLE = 73
                     SPDLOG_DEBUG("Ready for query: {}", status);
                     _state = READY;
 
@@ -253,18 +257,27 @@ namespace springtail {
                     // ignore for now
                     break;
 
-                case 'E':
+                case 'E': {
                     // Error response
                     SPDLOG_ERROR("Error response from server");
+                    std::string severity;
+                    std::string text;
+                    std::string code;
+                    std::string message;
+
+                    ProxyError::decode_error(_read_buffer, severity, text, code, message);
+
                     _state = ERROR;
-                    break;
+
+                    return;
+                }
 
                 default:
                     SPDLOG_ERROR("Unexpected message: {}", code);
                     _state = ERROR;
-                    break;
+                    return;
             }
-        } while (_read_buffer.remaining() > 0);
+        } while (_read_buffer.remaining() > 0 && _state != ERROR);
     }
 
     void
@@ -400,6 +413,89 @@ namespace springtail {
         free(input);
 
         _state = AUTH_DONE;
+    }
+
+    void
+    ServerSession::_handle_simple_query(const std::string &query)
+    {
+        // Send simple query to server
+        _write_buffer.reset();
+        _write_buffer.put('Q');
+        _write_buffer.put32(4 + query.size() + 1); // length
+        _write_buffer.putString(query);
+
+        ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
+        assert(n == _write_buffer.size());
+    }
+
+    void
+    ServerSession::_handle_replies()
+    {
+        // Read messages from server session
+        do {
+            auto [code, msg_length] = _read_hdr();
+
+            switch(code) {
+                case 'E': {
+                    // Error response
+                    _read_remaining(msg_length);
+                    const char *data = _read_buffer.current_data();
+
+                    SPDLOG_ERROR("Error response from server");
+                    std::string severity;
+                    std::string text;
+                    std::string err_code;
+                    std::string message;
+
+                    // decode the error message
+                    ProxyError::decode_error(_read_buffer, severity, text, err_code, message);
+
+                    // depending on error, behavior is different
+                    // if text is "FATAL" or "PANIC" we should stop, sever connection
+                    if (text == "FATAL" || text == "PANIC") {
+                        _state = ERROR;
+                    }
+
+                    // send error to client
+                    _send_to_remote_session(code, msg_length, data);
+
+                    // if not fatal then wait for ready for query from server
+
+                    break;
+                }
+
+                case 'C':
+                    // Command complete
+                    SPDLOG_DEBUG("Command complete");
+                    _stream_to_remote_session(code, msg_length);
+                    break;
+
+                case 'Z':
+                    // Ready for query
+                    SPDLOG_DEBUG("Ready for query");
+                    _stream_to_remote_session(code, msg_length);
+                    // notify client session that we are ready for query
+                    notify_client(SessionMsg::MSG_SERVER_CLIENT_READY);
+                    break;
+
+                case 'T':
+                    // Row description
+                    SPDLOG_DEBUG("Row description");
+                    _stream_to_remote_session(code, msg_length);
+                    break;
+
+                case 'D':
+                    // Data row
+                    SPDLOG_DEBUG("Data row");
+                    _stream_to_remote_session(code, msg_length);
+                    break;
+
+                default:
+                    SPDLOG_ERROR("Unknown message: {}", code);
+                    _state = ERROR;
+                    break;
+            }
+        } while (_read_buffer.remaining() > 0 && _state != ERROR);
     }
 
     /** factory to create session */

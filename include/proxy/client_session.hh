@@ -32,11 +32,15 @@ namespace springtail {
         /** notification from pool indicating server is free to use */
         void notify_server_available(SessionPtr server);
 
+        std::shared_ptr<ClientSession> shared_from_this() {
+            return std::static_pointer_cast<ClientSession>(Session::shared_from_this());
+        }
+
     protected:
 
         void _process_connection() override;
 
-        void _process_msg(SessionMsg msg) override;
+        void _process_msg(SessionMsg &msg) override;
 
     private:
         int _id;
@@ -56,8 +60,8 @@ namespace springtail {
         void _handle_auth();
         void _handle_scram_auth(const std::string &data);
         void _handle_scram_auth_continue(const std::string &data);
-
         void _handle_server_error(const std::string_view msg);
+        void _handle_simple_query(const std::string &query);
 
         void _send_auth_req();
         void _send_auth_done();

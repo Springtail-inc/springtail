@@ -289,6 +289,17 @@ namespace springtail {
     }
 
     ssize_t
+    ProxyConnection::read(ProxyBuffer &buffer, int max_size, int at_least)
+    {
+        buffer.reset();
+        ssize_t n = read(buffer.data(), max_size, at_least);
+        if (n > 0) {
+            buffer.set_read(n);
+        }
+        return n;
+    }
+
+    ssize_t
     ProxyConnection::read_fully(ProxyBuffer &buffer, int size)
     {
         ssize_t n = read(buffer.next_data(), size, size);

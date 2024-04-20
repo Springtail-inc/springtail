@@ -132,7 +132,7 @@ namespace springtail {
          * @brief Get the user login object containing creds of user
          * @return UserLoginPtr
          */
-        UserLoginPtr get_user_login();
+        UserLoginPtr get_user_login() const;
 
         /**
          * @brief Set the client scram key after client auth; used in server auth
@@ -174,7 +174,10 @@ namespace springtail {
         const std::string &dbname() const { return _database; }
 
         /** get database object */
-        const DatabasePtr get_database() const;
+        DatabasePtr get_database() const;
+
+        /** get pool */
+        PoolPtr get_pool() const { return _pool; }
 
     private:
         struct ScramKeys {
@@ -193,9 +196,9 @@ namespace springtail {
         std::string _password;
         uint32_t    _salt;
 
-        Pool        _pool;
+        PoolPtr     _pool;
 
-        std::mutex _scram_mutex;
+        mutable std::mutex _scram_mutex;
         std::shared_ptr<ScramKeys> _scram_keys;
     };
     using UserPtr = std::shared_ptr<User>;
@@ -213,7 +216,7 @@ namespace springtail {
          * @param database database name
          * @return UserPtr user or nullptr if not found
          */
-        UserPtr get_user(const std::string &username, const std::string &database)
+        UserPtr get_user(const std::string &username, const std::string &database) const
         {
             std::shared_lock lock(_mutex);
             auto it = _user_map.find(database);
@@ -257,7 +260,7 @@ namespace springtail {
          * @param hostname hostname of the database
          * @param port port of the database
          */
-        DatabasePtr get_database(const std::string &name)
+        DatabasePtr get_database(const std::string &name) const
         {
             std::shared_lock lock(_mutex);
             auto it = _database_map.find(name);
@@ -283,7 +286,7 @@ namespace springtail {
         }
 
     private:
-        std::shared_mutex _mutex;
+        mutable std::shared_mutex _mutex;
 
         /** user map from database -> map username -> UserPtr */
         std::map<std::string, std::map<std::string, UserPtr>> _user_map;

@@ -4,6 +4,7 @@
 #include <utility>
 #include <functional>
 #include <string>
+#include <variant>
 
 #include <common/logging.hh>
 
@@ -51,13 +52,28 @@ namespace springtail {
         };
 
         /** Messages between sessions */
-        enum SessionMsg : int8_t {
-            // client to server messages
-            MSG_CLIENT_SERVER_STARTUP=0,
+        struct SessionMsg {
+            enum SessionMsgType : int8_t {
+                // client to server messages
+                MSG_CLIENT_SERVER_STARTUP=0,
+                MSG_CLIENT_SERVER_SIMPLE_QUERY=1,
 
-            // server to client messages
-            MSG_SERVER_CLIENT_AUTH_DONE=10,
-            MSG_SERVER_CLIENT_ERROR=99
+                // server to client messages
+                MSG_SERVER_CLIENT_AUTH_DONE=10,
+                MSG_SERVER_CLIENT_READY=11,
+                MSG_SERVER_CLIENT_FATAL_ERROR=99
+            } type;
+
+            // union of message types based on SessionMsg type
+            std::variant<std::string> data;
+
+            SessionMsg(SessionMsgType type, std::string data)
+                : type(type), data(data)
+            {}
+
+            SessionMsg(SessionMsgType type)
+                : type(type)
+            {}
         };
 
         constexpr static int32_t MSG_STARTUP_V2 =0x20000;
@@ -110,11 +126,11 @@ namespace springtail {
         void operator()();
 
         /** Less than operator for std::set */
-        bool operator<(const Session &rhs) {
+        bool operator<(const Session &rhs) const {
             return _connection->get_socket() < rhs._connection->get_socket();
         }
 
-        ProxyConnectionPtr get_connection() {
+        ProxyConnectionPtr get_connection() const {
             return _connection;
         }
 
@@ -137,7 +153,7 @@ namespace springtail {
         }
 
         /** notify server session of message */
-        void notify_server(SessionMsg msg, SessionPtr remote_session) {
+        void notify_server(SessionMsg &msg, SessionPtr remote_session) {
             set_associated_session(remote_session);
             remote_session->_process_msg(msg);
         }
@@ -150,15 +166,15 @@ namespace springtail {
         }
 
         /** get error message */
-        const std::string_view get_err_msg() {
+        const std::string_view get_err_msg() const {
             return _err_msg;
         }
 
-        std::shared_ptr<Session> get_associated_session() {
+        std::shared_ptr<Session> get_associated_session() const {
             return _associated_session;
         }
 
-        bool is_waiting_on_session() {
+        bool is_waiting_on_session() const {
             return _waiting_on_session;
         }
 
@@ -187,13 +203,25 @@ namespace springtail {
          * must be implemented by derived class */
         virtual void _process_connection() = 0;
 
-        virtual void _process_msg(SessionMsg msg) = 0;
+        virtual void _process_msg(SessionMsg &msg) = 0;
 
         /** Get user creds */
         UserLoginPtr _get_user_login();
 
-        /** Helper to read a message header, 1B code, 4B length, returns code, length pair */
+        /** Read full message from data connection, returns header: 1B code, 4B length */
         std::pair<char,int32_t> _read_msg();
+
+        /** Read header: 1B code, 4B length from data connection */
+        std::pair<char,int32_t> _read_hdr();
+
+        /** If we've just read the header, read the actual data into the local write buffer */
+        void _read_remaining(int32_t msg_length);
+
+        /** Stream data from one connection directly to the other */
+        void _stream_to_remote_session(char code, int32_t msg_length);
+
+        /** Send data to remote session */
+        void _send_to_remote_session(char code, int32_t msg_length, const char *data);
 
     private:
         /** client/server session associated with this one */

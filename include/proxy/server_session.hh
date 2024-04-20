@@ -14,13 +14,17 @@ namespace springtail {
 
         ~ServerSession() {};
 
+        std::shared_ptr<ServerSession> shared_from_this() {
+            return std::static_pointer_cast<ServerSession>(Session::shared_from_this());
+        }
+
         /** factory to create session */
         static std::shared_ptr<ServerSession> create(ProxyServerPtr server, UserPtr user);
 
     protected:
         void _process_connection() override;
 
-        void _process_msg(SessionMsg msg) override;
+        void _process_msg(SessionMsg &msg) override;
 
     private:
         //bool _is_pinned = false;
@@ -33,6 +37,12 @@ namespace springtail {
 
         /** Auth done, final setup and params, waiting for Ready to Query */
         void _handle_auth_done();
+
+        /** Handle replies from server */
+        void _handle_replies();
+
+        /** Handle simple query */
+        void _handle_simple_query(const std::string &query);
 
         /** Encode md5 auth response */
         void _encode_auth_md5();

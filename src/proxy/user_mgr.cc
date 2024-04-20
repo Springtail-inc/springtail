@@ -15,7 +15,8 @@ namespace springtail {
           _username(username),
           _database(database),
           _password(password),
-          _salt(salt)
+          _salt(salt),
+          _pool(std::make_shared<Pool>())
     {
         if (_password.starts_with("SCRAM")) {
             _auth_type = SCRAM;
@@ -38,7 +39,7 @@ namespace springtail {
     }
 
     UserLoginPtr
-    User::get_user_login()
+    User::get_user_login() const
     {
         UserLoginPtr login = std::make_shared<UserLogin>(_auth_type, _password, _salt);
 
@@ -51,7 +52,7 @@ namespace springtail {
         return login;
     }
 
-    const DatabasePtr
+    DatabasePtr
     User::get_database() const
     {
         return _user_mgr->get_database(_database);

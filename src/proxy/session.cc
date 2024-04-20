@@ -63,12 +63,12 @@ namespace springtail {
     }
 
     std::pair<char,int32_t>
-    Session::_read_msg()
+    Session::_read_hdr()
     {
-        SPDLOG_DEBUG("Reading message from connection: remaining={}B", _read_buffer.remaining());
-        if (_read_buffer.remaining() <= 0) {
+        // if there is still data in the buffer use that
+        if (_read_buffer.remaining() < 5) {
             _read_buffer.reset();
-            ssize_t n = _connection->read(_read_buffer, 5);
+            ssize_t n = _connection->read(_read_buffer, 5, 5); // read at most 5B
             if (n <= 0) {
                 _state = ERROR;
                 return {'X', -1};
@@ -81,7 +81,27 @@ namespace springtail {
         // so really msg_length -= 4
         int32_t msg_length = _read_buffer.get32() - 4;
 
-        SPDLOG_DEBUG("Request: remaining={}B, msglen={}B, code={}", _read_buffer.remaining(), msg_length, code);
+        return {code, msg_length};
+    }
+
+    std::pair<char,int32_t>
+    Session::_read_msg()
+    {
+        // if there is still data in the buffer use that
+        if (_read_buffer.remaining() < 5) {
+            _read_buffer.reset();
+            ssize_t n = _connection->read(_read_buffer, 5); // read at least 5B
+            if (n <= 0) {
+                _state = ERROR;
+                return {'X', -1};
+            }
+        }
+
+        // op code
+        char code = _read_buffer.get();
+        // message length includes length field but not code byte
+        // so really msg_length -= 4
+        int32_t msg_length = _read_buffer.get32() - 4;
 
         // if we didn't read the whole message, read the rest
         if (msg_length > _read_buffer.remaining()) {
@@ -90,6 +110,79 @@ namespace springtail {
         }
 
         return {code, msg_length};
+    }
+
+    void
+    Session::_read_remaining(int32_t msg_length)
+    {
+        if (msg_length > _read_buffer.remaining()) {
+            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
+        }
+    }
+
+    void
+    Session::_stream_to_remote_session(char code, int32_t msg_length)
+    {
+        assert(_associated_session != nullptr);
+        char buffer[4096];
+
+        // first write the header, add 4 to msg length for size of length field
+        buffer[0] = code;
+        sendint32(msg_length+4, buffer + 1);
+        int n = _associated_session->get_connection()->write(buffer, 5);
+        if (n <= 0) {
+            SPDLOG_ERROR("Error writing to remote socket: {}",
+                         _associated_session->get_connection()->get_socket());
+            _state = ERROR;
+            return;
+        }
+        SPDLOG_DEBUG("Streamed header to remote session: code={}, msg_length={}", code, msg_length);
+
+        // iterate reading buffer from local session and write to remote session
+        while (msg_length > 0) {
+            SPDLOG_DEBUG("Reading {} bytes from local socket", std::min(msg_length, 4096));
+            int n = _connection->read(buffer, std::min(msg_length, 4096));
+            if (n <= 0) {
+                SPDLOG_ERROR("Error reading from local socket: {}", _connection->get_socket());
+                _state = ERROR;
+                return;
+            }
+
+            int m = _associated_session->get_connection()->write(buffer, n);
+            if (m <= 0 || m != n) {
+                SPDLOG_ERROR("Error writing to remote socket: {}",
+                             _associated_session->get_connection()->get_socket());
+                _state = ERROR;
+                return;
+            }
+
+            SPDLOG_DEBUG("Streamed {} bytes to remote session", m);
+
+            msg_length -= m;
+        }
+    }
+
+    void
+    Session::_send_to_remote_session(char code, int32_t msg_length, const char *data)
+    {
+        assert(_associated_session != nullptr);
+        char buffer[5];
+
+        // first write the header, add 4 to msg length for size of length field
+        buffer[0] = code;
+        sendint32(msg_length+4, buffer + 1);
+        int n = _associated_session->get_connection()->write(buffer, 5);
+        if (n <= 0) {
+            SPDLOG_ERROR("Error writing to remote socket: {}", _connection->get_socket());
+            _state = ERROR;
+            return;
+        }
+        n = _associated_session->get_connection()->write(data, msg_length);
+        if (n <= 0 || n != msg_length) {
+            SPDLOG_ERROR("Error writing to remote socket: {}", _connection->get_socket());
+            _state = ERROR;
+            return;
+        }
     }
 
     void
@@ -127,7 +220,7 @@ namespace springtail {
         if ((_type == Type::PRIMARY || _type == Type::REPLICA) &&
             _associated_session != nullptr) {
             // notify client session of error
-            notify_client(SessionMsg::MSG_SERVER_CLIENT_ERROR);
+            notify_client(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
         }
     }
 }
