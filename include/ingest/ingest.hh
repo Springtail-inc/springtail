@@ -14,8 +14,9 @@ namespace springtail
     ExtentSchemaPtr populate_schema(std::vector<PgColumn> pg_columns);
 
     private:
-    std::vector<PgMsgSchemaColumn> map_to_pg_msg(std::vector<PgColumn>);
-    void populate_rows(ExtentSchemaPtr schema, PgStreamTable table, std::shared_ptr<MutableBTree> btree);
+    std::vector<PgMsgSchemaColumn> map_to_pg_msg(std::vector<PgColumn>, std::vector<std::string> pkeys);
+    void populate_rows(ExtentSchemaPtr schema, PgStreamTable table, std::shared_ptr<MutableBTree> btree, std::vector<std::string> pkeys);
+    int get_vec_pos(std::vector<std::string> vec, std::string element);
 
     };
 }
