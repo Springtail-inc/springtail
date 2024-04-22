@@ -39,10 +39,14 @@ extern "C" {
 #define SHA256_BLOCK_SIZE (16*4)
 
 /** SHA224 result length in bytes */
+#ifndef SHA224_DIGEST_LENGTH
 #define SHA224_DIGEST_LENGTH (224/8)
+#endif
 
 /** SHA256 result length in bytes */
+#ifndef SHA256_DIGEST_LENGTH
 #define SHA256_DIGEST_LENGTH (256/8)
+#endif
 
 /**
  * State structure for both SHA256 and SHA224.

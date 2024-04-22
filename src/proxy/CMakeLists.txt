@@ -2,6 +2,7 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # source files
 set(PROXY_SOURCES
@@ -17,15 +18,15 @@ set(PROXY_SOURCES
 add_library(springtail_proxy ${PROXY_SOURCES})
 target_include_directories(springtail_proxy
     PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${Boost_INCLUDES}
 )
 target_link_libraries(springtail_proxy
     PUBLIC springtail_pg springtail_common
-    PRIVATE ${Boost_LIBRARIES}
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt
     PRIVATE auth
+    PRIVATE OpenSSL::SSL
+    PRIVATE OpenSSL::Crypto
 )
 
 # test parser executable
@@ -43,11 +44,10 @@ target_link_libraries(parser PRIVATE pg_query)
 add_executable(daemon test/daemon.cc)
 target_include_directories(daemon
     PRIVATE ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${Boost_INCLUDES}
 )
 target_link_libraries(daemon
-    PRIVATE springtail_proxy
-    PRIVATE auth
+    PUBLIC springtail_proxy
+    PRIVATE Boost::program_options
 )
 
 # test client executable -- boost::asio test, not used

@@ -4,6 +4,9 @@
 #include <string>
 #include <map>
 #include <set>
+#include <filesystem>
+
+#include <openssl/ssl.h>
 
 #include <common/thread_pool.hh>
 
@@ -20,7 +23,9 @@ namespace springtail {
     public:
         ProxyServer(const std::string &address,
                     int port,
-                    int thread_pool_size = 16);
+                    int thread_pool_size,
+                    const std::filesystem::path &cert_file,
+                    const std::filesystem::path &key_file);
 
         /** Start server main loop */
         void run();
@@ -55,6 +60,11 @@ namespace springtail {
             _user_mgr->add_database(dbname, hostname, port);
         }
 
+        SSL *SSL_new() {
+            // think this is thread safe but hard to know 100%
+            return ::SSL_new(_ssl_ctx);
+        }
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
@@ -68,6 +78,8 @@ namespace springtail {
         std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map
         std::set<int> _waiting_sessions;     ///< set of connection sockets waiting for read data
         std::map<int, SessionPtr> _sessions; ///< map of connection socket to session object
+
+        SSL_CTX *_ssl_ctx;                    ///< SSL context
 
         void _do_accept();                   ///< accept new connection handler
     };

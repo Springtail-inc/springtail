@@ -33,9 +33,35 @@ void populate_test_users(ProxyServerPtr server)
 
 int main(int argc, char* argv[])
 {
+    std::filesystem::path certificate;
+    std::filesystem::path key;
+    std::string host;
+    int port;
+    int num_threads;
+
+
+    boost::program_options::options_description desc("Allowed options");
+    desc.add_options()
+        ("help,h", "Help message.")
+        ("host,H", boost::program_options::value<std::string>(&host)->default_value("127.0.0.1"), "Proxy hostname")
+        ("port,p", boost::program_options::value<int>(&port)->default_value(8888), "Proxy port number")
+        ("threads,n", boost::program_options::value<int>(&port)->default_value(4), "Number of threads")
+        ("cert,c", boost::program_options::value<std::filesystem::path>(&certificate)->default_value(std::filesystem::path("cert.pem")), "Certificate file")
+        ("key,k", boost::program_options::value<std::filesystem::path>(&key)->default_value(std::filesystem::path("key.pem")), "Key file");
+
+    boost::program_options::variables_map vm;
+    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+    boost::program_options::notify(vm);
+
+    // check if we need to print the help message
+    if (vm.count("help")) {
+        std::cout << desc << std::endl;
+        return 0;
+    }
+
     springtail_init();
 
-    ProxyServerPtr server = std::make_shared<ProxyServer>("127.0.0.1", 8888, 2);
+    ProxyServerPtr server = std::make_shared<ProxyServer>(host, port, num_threads, certificate, key);
 
     populate_test_users(server);
 

@@ -57,6 +57,7 @@ namespace springtail {
 
         void _handle_request();
         void _handle_startup();
+        void _handle_ssl_handshake();
         void _handle_auth();
         void _handle_scram_auth(const std::string &data);
         void _handle_scram_auth_continue(const std::string &data);

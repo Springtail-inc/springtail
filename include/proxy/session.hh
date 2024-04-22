@@ -43,12 +43,11 @@ namespace springtail {
         /** State of session */
         enum State : int8_t {
             STARTUP=0,
-            AUTH=1,
-            AUTH_SERVER=2,
-            AUTH_DONE=3,
-            READY=4,
-            STREAMING_TO_SERVER=5,
-            STREAMING_TO_CLIENT=6,
+            SSL_HANDSHAKE=1,
+            AUTH=2,
+            AUTH_SERVER=3,
+            AUTH_DONE=4,
+            READY=5,
             ERROR=99
         };
 

@@ -88,6 +88,10 @@ namespace springtail {
                 // startup messages, no auth done yet
                 _handle_startup();
                 break;
+            case SSL_HANDSHAKE:
+                // ssl handshake in progress
+                _handle_ssl_handshake();
+                break;
             case AUTH:
                 // completed startup, now handling auth requests
                 _handle_auth();
@@ -101,6 +105,28 @@ namespace springtail {
                 _state = ERROR;
                 break;
         }
+    }
+
+    void
+    ClientSession::_handle_ssl_handshake()
+    {
+        // try the SSL accept.  This will return 1 on success, 0 on incomplete, and < 0 on error
+        // on error get the error code, if it is WANT_READ or WANT_WRITE, then we need to wait
+        int rc = _connection->SSL_accept();
+        if (rc <= 0) {
+            int err = _connection->SSL_get_error(rc);
+            if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                SPDLOG_DEBUG("SSL handshake in progress: err={}", err);
+                return;
+            }
+            SPDLOG_ERROR("SSL handshake failed: {}", err);
+            _state = ERROR;
+            return;
+        }
+
+        SPDLOG_DEBUG("SSL handshake complete");
+
+        _state = STARTUP;
     }
 
     void
@@ -118,12 +144,35 @@ namespace springtail {
         SPDLOG_DEBUG("Startup message: msg_length={}, code={}", msg_length, code);
 
         switch (code) {
-            case MSG_SSLREQ:
+            case MSG_SSLREQ: {
                 SPDLOG_DEBUG("SSL negotiation requested");
                 _write_buffer.reset();
-                _write_buffer.put('N');
+                _write_buffer.put('S');
                 _connection->write(_write_buffer.data(), 1);
+
+                // do tls handshake
+                SSL *ssl = _server->SSL_new();
+                if (ssl == nullptr) {
+                    SPDLOG_ERROR("Failed to create SSL context");
+                    _state = ERROR;
+                    return;
+                }
+
+                // init ssl on connection
+                if (_connection->setup_SSL(ssl) < 0) {
+                    SPDLOG_ERROR("Failed to setup SSL on connection");
+                    _state = ERROR;
+                    return;
+                }
+
+                // set state to SSL Handshake
+                _state = SSL_HANDSHAKE;
+
+                // do handshake
+                _handle_ssl_handshake();
+
                 break;
+            }
 
             case MSG_STARTUP_V2:
                 SPDLOG_WARN("Startup message version 2.0, not supported");

@@ -23,11 +23,31 @@
 namespace springtail {
     ProxyServer::ProxyServer(const std::string &address,
                              int port,
-                             int thread_pool_size)
+                             int thread_pool_size,
+                             const std::filesystem::path &cert_file,
+                             const std::filesystem::path &key_file)
       : _request_handler(std::make_shared<ProxyRequestHandler>()),
         _user_mgr(std::make_shared<UserMgr>()),
         _thread_pool(thread_pool_size)
     {
+        // create the SSL context
+        _ssl_ctx = ::SSL_CTX_new(::TLS_method());
+        if (!_ssl_ctx) {
+            SPDLOG_ERROR("Error creating SSL context");
+            exit(1);
+        }
+
+        /* Set the key and cert */
+        if (::SSL_CTX_use_certificate_file(_ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+            SPDLOG_ERROR("Error loading certificate file");
+            exit(1);
+        }
+
+        if (::SSL_CTX_use_PrivateKey_file(_ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
+            SPDLOG_ERROR("Error loading certificate file");
+            exit(1);
+        }
+
         _socket = socket(AF_INET, SOCK_STREAM, 0);
 
         struct sockaddr_in serv_addr;
@@ -195,6 +215,18 @@ namespace springtail {
                 _thread_pool.queue(session);
             }
         }
+
+        SPDLOG_INFO("Proxy server shutting down");
+
+        // close socket
+        ::close(_socket);
+
+        // close pipe
+        ::close(_pipe[0]);
+        ::close(_pipe[1]);
+
+        // shutdown ssl
+        ::SSL_CTX_free(_ssl_ctx);
     }
 
     void
