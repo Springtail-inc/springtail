@@ -417,7 +417,11 @@ bool read_server_first_message(ScramState *scram_state, char *input,
 		goto failed;
 	}
 
-	*server_nonce_p = server_nonce;
+	// malloc the server nonce since it is freed in scram_free, and the client
+	// mallocs the server nonce in build_server_first_message()
+	*server_nonce_p = (char *)malloc(strlen(server_nonce) + 1);
+	memcpy(*server_nonce_p, server_nonce, strlen(server_nonce) + 1);
+
 	*salt_p = salt;
 	*saltlen_p = saltlen;
 	*iterations_p = iterations;

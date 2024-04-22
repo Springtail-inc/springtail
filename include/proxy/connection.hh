@@ -16,6 +16,11 @@ namespace springtail {
             _addr(addr)
         {}
 
+        ~ProxyConnection() {
+            SPDLOG_DEBUG("Destroying connection to {}", _socket);
+            close();
+        }
+
         ssize_t read(char *buffer, int size, int at_least = 0);
         ssize_t read(ProxyBuffer &buffer, int at_least = 0);
         ssize_t read(ProxyBuffer &buffer, int max_size, int at_least);

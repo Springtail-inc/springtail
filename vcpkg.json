@@ -17,6 +17,7 @@
         "thrift",
         "gtest",
         "vincentlaucsb-csv-parser",
-        "cppzmq"
+        "cppzmq",
+        "libevent"
     ]
 }

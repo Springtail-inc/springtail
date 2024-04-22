@@ -34,7 +34,7 @@ namespace springtail {
             break;
 
         default:
-            SPDLOG_WARN("Unknown message: {}", (int8_t)msg.type);
+            SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg.type);
             break;
         }
 
@@ -45,27 +45,153 @@ namespace springtail {
     void
     ServerSession::_process_connection()
     {
-        SPDLOG_DEBUG("Server session processing connection: state={}", (int8_t)_state);
+        SPDLOG_DEBUG("Server session processing connection: state={:d}", (int8_t)_state);
 
         // entry point for connection message processing
         // called from operator() in session
         switch(_state) {
         case AUTH:
-            // auth handling
-            _handle_auth();
-            break;
         case AUTH_DONE:
-            // post auth handling, prior to ready for query
-            _handle_auth_done();
-            break;
         case READY:
             // ready for query, handle requests
-            _handle_replies();
+            _handle_message();
             break;
         default:
             _state = ERROR;
             break;
         }
+    }
+
+    void
+    ServerSession::_handle_message()
+    {
+        // Read messages from server session
+
+        // May be in AUTH_DONE or READY state
+        // If in AUTH_DONE state:
+        // Completed authentication; first expecting auth ok 'R' message
+        // followed by 'S' messages for parameter status (may be multiple),
+        // followed by 'K' message for backend key data,
+        // followed by 'Z' for ready for query
+
+        _read_buffer.reset();
+        auto [code, msg_length] = _read_hdr();
+
+        switch(code) {
+            case 'R': {
+                _read_remaining(msg_length);
+
+                if (_state == AUTH) {
+                    // still in auth negotiation state
+                    _handle_auth(msg_length);
+                    break;
+                }
+
+                // done with auth, this should be last message
+                assert(_state == AUTH_DONE);
+
+                // auth response, at this point should be AUTH_OK
+                int32_t status = _read_buffer.get32();
+                if (status != 0) {
+                    SPDLOG_ERROR("Auth failed: {}", status);
+                    _state = ERROR;
+                    return;
+                }
+
+                // free auth data
+                assert(_login != nullptr); // should have been set in _handle_auth
+                _login = nullptr;
+
+                break;
+            }
+
+            case 'S': {
+                assert(_state == AUTH_DONE);
+                _read_remaining(msg_length);
+
+                // Parameter status
+                std::string key = _read_buffer.getString();
+                std::string value = _read_buffer.getString();
+
+                // may want to store this to give back to client
+                SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
+
+                break;
+            }
+
+            case 'K':
+                assert(_state == AUTH_DONE);
+                _read_remaining(msg_length);
+                // Backend key data
+                _pid = _read_buffer.get32();
+                _cancel_key = _read_buffer.get32();
+                break;
+
+            case 'E': {
+                // Error response
+                _read_remaining(msg_length);
+                const char *data = _read_buffer.current_data();
+
+                _handle_error_code(data, msg_length);
+                break;
+            }
+
+            case 'C':
+                // Command complete
+                SPDLOG_DEBUG("Command complete");
+                _stream_to_remote_session(code, msg_length);
+                break;
+
+            case 'Z': {
+                // Ready for query
+                SPDLOG_DEBUG("Ready for query");
+
+                if (_state == AUTH_DONE) {
+                    _read_remaining(msg_length);
+                    _state = READY;
+                    // at this point we should notify client session
+                    // server authentication is done, and we can complete
+                    // the client session authentication
+                    SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
+                    notify_client(msg);
+                    break;
+                }
+
+                // send ready for query to client
+                _stream_to_remote_session(code, msg_length);
+
+                // notify client session that we are ready for query
+                SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_READY);
+                notify_client(msg);
+
+                break;
+            }
+
+            case 'T':
+                // Row description
+                SPDLOG_DEBUG("Row description");
+                _stream_to_remote_session(code, msg_length);
+                break;
+
+            case 'D':
+                // Data row
+                SPDLOG_DEBUG("Data row");
+                _stream_to_remote_session(code, msg_length);
+                break;
+
+            case 'N':
+                // Notice response
+                SPDLOG_DEBUG("Notice response");
+                _stream_to_remote_session(code, msg_length);
+                break;
+
+            default:
+                SPDLOG_ERROR("Unknown message: {}", code);
+                _state = ERROR;
+                break;
+        }
+
+        SPDLOG_DEBUG("Done msg handling: Remaining: {}", _read_buffer.remaining());
     }
 
     void
@@ -92,14 +218,11 @@ namespace springtail {
     }
 
     void
-    ServerSession::_handle_auth()
+    ServerSession::_handle_auth(int32_t msg_length)
     {
         // Read auth response 'R', we are still in auth flow
         // for SASL, we may have multiple messages
         // for MD5, we have one message
-        auto [code, msg_length] = _read_msg();
-        assert(code == 'R');
-
         int32_t auth_type = _read_buffer.get32();
         bool do_msg_send = true;
 
@@ -136,6 +259,14 @@ namespace springtail {
             case MSG_AUTH_SASL: {
                 // first message in SASL flow (SCRAM-SHA-256)
                 SPDLOG_DEBUG("Auth type: SASL");
+
+                // get user login info
+                _login = _get_user_login();
+                if (_login == nullptr) {
+                    SPDLOG_ERROR("Failed to get user login info");
+                    _state = ERROR;
+                    return;
+                }
 
                 // check that the server supports the SCRAM-SHA-256 mechanism
                 bool found = false;
@@ -195,89 +326,8 @@ namespace springtail {
             ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
             assert(n == _write_buffer.size());
         }
-    }
 
-    void
-    ServerSession::_handle_auth_done()
-    {
-        // Completed authentication; first expecting auth ok 'R' message
-        // followed by 'S' messages for parameter status (may be multiple),
-        // followed by 'K' message for backend key data,
-        // followed by 'Z' for ready for query
-        do {
-            auto [code, msg_length] = _read_msg(); // read full message
-
-            switch(code) {
-                case 'R': {
-                    // auth response, at this point should be AUTH_OK
-                    int32_t status = _read_buffer.get32();
-                    if (status != 0) {
-                        SPDLOG_ERROR("Auth failed: {}", status);
-                        _state = ERROR;
-                        return;
-                    }
-                    // free auth data
-                    _login = nullptr;
-                    break;
-                }
-
-                case 'S': {
-                    // Parameter status
-                    std::string key = _read_buffer.getString();
-                    std::string value = _read_buffer.getString();
-
-                    // may want to store this to give back to client
-                    SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
-
-                    break;
-                }
-
-                case 'K':
-                    // Backend key data
-                    _pid = _read_buffer.get32();
-                    _cancel_key = _read_buffer.get32();
-                    break;
-
-                case 'Z': {
-                    // Ready for query
-                    int8_t status = _read_buffer.get(); // IDLE = 73
-                    SPDLOG_DEBUG("Ready for query: {}", status);
-                    _state = READY;
-
-                    // at this point we should notify client session
-                    // server authentication is done, and we can complete
-                    // the client session authentication
-                    notify_client(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
-
-                    break;
-                }
-
-                case 'N':
-                    // Notice response
-                    // ignore for now
-                    break;
-
-                case 'E': {
-                    // Error response
-                    SPDLOG_ERROR("Error response from server");
-                    std::string severity;
-                    std::string text;
-                    std::string code;
-                    std::string message;
-
-                    ProxyError::decode_error(_read_buffer, severity, text, code, message);
-
-                    _state = ERROR;
-
-                    return;
-                }
-
-                default:
-                    SPDLOG_ERROR("Unexpected message: {}", code);
-                    _state = ERROR;
-                    return;
-            }
-        } while (_read_buffer.remaining() > 0 && _state != ERROR);
+        SPDLOG_DEBUG("Auth response sent to server: remaining: {}", _read_buffer.remaining());
     }
 
     void
@@ -317,7 +367,7 @@ namespace springtail {
         _write_buffer.put('p');
         _write_buffer.put32(4+14+4+len); // length
         _write_buffer.putString("SCRAM-SHA-256");
-        _write_buffer.put(len); // length of data
+        _write_buffer.put32(len); // length of data
         _write_buffer.putBytes(client_first_message, len);
 
         free(client_first_message);
@@ -428,74 +478,32 @@ namespace springtail {
         assert(n == _write_buffer.size());
     }
 
+
+
     void
-    ServerSession::_handle_replies()
+    ServerSession::_handle_error_code(const char *data, int32_t msg_length)
     {
-        // Read messages from server session
-        do {
-            auto [code, msg_length] = _read_hdr();
+        // Error response
+        SPDLOG_ERROR("Error response from server");
 
-            switch(code) {
-                case 'E': {
-                    // Error response
-                    _read_remaining(msg_length);
-                    const char *data = _read_buffer.current_data();
+        std::string severity;
+        std::string text;
+        std::string code;
+        std::string message;
 
-                    SPDLOG_ERROR("Error response from server");
-                    std::string severity;
-                    std::string text;
-                    std::string err_code;
-                    std::string message;
+        ProxyError::decode_error(_read_buffer, severity, text, code, message);
 
-                    // decode the error message
-                    ProxyError::decode_error(_read_buffer, severity, text, err_code, message);
+        // depending on error, behavior is different
+        // if text is "FATAL" or "PANIC" we should stop, sever connection
+        if (text == "FATAL" || text == "PANIC") {
+            _state = ERROR;
+        }
 
-                    // depending on error, behavior is different
-                    // if text is "FATAL" or "PANIC" we should stop, sever connection
-                    if (text == "FATAL" || text == "PANIC") {
-                        _state = ERROR;
-                    }
+        // send error to client
+        _send_to_remote_session('E', msg_length, data);
 
-                    // send error to client
-                    _send_to_remote_session(code, msg_length, data);
-
-                    // if not fatal then wait for ready for query from server
-
-                    break;
-                }
-
-                case 'C':
-                    // Command complete
-                    SPDLOG_DEBUG("Command complete");
-                    _stream_to_remote_session(code, msg_length);
-                    break;
-
-                case 'Z':
-                    // Ready for query
-                    SPDLOG_DEBUG("Ready for query");
-                    _stream_to_remote_session(code, msg_length);
-                    // notify client session that we are ready for query
-                    notify_client(SessionMsg::MSG_SERVER_CLIENT_READY);
-                    break;
-
-                case 'T':
-                    // Row description
-                    SPDLOG_DEBUG("Row description");
-                    _stream_to_remote_session(code, msg_length);
-                    break;
-
-                case 'D':
-                    // Data row
-                    SPDLOG_DEBUG("Data row");
-                    _stream_to_remote_session(code, msg_length);
-                    break;
-
-                default:
-                    SPDLOG_ERROR("Unknown message: {}", code);
-                    _state = ERROR;
-                    break;
-            }
-        } while (_read_buffer.remaining() > 0 && _state != ERROR);
+        // if not fatal then wait for ready for query from server
+        return;
     }
 
     /** factory to create session */

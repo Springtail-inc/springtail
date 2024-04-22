@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <variant>
+#include <atomic>
 
 #include <common/logging.hh>
 
@@ -119,7 +120,7 @@ namespace springtail {
         Session& operator=(const Session&) = delete;
 
         /** Destruct a connection. */
-        virtual ~Session() {};
+        virtual ~Session() { SPDLOG_DEBUG("Session destructor"); };
 
         /** Process messages for session connection;
          * thread entry, calls _process() */
@@ -154,13 +155,17 @@ namespace springtail {
 
         /** notify server session of message */
         void notify_server(SessionMsg &msg, SessionPtr remote_session) {
+            assert(remote_session->_type == PRIMARY || remote_session->_type == REPLICA);
+            SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg.type);
             set_associated_session(remote_session);
             remote_session->_process_msg(msg);
         }
 
         /** notify client session of message */
-        void notify_client(SessionMsg msg) {
+        void notify_client(SessionMsg &msg) {
             assert(_associated_session != nullptr);
+            assert(_associated_session->_type == CLIENT);
+            SPDLOG_DEBUG("Notifying client of message: {:d}", (int8_t)msg.type);
             _associated_session->clear_waiting_on_session();
             _associated_session->_process_msg(msg);
         }
@@ -228,8 +233,10 @@ namespace springtail {
         std::shared_ptr<Session> _associated_session = nullptr;
         /** waiting on associated session for data -- _associated_session should be set */
         bool _waiting_on_session = false;
+        std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
         void _handle_error();
+
     };
     using SessionPtr = std::shared_ptr<Session>;
 }

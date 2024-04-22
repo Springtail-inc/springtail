@@ -211,11 +211,12 @@ namespace springtail {
     }
 
     void
-    ProxyServer::shutdown_session(Session *session)
+    ProxyServer::shutdown_session(SessionPtr session)
     {
+        int socket = session->get_connection()->get_socket();
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _sessions.erase(session->get_connection()->get_socket());
-        _waiting_sessions.erase(session->get_connection()->get_socket());
+        _sessions.erase(socket);
+        _waiting_sessions.erase(socket);
     }
 
     void

@@ -68,7 +68,7 @@ namespace springtail {
                 break;
 
             default:
-                SPDLOG_WARN("Invalid message recevied by client session: {}", (int8_t)msg.type);
+                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg.type);
                 break;
         }
 
@@ -79,7 +79,7 @@ namespace springtail {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        SPDLOG_DEBUG("Processing client session: state={}", (int8_t)_state);
+        SPDLOG_DEBUG("Processing client session: state={:d}", (int8_t)_state);
 
         // main entry point for thread processing
         // resume from where we left off

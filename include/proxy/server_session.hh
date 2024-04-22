@@ -33,16 +33,19 @@ namespace springtail {
         void _handle_startup();
 
         /** Authentication */
-        void _handle_auth();
+        void _handle_auth(int32_t msg_length);
 
         /** Auth done, final setup and params, waiting for Ready to Query */
         void _handle_auth_done();
 
         /** Handle replies from server */
-        void _handle_replies();
+        void _handle_message();
 
         /** Handle simple query */
         void _handle_simple_query(const std::string &query);
+
+        /** Handle error code 'E' */
+        void _handle_error_code(const char *data, int32_t size);
 
         /** Encode md5 auth response */
         void _encode_auth_md5();

@@ -12,6 +12,9 @@
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
 
+#include <event2/event.h>
+
+
 namespace springtail {
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
@@ -29,7 +32,7 @@ namespace springtail {
         void register_session(SessionPtr session);
 
         /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
-        void shutdown_session(Session *session);
+        void shutdown_session(SessionPtr session);
 
         /** Get the user mgr object */
         UserMgrPtr get_user_mgr() {

@@ -206,21 +206,28 @@ namespace springtail {
     void
     Session::_handle_error()
     {
+        bool shutting_down = _shut_down_flag.test_and_set();
+        if (shutting_down) {
+            return;
+        }
+
         // general error handling
         // cleanup this session and check for associated session
-        SPDLOG_ERROR("Error state, closing connection");
+        SPDLOG_ERROR("Error state, closing connection: type={}", _type == Type::PRIMARY ? "PRIMARY" : "CLIENT");
+        std::cout << this << std::endl;
 
         // close connection
         _connection->close();
 
         // let server handle full cleanup
-        _server->shutdown_session(this);
+        _server->shutdown_session(shared_from_this());
 
         // check for associated client session, and notify of error
-        if ((_type == Type::PRIMARY || _type == Type::REPLICA) &&
-            _associated_session != nullptr) {
+        if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
             // notify client session of error
-            notify_client(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
+            SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
+            notify_client(msg);
         }
+        SPDLOG_ERROR("Shutdown complete\n");
     }
 }

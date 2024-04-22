@@ -28,7 +28,7 @@ void populate_test_users(ProxyServerPtr server)
     server->add_user("test_md5", "test", md5, salt);
 
     // add user for test db with scram
-    server->add_user("test_scram", "test", "SCRAM-SHA-256$4096:ELqGVsjLPt+bQ4cm7iyV3g==$5/DxDP2LghUcln0Xkkzq+8SDjC7AmJ6NLwt7lW1/ilY=:HBf0FAcuI5FNmasZ6qGZtKVkeGaGeLbYjFDd77tzBEk=");
+    server->add_user("test_scram", "test", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
 }
 
 int main(int argc, char* argv[])
