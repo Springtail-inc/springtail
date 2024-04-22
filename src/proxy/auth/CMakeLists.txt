@@ -12,6 +12,7 @@ set(SOURCES
     sha256.c
     wchar.c
     md5.c
+    unicode_norm.c
 )
 
 # Create the library target

@@ -20,7 +20,7 @@ target_include_directories(springtail_proxy
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
 target_link_libraries(springtail_proxy
-    PUBLIC springtail_pg springtail_common
+    PUBLIC springtail_common
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt
