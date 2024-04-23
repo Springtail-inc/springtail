@@ -34,7 +34,7 @@ namespace springtail {
         void close() {
             if (!_closed.test_and_set()) {
                 // free ssl object
-                if (_ssl) {
+                if (_ssl != nullptr) {
                     ::SSL_shutdown(_ssl);
                     ::SSL_free(_ssl);
                 }
@@ -64,6 +64,8 @@ namespace springtail {
                 return -1;
             }
 
+            // set socket to non-blocking while we do the SSL handshake
+            // it is set back to blocking after the handshake (after ssl_accept)
             int flags = fcntl(_socket, F_GETFL, 0);
             rc = fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
             if (rc < 0) {
@@ -81,7 +83,11 @@ namespace springtail {
             if (rc == 1) {
                 // set socket back to blocking
                 int flags = fcntl(_socket, F_GETFL, 0);
-                rc = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
+                int r = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
+                if (r < 0) {
+                    SPDLOG_ERROR("Error setting socket to blocking: {}", strerror(errno));
+                    return -1;
+                }
             }
             return rc;
         }
@@ -98,6 +104,12 @@ namespace springtail {
         struct sockaddr_in _addr;
         std::atomic_flag _closed = ATOMIC_FLAG_INIT;
         SSL *_ssl = nullptr;
+
+        ssize_t _ssl_read(char *buffer, int max_size, int at_least);
+        ssize_t _ssl_write(const char *buffer, int size);
+
+        ssize_t _read(char *buffer, int size, int at_least);
+        ssize_t _write(const char *buffer, int size, bool more);
     };
     using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
 }

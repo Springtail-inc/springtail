@@ -2,6 +2,8 @@
 #include <sstream>
 #include <cassert>
 
+#include <openssl/err.h>
+
 #include <common/logging.hh>
 
 #include <pg_repl/pg_types.hh>
@@ -115,11 +117,19 @@ namespace springtail {
         int rc = _connection->SSL_accept();
         if (rc <= 0) {
             int err = _connection->SSL_get_error(rc);
+            char *msg = ::ERR_error_string(err, NULL);
             if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
                 SPDLOG_DEBUG("SSL handshake in progress: err={}", err);
                 return;
             }
-            SPDLOG_ERROR("SSL handshake failed: {}", err);
+            if (err == SSL_ERROR_SYSCALL) {
+                SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
+            }
+            if (err == SSL_ERROR_SSL) {
+                SPDLOG_ERROR("SSL handshake failed: error ssl\n");
+            }
+
+            SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
             _state = ERROR;
             return;
         }
@@ -144,35 +154,10 @@ namespace springtail {
         SPDLOG_DEBUG("Startup message: msg_length={}, code={}", msg_length, code);
 
         switch (code) {
-            case MSG_SSLREQ: {
+            case MSG_SSLREQ:
                 SPDLOG_DEBUG("SSL negotiation requested");
-                _write_buffer.reset();
-                _write_buffer.put('S');
-                _connection->write(_write_buffer.data(), 1);
-
-                // do tls handshake
-                SSL *ssl = _server->SSL_new();
-                if (ssl == nullptr) {
-                    SPDLOG_ERROR("Failed to create SSL context");
-                    _state = ERROR;
-                    return;
-                }
-
-                // init ssl on connection
-                if (_connection->setup_SSL(ssl) < 0) {
-                    SPDLOG_ERROR("Failed to setup SSL on connection");
-                    _state = ERROR;
-                    return;
-                }
-
-                // set state to SSL Handshake
-                _state = SSL_HANDSHAKE;
-
-                // do handshake
-                _handle_ssl_handshake();
-
+                _process_ssl_request();
                 break;
-            }
 
             case MSG_STARTUP_V2:
                 SPDLOG_WARN("Startup message version 2.0, not supported");
@@ -230,6 +215,43 @@ namespace springtail {
 
         // handle authentication -- send auth request
         _send_auth_req();
+    }
+
+    void
+    ClientSession::_process_ssl_request()
+    {
+        // send response 'S' or 'N' for SSL or no SSL respectively
+        _write_buffer.reset();
+        if (!_server->is_ssl_enabled()) {
+            _write_buffer.put('N');
+            _connection->write(_write_buffer.data(), 1);
+            return;
+        }
+
+        // SSL is enabled, send 'S' and start handshake
+        _write_buffer.put('S');
+        _connection->write(_write_buffer.data(), 1);
+
+        // allocate ssl struct for this connection
+        SSL *ssl = _server->SSL_new();
+        if (ssl == nullptr) {
+            SPDLOG_ERROR("Failed to create SSL context");
+            _state = ERROR;
+            return;
+        }
+
+        // init ssl on connection
+        if (_connection->setup_SSL(ssl) < 0) {
+            SPDLOG_ERROR("Failed to setup SSL on connection");
+            _state = ERROR;
+            return;
+        }
+
+        // set state to SSL Handshake
+        _state = SSL_HANDSHAKE;
+
+        // start handshake; starts ssl_accept()
+        _handle_ssl_handshake();
     }
 
     void

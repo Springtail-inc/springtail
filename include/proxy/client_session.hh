@@ -46,6 +46,7 @@ namespace springtail {
         int _id;
 
         void _process_startup_msg(int32_t code, int32_t msg_length);
+        void _process_ssl_request();
 
         void _encode_parameter_status(const std::string &key, const std::string &value);
 

@@ -7,6 +7,7 @@ find_package(OpenSSL REQUIRED)
 # source files
 set(PROXY_SOURCES
     server.cc
+    connection.cc
     session.cc
     client_session.cc
     server_session.cc

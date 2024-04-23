@@ -21,11 +21,11 @@
 namespace springtail {
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
-        ProxyServer(const std::string &address,
-                    int port,
+        ProxyServer(int port,
                     int thread_pool_size,
                     const std::filesystem::path &cert_file,
-                    const std::filesystem::path &key_file);
+                    const std::filesystem::path &key_file,
+                    bool enable_ssl=true);
 
         /** Start server main loop */
         void run();
@@ -65,6 +65,10 @@ namespace springtail {
             return ::SSL_new(_ssl_ctx);
         }
 
+        bool is_ssl_enabled() {
+            return _enable_ssl;
+        }
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
@@ -79,9 +83,16 @@ namespace springtail {
         std::set<int> _waiting_sessions;     ///< set of connection sockets waiting for read data
         std::map<int, SessionPtr> _sessions; ///< map of connection socket to session object
 
-        SSL_CTX *_ssl_ctx;                    ///< SSL context
+        SSL_CTX *_ssl_ctx = nullptr;         ///< SSL context
 
-        void _do_accept();                   ///< accept new connection handler
+        bool _enable_ssl;                    ///< true if SSL is enabled
+
+        /** Accept handler -- called from poll loop */
+        void _do_accept();
+
+        /** Setup and configure SSL context */
+        void _setup_SSL(const std::filesystem::path &cert_file,
+                        const std::filesystem::path &key_file);
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

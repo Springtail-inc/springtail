@@ -10,72 +10,60 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 
 #include <proxy/server.hh>
 #include <proxy/client_session.hh>
 
-#ifndef MSG_MORE
-#define MSG_MORE 0 // not defined for OSX
-#endif
 
 namespace springtail {
-    ProxyServer::ProxyServer(const std::string &address,
-                             int port,
+    ProxyServer::ProxyServer(int port,
                              int thread_pool_size,
                              const std::filesystem::path &cert_file,
-                             const std::filesystem::path &key_file)
+                             const std::filesystem::path &key_file,
+                             bool enable_ssl)
       : _request_handler(std::make_shared<ProxyRequestHandler>()),
         _user_mgr(std::make_shared<UserMgr>()),
-        _thread_pool(thread_pool_size)
+        _thread_pool(thread_pool_size),
+        _enable_ssl(enable_ssl)
     {
-        // create the SSL context
-        _ssl_ctx = ::SSL_CTX_new(::TLS_method());
-        if (!_ssl_ctx) {
-            SPDLOG_ERROR("Error creating SSL context");
-            exit(1);
-        }
-
-        /* Set the key and cert */
-        if (::SSL_CTX_use_certificate_file(_ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-            SPDLOG_ERROR("Error loading certificate file");
-            exit(1);
-        }
-
-        if (::SSL_CTX_use_PrivateKey_file(_ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
-            SPDLOG_ERROR("Error loading certificate file");
-            exit(1);
+        // Initialize SSL
+        if (_enable_ssl) {
+            _setup_SSL(cert_file, key_file);
         }
 
         _socket = socket(AF_INET, SOCK_STREAM, 0);
 
         struct sockaddr_in serv_addr;
         serv_addr.sin_family = AF_INET;
-        serv_addr.sin_addr.s_addr = inet_addr(address.c_str());
+        serv_addr.sin_addr.s_addr = INADDR_ANY;
         serv_addr.sin_port = htons(port);
 
         int flags = 1;
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
-            std::cerr << "Error setting socket options: SO_REUSEADDR" << std::endl;
+            SPDLOG_ERROR("Error setting socket options: SO_REUSEADDR\n");
             close(_socket);
             exit(1);
         }
 
         if (bind(_socket, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-            std::cerr << "Error binding to socket" << std::endl;
+            SPDLOG_ERROR("Error binding to socket\n");
             close(_socket);
             exit(1);
         }
 
         if (fcntl(_socket, F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "Error setting socket non-blocking" << std::endl;
+            SPDLOG_ERROR("Error setting socket non-blocking\n");
             close(_socket);
             exit(1);
         }
 
         if (listen(_socket, 16) < 0) {
-            std::cerr << "Error listening on socket" << std::endl;
+            SPDLOG_ERROR("Error listening on socket\n");
             close(_socket);
             exit(1);
         }
@@ -94,7 +82,52 @@ namespace springtail {
             exit(1);
         }
 
-        SPDLOG_INFO("Proxy server listening on {}:{}", address, port);
+        SPDLOG_INFO("Proxy server listening on port={}", port);
+    }
+
+    void
+    ProxyServer::_setup_SSL(const std::filesystem::path &cert_file,
+                            const std::filesystem::path &key_file)
+    {
+        // load error strings
+        ::ERR_load_crypto_strings();
+        ::SSL_load_error_strings();
+
+        // create the SSL context
+        //_ssl_ctx = ::SSL_CTX_new(::TLS_method());
+        _ssl_ctx = ::SSL_CTX_new(::SSLv23_server_method());
+        if (!_ssl_ctx) {
+            SPDLOG_ERROR("Error creating SSL context");
+            exit(1);
+        }
+
+        SSL_CTX_set_mode(_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+
+        /* Set the key and cert */
+        if (::SSL_CTX_use_certificate_file(_ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+            SPDLOG_ERROR("Error loading certificate file");
+            exit(1);
+        }
+
+        if (::SSL_CTX_use_PrivateKey_file(_ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
+            SPDLOG_ERROR("Error loading certificate file");
+            exit(1);
+        }
+
+        if (::SSL_CTX_check_private_key(_ssl_ctx) != 1) {
+            SPDLOG_ERROR("Private key does not match the certificate public key");
+            exit(1);
+        }
+
+        // from libpq be code
+        /* disallow SSL session tickets */
+	    SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_TICKET);
+
+	    /* disallow SSL session caching, too */
+	    SSL_CTX_set_session_cache_mode(_ssl_ctx, SSL_SESS_CACHE_OFF);
+
+	    /* disallow SSL compression */
+	    SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_COMPRESSION);
     }
 
     void
@@ -226,7 +259,10 @@ namespace springtail {
         ::close(_pipe[1]);
 
         // shutdown ssl
-        ::SSL_CTX_free(_ssl_ctx);
+        if (_enable_ssl) {
+            ::SSL_CTX_free(_ssl_ctx);
+            ERR_free_strings();
+        }
     }
 
     void
@@ -258,145 +294,5 @@ namespace springtail {
         _sessions.insert(std::make_pair(session->get_connection()->get_socket(), session));
     }
 
-    ssize_t
-    ProxyConnection::write(const char *buffer, int size, bool more)
-    {
-        ssize_t bytes_written = 0;
-        do {
-            ssize_t n = send(_socket, buffer, size, more ? MSG_MORE : 0);
 
-            if (n > 0) {
-                bytes_written += n;
-                buffer += n;
-                size -= n;
-            } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
-                continue;
-            } else {
-                SPDLOG_ERROR("Error writing to socket: {}", strerror(errno));
-                close();
-                return -1;
-            }
-        } while (size > 0);
-
-        return bytes_written;
-    }
-
-    ssize_t
-    ProxyConnection::read(char *buffer, int max_size, int at_least)
-    {
-        ssize_t bytes_read = 0;
-        do {
-            ssize_t n = recv(_socket, buffer, max_size, 0);
-            if (n > 0) {
-                bytes_read += n;
-                buffer += n;
-                max_size -= n;
-                at_least -= n;
-            } else if (n == 0) {
-                // Connection closed by the client
-                SPDLOG_DEBUG("Connection closed by client");
-                close();
-                return 0;
-            } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
-                continue;
-            } else {
-                // Error occurred
-                SPDLOG_ERROR("Error reading from socket: {}", strerror(errno));
-                close();
-                return -1;
-            }
-        } while (at_least > 0);
-
-        return bytes_read;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), buffer.capacity(), at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int max_size, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), max_size, at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read_fully(ProxyBuffer &buffer, int size)
-    {
-        ssize_t n = read(buffer.next_data(), size, size);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    static std::string hostname_to_ip(const std::string &hostname)
-    {
-	    struct hostent *he;
-	    struct in_addr **addr_list;
-	    int i;
-
-	    if ( (he = gethostbyname( hostname.c_str() ) ) == nullptr) {
-		    // get the host info
-		    SPDLOG_ERROR("gethostbyname");
-		    return {};
-	    }
-
-	    addr_list = (struct in_addr **) he->h_addr_list;
-
-	    for(i = 0; addr_list[i] != nullptr; i++) {
-		    // return the first one;
-		    return {inet_ntoa(*addr_list[i])};
-	    }
-
-    	return {};
-    }
-
-    ProxyConnectionPtr
-    ProxyConnection::create(const std::string &hostname, int port)
-    {
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock == -1) {
-            SPDLOG_ERROR("Error creating socket: {}", strerror(errno));
-            return nullptr;
-        }
-
-        SPDLOG_DEBUG("Connecting to {}:{}", hostname, port);
-
-        std::string ip = hostname_to_ip(hostname);
-        if (ip.empty()) {
-            SPDLOG_ERROR("Error resolving hostname: {}", hostname);
-            ::close(sock);
-            return nullptr;
-        }
-
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) <= 0) {
-            SPDLOG_ERROR("Error converting hostname {} to address: {}", hostname, strerror(errno));
-            ::close(sock);
-            return nullptr;
-        }
-
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-            SPDLOG_ERROR("Error connecting to {}:{}", hostname, port);
-            ::close(sock);
-            return nullptr;
-        }
-
-        return std::make_shared<ProxyConnection>(sock, addr);
-    }
 }
