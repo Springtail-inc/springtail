@@ -11,6 +11,8 @@
 #include <unistd.h>
 
 #include <common/logging.hh>
+#include <proxy/buffer.hh>
+#include <proxy/exception.hh>
 #include <proxy/connection.hh>
 
 #ifndef MSG_MORE
@@ -72,7 +74,8 @@ namespace springtail {
                     break;
                 }
                 close();
-                return w;
+
+                throw ProxyIOError();
             }
         } while (size > 0);
 
@@ -94,7 +97,7 @@ namespace springtail {
             } else {
                 SPDLOG_ERROR("Error writing to socket: {}", strerror(errno));
                 close();
-                return -1;
+                throw ProxyIOError();
             }
         } while (size > 0);
 
@@ -170,7 +173,7 @@ namespace springtail {
                     break;
                 }
                 close();
-                return r;
+                throw ProxyIOError();
             }
         } while (at_least > 0);
 
@@ -199,7 +202,7 @@ namespace springtail {
                 // Error occurred
                 SPDLOG_ERROR("Error reading from socket: {}", strerror(errno));
                 close();
-                return -1;
+                throw ProxyIOError();
             }
         } while (at_least > 0);
 
@@ -266,7 +269,7 @@ namespace springtail {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock == -1) {
             SPDLOG_ERROR("Error creating socket: {}", strerror(errno));
-            return nullptr;
+            throw ProxyIOConnectionError();
         }
 
         SPDLOG_DEBUG("Connecting to {}:{}", hostname, port);
@@ -275,7 +278,7 @@ namespace springtail {
         if (ip.empty()) {
             SPDLOG_ERROR("Error resolving hostname: {}", hostname);
             ::close(sock);
-            return nullptr;
+            throw ProxyIOConnectionError();
         }
 
         struct sockaddr_in addr;
@@ -284,15 +287,140 @@ namespace springtail {
         if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) <= 0) {
             SPDLOG_ERROR("Error converting hostname {} to address: {}", hostname, strerror(errno));
             ::close(sock);
-            return nullptr;
+            throw ProxyIOConnectionError();
         }
 
         if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
             SPDLOG_ERROR("Error connecting to {}:{}", hostname, port);
             ::close(sock);
-            return nullptr;
+            throw ProxyIOConnectionError();
         }
 
         return std::make_shared<ProxyConnection>(sock, addr);
+    }
+
+    void
+    ProxyConnection::setup_SSL(SSL *ssl)
+    {
+        _ssl = ssl;
+        int rc = ::SSL_set_fd(ssl, _socket);
+        if (rc < 0) {
+            throw ProxySSLConnectionError();
+        }
+
+        // set socket to non-blocking while we do the SSL handshake
+        // it is set back to blocking after the handshake (after ssl_accept/connect)
+        _set_non_blocking();
+
+    #if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+        // set the connection object in the SSL ex data for debugging
+        SSL_set_ex_data(ssl, 0, this);
+    #endif
+    }
+
+    void
+    ProxyConnection::_set_blocking()
+    {
+        int flags = fcntl(_socket, F_GETFL, 0);
+        int rc = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
+        if (rc < 0) {
+            SPDLOG_ERROR("Error setting socket to blocking: {}", strerror(errno));
+            throw ProxyIOError();
+        }
+    }
+
+    void
+    ProxyConnection::_set_non_blocking()
+    {
+        int flags = fcntl(_socket, F_GETFL, 0);
+        int rc = fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
+        if (rc < 0) {
+            SPDLOG_ERROR("Error setting socket to non-blocking: {}", strerror(errno));
+            throw ProxyIOError();
+        }
+    }
+
+    void
+    ProxyConnection::_handle_ssl_error(int rc)
+    {
+        int err = SSL_get_error(rc);
+        char *msg = ::ERR_error_string(err, NULL);
+        switch (err) {
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_WRITE:
+                SPDLOG_DEBUG("SSL handshake in progress, need data: err={}", err);
+                return;
+            case SSL_ERROR_SYSCALL:
+                SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
+                break;
+            case SSL_ERROR_SSL:
+                SPDLOG_ERROR("SSL handshake failed: error ssl\n");
+                break;
+            default:
+                SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
+                break;
+        }
+
+        // throw exception
+        close();
+        throw ProxySSLConnectionError();
+    }
+
+    int
+    ProxyConnection::SSL_accept()
+    {
+        int rc = ::SSL_accept(_ssl);
+        if (rc <= 0) {
+            // throws exception on fatal error, otherwise returns
+            _handle_ssl_error(rc);
+            return -1;
+        }
+
+        // success
+        _ssl_enabled = true;
+
+        // set socket back to blocking
+        _set_blocking();
+
+        return 0;
+    }
+
+    int
+    ProxyConnection::SSL_connect()
+    {
+        int rc = ::SSL_connect(_ssl);
+        if (rc <= 0) {
+            // throws exception on fatal error, otherwise returns
+            _handle_ssl_error(rc);
+            return -1;
+        }
+
+        // success
+        _ssl_enabled = true;
+
+        // set socket back to blocking
+        _set_blocking();
+
+        return 0;
+    }
+
+    /** Does connection have pending data */
+    bool
+    ProxyConnection::has_pending()
+    {
+        // if ssl is enabled, check for buffered data on ssl connection first
+        if (_ssl_enabled && ::SSL_pending(_ssl) > 0) {
+            return true;
+        }
+
+        // check socket if we want to see if more data is available
+        // call poll() which is a function call
+        struct pollfd pfd = { get_socket(), POLLIN, 0 };
+        int n = poll(&pfd, 1, 0);
+        if (n > 0 && pfd.revents & POLLIN) {
+            return true;
+        }
+
+        return false;
     }
 }

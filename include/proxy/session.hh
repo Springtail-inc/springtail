@@ -157,7 +157,7 @@ namespace springtail {
             assert(remote_session->_type == PRIMARY || remote_session->_type == REPLICA);
             SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg.type);
             set_associated_session(remote_session);
-            remote_session->_process_msg(msg);
+            remote_session->_internal_process_msg(msg);
         }
 
         /** notify client session of message */
@@ -166,7 +166,7 @@ namespace springtail {
             assert(_associated_session->_type == CLIENT);
             SPDLOG_DEBUG("Notifying client of message: {:d}", (int8_t)msg.type);
             _associated_session->clear_waiting_on_session();
-            _associated_session->_process_msg(msg);
+            _associated_session->_internal_process_msg(msg);
         }
 
         /** get error message */
@@ -181,9 +181,6 @@ namespace springtail {
         bool is_waiting_on_session() const {
             return _waiting_on_session;
         }
-
-        /** enable processing of msgs via server poll loop */
-        void enable_processing();
 
     protected:
         ProxyConnectionPtr _connection;   ///< connection associated with this session
@@ -233,6 +230,12 @@ namespace springtail {
         /** waiting on associated session for data -- _associated_session should be set */
         bool _waiting_on_session = false;
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
+
+        /** Single place to do error handling on messages */
+        void _internal_process_msg(SessionMsg &msg);
+
+        /** enable processing of msgs via server poll loop */
+        void _enable_processing();
 
         void _handle_error();
 

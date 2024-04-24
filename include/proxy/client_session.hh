@@ -67,6 +67,9 @@ namespace springtail {
 
         void _send_auth_req();
         void _send_auth_done();
+
+        /** Release server session back to session pool */
+        void _release_server_session();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
 }

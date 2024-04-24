@@ -62,67 +62,17 @@ namespace springtail {
         }
 
         /** Setup SSL for the connection socket 0 - success */
-        int setup_SSL(SSL *ssl) {
-            _ssl = ssl;
-            int rc = ::SSL_set_fd(ssl, _socket);
-            if (rc < 0) {
-                SPDLOG_ERROR("Error setting SSL fd\n");
-                return -1;
-            }
+        void setup_SSL(SSL *ssl);
 
-            // set socket to non-blocking while we do the SSL handshake
-            // it is set back to blocking after the handshake (after ssl_accept)
-            int flags = fcntl(_socket, F_GETFL, 0);
-            rc = fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
-            if (rc < 0) {
-                SPDLOG_ERROR("Error setting socket to non-blocking: {}", strerror(errno));
-                return -1;
-            }
+        /** Accept with SSL 0 is success -- converts socket to non-blocking
+         *  throws IOError on exception
+         */
+        int SSL_accept();
 
-#if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
-            // set the connection object in the SSL ex data for debugging
-            SSL_set_ex_data(ssl, 0, this);
-#endif
-
-            return 0;
-        }
-
-        /** Accept with SSL 1 is success -- converts socket to non-blocking */
-        int SSL_accept() {
-            // set socket to non-blocking
-            int rc = ::SSL_accept(_ssl);
-            if (rc == 1) {
-                // success
-                _ssl_enabled = true;
-
-                // set socket back to blocking
-                int flags = fcntl(_socket, F_GETFL, 0);
-                int r = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
-                if (r < 0) {
-                    SPDLOG_ERROR("Error setting socket to blocking: {}", strerror(errno));
-                    return -1;
-                }
-            }
-            return rc;
-        }
-
-        /** Connect with SSL 1 is success -- converts socket to non-blocking */
-        int SSL_connect() {
-            int rc = ::SSL_connect(_ssl);
-            if (rc == 1) {
-                // success
-                _ssl_enabled = true;
-
-                // set socket back to blocking
-                int flags = fcntl(_socket, F_GETFL, 0);
-                int r = fcntl(_socket, F_SETFL, flags & ~O_NONBLOCK);
-                if (r < 0) {
-                    SPDLOG_ERROR("Error setting socket to blocking: {}", strerror(errno));
-                    return -1;
-                }
-            }
-            return rc;
-        }
+        /** Connect with SSL 0 is success -- converts socket to non-blocking
+         *  throws IOError on exception
+         */
+        int SSL_connect();
 
         /** Get SSL error code */
         int SSL_get_error(int rc) {
@@ -130,23 +80,7 @@ namespace springtail {
         }
 
         /** Does connection have pending data */
-        bool has_pending() {
-            if (_ssl_enabled) {
-                if (::SSL_pending(_ssl) > 0) {
-                    return true;
-                }
-            }
-
-            // check socket if we want to see if more data is available
-            // call poll() which is a function call
-            struct pollfd pfd = { get_socket(), POLLIN, 0 };
-            int n = poll(&pfd, 1, 0);
-            if (n > 0 && pfd.revents & POLLIN) {
-                return true;
-            }
-
-            return false;
-        }
+        bool has_pending();
 
         /** factory method to create a connection */
         static std::shared_ptr<ProxyConnection> create(const std::string &hostname, int port);
@@ -163,6 +97,14 @@ namespace springtail {
 
         ssize_t _read(char *buffer, int size, int at_least);
         ssize_t _write(const char *buffer, int size, bool more);
+
+        /** Set connection to non-blocking */
+        void _set_non_blocking();
+
+        /** Set connection to blocking */
+        void _set_blocking();
+
+        void _handle_ssl_error(int rc);
     };
     using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
 }

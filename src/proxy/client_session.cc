@@ -48,11 +48,21 @@ namespace springtail {
     }
 
     void
-    ClientSession::_process_msg(SessionMsg &msg)
+    ClientSession::_release_server_session()
     {
         ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
+        assert(server_session != nullptr);
         clear_associated_session();
         _user->get_pool()->release_server_session(server_session);
+    }
+
+    void
+    ClientSession::_process_msg(SessionMsg &msg)
+    {
+        // client session is receiving a message from the server session
+        // this indicates server is done with processing
+        // in future this may not be true for all message types
+        _release_server_session();
 
         // entry point for messages from server session
         switch(msg.type) {
@@ -73,8 +83,6 @@ namespace springtail {
                 SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg.type);
                 break;
         }
-
-        enable_processing();
     }
 
     void
@@ -112,32 +120,15 @@ namespace springtail {
     void
     ClientSession::_handle_ssl_handshake()
     {
-        // try the SSL accept.  This will return 1 on success, 0 on incomplete, and < 0 on error
-        // on error get the error code, if it is WANT_READ or WANT_WRITE, then we need to wait
+        // try the SSL accept
+        // this will return 1 on success, -1 if more data is needed; throws exception on fatal error
         int rc = _connection->SSL_accept();
-        if (rc <= 0) {
-            int err = _connection->SSL_get_error(rc);
-            char *msg = ::ERR_error_string(err, NULL);
-            switch (err) {
-                case SSL_ERROR_WANT_READ:
-                case SSL_ERROR_WANT_WRITE:
-                    SPDLOG_DEBUG("SSL client handshake in progress: err={}", err);
-                    return;
-                case SSL_ERROR_SYSCALL:
-                    SPDLOG_ERROR("SSL client handshake failed: error syscall: errno={}\n", errno);
-                    break;
-                case SSL_ERROR_SSL:
-                    SPDLOG_ERROR("SSL client handshake failed: error ssl\n");
-                    break;
-                default:
-                    SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
-                    break;
-            }
-            _state = ERROR;
+        if (rc < 0) {
+            SPDLOG_DEBUG("SSL client handshake in progress, need more data");
             return;
         }
 
-        SPDLOG_DEBUG("SSL handshake complete");
+        SPDLOG_DEBUG("SSL client handshake complete");
 
         _state = STARTUP;
     }
@@ -244,11 +235,7 @@ namespace springtail {
         }
 
         // init ssl on connection
-        if (_connection->setup_SSL(ssl) < 0) {
-            SPDLOG_ERROR("Failed to setup SSL on connection");
-            _state = ERROR;
-            return;
-        }
+        _connection->setup_SSL(ssl);
 
         // set state to SSL Handshake
         _state = SSL_HANDSHAKE;

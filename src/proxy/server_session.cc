@@ -46,9 +46,6 @@ namespace springtail {
             SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg.type);
             break;
         }
-
-        // re-enable processing, add socket to poll list
-        enable_processing();
     }
 
     void
@@ -91,10 +88,6 @@ namespace springtail {
 
         _read_buffer.reset();
         auto [code, msg_length] = _read_hdr();
-
-        if (_state == ERROR) {
-            return;
-        }
 
         SPDLOG_DEBUG("Server session message: code={}, length={}", code, msg_length);
 
@@ -278,32 +271,14 @@ namespace springtail {
     void
     ServerSession::_handle_ssl_handshake()
     {
-        // do the SSL handshake
+        // do the SSL handshake; exception thrown on fatal error
         int rc = _connection->SSL_connect();
-        if (rc <= 0) {
-            int err = _connection->SSL_get_error(rc);
-            char *msg = ::ERR_error_string(err, NULL);
-            switch (err) {
-                case SSL_ERROR_WANT_READ:
-                case SSL_ERROR_WANT_WRITE:
-                    SPDLOG_DEBUG("SSL server handshake in progress: err={}", err);
-                    return;
-                case SSL_ERROR_SYSCALL:
-                    // note: SSL_shutdown should not be called
-                    SPDLOG_ERROR("SSL server handshake failed: error syscall: errno={}\n", errno);
-                    break;
-                case SSL_ERROR_SSL:
-                    // note: SSL_shutdown should not be called
-                    SPDLOG_ERROR("SSL server handshake failed: error ssl, msg={}\n", msg);
-                    break;
-                default:
-                    SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
-                    break;
-            }
-            _state = ERROR;
+        if (rc < 0) {
+            SPDLOG_DEBUG("SSL server handshake in progress, need more data");
             return;
         }
-        SPDLOG_DEBUG("Server session: SSL handshake complete");
+
+        SPDLOG_DEBUG("SSL server handshake complete");
 
         // send the startup message and then move to AUTH state
         _send_startup_msg();

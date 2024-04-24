@@ -1,10 +1,12 @@
 #include <memory>
 #include <cassert>
 
+#include <common/logging.hh>
+
 #include <proxy/session.hh>
 #include <proxy/server.hh>
-#include <proxy/auth/md5.h>
-#include <proxy/auth/scram.hh>
+
+#include <proxy/exception.hh>
 
 namespace springtail {
 
@@ -16,7 +18,18 @@ namespace springtail {
 
         do {
             // thread entry point
-            _process_connection();
+            try {
+                _process_connection();
+            } catch (const ProxyIOError &e) {
+                SPDLOG_ERROR("ProxyIOError: {}", e.what());
+                _state = ERROR;
+            } catch (const std::exception &e) {
+                SPDLOG_ERROR("Exception: {}", e.what());
+                _state = ERROR;
+            } catch (...) {
+                SPDLOG_ERROR("Unknown exception");
+                _state = ERROR;
+            }
 
             // cleanup connection and remove from server list if closed or error
             if (_state == ERROR || _connection->closed()) {
@@ -43,6 +56,32 @@ namespace springtail {
         _server->signal(_connection);
     }
 
+    void
+    Session::_internal_process_msg(SessionMsg &msg)
+    {
+        // send message to session
+        try {
+            _process_msg(msg);
+        } catch (const ProxyIOError &e) {
+            SPDLOG_ERROR("ProxyIOError: {}", e.what());
+            _state = ERROR;
+        } catch (const std::exception &e) {
+            SPDLOG_ERROR("Exception: {}", e.what());
+            _state = ERROR;
+        } catch (...) {
+            SPDLOG_ERROR("Unknown exception");
+            _state = ERROR;
+        }
+
+        if (_state == ERROR || _connection->closed()) {
+            _handle_error();
+            return;
+        }
+
+        // re-enable processing, add socket to poll list
+        _enable_processing();
+    }
+
     UserLoginPtr
     Session::_get_user_login()
     {
@@ -59,10 +98,7 @@ namespace springtail {
         if (_read_buffer.remaining() < 5) {
             _read_buffer.reset();
             ssize_t n = _connection->read(_read_buffer, 5, 5); // read at most 5B
-            if (n <= 0) {
-                _state = ERROR;
-                return {'X', -1};
-            }
+            assert(n == 5);
         }
 
         // op code
@@ -81,10 +117,7 @@ namespace springtail {
         if (_read_buffer.remaining() < 5) {
             _read_buffer.reset();
             ssize_t n = _connection->read(_read_buffer, 5); // read at least 5B
-            if (n <= 0) {
-                _state = ERROR;
-                return {'X', -1};
-            }
+            assert(n >= 5);
         }
 
         // op code
@@ -120,31 +153,18 @@ namespace springtail {
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
         int n = _associated_session->get_connection()->write(buffer, 5);
-        if (n <= 0) {
-            SPDLOG_ERROR("Error writing to remote socket: {}",
-                         _associated_session->get_connection()->get_socket());
-            _state = ERROR;
-            return;
-        }
+        assert (n == 5);
         SPDLOG_DEBUG("Streamed header to remote session: code={}, msg_length={}", code, msg_length);
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
             SPDLOG_DEBUG("Reading {} bytes from local socket", std::min(msg_length, 4096));
+            // throws exception on error
             int n = _connection->read(buffer, std::min(msg_length, 4096));
-            if (n <= 0) {
-                SPDLOG_ERROR("Error reading from local socket: {}", _connection->get_socket());
-                _state = ERROR;
-                return;
-            }
+            assert (n == std::min(msg_length, 4096));
 
             int m = _associated_session->get_connection()->write(buffer, n);
-            if (m <= 0 || m != n) {
-                SPDLOG_ERROR("Error writing to remote socket: {}",
-                             _associated_session->get_connection()->get_socket());
-                _state = ERROR;
-                return;
-            }
+            assert (m == n);
 
             SPDLOG_DEBUG("Streamed {} bytes to remote session", m);
 
@@ -162,21 +182,14 @@ namespace springtail {
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
         int n = _associated_session->get_connection()->write(buffer, 5);
-        if (n <= 0) {
-            SPDLOG_ERROR("Error writing to remote socket: {}", _connection->get_socket());
-            _state = ERROR;
-            return;
-        }
+        assert (n == 5);
+
         n = _associated_session->get_connection()->write(data, msg_length);
-        if (n <= 0 || n != msg_length) {
-            SPDLOG_ERROR("Error writing to remote socket: {}", _connection->get_socket());
-            _state = ERROR;
-            return;
-        }
+        assert(n == msg_length);
     }
 
     void
-    Session::enable_processing()
+    Session::_enable_processing()
     {
         if (_waiting_on_session) {
             // if we are waiting on a session, we should not be processing
@@ -185,10 +198,6 @@ namespace springtail {
             return;
         }
 
-        if (_state == ERROR || _connection->closed()) {
-            _handle_error();
-            return;
-        }
         // add session connection to server poll list
         _server->signal(_connection);
     }
