@@ -37,11 +37,12 @@ int main(int argc, char* argv[])
     std::filesystem::path key;
     int port;
     int num_threads;
-
+    bool enable_ssl;
 
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
+        ("ssl,s", boost::program_options::value<bool>(&enable_ssl)->default_value(true), "Enable SSL")
         ("port,p", boost::program_options::value<int>(&port)->default_value(8888), "Proxy port number")
         ("threads,n", boost::program_options::value<int>(&num_threads)->default_value(4), "Number of threads")
         ("cert,c", boost::program_options::value<std::filesystem::path>(&certificate)->default_value(std::filesystem::path("cert.pem")), "Certificate file")
@@ -57,9 +58,13 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (!enable_ssl) {
+        SPDLOG_INFO("SSL Disabled");
+    }
+
     springtail_init();
 
-    ProxyServerPtr server = std::make_shared<ProxyServer>(port, num_threads, certificate, key);
+    ProxyServerPtr server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, enable_ssl);
 
     populate_test_users(server);
 

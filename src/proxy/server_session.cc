@@ -1,3 +1,6 @@
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include <common/logging.hh>
 
 #include <proxy/server_session.hh>
@@ -25,8 +28,14 @@ namespace springtail {
         // entry point for message processing from client session
         switch(msg.type) {
         case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
-            // startup message from client
-            _handle_startup();
+            // this is the startup message from client session
+            if (_server->is_ssl_enabled()) {
+                // send ssl request to server
+                _send_ssl_req();
+            } else {
+                // otherwise send the startup message
+                _send_startup_msg();
+            }
             break;
 
         case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
@@ -50,6 +59,12 @@ namespace springtail {
         // entry point for connection message processing
         // called from operator() in session
         switch(_state) {
+        case STARTUP:
+            _handle_ssl_response();
+            break;
+        case SSL_HANDSHAKE:
+            _handle_ssl_handshake();
+            break;
         case AUTH:
         case AUTH_DONE:
         case READY:
@@ -76,6 +91,12 @@ namespace springtail {
 
         _read_buffer.reset();
         auto [code, msg_length] = _read_hdr();
+
+        if (_state == ERROR) {
+            return;
+        }
+
+        SPDLOG_DEBUG("Server session message: code={}, length={}", code, msg_length);
 
         switch(code) {
             case 'R': {
@@ -185,6 +206,13 @@ namespace springtail {
                 _stream_to_remote_session(code, msg_length);
                 break;
 
+            case 'X':
+                // Terminate
+                SPDLOG_DEBUG("Terminate");
+                _stream_to_remote_session(code, msg_length);
+                _state = ERROR;
+                break;
+
             default:
                 SPDLOG_ERROR("Unknown message: {}", code);
                 _state = ERROR;
@@ -195,7 +223,94 @@ namespace springtail {
     }
 
     void
-    ServerSession::_handle_startup()
+    ServerSession::_send_ssl_req()
+    {
+        // Send ssl message
+        _write_buffer.reset();
+        _write_buffer.put32(8); // length
+        _write_buffer.put32(MSG_SSLREQ); // SSL request code
+        ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
+        assert(n == _write_buffer.size());
+    }
+
+    void
+    ServerSession::_handle_ssl_response()
+    {
+        // Read startup ssl message from server in response to send_startup
+        // Just one character: 'N' no ssl or 'S' yes ssl
+        _read_buffer.reset();
+        ssize_t n = _connection->read(_read_buffer, 1);
+        if (n <= 0) {
+            _state = ERROR;
+            return;
+        }
+
+        char ssl_response = _read_buffer.get();
+        SPDLOG_DEBUG("SSL response from server: {}", ssl_response);
+        if (ssl_response == 'S') {
+            // server is ready for ssl negotiation
+            _send_ssl_handshake();
+        } else {
+            // server is ready for startup message
+            _send_startup_msg();
+        }
+    }
+
+    void
+    ServerSession::_send_ssl_handshake()
+    {
+        SSL *ssl = _server->SSL_new(true);
+        if (ssl == nullptr) {
+            SPDLOG_ERROR("Failed to create SSL object");
+            _state = ERROR;
+            return;
+        }
+
+        // set the SSL object on the connection
+        _connection->setup_SSL(ssl);
+
+        // do the SSL handshake
+        _state = SSL_HANDSHAKE;
+
+        _handle_ssl_handshake();
+    }
+
+    void
+    ServerSession::_handle_ssl_handshake()
+    {
+        // do the SSL handshake
+        int rc = _connection->SSL_connect();
+        if (rc <= 0) {
+            int err = _connection->SSL_get_error(rc);
+            char *msg = ::ERR_error_string(err, NULL);
+            switch (err) {
+                case SSL_ERROR_WANT_READ:
+                case SSL_ERROR_WANT_WRITE:
+                    SPDLOG_DEBUG("SSL server handshake in progress: err={}", err);
+                    return;
+                case SSL_ERROR_SYSCALL:
+                    // note: SSL_shutdown should not be called
+                    SPDLOG_ERROR("SSL server handshake failed: error syscall: errno={}\n", errno);
+                    break;
+                case SSL_ERROR_SSL:
+                    // note: SSL_shutdown should not be called
+                    SPDLOG_ERROR("SSL server handshake failed: error ssl, msg={}\n", msg);
+                    break;
+                default:
+                    SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
+                    break;
+            }
+            _state = ERROR;
+            return;
+        }
+        SPDLOG_DEBUG("Server session: SSL handshake complete");
+
+        // send the startup message and then move to AUTH state
+        _send_startup_msg();
+    }
+
+    void
+    ServerSession::_send_startup_msg()
     {
         // Send startup message
         _write_buffer.reset();
@@ -306,6 +421,9 @@ namespace springtail {
                 // verify the server signature
                 std::string data = _read_buffer.getBytes(msg_length-4);
                 _handle_auth_scram_complete(data);
+
+                SPDLOG_DEBUG("SASL authentication complete: set AUTH_DONE");
+                _state = AUTH_DONE;
 
                 do_msg_send = false;
                 break;
@@ -461,8 +579,6 @@ namespace springtail {
         }
 
         free(input);
-
-        _state = AUTH_DONE;
     }
 
     void

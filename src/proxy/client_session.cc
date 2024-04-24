@@ -118,18 +118,21 @@ namespace springtail {
         if (rc <= 0) {
             int err = _connection->SSL_get_error(rc);
             char *msg = ::ERR_error_string(err, NULL);
-            if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                SPDLOG_DEBUG("SSL handshake in progress: err={}", err);
-                return;
+            switch (err) {
+                case SSL_ERROR_WANT_READ:
+                case SSL_ERROR_WANT_WRITE:
+                    SPDLOG_DEBUG("SSL client handshake in progress: err={}", err);
+                    return;
+                case SSL_ERROR_SYSCALL:
+                    SPDLOG_ERROR("SSL client handshake failed: error syscall: errno={}\n", errno);
+                    break;
+                case SSL_ERROR_SSL:
+                    SPDLOG_ERROR("SSL client handshake failed: error ssl\n");
+                    break;
+                default:
+                    SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
+                    break;
             }
-            if (err == SSL_ERROR_SYSCALL) {
-                SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
-            }
-            if (err == SSL_ERROR_SSL) {
-                SPDLOG_ERROR("SSL handshake failed: error ssl\n");
-            }
-
-            SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
             _state = ERROR;
             return;
         }
@@ -233,7 +236,7 @@ namespace springtail {
         _connection->write(_write_buffer.data(), 1);
 
         // allocate ssl struct for this connection
-        SSL *ssl = _server->SSL_new();
+        SSL *ssl = _server->SSL_new(false);
         if (ssl == nullptr) {
             SPDLOG_ERROR("Failed to create SSL context");
             _state = ERROR;
@@ -569,7 +572,6 @@ namespace springtail {
     {
         do {
             auto [code, msg_length] = _read_msg();
-
             if (_state == ERROR) {
                 return;
             }
@@ -582,8 +584,6 @@ namespace springtail {
 
                 // handle simple query
                 _handle_simple_query(query);
-
-                //_request_handler->handle_query(shared_from_this(), query);
                 break;
             }
             case 'X': {

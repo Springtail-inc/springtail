@@ -60,11 +60,17 @@ namespace springtail {
             _user_mgr->add_database(dbname, hostname, port);
         }
 
-        SSL *SSL_new() {
+        /** Allocate SSL struct for new connection */
+        SSL *SSL_new(bool is_server) {
             // think this is thread safe but hard to know 100%
-            return ::SSL_new(_ssl_ctx);
+            if (is_server) {
+                return ::SSL_new(_ssl_ctx_server);
+            } else {
+                return ::SSL_new(_ssl_ctx_client);
+            }
         }
 
+        /** Is ssl enabled globally? */
         bool is_ssl_enabled() {
             return _enable_ssl;
         }
@@ -83,16 +89,17 @@ namespace springtail {
         std::set<int> _waiting_sessions;     ///< set of connection sockets waiting for read data
         std::map<int, SessionPtr> _sessions; ///< map of connection socket to session object
 
-        SSL_CTX *_ssl_ctx = nullptr;         ///< SSL context
+        SSL_CTX *_ssl_ctx_server = nullptr;  ///< SSL context for server
+        SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
 
         bool _enable_ssl;                    ///< true if SSL is enabled
 
         /** Accept handler -- called from poll loop */
         void _do_accept();
 
-        /** Setup and configure SSL context */
-        void _setup_SSL(const std::filesystem::path &cert_file,
-                        const std::filesystem::path &key_file);
+        /** Setup and configure SSL context; pass in certificate and private key */
+        SSL_CTX *_setup_SSL_context(const std::filesystem::path &cert_file={},
+                                    const std::filesystem::path &key_file={});
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

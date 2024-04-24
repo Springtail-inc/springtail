@@ -29,8 +29,20 @@ namespace springtail {
     private:
         //bool _is_pinned = false;
 
+        /** Send startup message */
+        void _send_startup_msg();
+
         /** Initial setup, SSL negotiation */
-        void _handle_startup();
+        void _send_ssl_req();
+
+        /** Send SSL handshake */
+        void _send_ssl_handshake();
+
+        /** Handle SSL handshake */
+        void _handle_ssl_handshake();
+
+        /** Handle ssl response */
+        void _handle_ssl_response();
 
         /** Authentication */
         void _handle_auth(int32_t msg_length);

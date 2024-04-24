@@ -1,6 +1,5 @@
 #include <memory>
 #include <cassert>
-#include <poll.h>
 
 #include <proxy/session.hh>
 #include <proxy/server.hh>
@@ -13,7 +12,6 @@ namespace springtail {
     Session::operator()()
     {
         // thread entry point from server
-        int pkt_count = 0;
         bool has_data = false;
 
         do {
@@ -35,18 +33,10 @@ namespace springtail {
                 return;
             }
 
-            // check socket if we want to see if more data is available
-            // call poll() which is a function call
-            struct pollfd pfd = { _connection->get_socket(), POLLIN, 0 };
-            int n = poll(&pfd, 1, 0);
-            if (n > 0 && pfd.revents & POLLIN) {
-                has_data = true;
-            } else {
-                has_data = false;
-            }
-
-            pkt_count++;
-        } while (pkt_count < PKT_ITER_MAX_COUNT && has_data);
+            // check if there is more data to process
+            // checks buffered data in ssl connection
+            has_data = _connection->has_pending();
+        } while (has_data);
 
         // signal server to wait on this connection
         SPDLOG_DEBUG("Adding connection to server poll list: {}", _connection->get_socket());
@@ -228,6 +218,6 @@ namespace springtail {
             SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
             notify_client(msg);
         }
-        SPDLOG_ERROR("Shutdown complete\n");
+        SPDLOG_ERROR("Shutdown complete");
     }
 }

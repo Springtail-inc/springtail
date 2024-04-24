@@ -19,7 +19,6 @@
 #include <proxy/server.hh>
 #include <proxy/client_session.hh>
 
-
 namespace springtail {
     ProxyServer::ProxyServer(int port,
                              int thread_pool_size,
@@ -33,7 +32,8 @@ namespace springtail {
     {
         // Initialize SSL
         if (_enable_ssl) {
-            _setup_SSL(cert_file, key_file);
+            _ssl_ctx_server = _setup_SSL_context(cert_file, key_file);
+            _ssl_ctx_client = _setup_SSL_context();
         }
 
         _socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -85,49 +85,101 @@ namespace springtail {
         SPDLOG_INFO("Proxy server listening on port={}", port);
     }
 
-    void
-    ProxyServer::_setup_SSL(const std::filesystem::path &cert_file,
-                            const std::filesystem::path &key_file)
+    /** Callback to get more info about what is going on in SSL */
+    static void
+    ssl_info_callback(const SSL *s, int where, int ret)
     {
-        // load error strings
-        ::ERR_load_crypto_strings();
-        ::SSL_load_error_strings();
+        const char *str;
+        int w = where & ~SSL_ST_MASK;
 
+        ProxyConnection *conn = static_cast<ProxyConnection *>(SSL_get_ex_data(s, 0));
+        int fd = conn->get_socket();
+
+        if (w & SSL_ST_CONNECT) {
+            str = "SSL_connect";
+        } else if (w & SSL_ST_ACCEPT) {
+            str = "SSL_accept";
+        } else {
+            str = "undefined";
+        }
+
+        if (where & SSL_CB_HANDSHAKE_START) {
+            SPDLOG_DEBUG("SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
+        } else if (where & SSL_CB_HANDSHAKE_DONE) {
+            SPDLOG_DEBUG("SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
+        } else if (where & SSL_CB_LOOP) {
+            SPDLOG_DEBUG("SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
+        } else if (where & SSL_CB_ALERT) {
+            str = (where & SSL_CB_READ) ? "read" : "write";
+            SPDLOG_DEBUG("SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
+                         SSL_alert_type_string_long(ret),
+                         SSL_alert_desc_string_long(ret));
+       } else if (where & SSL_CB_EXIT) {
+            if (ret == 0) {
+                SPDLOG_DEBUG("SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
+            } else if (ret < 0) {
+                SPDLOG_DEBUG("SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
+            }
+        } else {
+            SPDLOG_DEBUG("SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
+        }
+    }
+
+    SSL_CTX *
+    ProxyServer::_setup_SSL_context(const std::filesystem::path &cert_file,
+                                    const std::filesystem::path &key_file)
+    {
         // create the SSL context
-        //_ssl_ctx = ::SSL_CTX_new(::TLS_method());
-        _ssl_ctx = ::SSL_CTX_new(::SSLv23_server_method());
-        if (!_ssl_ctx) {
+        SSL_CTX *ssl_ctx = ::SSL_CTX_new(::TLS_method());
+        if (!ssl_ctx) {
             SPDLOG_ERROR("Error creating SSL context");
             exit(1);
         }
 
-        SSL_CTX_set_mode(_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+#if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+        // set the info callback
+        SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback);
+#endif
+
+    	/*
+	     * Disable OpenSSL's moving-write-buffer sanity check, because it causes
+	    * unnecessary failures in nonblocking send cases. (from pgbouncer code)
+	    */
+        SSL_CTX_set_mode(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
         /* Set the key and cert */
-        if (::SSL_CTX_use_certificate_file(_ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-            SPDLOG_ERROR("Error loading certificate file");
-            exit(1);
+        if (!cert_file.empty() && !key_file.empty()) {
+            if (::SSL_CTX_use_certificate_file(ssl_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+                SPDLOG_ERROR("Error loading certificate file");
+                exit(1);
+            }
+
+            if (::SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
+                SPDLOG_ERROR("Error loading certificate file");
+                exit(1);
+            }
+
+            if (::SSL_CTX_check_private_key(ssl_ctx) != 1) {
+                SPDLOG_ERROR("Private key does not match the certificate public key");
+                exit(1);
+            }
         }
 
-        if (::SSL_CTX_use_PrivateKey_file(_ssl_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0 ) {
-            SPDLOG_ERROR("Error loading certificate file");
-            exit(1);
-        }
-
-        if (::SSL_CTX_check_private_key(_ssl_ctx) != 1) {
-            SPDLOG_ERROR("Private key does not match the certificate public key");
-            exit(1);
-        }
+        // set the verify mode to none
+        // see https://www.openssl.org/docs/man3.2/man3/SSL_CTX_set_verify.html
+        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
 
         // from libpq be code
         /* disallow SSL session tickets */
-	    SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_TICKET);
+	    SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TICKET);
 
 	    /* disallow SSL session caching, too */
-	    SSL_CTX_set_session_cache_mode(_ssl_ctx, SSL_SESS_CACHE_OFF);
+	    SSL_CTX_set_session_cache_mode(ssl_ctx, SSL_SESS_CACHE_OFF);
 
 	    /* disallow SSL compression */
-	    SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_COMPRESSION);
+	    SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
+
+        return ssl_ctx;
     }
 
     void
@@ -260,8 +312,8 @@ namespace springtail {
 
         // shutdown ssl
         if (_enable_ssl) {
-            ::SSL_CTX_free(_ssl_ctx);
-            ERR_free_strings();
+            ::SSL_CTX_free(_ssl_ctx_server);
+            ::SSL_CTX_free(_ssl_ctx_client);
         }
     }
 
