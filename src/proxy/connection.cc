@@ -36,9 +36,10 @@ namespace springtail {
         char *msg = nullptr;
 
         do {
-            ssize_t n = ::SSL_write(_ssl, buffer, size);
+            size_t n;
+            int w = ::SSL_write_ex(_ssl, buffer, size, &n);
             int err = ::SSL_get_error(_ssl, n);
-            if (n > 0) {
+            if (w > 0) {
                 bytes_written += n;
                 buffer += n;
                 size -= n;
@@ -50,11 +51,11 @@ namespace springtail {
                     continue;
 
                 case SSL_ERROR_SYSCALL:
-                    if (n == -1) {
+                    if (w == -1) {
                         SPDLOG_ERROR("SSL_write: error syscall: {}", err);
                     } else {
                         SPDLOG_ERROR("SSL_write: error syscall: EOF detected");
-                        n = -1;
+                        w = -1;
                     }
                     break;
 
@@ -62,16 +63,16 @@ namespace springtail {
                 case SSL_ERROR_SSL:
                     msg = ERR_error_string(err, nullptr);
                     SPDLOG_ERROR("SSL_write: error ssl: err={}, msg={}", err, msg);
-                    n = -1;
+                    w = -1;
                     break;
 
                 default:
                     SPDLOG_ERROR("SSL_write: unknown error: {}", err);
-                    n = -1;
+                    w = -1;
                     break;
                 }
                 close();
-                return n;
+                return w;
             }
         } while (size > 0);
 
@@ -84,7 +85,6 @@ namespace springtail {
         ssize_t bytes_written = 0;
         do {
             ssize_t n = ::send(_socket, buffer, size, more ? MSG_MORE : 0);
-
             if (n > 0) {
                 bytes_written += n;
                 buffer += n;
@@ -118,9 +118,10 @@ namespace springtail {
         ssize_t bytes_read = 0;
 
         do {
-            ssize_t n = ::SSL_read(_ssl, buffer, max_size);
+            size_t n;
+            int r = ::SSL_read_ex(_ssl, buffer, max_size, &n);
             int err = ::SSL_get_error(_ssl, n);
-            if (n > 0) {
+            if (r > 0) {
                 bytes_read += n;
                 buffer += n;
                 max_size -= n;
@@ -133,18 +134,18 @@ namespace springtail {
                     continue;
 
                 case SSL_ERROR_SYSCALL:
-                    if (n == -1) {
+                    if (r == -1) {
                         SPDLOG_ERROR("SSL_read: error syscall: {}", err);
                     } else {
                         SPDLOG_ERROR("SSL_read: error syscall: EOF detected");
-                        n = -1;
+                        r = -1;
                     }
                     break;
 
                 case SSL_ERROR_SSL:
                     msg = ERR_error_string(err, nullptr);
                     SPDLOG_ERROR("SSL_read: error ssl: {}", msg);
-                    n = -1;
+                    r = -1;
                     break;
 
                 case SSL_ERROR_ZERO_RETURN:
@@ -161,15 +162,15 @@ namespace springtail {
                     */
                     msg = ERR_error_string(err, nullptr);
                     SPDLOG_ERROR("SSL_read: SSL_ERROR_ZERO_RETURN: {}", msg);
-                    n = 0;
+                    r = 0;
                     break;
                 default:
                     SPDLOG_ERROR("SSL_read: unknown error: {}", err);
-                    n = -1;
+                    r = -1;
                     break;
                 }
                 close();
-                return n;
+                return r;
             }
         } while (at_least > 0);
 
