@@ -7,7 +7,7 @@ namespace springtail
 {
     class Ingest {
 
-    Ingest(PgStreamTable &source, std::string &path);
+    Ingest(PgStreamTable &source, std::filesystem::path path);
 
     public:
 
@@ -15,7 +15,7 @@ namespace springtail
 
     private:
     std::vector<PgMsgSchemaColumn> map_to_pg_msg(std::vector<PgColumn>, std::vector<std::string> pkeys);
-    void populate_rows(ExtentSchemaPtr schema, PgStreamTable table, std::shared_ptr<MutableBTree> btree, std::vector<std::string> pkeys);
+    void populate_rows(std::shared_ptr<IOHandle> io_handle, std::shared_ptr<MutableBTree> btree, ExtentSchemaPtr schema, PgStreamTable table, std::vector<std::string> pkeys);
     int get_vec_pos(std::vector<std::string> vec, std::string element);
 
     };

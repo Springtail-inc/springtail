@@ -3,6 +3,8 @@
 #include "pg_repl/pg_stream_table.hh"
 #include "storage/constants.hh"
 #include "storage/field.hh"
+#include "storage/io_mgr.hh"
+#include "storage/mutable_btree.hh"
 #include "storage/schema.hh"
 #include "storage/table_mgr.hh"
 #include <boost/algorithm/string.hpp>
@@ -10,7 +12,7 @@
 
 namespace springtail
 {
-    Ingest::Ingest(PgStreamTable &source, std::string &path) {
+    Ingest::Ingest(PgStreamTable &source, std::filesystem::path path) {
 
         springtail_init();
 
@@ -21,12 +23,24 @@ namespace springtail
         boost::split(xids, pg_xids, boost::is_any_of(":"));
         //TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
 
-        auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
-        btree->init_empty();
+        // set up io_handle path for extents
+        std::filesystem::path extent_path = path;
+        extent_path /= "raw";
+        std::shared_ptr<IOHandle> io_handle = IOMgr::get_instance()->open(extent_path, IOMgr::IO_MODE::APPEND, true);
+        
+        // set up write cache
+        std::shared_ptr<MutableBTree::PageCache> write_cache = MutableBTree::create_cache(2*1024*1024);
 
+        // generate schema
         ExtentSchemaPtr schema = populate_schema(pg_schema.columns);
 
-        populate_rows(schema, source, btree, pg_schema.pkeys);
+        // set up pkey btree
+        std::filesystem::path index_path = path;
+        index_path /= "0.idx";
+        auto btree = std::make_shared<MutableBTree>(index_path, pg_schema.pkeys, write_cache, schema);
+        btree->init_empty();
+
+        populate_rows(io_handle, btree, schema, source, pg_schema.pkeys);
 
         // make PgMsgTable entry and call create_table
         TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
@@ -66,7 +80,7 @@ namespace springtail
             return -1;
         } else
         {
-          return std::distance(vec.begin(), it);
+            return std::distance(vec.begin(), it);
         }
     }
 
@@ -89,20 +103,32 @@ namespace springtail
         return std::make_shared<ExtentSchema>(columns);
     }
 
-    void Ingest::populate_rows(ExtentSchemaPtr schema, PgStreamTable table, std::shared_ptr<MutableBTree> btree, std::vector<std::string> pkeys) {
+    void Ingest::populate_rows(std::shared_ptr<IOHandle> io_handle, std::shared_ptr<MutableBTree> btree,
+                               ExtentSchemaPtr schema, PgStreamTable table, std::vector<std::string> pkeys) {
         auto extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
+        // initiate state on pg connection for data copying
         table.copy_data();
+
         std::optional<FieldArrayPtr> values;
-        std::shared_ptr<KeyValueTuple> insert_tuple;
-        // XXX this probably doesn't work fix this so it uses different tuples
+        std::shared_ptr<MutableTuple> insert_tuple;
+        MutableFieldArrayPtr fields = schema->get_mutable_fields();
         while((values = table.next_row())){
+            Extent::Row row = extent->append();
+            insert_tuple.reset(new MutableTuple(fields, row));
+            insert_tuple->assign(FieldTuple(values.value(), nullptr));
+            // write the new extent to disk
+            auto &&future = extent->async_flush(io_handle);
+
+            // construct a new root page based on the new extent
+            uint64_t extent_id = future.get()->offset;
+            //if the next row will go over the max extent size, then flush and make a new one
             if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
-                btree->insert(insert_tuple);
+                // construct vector with values into pk_position, then append field with extent id
+                FieldArrayPtr pkey_values;
+                btree->insert(std::make_shared<FieldTuple>(schema->tuple_subset(insert_tuple, pkeys), extent_id));
                 extent.reset(new Extent(schema, ExtentType{false}, 0));
             }
-            Extent::Row row = extent->append();
-            insert_tuple.reset(new KeyValueTuple(schema->get_fields(), values.value(), row));
         }
     }
 }
