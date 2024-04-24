@@ -1,0 +1,75 @@
+# A reusable workflow that runs tests on the code.
+name: Test
+
+on:
+  workflow_call:
+    inputs:
+      builder_image_version_tag:
+        description: 'The image version tag for the base builder to pull.'
+        type: string
+        required: true
+    secrets:
+      ecr_pw:
+        description: 'The password for the ECR.'
+        required: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    # Redis
+    services:
+      # Label used to access the service container
+      redis:
+        # Docker Hub image
+        image: redis
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::891377357651:role/GitHubOIDCStack-GHDeploymentRolespringtail4901D08A-77JHxuAaXoIY
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate temporary Dockerfile
+        run: |
+          echo "FROM ${{ vars.ECR_REPO_URI }}:${{ inputs.builder_image_version_tag }}" > Dockerfile.test
+          echo "WORKDIR /springtail" >> Dockerfile.test
+          echo "COPY ./ /springtail" >> Dockerfile.test
+          echo "COPY ./.docker/system.json.override /springtail/system.json" >> Dockerfile.test
+          echo "RUN rm -rf release debug" >> Dockerfile.test
+          echo "RUN cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'" >> Dockerfile.test
+          echo "RUN make -C debug -j $(nproc)" >> Dockerfile.test
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: "Dockerfile.test"
+          tags: localtest:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: false
+
+      - name: Run Test
+        uses: addnab/docker-run-action@v3
+        with:
+          image: localtest:latest
+          run: |
+            make test -C debug
