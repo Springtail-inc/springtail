@@ -1,0 +1,49 @@
+# An image that contains has Gcc 13 + CMake 3.29.2 preinstalled to serve as the base of the builders.
+# Using Ubuntu 22.04 LTS distro. This image should stay relatively stable.
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    lsb-release wget software-properties-common gnupg \
+    build-essential autoconf libelf-dev \
+    bison pkg-config flex libdw-dev \
+    libdwarf-dev binutils-dev linux-libc-dev \
+    git curl zip unzip tar ninja-build \
+    && apt-get clean autoclean \
+    && apt-get autoremove --yes \
+    && rm -rf /var/lib/{apt,cache,log,dpkg}
+
+# Only this GCC stdc++ lib >= 13 supports C++20 Text Formatting.
+# The one installed within the group "build-essential" is GCC 11.
+#
+# Ref: https://en.cppreference.com/w/cpp/compiler_support#C.2B.2B20_library_features
+RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+    && apt-get update \
+    && apt-get install -y gcc-13 g++-13 \
+    && apt-get clean autoclean \
+    && apt-get autoremove --yes
+
+# Update alternatives to use gcc-13.
+RUN update-alternatives --install /usr/bin/c++ c++ $(which g++-13) 50 \
+    && update-alternatives --install /usr/bin/cc cc $(which gcc-13) 50
+
+# Install the latest CMake
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
+RUN echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | tee /etc/apt/sources.list.d/kitware.list > /dev/null
+RUN apt-get update && apt-get install -y kitware-archive-keyring cmake
+
+ENV ZIC=true
+ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+ENV _EXTERNAL_DIR=/springtail/external
+ENV _VCPKG_DIR=${_EXTERNAL_DIR}/vcpkg
+ENV PATH="${PATH}:${_VCPKG_DIR}"
+WORKDIR /springtail
+
+RUN mkdir -p ${_EXTERNAL_DIR} \
+    && cd ${_EXTERNAL_DIR} \
+    && git clone https://github.com/Microsoft/vcpkg.git \
+    && cd ${_VCPKG_DIR} \
+    && ./bootstrap-vcpkg.sh \
+    && vcpkg integrate install
+
+COPY vcpkg.json /springtail/vcpkg.json
+RUN vcpkg install
