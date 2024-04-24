@@ -195,7 +195,7 @@ namespace springtail {
                 // Connection closed by the client
                 SPDLOG_DEBUG("Connection closed by client");
                 close();
-                return 0;
+                throw ProxyIOError();
             } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
                 continue;
             } else {
@@ -304,7 +304,8 @@ namespace springtail {
     {
         _ssl = ssl;
         int rc = ::SSL_set_fd(ssl, _socket);
-        if (rc < 0) {
+        if (rc <= 0) {
+            SPDLOG_ERROR("Error setting SSL fd: {}", _socket);
             throw ProxySSLConnectionError();
         }
 
@@ -354,7 +355,7 @@ namespace springtail {
                 SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
                 break;
             case SSL_ERROR_SSL:
-                SPDLOG_ERROR("SSL handshake failed: error ssl\n");
+                SPDLOG_ERROR("SSL handshake failed: error ssl, msg={}", msg);
                 break;
             default:
                 SPDLOG_ERROR("SSL handshake failed: rc={}, err={}, msg={}", rc, err, msg);
