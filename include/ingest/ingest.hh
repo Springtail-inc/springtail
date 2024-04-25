@@ -9,14 +9,11 @@ namespace springtail
 
     Ingest(PgStreamTable &source, std::filesystem::path path);
 
-    public:
-
-    ExtentSchemaPtr populate_schema(std::vector<PgColumn> pg_columns);
-
     private:
-    std::vector<PgMsgSchemaColumn> map_to_pg_msg(std::vector<PgColumn>, std::vector<std::string> pkeys);
-    void populate_rows(std::shared_ptr<IOHandle> io_handle, std::shared_ptr<MutableBTree> btree, ExtentSchemaPtr schema, PgStreamTable table, std::vector<std::string> pkeys);
-    int get_vec_pos(std::vector<std::string> vec, std::string element);
+    ExtentSchemaPtr _populate_schema(std::vector<PgColumn> pg_columns);
+    std::vector<PgMsgSchemaColumn> _map_to_pg_msg(std::vector<PgColumn>, std::vector<std::string> pkeys);
+    void _populate_rows(std::shared_ptr<IOHandle> io_handle, std::shared_ptr<MutableBTree> btree, ExtentSchemaPtr schema, PgStreamTable table, std::vector<std::string> pkeys);
+    int _get_vec_pos(std::vector<std::string> vec, std::string element);
 
     };
 }

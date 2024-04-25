@@ -51,6 +51,11 @@ namespace springtail {
          */
         void drop_table(uint64_t xid, uint64_t lsn, const PgMsgDropTable &msg);
 
+        /**
+         * Converts a Postgres type to a Springtail type.
+         */
+        SchemaType convert_pg_type(const std::string &pg_type);
+
     protected:
         static TableMgr *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
@@ -79,11 +84,6 @@ namespace springtail {
          * Retrieve the namespace and name of the table at a given xid/lsn.
          */
         std::pair<std::string, std::string> _get_table_name(uint64_t table_id, uint64_t xid, uint64_t lsn);
-
-        /**
-         * Converts a Postgres type to a Springtail type.
-         */
-        SchemaType _convert_pg_type(const std::string &pg_type);
 
     private:
         // singleton; delete copy constructor

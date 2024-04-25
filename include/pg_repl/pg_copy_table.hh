@@ -75,7 +75,7 @@ namespace springtail
         std::string read_string(int length);
 
         // retrieve schema, write out schema and copy data
-        PgTableSchema get_schema();
+        void get_schema();
         void get_xact_xids();
         void get_table_oid();
         void get_pkeys();

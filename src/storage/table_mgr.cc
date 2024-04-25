@@ -433,7 +433,7 @@ namespace springtail {
     }
 
     SchemaType
-    TableMgr::_convert_pg_type(const std::string &pg_type)
+    TableMgr::convert_pg_type(const std::string &pg_type)
     {
         if (pg_type == "int4" || pg_type == "int" || pg_type == "serial4" || pg_type == "serial" ||
             pg_type == "date") {

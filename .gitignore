@@ -7,4 +7,7 @@ docs
 .vscode
 vcpkg_installed
 src/**/gen-cpp
+.idea
+.scannerwork
+cmake-build-*
 compile_commands.json
