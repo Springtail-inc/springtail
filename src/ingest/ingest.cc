@@ -124,9 +124,12 @@ namespace springtail
             uint64_t extent_id = future.get()->offset;
             //if the next row will go over the max extent size, then flush and make a new one
             if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
-                // construct vector with values into pk_position, then append field with extent id
-                FieldArrayPtr pkey_values;
-                btree->insert(std::make_shared<FieldTuple>(schema->tuple_subset(insert_tuple, pkeys), extent_id));
+                //grab pkey fields from the last insert, add `extent_id` to end of the fieldarray
+                FieldArrayPtr fields = schema->fieldarray_subset(insert_tuple, pkeys);
+                fields->push_back(std::make_shared<ConstTypeField<std::string>>(extent_id));
+                btree->insert(std::make_shared<FieldTuple>(fields, nullptr));
+                
+                //create new extent
                 extent.reset(new Extent(schema, ExtentType{false}, 0));
             }
         }

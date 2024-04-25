@@ -22,7 +22,7 @@ target_link_libraries(springtail_ingest
 )
 
 # executables
-add_executable(test_ingest test/ingest.cc)
+add_executable(test_ingest test/test_ingest.cc)
 
 target_include_directories(test_ingest
     PUBLIC ${PROJECT_SOURCE_DIR}/include

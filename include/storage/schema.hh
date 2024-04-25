@@ -223,6 +223,9 @@ namespace springtail {
          */
         std::shared_ptr<Tuple> tuple_subset(std::shared_ptr<Tuple> tuple,
                                             const std::vector<std::string> &columns) const;
+        std::shared_ptr<std::vector<std::shared_ptr<Field>>>
+        fieldarray_subset(std::shared_ptr<Tuple> tuple,
+                          const std::vector<std::string> &columns) const;
 
         /**
          * Return the order of the columns in the schema.

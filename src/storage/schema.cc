@@ -221,6 +221,17 @@ namespace springtail {
         // 1) size of tuple matches the schema column count
         // 2) the types of the tuple match the schema columns
 
+        auto fields = fieldarray_subset(tuple, columns);
+
+        return std::make_shared<FieldTuple>(fields, tuple->row());
+    }
+
+    
+    std::shared_ptr<std::vector<std::shared_ptr<Field>>>
+    ExtentSchema::fieldarray_subset(std::shared_ptr<Tuple> tuple,
+                               const std::vector<std::string> &columns) const
+    {
+        
         // find the correct column indexes for the columns
         auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
         for (auto &&column : columns) {
@@ -228,9 +239,9 @@ namespace springtail {
             fields->push_back(tuple->field(i->second.second));
         }
 
-        return std::make_shared<FieldTuple>(fields, tuple->row());
+        return fields;
     }
-
+ 
     std::shared_ptr<Field>
     VirtualSchema::_make_const(SchemaType type,
                                const std::string &value)
