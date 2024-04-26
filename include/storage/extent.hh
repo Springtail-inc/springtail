@@ -8,9 +8,12 @@
 
 #include <xxhash.h>
 
+#include <pg_repl/pg_types.hh>
+
+#include <storage/compressors.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
-#include <storage/compressors.hh>
+#include <storage/schema_mgr.hh>
 
 namespace springtail {
     // pre-declare classes to avoid circular dependencies
@@ -61,36 +64,44 @@ namespace springtail {
     public:
         ExtentType type; ///< The type of the extent.
         uint64_t xid; ///< The XID that this extent is valid from.
+
+        uint64_t table_id; ///< The table that this extent is associated with.
+        uint32_t index_id; ///< The table index that this extent is associated with.  Marked with constant::INDEX_DATA in the case where the extent contains raw table data.
+
         uint64_t prev_offset; ///< The location of the previous extent that this extent is overwriting.  Set to zero for new extents.
 
         /** Constructor for uncommitted extents.*/
-        ExtentHeader(ExtentType type, uint64_t xid, uint64_t prev = 0)
+        ExtentHeader(ExtentType type, uint64_t xid, uint64_t table_id, uint32_t index_id, uint64_t prev = 0)
             : type(type),
               xid(xid),
+              table_id(table_id),
+              index_id(index_id),
               prev_offset(prev)
         { }
 
         /** Constructor that deserializes the header. */
         ExtentHeader(std::shared_ptr<std::vector<char>> data)
         {
-            std::copy_n(data->data(), sizeof(uint8_t),
-                        reinterpret_cast<char *>(&type));
-            std::copy_n(data->data() + sizeof(uint8_t), sizeof(uint64_t),
-                        reinterpret_cast<char *>(&xid));
-            std::copy_n(data->data() + sizeof(uint8_t) + sizeof(uint64_t), sizeof(uint64_t),
-                        reinterpret_cast<char *>(&prev_offset));
+            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data()));
+            // type = recvint8(data->data());
+            xid = recvint64(data->data() + 1);
+            table_id = recvint64(data->data() + 9);
+            index_id = recvint32(data->data() + 17);
+            prev_offset = recvint64(data->data() + 21);
         }
 
         /** Serialize the header. */
         std::vector<char> pack()
         {
-            std::vector<char> data(17);
-            std::copy_n(reinterpret_cast<char *>(&type), sizeof(uint8_t),
-                        data.data());
-            std::copy_n(reinterpret_cast<char *>(&xid), sizeof(uint64_t),
-                        data.data() + sizeof(uint8_t));
-            std::copy_n(reinterpret_cast<char *>(&prev_offset), sizeof(uint64_t),
-                        data.data() + sizeof(uint8_t) + sizeof(uint64_t));
+            std::vector<char> data(29);
+
+            data[0] = static_cast<uint8_t>(type);
+            // sendint8(type, data.data());
+            sendint64(xid, data.data() + 1);
+            sendint64(table_id, data.data() + 9);
+            sendint32(index_id, data.data() + 17);
+            sendint64(prev_offset, data.data() + 21);
+
             return data;
         }
     };
@@ -144,6 +155,10 @@ namespace springtail {
 
             char *data() const {
                 return extent->_fixed_data->data() + offset;
+            }
+
+            bool operator==(const Row &rhs) {
+                return (extent == rhs.extent && offset == rhs.offset);
             }
 
         private:
@@ -229,27 +244,7 @@ namespace springtail {
         /** The size of a row in the fixed data. */
         uint32_t _row_size;
 
-    public:
-        Extent(std::shared_ptr<ExtentSchema> schema,
-               ExtentType type,
-               uint64_t xid)
-            : _schema(schema),
-              _header(type, xid),
-              _row_size(schema->row_size())
-        {
-            // empty extent
-            _fixed_data = std::make_shared<std::vector<char>>();
-            _variable_data = std::make_shared<std::vector<char>>();
-        }
-
-        Extent(std::shared_ptr<ExtentSchema> schema,
-               const std::vector<std::shared_ptr<std::vector<char>>> &data)
-            : _schema(schema),
-              _header(data[0]),
-              _fixed_data(data[1]),
-              _variable_data(data[2]),
-              _row_size(schema->row_size())
-        {
+        void _populate_vhash() {
             // fill the hash with the variable data
             uint32_t size;
             uint32_t offset = 0;
@@ -267,6 +262,57 @@ namespace springtail {
                 // move to the next entry
                 offset += size + sizeof(uint32_t);
             }
+        }
+
+    public:
+        Extent(std::shared_ptr<ExtentSchema> schema,
+               ExtentType type,
+               uint64_t xid)
+            : _schema(schema),
+              _header(type, xid, 0, 0),
+              _row_size(schema->row_size())
+        {
+            // empty extent
+            _fixed_data = std::make_shared<std::vector<char>>();
+            _variable_data = std::make_shared<std::vector<char>>();
+        }
+
+        Extent(std::shared_ptr<ExtentSchema> schema,
+               const std::vector<std::shared_ptr<std::vector<char>>> &data)
+            : _schema(schema),
+              _header(data[0]),
+              _fixed_data(data[1]),
+              _variable_data(data[2]),
+              _row_size(schema->row_size())
+        {
+            _populate_vhash();
+        }
+
+        Extent(const std::vector<std::shared_ptr<std::vector<char>>> &data)
+            : _header(data[0]),
+              _fixed_data(data[1]),
+              _variable_data(data[2])
+        {
+            SchemaMgr *mgr = SchemaMgr::get_instance();
+
+            if (_header.index_id == constant::INDEX_DATA) {
+                _schema = mgr->get_extent_schema(_header.table_id, _header.xid);
+            } else {
+                _schema = mgr->get_extent_schema(_header.table_id, _header.xid, _header.index_id, _header.type);
+            }
+
+            _row_size = _schema->row_size();
+            _populate_vhash();
+        }
+
+        Extent(const Extent &extent)
+            : _schema(extent._schema),
+              _header(extent._header),
+              _fixed_data(extent._fixed_data),
+              _variable_data(extent._variable_data),
+              _row_size(extent._row_size)
+        {
+            _populate_vhash();
         }
 
         ExtentHeader &header() {

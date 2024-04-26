@@ -195,11 +195,16 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    SchemaMgr::SchemaInfo::get_primary_key(uint64_t xid)
+    SchemaMgr::SchemaInfo::get_index_keys(uint64_t index_id, uint64_t xid)
     {
         std::vector<std::string> key;
 
-        auto &&i = _primary_index.lower_bound(xid);
+        // XXX need to handle lookup failure
+        auto &index = (index_id == constant::INDEX_PRIMARY)
+            ? _primary_index
+            : _secondary_indexes[index_id];
+
+        auto &&i = index.lower_bound(xid);
         for (uint32_t column : i->second) {
             // XXX need to handle lookup failure
             key.push_back(_column_map[column].lower_bound(xid)->second.back().name);
@@ -273,17 +278,47 @@ namespace springtail {
     SchemaMgr::SchemaMgr()
         : _cache(1024*1024)
     {
-        _system_cache[sys_tbl::TableNames::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
-        _system_cache[sys_tbl::TableRoots::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
-        _system_cache[sys_tbl::Indexes::ID] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
-        _system_cache[sys_tbl::Schemas::ID] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+
+        // TableNames
+        _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
+
+        auto schema = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Primary::SCHEMA);
+        _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_PRIMARY, true }] = schema;
+        _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::TableNames::Primary::KEY, { child });
+        
+        schema = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Secondary::SCHEMA);
+        _system_cache[{ sys_tbl::TableNames::ID, 1, true }] = schema;
+        _system_cache[{ sys_tbl::TableNames::ID, 1, false }] = schema->create_schema(sys_tbl::TableNames::Secondary::KEY, { child });
+
+        // TableRoots
+        _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
+
+        schema = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Primary::SCHEMA);
+        _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_PRIMARY, true }] = schema;
+        _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::TableRoots::Primary::KEY, { child });
+
+        // Indexes
+        _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
+
+        schema = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Primary::SCHEMA);
+        _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_PRIMARY, true }] = schema;
+        _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::Indexes::Primary::KEY, { child });
+
+        // Schemas
+        _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
+
+        schema = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Primary::SCHEMA);
+        _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_PRIMARY, true }] = schema;
+        _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::Schemas::Primary::KEY, { child });
+        
     }
 
     std::map<uint32_t, SchemaColumn>
     SchemaMgr::get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn)
     {
         // XXX can't call this for system tables
-        assert(_system_cache.find(table_id) == _system_cache.end());
+        assert(_system_cache.find({ table_id, constant::INDEX_DATA, true }) == _system_cache.end());
 
         std::shared_ptr<SchemaInfo> info = _cache.get(table_id);
         if (info == nullptr) {
@@ -298,7 +333,7 @@ namespace springtail {
     SchemaMgr::get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn)
     {
         // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find(table_id);
+        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
         if (system_i != _system_cache.end()) {
             return system_i->second;
         }
@@ -323,7 +358,7 @@ namespace springtail {
                                  uint64_t xid)
     {
         // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find(table_id);
+        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
         if (system_i != _system_cache.end()) {
             return system_i->second;
         }
@@ -339,6 +374,59 @@ namespace springtail {
 
         // retrieve the schema at the appropriate point-in-time
         return info->get_extent_schema(xid);
+    }
+
+    std::shared_ptr<ExtentSchema>
+    SchemaMgr::get_extent_schema(uint64_t table_id,
+                                 uint64_t xid,
+                                 uint64_t index_id,
+                                 ExtentType type)
+    {
+        ExtentSchemaPtr data_schema;
+
+        // first check if it's an immutable system table schema
+        auto &&system_i = _system_cache.find({ table_id, index_id, type.is_leaf() });
+        if (system_i != _system_cache.end()) {
+            return system_i->second;
+        }
+
+        // next check the cache
+        std::shared_ptr<SchemaInfo> info = _cache.get(table_id);
+
+        // if not in the cache then read it and insert it into the cache
+        if (info == nullptr) {
+            info = std::make_shared<SchemaInfo>(table_id);
+            _cache.insert(table_id, info);
+        }
+
+        // retrieve the schema at the appropriate point-in-time
+        auto schema = info->get_extent_schema(xid);
+
+        // check if this is for a data extent
+        if (index_id == constant::INDEX_DATA) {
+            return schema;
+        }
+
+        // get the keys of the index
+        auto keys = info->get_index_keys(index_id, xid);
+
+        if (type.is_leaf()) {
+            // construct a schema for the leaf extents of the index
+            if (index_id == constant::INDEX_PRIMARY) {
+                // primary index value column
+                SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
+                return schema->create_schema(keys, { extent_c });
+            } else {
+                // secondary index value columns
+                SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
+                SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, false);
+                return schema->create_schema(keys, { extent_c, row_c });
+            }
+        } else {
+            // branch schema value column
+            SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+            return schema->create_schema(keys, { child });
+        }
     }
 
     SchemaColumn

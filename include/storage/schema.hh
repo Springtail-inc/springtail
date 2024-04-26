@@ -117,6 +117,9 @@ namespace springtail {
         /** The order of the columns. */
         std::vector<std::string> _column_order;
 
+        /** The sort columns of the schema. */
+        std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
+
     protected:
         /**
          * Construct the set of column fields based on the column definitions.
@@ -201,6 +204,13 @@ namespace springtail {
          * Generate a list of all of the fields in the schema.
          */
         std::shared_ptr<std::vector<MutableFieldPtr>> get_mutable_fields() const;
+
+        /**
+         * Return a list of fields that form the sort columns of this schema.
+         */
+        std::shared_ptr<std::vector<FieldPtr>> get_sort_fields() const {
+            return _sort_fields;
+        }
 
         /**
          * Generate a list of fields based on an ordered list of columns.
