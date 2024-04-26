@@ -57,7 +57,7 @@ namespace springtail {
     }
 
     void
-    Session::_internal_process_msg(SessionMsg &msg)
+    Session::_internal_process_msg(SessionMsgPtr msg)
     {
         // send message to session
         try {
@@ -224,7 +224,7 @@ namespace springtail {
         // check for associated client session, and notify of error
         if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
             // notify client session of error
-            SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
             notify_client(msg);
         }
         SPDLOG_ERROR("Shutdown complete");

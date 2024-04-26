@@ -38,9 +38,16 @@ namespace springtail {
 
     protected:
 
+        /**
+         * @brief Entry point for data from the connection
+         */
         void _process_connection() override;
 
-        void _process_msg(SessionMsg &msg) override;
+        /**
+         * @brief Entry point for a message from the server (normally a reply))
+         * @param msg message from the server
+         */
+        void _process_msg(SessionMsgPtr msg) override;
 
     private:
         int _id;
@@ -54,7 +61,7 @@ namespace springtail {
         void _encode_auth_ok();
         void _encode_auth_scram();
 
-        void _do_server_auth();
+        void _create_primary_server_session();
 
         void _handle_request();
         void _handle_startup();
@@ -67,6 +74,8 @@ namespace springtail {
 
         void _send_auth_req();
         void _send_auth_done();
+
+        ServerSessionPtr _select_session_and_notify(Type type, SessionMsgPtr msg);
 
         /** Release server session back to session pool */
         void _release_server_session();

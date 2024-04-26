@@ -7,6 +7,7 @@
 #include <proxy/server.hh>
 #include <proxy/connection.hh>
 #include <proxy/errors.hh>
+#include <proxy/exception.hh>
 
 #include <proxy/auth/md5.h>
 #include <proxy/auth/sha256.h>
@@ -15,18 +16,21 @@
 namespace springtail {
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server,
-                                 UserPtr user)
-        : Session(connection, server, user, PRIMARY)
+                                 UserPtr user,
+                                 std::string database,
+                                 DatabaseInstancePtr instance,
+                                 Session::Type type)
+        : Session(instance, connection, server, user, database, type)
     {
         _state = STARTUP;
         SPDLOG_DEBUG("Server connected: {}", connection->endpoint());
     }
 
     void
-    ServerSession::_process_msg(SessionMsg &msg)
+    ServerSession::_process_msg(SessionMsgPtr msg)
     {
         // entry point for message processing from client session
-        switch(msg.type) {
+        switch(msg->type) {
         case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
             // this is the startup message from client session
             if (_server->is_ssl_enabled()) {
@@ -39,11 +43,11 @@ namespace springtail {
             break;
 
         case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
-            _handle_simple_query(std::get<std::string>(msg.data));
+            _handle_simple_query(std::get<std::string>(msg->data));
             break;
 
         default:
-            SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg.type);
+            SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg->type);
             break;
         }
     }
@@ -108,8 +112,7 @@ namespace springtail {
                 int32_t status = _read_buffer.get32();
                 if (status != 0) {
                     SPDLOG_ERROR("Auth failed: {}", status);
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
 
                 // free auth data
@@ -166,7 +169,7 @@ namespace springtail {
                     // at this point we should notify client session
                     // server authentication is done, and we can complete
                     // the client session authentication
-                    SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
+                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
                     notify_client(msg);
                     break;
                 }
@@ -175,7 +178,7 @@ namespace springtail {
                 _stream_to_remote_session(code, msg_length);
 
                 // notify client session that we are ready for query
-                SessionMsg msg(SessionMsg::MSG_SERVER_CLIENT_READY);
+                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY);
                 notify_client(msg);
 
                 break;
@@ -233,10 +236,7 @@ namespace springtail {
         // Just one character: 'N' no ssl or 'S' yes ssl
         _read_buffer.reset();
         ssize_t n = _connection->read(_read_buffer, 1);
-        if (n <= 0) {
-            _state = ERROR;
-            return;
-        }
+        assert(n==1);
 
         char ssl_response = _read_buffer.get();
         SPDLOG_DEBUG("SSL response from server: {}", ssl_response);
@@ -252,7 +252,8 @@ namespace springtail {
     void
     ServerSession::_send_ssl_handshake()
     {
-        SSL *ssl = _server->SSL_new(true);
+        // create the SSL object from the server's context, acting as a client
+        SSL *ssl = _server->SSL_new(false);
         if (ssl == nullptr) {
             SPDLOG_ERROR("Failed to create SSL object");
             _state = ERROR;
@@ -289,12 +290,12 @@ namespace springtail {
     {
         // Send startup message
         _write_buffer.reset();
-        _write_buffer.put32(8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _user->dbname().size() + 3); // length
+        _write_buffer.put32(8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _database.size() + 3); // length
         _write_buffer.put32(MSG_STARTUP_V3); // protocol version
         _write_buffer.putString("user");
         _write_buffer.putString(_user->username());
         _write_buffer.putString("database");
-        _write_buffer.putString(_user->dbname());
+        _write_buffer.putString(_database);
         _write_buffer.putString("application_name");
         _write_buffer.putString("Springtail");
         _write_buffer.putString("client_encoding");
@@ -332,9 +333,7 @@ namespace springtail {
                 // get user login info
                 _login = _get_user_login();
                 if (_login == nullptr) {
-                    SPDLOG_ERROR("Failed to get user login info");
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
                 _login->_salt = salt;
 
@@ -354,8 +353,7 @@ namespace springtail {
                 _login = _get_user_login();
                 if (_login == nullptr) {
                     SPDLOG_ERROR("Failed to get user login info");
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
 
                 // check that the server supports the SCRAM-SHA-256 mechanism
@@ -369,8 +367,7 @@ namespace springtail {
 
                 if (!found) {
                     SPDLOG_ERROR("No SASL mechanism found matching: SCRAM-SHA-256");
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
 
                 // encode reply for first scram message to server
@@ -406,8 +403,7 @@ namespace springtail {
 
             default:
                 SPDLOG_ERROR("Unknown auth type: {}", auth_type);
-                _state = ERROR;
-                return;
+                throw ProxyAuthError();
         }
 
         if (_state == ERROR) {
@@ -436,8 +432,7 @@ namespace springtail {
         assert(_login->_password.starts_with("md5"));
         if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
             SPDLOG_ERROR("Failed to calculate MD5 hash");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
         md5[MD5_PASSWD_LEN] = '\0';
 
@@ -450,8 +445,7 @@ namespace springtail {
         char *client_first_message = build_client_first_message(&_login->scram_state);
         if (client_first_message == nullptr) {
             SPDLOG_ERROR("Failed to build client first message");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         int32_t len = strlen(client_first_message);
@@ -471,14 +465,12 @@ namespace springtail {
     {
         if (_login->scram_state.client_nonce == nullptr) {
             SPDLOG_ERROR("No client nonce set");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         if (_login->scram_state.server_first_message != nullptr) {
             SPDLOG_ERROR("Received second SCRAM-SHA-256 continue message");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         int salt_len;
@@ -491,8 +483,7 @@ namespace springtail {
                                        &_login->scram_state.iterations)) {
             SPDLOG_ERROR("Failed to read server first message");
             free (input);
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         PgUser user;
@@ -507,8 +498,7 @@ namespace springtail {
 
         if (client_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build client final message");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         _write_buffer.reset();
@@ -525,8 +515,7 @@ namespace springtail {
         // make sure we are in right flow
         if (_login->scram_state.server_first_message == nullptr) {
             SPDLOG_ERROR("No server first message set");
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         char *input = strdup(data.c_str());
@@ -536,8 +525,7 @@ namespace springtail {
         if (!read_server_final_message(input, ServerSignature)) {
             SPDLOG_ERROR("Failed to read server final message");
             free(input);
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         PgUser user;
@@ -549,8 +537,7 @@ namespace springtail {
         if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
             SPDLOG_ERROR("Failed to verify server signature");
             free(input);
-            _state = ERROR;
-            return;
+            throw ProxyAuthError();
         }
 
         free(input);
@@ -569,8 +556,6 @@ namespace springtail {
         assert(n == _write_buffer.size());
     }
 
-
-
     void
     ServerSession::_handle_error_code(const char *data, int32_t msg_length)
     {
@@ -582,7 +567,10 @@ namespace springtail {
         std::string code;
         std::string message;
 
-        ProxyError::decode_error(_read_buffer, severity, text, code, message);
+        ProxyProtoError::decode_error(_read_buffer, severity, text, code, message);
+
+        // send error to client
+        _send_to_remote_session('E', msg_length, data);
 
         // depending on error, behavior is different
         // if text is "FATAL" or "PANIC" we should stop, sever connection
@@ -590,31 +578,31 @@ namespace springtail {
             _state = ERROR;
         }
 
-        // send error to client
-        _send_to_remote_session('E', msg_length, data);
-
         // if not fatal then wait for ready for query from server
         return;
     }
 
     /** factory to create session */
     std::shared_ptr<ServerSession>
-    ServerSession::create(ProxyServerPtr server, UserPtr user)
+    ServerSession::create(ProxyServerPtr server,
+                          UserPtr user,
+                          const std::string &database,
+                          DatabaseInstancePtr instance,
+                          Session::Type type)
     {
-        auto database = user->get_database();
-        if (database == nullptr) {
-            SPDLOG_ERROR("Failed to get database for user");
-            return nullptr;
+        if (instance == nullptr) {
+            assert (type == Session::Type::PRIMARY);
+            instance = server->get_primary_instance();
         }
 
-        auto connection = database->create_connection();
+        auto connection = instance->create_connection();
         if (connection == nullptr) {
             SPDLOG_ERROR("Failed to create connection for server db");
             return nullptr;
         }
 
-        SPDLOG_DEBUG("Created connection for server session, to: db={}", database->name());
+        SPDLOG_DEBUG("Created connection for server session, to: db={}", database);
 
-        return std::make_shared<ServerSession>(connection, server, user);
+        return std::make_shared<ServerSession>(connection, server, user, database, instance, type);
     }
 }

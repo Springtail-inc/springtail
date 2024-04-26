@@ -104,25 +104,23 @@ namespace springtail {
         }
 
         std::string getString() {
-            // read until we get a null byte
-            std::string s;
-            assert(_offset < _data_size);
-            while (_buffer[_offset] != 0) {
-                assert(_offset < _data_size);
-                s.push_back(_buffer[_offset]);
-                _offset++;
+            int str_len = ::strnlen(_buffer.data() + _offset, _data_size - _offset);
+            assert(str_len < _data_size - _offset);
+            if (str_len < _data_size - _offset) {
+                _offset += str_len + 1; // skip null byte
+                return std::string(_buffer.data() + _offset);
             }
-            assert(_offset < _data_size);
-            _offset++; // skip null byte
-            return s;
+            return {};
         }
 
         void getBytes(char *bytes, int32_t len) {
+            assert(_offset + len <= _data_size);
             memcpy(bytes, _buffer.data() + _offset, len);
             _offset += len;
         }
 
         std::string getBytes(int32_t len) {
+            assert(_offset + len <= _data_size);
             std::string s(_buffer.data() + _offset, len);
             _offset += len;
             return s;

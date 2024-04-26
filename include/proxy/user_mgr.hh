@@ -3,12 +3,12 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <set>
 #include <shared_mutex>
 #include <mutex>
 
 #include <common/logging.hh>
 
-#include <proxy/pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
@@ -58,46 +58,13 @@ namespace springtail {
     };
     using UserLoginPtr = std::shared_ptr<UserLogin>;
 
-    /** Class representing a database, includes database name and hostname DNS */
-    class Database {
-    public:
-        Database(const std::string &name,
-                 const std::string &hostname,
-                 int port=5432)
-            : _name(name), _hostname(hostname), _port(port)
-        {}
-
-        /** get database name */
-        const std::string &name() const { return _name; }
-
-        /** get hostname */
-        const std::string &hostname() const { return _hostname; }
-
-        /** get port */
-        int port() const { return _port; }
-
-        /** create connection */
-        ProxyConnectionPtr create_connection() {
-            return ProxyConnection::create(_hostname, _port);
-        }
-
-    private:
-        std::string _name;
-        std::string _hostname;
-        int _port;
-
-        // XXX may want to cache dns lookups
-    };
-    using DatabasePtr = std::shared_ptr<Database>;
-
     class UserMgr;
     using UserMgrPtr = std::shared_ptr<UserMgr>;
 
     /**
-     * @brief Identifies the user as a user:database pair.
+     * @brief Identifies the user.
      * Holds credentials from the client login that may be required
-     * for the server side login.  Contains the pool that holds
-     * the client session, the primary and the replica sessions.
+     * for the server side login.
      */
     class User {
     public:
@@ -107,12 +74,10 @@ namespace springtail {
          * @param database database name
          */
         User(UserMgrPtr user_mgr,
-             const std::string &username,
-             const std::string &database)
+             const std::string &username)
             : _user_mgr(user_mgr),
               _auth_type(TRUST),
-              _username(username),
-              _database(database)
+              _username(username)
         {}
 
         /**
@@ -124,7 +89,6 @@ namespace springtail {
          */
         User(UserMgrPtr user_mgr,
              const std::string &username,
-             const std::string &database,
              const std::string &password,
              uint32_t salt=0);
 
@@ -138,46 +102,23 @@ namespace springtail {
          * @brief Set the client scram key after client auth; used in server auth
          * @param client_key
          */
-        void set_client_scram_key(const uint8_t *client_key)
-        {
-            std::unique_lock lock(_scram_mutex);
-            if (!_scram_keys) {
-               _scram_keys = std::make_shared<ScramKeys>();
-            }
-            if (!_scram_keys->client_key_set) {
-                memcpy(_scram_keys->client_key, client_key, 32);
-                _scram_keys->client_key_set = true;
-            }
-        }
+        void set_client_scram_key(const uint8_t *client_key);
 
         /**
          * @brief Set the server scram key; this should be based on the stored password
          * and should be set in the constructor when it parses the scram password.
          * @param server_key
          */
-        void set_server_scram_key(const uint8_t *server_key)
-        {
-            std::unique_lock lock(_scram_mutex);
-            if (!_scram_keys) {
-                _scram_keys = std::make_shared<ScramKeys>();
-            }
-            if (!_scram_keys->server_key_set) {
-                memcpy(_scram_keys->server_key, server_key, 32);
-                _scram_keys->server_key_set = true;
-            }
-        }
+        void set_server_scram_key(const uint8_t *server_key);
 
         /** get username */
         const std::string &username() const { return _username; }
 
-        /** get databese name */
-        const std::string &dbname() const { return _database; }
-
-        /** get database object */
-        DatabasePtr get_database() const;
-
-        /** get pool */
-        PoolPtr get_pool() const { return _pool; }
+        /** add database */
+        void add_database(const std::string &name) {
+            std::unique_lock lock(_db_mutex);
+            _connected_databases.insert(name);
+        }
 
     private:
         struct ScramKeys {
@@ -187,19 +128,18 @@ namespace springtail {
             bool server_key_set=false;
         };
 
-        UserMgrPtr  _user_mgr;
-
+        UserMgrPtr  _user_mgr; // XXX is this needed
         AuthType    _auth_type;
 
         std::string _username;
-        std::string _database;
         std::string _password;
         uint32_t    _salt;
 
-        PoolPtr     _pool;
-
         mutable std::mutex _scram_mutex;
         std::shared_ptr<ScramKeys> _scram_keys;
+
+        mutable std::shared_mutex _db_mutex;
+        std::set<std::string> _connected_databases;
     };
     using UserPtr = std::shared_ptr<User>;
 
@@ -213,18 +153,14 @@ namespace springtail {
         /**
          * @brief Lookup user by username and database name
          * @param username user's name
-         * @param database database name
          * @return UserPtr user or nullptr if not found
          */
-        UserPtr get_user(const std::string &username, const std::string &database) const
+        UserPtr get_user(const std::string &username) const
         {
             std::shared_lock lock(_mutex);
-            auto it = _user_map.find(database);
+            auto it = _user_map.find(username);
             if (it != _user_map.end()) {
-                auto it2 = it->second.find(username);
-                if (it2 != it->second.end()) {
-                    return it2->second;
-                }
+                return it->second;
             }
             return nullptr;
         }
@@ -232,67 +168,27 @@ namespace springtail {
         /**
          * @brief Add new user to the user map
          * @param username users name
-         * @param database database name
          * @param password password
          * @param salt     optional salt for md5
          */
-        void add_user(const std::string &username, const std::string &database,
-                      const std::string &password={}, uint32_t salt=0)
+        void add_user(const std::string &username,
+                      const std::string &password={},
+                      uint32_t salt=0)
         {
             std::unique_lock lock(_mutex);
-            auto it = _user_map.find(database);
+            auto it = _user_map.find(username);
             if (it == _user_map.end()) {
-                _user_map[database] = std::map<std::string, UserPtr>();
-            } else {
-                auto it2 = it->second.find(username);
-                if (it2 != it->second.end()) {
-                    return;
-                }
-            }
-            // user not found, add user to the map
-            _user_map[database][username] = std::make_shared<User>(shared_from_this(), username,
-                                                                   database, password, salt);
-        }
-
-        /**
-         * @brief Add new database to the database map
-         * @param name database name
-         * @param hostname hostname of the database
-         * @param port port of the database
-         */
-        DatabasePtr get_database(const std::string &name) const
-        {
-            std::shared_lock lock(_mutex);
-            auto it = _database_map.find(name);
-            if (it != _database_map.end()) {
-                return it->second;
-            }
-            return nullptr;
-        }
-
-        /**
-         * @brief Add new database to the database map
-         * @param name database name
-         * @param hostname hostname of the database
-         * @param port port of the database
-         */
-        void add_database(const std::string &name, const std::string &hostname, int port=5432)
-        {
-            std::unique_lock lock(_mutex);
-            auto it = _database_map.find(name);
-            if (it == _database_map.end()) {
-                _database_map[name] = std::make_shared<Database>(name, hostname, port);
+                _user_map[username] = std::make_shared<User>(shared_from_this(),
+                                                             username,
+                                                             password, salt);
             }
         }
 
     private:
         mutable std::shared_mutex _mutex;
 
-        /** user map from database -> map username -> UserPtr */
-        std::map<std::string, std::map<std::string, UserPtr>> _user_map;
-
-        /** database map from db name to database object */
-        std::map<std::string, DatabasePtr> _database_map;
+        /** user map from user to User object */
+        std::map<std::string, UserPtr> _user_map;
     };
     using UserMgrPtr = std::shared_ptr<UserMgr>;
 }

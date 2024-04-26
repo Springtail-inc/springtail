@@ -12,22 +12,20 @@
 #include <proxy/connection.hh>
 #include <proxy/buffer.hh>
 #include <proxy/auth/scram.hh>
+#include <proxy/user_mgr.hh>
 
 namespace springtail {
     // forward declarations to avoid circular dependencies
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
-    struct UserLogin;
-    using UserLoginPtr = std::shared_ptr<UserLogin>;
-
-    class User;
-    using UserPtr = std::shared_ptr<User>;
+    class DatabaseInstance;
+    using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
 
     /**
      * @brief Session base class.  Derived classes  include:
-     * - ClientSession -- client session client connected to us
-     * - ServerSession -- we connect to the server
+     * - ClientSession -- client session client connects to proxy
+     * - ServerSession -- proxy connects to the server; either a replica or primary
      */
     class Session : public std::enable_shared_from_this<Session> {
     public:
@@ -75,6 +73,7 @@ namespace springtail {
                 : type(type)
             {}
         };
+        using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
         constexpr static int32_t MSG_STARTUP_V2 =0x20000;
         constexpr static int32_t MSG_STARTUP_V3 = 0x30000;
@@ -92,9 +91,9 @@ namespace springtail {
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
 
         /** Construct a session with the given socket. */
-        explicit Session(ProxyConnectionPtr connection,
-                         ProxyServerPtr server,
-                         Type type=CLIENT)
+        Session(ProxyConnectionPtr connection,
+                ProxyServerPtr server,
+                Type type=CLIENT)
             : _connection(connection),
               _server(server),
               _type(type)
@@ -103,14 +102,19 @@ namespace springtail {
             _write_buffer.reset();
         }
 
-        explicit Session(ProxyConnectionPtr connection,
-                         ProxyServerPtr server,
-                         UserPtr user,
-                         Type type=CLIENT)
+        Session(DatabaseInstancePtr instance,
+                ProxyConnectionPtr connection,
+                ProxyServerPtr server,
+                UserPtr user,
+                const std::string &database,
+                Type type=CLIENT)
             : _connection(connection),
               _server(server), _type(type),
-              _user(user)
+              _user(user),
+              _database(database),
+              _instance(instance)
         {
+            _state = STARTUP;
             _read_buffer.reset();
             _write_buffer.reset();
         }
@@ -153,25 +157,20 @@ namespace springtail {
         }
 
         /** notify server session of message */
-        void notify_server(SessionMsg &msg, SessionPtr remote_session) {
+        void notify_server(SessionMsgPtr msg, SessionPtr remote_session) {
             assert(remote_session->_type == PRIMARY || remote_session->_type == REPLICA);
-            SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg.type);
+            SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg->type);
             set_associated_session(remote_session);
             remote_session->_internal_process_msg(msg);
         }
 
         /** notify client session of message */
-        void notify_client(SessionMsg &msg) {
+        void notify_client(SessionMsgPtr msg) {
             assert(_associated_session != nullptr);
             assert(_associated_session->_type == CLIENT);
-            SPDLOG_DEBUG("Notifying client of message: {:d}", (int8_t)msg.type);
+            SPDLOG_DEBUG("Notifying client of message: {:d}", (int8_t)msg->type);
             _associated_session->clear_waiting_on_session();
             _associated_session->_internal_process_msg(msg);
-        }
-
-        /** get error message */
-        const std::string_view get_err_msg() const {
-            return _err_msg;
         }
 
         std::shared_ptr<Session> get_associated_session() const {
@@ -180,6 +179,48 @@ namespace springtail {
 
         bool is_waiting_on_session() const {
             return _waiting_on_session;
+        }
+
+        void set_database(const std::string &database) {
+            _database = database;
+        }
+
+        const std::string &database() const {
+            return _database;
+        }
+
+        const std::string &username() const {
+            return _user->username();
+        }
+
+        /** Get db instance */
+        DatabaseInstancePtr get_instance() const {
+            return _instance;
+        }
+
+        /** Shutdown the session, close connection, etc */
+        void shutdown() {
+            SPDLOG_DEBUG("Shutting down session: type={}, socket={}",
+                         _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
+                         _connection->get_socket());
+            assert(_associated_session == nullptr);
+            _state = ERROR;
+            _handle_error();
+        }
+
+        bool is_ready() const {
+            return _state == READY;
+        }
+
+        void set_pending_msg(SessionMsgPtr msg) {
+            assert(_pending_msg == nullptr);
+            _pending_msg = msg;
+        }
+
+        SessionMsgPtr get_pending_msg() {
+            SessionMsgPtr msg = _pending_msg;
+            _pending_msg = nullptr;
+            return msg;
         }
 
     protected:
@@ -198,13 +239,15 @@ namespace springtail {
         int32_t      _pid;         ///< pid for cancel request
         int32_t      _cancel_key;  ///< cancel key for cancel request
 
-        std::string_view _err_msg;  ///< error message
+        std::string  _database;    ///< database name associated with this session
+
+        DatabaseInstancePtr _instance; ///< database instance associated with this session
 
         /** Process messages for session connection,
          * must be implemented by derived class */
         virtual void _process_connection() = 0;
 
-        virtual void _process_msg(SessionMsg &msg) = 0;
+        virtual void _process_msg(SessionMsgPtr msg) = 0;
 
         /** Get user creds */
         UserLoginPtr _get_user_login();
@@ -231,12 +274,15 @@ namespace springtail {
         bool _waiting_on_session = false;
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
+        SessionMsgPtr _pending_msg = nullptr;
+
         /** Single place to do error handling on messages */
-        void _internal_process_msg(SessionMsg &msg);
+        void _internal_process_msg(SessionMsgPtr msg);
 
         /** enable processing of msgs via server poll loop */
         void _enable_processing();
 
+        /** handle fatal error, by shutting down */
         void _handle_error();
 
     };

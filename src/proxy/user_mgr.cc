@@ -8,15 +8,12 @@ namespace springtail {
 
     User::User(UserMgrPtr user_mgr,
                const std::string &username,
-               const std::string &database,
                const std::string &password,
                uint32_t salt)
         : _user_mgr(user_mgr),
           _username(username),
-          _database(database),
           _password(password),
-          _salt(salt),
-          _pool(std::make_shared<Pool>())
+          _salt(salt)
     {
         if (_password.starts_with("SCRAM")) {
             _auth_type = SCRAM;
@@ -52,9 +49,29 @@ namespace springtail {
         return login;
     }
 
-    DatabasePtr
-    User::get_database() const
+    void
+    User::set_client_scram_key(const uint8_t *client_key)
     {
-        return _user_mgr->get_database(_database);
+        std::unique_lock lock(_scram_mutex);
+        if (!_scram_keys) {
+            _scram_keys = std::make_shared<ScramKeys>();
+        }
+        if (!_scram_keys->client_key_set) {
+            memcpy(_scram_keys->client_key, client_key, 32);
+            _scram_keys->client_key_set = true;
+        }
+    }
+
+    void
+    User::set_server_scram_key(const uint8_t *server_key)
+    {
+        std::unique_lock lock(_scram_mutex);
+        if (!_scram_keys) {
+            _scram_keys = std::make_shared<ScramKeys>();
+        }
+        if (!_scram_keys->server_key_set) {
+            memcpy(_scram_keys->server_key, server_key, 32);
+            _scram_keys->server_key_set = true;
+        }
     }
 }

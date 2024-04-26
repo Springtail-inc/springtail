@@ -5,6 +5,8 @@
 #include <map>
 #include <set>
 #include <filesystem>
+#include <mutex>
+#include <shared_mutex>
 
 #include <openssl/ssl.h>
 
@@ -15,8 +17,7 @@
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
 
-#include <event2/event.h>
-
+#include <proxy/database.hh>
 
 namespace springtail {
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
@@ -45,19 +46,28 @@ namespace springtail {
         }
 
         /** Add a user to the user manager -- trust authentication no password */
-        void add_user(const std::string &username, const std::string &database) {
-            _user_mgr->add_user(username, database);
+        void add_user(const std::string &username) {
+            _user_mgr->add_user(username);
         }
 
         /** Add a user to the user manager */
-        void add_user(const std::string &username, const std::string &database,
+        void add_user(const std::string &username,
                       const std::string &password, uint32_t salt=0) {
-            _user_mgr->add_user(username, database, password, salt);
+            _user_mgr->add_user(username, password, salt);
         }
 
-        /** Add a database hostname, port to user mgr */
-        void add_database(const std::string &dbname, const std::string &hostname, int port) {
-            _user_mgr->add_database(dbname, hostname, port);
+        /** Add a database */
+        void add_replicated_database(const std::string &dbname) {
+            std::unique_lock lock(_db_mutex);
+            _replicated_databases.insert(dbname);
+        }
+
+        /** Check if a database is replicated */
+        bool is_database_replicated(const std::string &dbname) {
+            std::shared_lock lock(_db_mutex);
+            return std::find(_replicated_databases.begin(),
+                             _replicated_databases.end(),
+                             dbname) != _replicated_databases.end();
         }
 
         /** Allocate SSL struct for new connection */
@@ -73,6 +83,31 @@ namespace springtail {
         /** Is ssl enabled globally? */
         bool is_ssl_enabled() {
             return _enable_ssl;
+        }
+
+        /** Get primary database instance */
+        DatabaseInstancePtr get_primary_instance() {
+            return _primary_database.primary();
+        }
+
+        /** Get replica database instance  -- use username/dbname as a hint */
+        DatabaseInstancePtr get_replica_instance(const std::string &dbname, const std::string &username) {
+            return _replica_set.get_replica(dbname, username);
+        }
+
+        /** Set primary db instance */
+        void set_primary(DatabaseInstancePtr instance) {
+            _primary_database.set_primary(instance);
+        }
+
+        /** Set the secondary db instance */
+        void set_standby(DatabaseInstancePtr instance) {
+            _primary_database.set_standby(instance);
+        }
+
+        /** Add replica instance */
+        void add_replica(DatabaseInstancePtr instance) {
+            _replica_set.add_replica(instance);
         }
 
     private:
@@ -93,6 +128,12 @@ namespace springtail {
         SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
 
         bool _enable_ssl;                    ///< true if SSL is enabled
+
+        DatabasePrimarySet _primary_database; ///< set of primary databases
+        DatabaseReplicaSet _replica_set;      ///< set of replica databases
+
+        std::shared_mutex _db_mutex;
+        std::set<std::string> _replicated_databases; ///< list of authorized databases
 
         /** Accept handler -- called from poll loop */
         void _do_accept();

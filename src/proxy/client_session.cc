@@ -10,10 +10,11 @@
 
 #include <proxy/server_session.hh>
 #include <proxy/client_session.hh>
+#include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/errors.hh>
 #include <proxy/server.hh>
-
+#include <proxy/exception.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
 
@@ -52,23 +53,44 @@ namespace springtail {
     {
         ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
         assert(server_session != nullptr);
+
+        // clear associated session from the client session
         clear_associated_session();
-        _user->get_pool()->release_server_session(server_session);
+
+        // release session back to instance pool
+        server_session->get_instance()->release_session(server_session);
     }
 
     void
-    ClientSession::_process_msg(SessionMsg &msg)
+    ClientSession::_process_msg(SessionMsgPtr msg)
     {
         // client session is receiving a message from the server session
         // this indicates server is done with processing
         // in future this may not be true for all message types
-        _release_server_session();
+
+        // get any pending messages for the server, and clear them
+        SessionMsgPtr pending_msg = get_pending_msg();
+        if (pending_msg == nullptr) {
+            _release_server_session();
+        }
 
         // entry point for messages from server session
-        switch(msg.type) {
+        switch(msg->type) {
             case SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
                 SPDLOG_DEBUG("Client session got auth done from server session");
+                if (_state == READY) {
+                    // already ready, auth completed previously, this was new server auth completing
+                    break;
+                }
+
+                assert(_state == AUTH);
                 _send_auth_done();
+
+                SPDLOG_DEBUG("Authentication complete, setting READY state");
+                _state = READY;
+
+                // the client session is established as is a server session.
+                // the replica session will be created on-demand
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
@@ -80,8 +102,14 @@ namespace springtail {
                 break;
 
             default:
-                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg.type);
+                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg->type);
                 break;
+        }
+
+        // notify server of pending message if any
+        if (pending_msg != nullptr) {
+            assert(get_associated_session() != nullptr);
+            notify_server(pending_msg, std::static_pointer_cast<ServerSession>(get_associated_session()));
         }
     }
 
@@ -194,15 +222,20 @@ namespace springtail {
                 database = value;
             }
         }
-        _read_buffer.reset(); // skip null byte, reset buffer
+        // read last null byte
+        char c = _read_buffer.get();
+        assert(c == '\0');
+
+        _read_buffer.reset();
 
         // get user info and store it
-        _user = _server->get_user_mgr()->get_user(username, database);
+        _user = _server->get_user_mgr()->get_user(username);
         if (_user == nullptr) {
             SPDLOG_ERROR("User {} not found", username);
             _state = ERROR;
             return;
         }
+        _database = database;
 
         // get login info for the user
         _login = _user->get_user_login();
@@ -226,8 +259,8 @@ namespace springtail {
         _write_buffer.put('S');
         _connection->write(_write_buffer.data(), 1);
 
-        // allocate ssl struct for this connection
-        SSL *ssl = _server->SSL_new(false);
+        // allocate ssl struct for this connection; acting as server
+        SSL *ssl = _server->SSL_new(true);
         if (ssl == nullptr) {
             SPDLOG_ERROR("Failed to create SSL context");
             _state = ERROR;
@@ -254,7 +287,7 @@ namespace springtail {
         switch(_login->_type) {
             case TRUST:
                 SPDLOG_DEBUG("User {} authenticated with trust", _user->username());
-                _do_server_auth();
+                _create_primary_server_session();
                 return; // did send above so we return here
 
             case MD5:
@@ -269,9 +302,8 @@ namespace springtail {
 
             default:
                 SPDLOG_ERROR("User {} not found", _user->username());
-                _state = ERROR;
-                ProxyError::encode_error(_write_buffer, ProxyError::INVALID_PASSWORD, "password authentication failed");
-                break;
+                ProxyProtoError::encode_error(_write_buffer, ProxyProtoError::INVALID_PASSWORD, "password authentication failed");
+                throw ProxyAuthError();
         }
 
         // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
@@ -283,10 +315,6 @@ namespace springtail {
     ClientSession::_handle_auth()
     {
         auto [code, msg_length] = _read_msg();
-        if (_state == ERROR) {
-            return;
-        }
-
         assert(code == 'p');
 
         SPDLOG_DEBUG("Auth continue: msg_length={}", msg_length);
@@ -298,28 +326,28 @@ namespace springtail {
                 std::string client_passwd = _read_buffer.getString();
                 if (client_passwd.empty() || client_passwd.size() != MD5_PASSWD_LEN) {
                     SPDLOG_ERROR("Empty password received; or password length mismatch");
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
 
                 // calculate md5 hash; skip the 'md5' prefix on the password
                 if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
                     SPDLOG_ERROR("Failed to calculate MD5 hash");
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
                 md5[MD5_PASSWD_LEN] = '\0';
 
                 if (strcmp(md5, client_passwd.c_str()) != 0) {
                     SPDLOG_ERROR("MD5 password mismatch: : {} <> {}", md5, client_passwd);
-                    ProxyError::encode_error(_write_buffer, ProxyError::INVALID_PASSWORD, "password authentication failed");
+                    ProxyProtoError::encode_error(_write_buffer, ProxyProtoError::INVALID_PASSWORD, "password authentication failed");
                     _connection->write(_write_buffer.data(), _write_buffer.size());
-                    _state = ERROR;
-                    return;
+                    throw ProxyAuthError();
                 }
 
                 SPDLOG_DEBUG("MD5 password match");
-                _do_server_auth();
+
+                // auth successful on client side
+                // see if we need to create a server session
+                _create_primary_server_session();
 
                 return;
             }
@@ -333,8 +361,7 @@ namespace springtail {
                     std::string scram_type = _read_buffer.getString();
                     if (scram_type != "SCRAM-SHA-256") {
                         SPDLOG_ERROR("Unsupported scram type: {}", scram_type);
-                        _state = ERROR;
-                        return;
+                        throw ProxyAuthError();
                     }
 
                     int32_t len = _read_buffer.get32();
@@ -352,8 +379,7 @@ namespace springtail {
 
             default:
                 SPDLOG_ERROR("Invalid auth continue state");
-                _state = ERROR;
-                break;
+                throw ProxyAuthError();
         }
     }
 
@@ -366,17 +392,15 @@ namespace springtail {
                                         &_login->scram_state.client_first_message_bare,
                                         &_login->scram_state.client_nonce)) {
             SPDLOG_ERROR("Failed to read client first message");
-            _state = ERROR;
             free (raw);
-            return;
+            throw ProxyAuthError();
         }
 
         // note: some code inside of here could be optimized based on how the password is stored
         if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->_password.c_str())) {
             SPDLOG_ERROR("Failed to build server first message");
-            _state = ERROR;
             free (raw);
-            return;
+            throw ProxyAuthError();
         }
 
         // Send SASL continue message
@@ -405,19 +429,18 @@ namespace springtail {
                                         reinterpret_cast<const uint8_t *>(data.c_str()),
                                         raw, &client_final_nonce, &proof)) {
             SPDLOG_ERROR("Failed to read client final message");
-            _state = ERROR;
             free (raw);
-            return;
+            throw ProxyAuthError();
         }
 
         // verify the nonce and the proof from client
         if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
             !verify_client_proof(&_login->scram_state, proof)) {
 		    SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
-            _state = ERROR;
             free (raw);
             free (proof);
-            return;
+
+            throw ProxyAuthError();
 	    }
 
         // after verifying the client proof, we now have the client key
@@ -427,10 +450,10 @@ namespace springtail {
         char *server_final_message = build_server_final_message(&_login->scram_state);
         if (server_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build server final message");
-            _state = ERROR;
             free (raw);
             free (proof);
-            return;
+
+            throw ProxyAuthError();
         }
 
         _write_buffer.reset();
@@ -446,27 +469,33 @@ namespace springtail {
         ssize_t n = _connection->write(_write_buffer.data(), _write_buffer.size());
         assert(n == _write_buffer.size());
 
-        _do_server_auth();
+        _create_primary_server_session();
     }
 
     void
-    ClientSession::_do_server_auth()
+    ClientSession::_create_primary_server_session()
     {
+        // see if any primary session pool exists for this user/database combo
+        // if not, create a new one
+        DatabaseInstancePtr primary = _server->get_primary_instance();
+        assert (primary != nullptr);
+        if (primary->get_pool(_database, _user->username()) != nullptr) {
+            return;
+        }
+
         // create a new server session; will initiate the connection to the server
-        ServerSessionPtr server_session = ServerSession::create(_server, _user);
+        ServerSessionPtr server_session = ServerSession::create(_server, _user, _database, primary, REPLICA);
         if (server_session == nullptr) {
             SPDLOG_ERROR("Failed to create server session");
             _state = ERROR;
             return;
         }
+
         // register server session connection with server
         _server->register_session(server_session);
 
-        // add server to pool
-        _user->get_pool()->add_server_session(server_session);
-
         // notify server of client message, response comes in _process_msg()
-        SessionMsg msg(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
         notify_server(msg, server_session);
 
         // at this point we'll return through process()
@@ -513,9 +542,6 @@ namespace springtail {
 
         // free login info
         _login.reset();
-
-        SPDLOG_DEBUG("Authentication complete, setting READY state");
-        _state = READY;
     }
 
     void
@@ -593,12 +619,66 @@ namespace springtail {
         SPDLOG_DEBUG("Simple Query: {}", query);
 
         // get a server session from the pool, there should be one (for now at least)
-        ServerSessionPtr server_session = _user->get_pool()->get_server_session(shared_from_this());
+        // Type session_type = select_session_type(query);
+        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, query);
+
+        ServerSessionPtr server_session = _select_session_and_notify(PRIMARY, msg);
         assert (server_session != nullptr);
 
         // notify server of client message, response comes in _process_msg()
-        SessionMsg msg(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, query);
+
         notify_server(msg, server_session);
+    }
+
+    ServerSessionPtr
+    ClientSession::_select_session_and_notify(Session::Type type,
+                                              SessionMsgPtr pending_msg)
+    {
+        // get database instance from either primary or replica set
+        DatabaseInstancePtr instance = nullptr;
+        if (type == PRIMARY) {
+            // get a primary session
+            instance = _server->get_primary_instance();
+        } else {
+            // get a replica session
+            instance = _server->get_replica_instance(_database, _user->username());
+        }
+        assert (instance != nullptr);
+
+        // get a session from the instance
+        ServerSessionPtr session = instance->get_session(_database, _user->username());
+        if (session == nullptr) {
+            // need to allocate a new session
+            session = instance->allocate_session(_server, _user, _database, type);
+        }
+
+        if (session->is_ready()) {
+            // session is ready, we can use it
+            if (pending_msg != nullptr) {
+                notify_server(pending_msg, session);
+            }
+            return session;
+        }
+
+        // session is not ready, we need to wait for it
+        if (pending_msg != nullptr) {
+            // set the pending message on the session, this message will be sent after session is ready
+            set_pending_msg(pending_msg);
+        }
+
+        // we need to do authentication and wait for session to become ready
+        // register server session connection with server
+        _server->register_session(session);
+
+        // notify server of client message, response comes in _process_msg()
+        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        notify_server(msg, session);
+
+        // at this point we'll return through process()
+        // most likely with _waiting_on_session set, in which case this
+        // session will be removed from the server poll list
+
+        return session;
     }
 
 }

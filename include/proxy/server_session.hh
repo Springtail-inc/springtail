@@ -1,16 +1,25 @@
 #pragma once
 
 #include <proxy/session.hh>
+#include <proxy/user_mgr.hh>
 
 namespace springtail {
+    /**
+     * @brief Server session object.
+     * This object represents a session with a remote database.
+     * The database may be either the primary or a replica
+     */
     class ServerSession : public Session {
     public:
         ServerSession(const ServerSession&) = delete;
         ServerSession& operator=(const ServerSession&) = delete;
 
-        explicit ServerSession(ProxyConnectionPtr connection,
-                               ProxyServerPtr server,
-                               UserPtr user);
+        ServerSession(ProxyConnectionPtr connection,
+                      ProxyServerPtr server,
+                      UserPtr user,
+                      std::string database,
+                      DatabaseInstancePtr instance,
+                      Session::Type type=PRIMARY);
 
         ~ServerSession() {};
 
@@ -19,15 +28,18 @@ namespace springtail {
         }
 
         /** factory to create session */
-        static std::shared_ptr<ServerSession> create(ProxyServerPtr server, UserPtr user);
+        static std::shared_ptr<ServerSession>
+        create(ProxyServerPtr server, UserPtr user, const std::string &database, DatabaseInstancePtr instance, Session::Type type);
 
     protected:
         void _process_connection() override;
 
-        void _process_msg(SessionMsg &msg) override;
+        void _process_msg(SessionMsgPtr msg) override;
 
     private:
         //bool _is_pinned = false;
+
+        DatabaseInstancePtr _instance;
 
         /** Send startup message */
         void _send_startup_msg();
@@ -46,9 +58,6 @@ namespace springtail {
 
         /** Authentication */
         void _handle_auth(int32_t msg_length);
-
-        /** Auth done, final setup and params, waiting for Ready to Query */
-        void _handle_auth_done();
 
         /** Handle replies from server */
         void _handle_message();

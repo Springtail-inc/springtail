@@ -20,7 +20,17 @@
 #include <proxy/client_session.hh>
 
 namespace springtail {
-    ProxyServer::ProxyServer(int port,
+    /**
+     * @brief Construct a new Proxy Server object.
+     * The server handles the poll loop and accepts new connections.
+     * It dispatches readable sockets into the thread pool
+     * @param proxy_port          port to listen for connections on
+     * @param thread_pool_size    number of threads in the thread pool
+     * @param cert_file           path to the server certificate file
+     * @param key_file            path to the server key file
+     * @param enable_ssl          enable SSL
+     */
+    ProxyServer::ProxyServer(int proxy_port,
                              int thread_pool_size,
                              const std::filesystem::path &cert_file,
                              const std::filesystem::path &key_file,
@@ -41,7 +51,7 @@ namespace springtail {
         struct sockaddr_in serv_addr;
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_addr.s_addr = INADDR_ANY;
-        serv_addr.sin_port = htons(port);
+        serv_addr.sin_port = htons(proxy_port);
 
         int flags = 1;
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
@@ -82,7 +92,7 @@ namespace springtail {
             exit(1);
         }
 
-        SPDLOG_INFO("Proxy server listening on port={}", port);
+        SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -125,6 +135,13 @@ namespace springtail {
         }
     }
 
+    static int
+    ssl_verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
+    {
+        SPDLOG_DEBUG("SSL verify callback: preverify_ok={}", preverify_ok);
+        return 1; // no verification
+    }
+
     SSL_CTX *
     ProxyServer::_setup_SSL_context(const std::filesystem::path &cert_file,
                                     const std::filesystem::path &key_file)
@@ -141,10 +158,10 @@ namespace springtail {
         SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback);
 #endif
 
-    	/*
-	     * Disable OpenSSL's moving-write-buffer sanity check, because it causes
-	    * unnecessary failures in nonblocking send cases. (from pgbouncer code)
-	    */
+        /*
+         * Disable OpenSSL's moving-write-buffer sanity check, because it causes
+         * unnecessary failures in nonblocking send cases. (from pgbouncer code)
+         */
         SSL_CTX_set_mode(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
         /* Set the key and cert */
@@ -167,17 +184,18 @@ namespace springtail {
 
         // set the verify mode to none
         // see https://www.openssl.org/docs/man3.2/man3/SSL_CTX_set_verify.html
-        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
+        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, ssl_verify_callback);
+        SSL_CTX_set_verify_depth(ssl_ctx, 0);
 
         // from libpq be code
         /* disallow SSL session tickets */
-	    SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TICKET);
+        SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TICKET);
 
-	    /* disallow SSL session caching, too */
-	    SSL_CTX_set_session_cache_mode(ssl_ctx, SSL_SESS_CACHE_OFF);
+        /* disallow SSL session caching, too */
+        SSL_CTX_set_session_cache_mode(ssl_ctx, SSL_SESS_CACHE_OFF);
 
-	    /* disallow SSL compression */
-	    SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
+        /* disallow SSL compression */
+        SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
 
         return ssl_ctx;
     }

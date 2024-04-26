@@ -33,4 +33,11 @@ namespace springtail {
         }
     };
 
+    class ProxyAuthError : public ProxyError {
+    public:
+        const char *what() const noexcept {
+            return "Authentication failed";
+        }
+    };
+
 } // namespace springtail

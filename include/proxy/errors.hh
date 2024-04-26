@@ -4,8 +4,9 @@
 #include <proxy/buffer.hh>
 
 namespace springtail {
-    class ProxyError {
+    class ProxyProtoError {
     public:
+        // for full error codes: https://www.postgresql.org/docs/16/errcodes-appendix.html
         constexpr static std::string_view INVALID_PASSWORD = "28P01";
         constexpr static std::string_view SYNTAX_ERROR = "42601";
         constexpr static std::string_view PERMISSION_DENIED = "42501";

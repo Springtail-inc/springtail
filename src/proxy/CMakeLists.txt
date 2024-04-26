@@ -8,6 +8,7 @@ find_package(OpenSSL REQUIRED)
 set(PROXY_SOURCES
     server.cc
     connection.cc
+    database.cc
     session.cc
     client_session.cc
     server_session.cc
