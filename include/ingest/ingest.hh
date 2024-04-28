@@ -1,6 +1,6 @@
-#include "pg_repl/pg_stream_table.hh"
-#include "storage/mutable_btree.hh"
-#include "storage/schema.hh"
+#include <pg_repl/pg_stream_table.hh>
+#include <storage/mutable_btree.hh>
+#include <storage/schema.hh>
 #include <vector>
 
 namespace springtail

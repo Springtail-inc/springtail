@@ -13,10 +13,7 @@
 
 namespace springtail
 {
-    Ingest::Ingest(PgStreamTable &source, std::filesystem::path path) {
-
-        springtail_init();
-
+    Ingest::Ingest(PgStreamTable &source, const std::filesystem::path path) {
         std::string pg_xids = source.get_xact_xids();
         PgTableSchema pg_schema = source.get_schema();
 
@@ -54,10 +51,11 @@ namespace springtail
         });
     }
 
-    std::vector<PgMsgSchemaColumn> Ingest::_map_to_pg_msg(std::vector<PgColumn> pg_columns, std::vector<std::string> pkeys) {
+    std::vector<PgMsgSchemaColumn> Ingest::_map_to_pg_msg(const std::vector<PgColumn> pg_columns,
+                                                          const std::vector<std::string> pkeys) {
         std::vector<PgMsgSchemaColumn> columns;
         columns.reserve(pg_columns.size());
-        for(PgColumn &pg_col : pg_columns){
+        for(const PgColumn &pg_col : pg_columns){
             columns.emplace_back(
                 PgMsgSchemaColumn(
                     pg_col.name,
@@ -75,7 +73,7 @@ namespace springtail
         return columns;
     }
 
-    int Ingest::_get_vec_pos(std::vector<std::string> vec, std::string element) {
+    int Ingest::_get_vec_pos(const std::vector<std::string> vec, const std::string element) {
         auto it = std::find(vec.begin(), vec.end(), element);
         if (it == vec.end())
         {
@@ -86,10 +84,10 @@ namespace springtail
         }
     }
 
-    ExtentSchemaPtr Ingest::_populate_schema(std::vector<PgColumn> pg_columns) {
+    ExtentSchemaPtr Ingest::_populate_schema(const std::vector<PgColumn> pg_columns) {
         std::vector<SchemaColumn> columns;
         auto tbl_mgr = TableMgr::get_instance();
-        for(PgColumn &pg_col : pg_columns){
+        for(const PgColumn &pg_col : pg_columns){
             columns.emplace_back(
                 SchemaColumn(
                     0, //internal xid
@@ -106,8 +104,10 @@ namespace springtail
         return std::make_shared<ExtentSchema>(columns);
     }
 
-    void Ingest::_populate_rows(std::shared_ptr<IOHandle> io_handle, std::shared_ptr<MutableBTree> btree,
-                               ExtentSchemaPtr schema, PgStreamTable table, std::vector<std::string> pkeys) {
+    void Ingest::_populate_rows(const std::shared_ptr<IOHandle> io_handle,
+                                const std::shared_ptr<MutableBTree> btree,
+                                const ExtentSchemaPtr schema, PgStreamTable table,
+                                const std::vector<std::string> pkeys) {
         auto extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
         // initiate state on pg connection for data copying

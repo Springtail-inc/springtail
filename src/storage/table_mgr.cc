@@ -144,7 +144,7 @@ namespace springtail {
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
                                                        true, // exists
                                                        column.column_name,
-                                                       static_cast<uint8_t>(_convert_pg_type(column.udt_type)),
+                                                       static_cast<uint8_t>(convert_pg_type(column.udt_type)),
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -206,7 +206,7 @@ namespace springtail {
             std::map<uint32_t, SchemaColumn> new_columns;
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
-                                                         _convert_pg_type(col.udt_type),
+                                                         convert_pg_type(col.udt_type),
                                                          true, col.is_nullable, col.default_value);
             }
 
