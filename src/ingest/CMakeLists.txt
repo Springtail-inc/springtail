@@ -19,6 +19,8 @@ target_link_libraries(springtail_ingest
     PUBLIC springtail_common
     PUBLIC springtail_pg
     PUBLIC springtail_storage
+    PRIVATE Boost::program_options
+    PRIVATE nlohmann_json::nlohmann_json
 )
 
 # executables
@@ -30,6 +32,7 @@ target_include_directories(test_ingest
 
 target_link_libraries(test_ingest
     PUBLIC springtail_ingest
+    PRIVATE GTest::gtest_main
 )
 
 gtest_discover_tests(test_ingest
