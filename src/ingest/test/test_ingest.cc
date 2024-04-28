@@ -32,7 +32,7 @@ namespace {
     };
 
     TEST_F(Ingest_Test, Write) {
-        auto source = std::make_shared<PgStreamTable>();
+        auto source = std::make_shared<PgStreamTable>("springtail_test", "public", "test_ingest");
         source->connect("localhost", "username", "password", 5432);
         auto ingest = std::make_shared<Ingest>(source, _base_dir);
 

@@ -94,8 +94,7 @@ namespace springtail
          */
         PgStreamTable(const std::string &db_name,
                     const std::string &schema_name,
-                    const std::string &table_name,
-                    const std::string filename) :
+                    const std::string &table_name) :
             _db_name(db_name),
             _schema_name(schema_name),
             _table_name(table_name)

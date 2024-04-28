@@ -1,4 +1,3 @@
-#pragma once
 #include <common/common.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_stream_table.hh>
@@ -13,9 +12,9 @@
 
 namespace springtail
 {
-    Ingest::Ingest(PgStreamTable &source, const std::filesystem::path path) {
-        std::string pg_xids = source.get_xact_xids();
-        PgTableSchema pg_schema = source.get_schema();
+    Ingest::Ingest(std::shared_ptr<PgStreamTable> source, const std::filesystem::path path) {
+        std::string pg_xids = source->get_xact_xids();
+        PgTableSchema pg_schema = source->get_schema();
 
         std::vector<std::string> xids;
         boost::split(xids, pg_xids, boost::is_any_of(":"));
@@ -56,8 +55,8 @@ namespace springtail
         std::vector<PgMsgSchemaColumn> columns;
         columns.reserve(pg_columns.size());
         for(const PgColumn &pg_col : pg_columns){
-            columns.emplace_back(
-                PgMsgSchemaColumn(
+            columns.push_back(
+                PgMsgSchemaColumn{
                     pg_col.name,
                     pg_col.type,
                     pg_col.default_value,
@@ -67,7 +66,7 @@ namespace springtail
                     pg_col.is_pkey,
                     // TODO: we assume false since we don't support generated fields rn
                     false  // is_generated
-                )
+                }
             );
         }
         return columns;
@@ -88,17 +87,17 @@ namespace springtail
         std::vector<SchemaColumn> columns;
         auto tbl_mgr = TableMgr::get_instance();
         for(const PgColumn &pg_col : pg_columns){
-            columns.emplace_back(
-                SchemaColumn(
+            columns.push_back(
+                SchemaColumn{
                     0, //internal xid
                     0, //lsn
                     pg_col.name, //name
-                    pg_col.position,
+                    static_cast<uint32_t>(pg_col.position),
                     tbl_mgr->convert_pg_type(pg_col.type), //SchemaType type
                     true, //exists?
                     pg_col.is_nullable, //nullable?
                     pg_col.default_value //default_value
-                )
+                }
             );
         }
         return std::make_shared<ExtentSchema>(columns);
@@ -106,17 +105,18 @@ namespace springtail
 
     void Ingest::_populate_rows(const std::shared_ptr<IOHandle> io_handle,
                                 const std::shared_ptr<MutableBTree> btree,
-                                const ExtentSchemaPtr schema, PgStreamTable table,
+                                const ExtentSchemaPtr schema,
+                                const std::shared_ptr<PgStreamTable> table,
                                 const std::vector<std::string> pkeys) {
         auto extent = std::make_shared<Extent>(schema, ExtentType{false}, 0);
 
         // initiate state on pg connection for data copying
-        table.copy_data();
+        table->copy_data();
 
         std::optional<FieldArrayPtr> values;
         std::shared_ptr<MutableTuple> insert_tuple;
         MutableFieldArrayPtr fields = schema->get_mutable_fields();
-        while((values = table.next_row())){
+        while((values = table->next_row())){
             Extent::Row row = extent->append();
             insert_tuple = std::make_shared<MutableTuple>(fields, row);
             insert_tuple->assign(FieldTuple(values.value(), nullptr));
@@ -129,7 +129,7 @@ namespace springtail
             if(extent->byte_count() + extent->row_size() >= constant::MAX_EXTENT_SIZE){
                 //grab pkey fields from the last insert, add `extent_id` to end of the fieldarray
                 FieldArrayPtr fields = schema->fieldarray_subset(insert_tuple, pkeys);
-                fields->push_back(std::make_shared<ConstTypeField<std::string>>(extent_id));
+                fields->push_back(std::make_shared<ConstTypeField<uint64_t>>(extent_id));
                 btree->insert(std::make_shared<FieldTuple>(fields, nullptr));
                 
                 //create new extent
