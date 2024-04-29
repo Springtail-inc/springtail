@@ -12,7 +12,7 @@
 namespace springtail {
 
     /** unique session id counter */
-    static std::atomic<int> session_id(0);
+    static std::atomic<uint64_t> session_id(0);
 
     Session::Session(ProxyConnectionPtr connection,
                      ProxyServerPtr server,

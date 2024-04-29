@@ -24,10 +24,10 @@ namespace springtail {
         std::shared_lock lock(_mutex);
         // get size of pool based on dbname and username
         auto it = _sessions.find({dbname, username});
-        if (it != _sessions.end()) {
-            return it->second;
+        if (it == _sessions.end()) {
+            return nullptr;
         }
-        return nullptr;
+        return it->second;
     }
 
     /**
@@ -50,12 +50,15 @@ namespace springtail {
     {
         std::unique_lock lock(_mutex);
         auto it = _sessions.find({session->database(), session->username()});
-        if (it != _sessions.end()) {
-            it->second->release_session(session);
-            _active_sessions--;
-            assert(_active_sessions >= 0);
-            SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_sessions);
+        if (it == _sessions.end()) {
+            SPDLOG_WARN("Session not found in pool: {:d}", session->id());
+            return;
         }
+
+        it->second->release_session(session);
+        _active_sessions--;
+        assert(_active_sessions >= 0);
+        SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_sessions);
     }
 
     void
@@ -111,7 +114,7 @@ namespace springtail {
         }
 
         // incr active count on pool
-        pool->incr_active_count();
+        pool->reserve_session();
 
         // incr active count on instance
         _active_sessions++;
@@ -131,16 +134,18 @@ namespace springtail {
     {
         // lock must be held
         auto it = _sessions.find({dbname, username});
-        if (it != _sessions.end()) {
-            ServerSessionPtr session = it->second->get_session();
-            if (session != nullptr) {
-                // find the session in LRU list and remove it
-                _sessions_lru.remove(session);
-                _active_sessions++;
-                return session;
-            }
+        if (it == _sessions.end()) {
+            return nullptr;
         }
-        return nullptr;
+        ServerSessionPtr session = it->second->get_session();
+        if (session == nullptr) {
+            return nullptr;
+        }
+
+        // find the session in LRU list and remove it
+        _sessions_lru.remove(session);
+        _active_sessions++;
+        return session;
     }
 
     ServerSessionPtr

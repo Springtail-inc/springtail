@@ -96,7 +96,7 @@ namespace springtail {
             return _free_sessions.size();
         }
 
-        void incr_active_count() {
+        void reserve_session() {
             std::unique_lock lock(_mutex);
             _active_count++;
         }

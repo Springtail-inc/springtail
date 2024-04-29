@@ -14,13 +14,18 @@ set(PROXY_SOURCES
     server_session.cc
     user_mgr.cc
     request_handler.cc
-    parser.cc
+    #parser.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
 target_include_directories(springtail_proxy
     PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
 )
+
 target_link_libraries(springtail_proxy
     PUBLIC springtail_common
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
@@ -32,7 +37,7 @@ target_link_libraries(springtail_proxy
 )
 
 # test parser executable
-add_executable(parser test/parser.cc)
+add_executable(parser test/test_parser.cc)
 target_include_directories(parser
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src

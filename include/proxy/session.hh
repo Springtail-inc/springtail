@@ -263,7 +263,7 @@ namespace springtail {
 
         DatabaseInstancePtr _instance; ///< database instance associated with this session
 
-        int _id;                   ///< unique id for session
+        uint64_t _id;                   ///< unique id for session
 
         /** Process messages for session connection,
          * must be implemented by derived class */

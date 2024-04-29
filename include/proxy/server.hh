@@ -65,9 +65,7 @@ namespace springtail {
         /** Check if a database is replicated */
         bool is_database_replicated(const std::string &dbname) {
             std::shared_lock lock(_db_mutex);
-            return std::find(_replicated_databases.begin(),
-                             _replicated_databases.end(),
-                             dbname) != _replicated_databases.end();
+            return _replicated_databases.contains(dbname);
         }
 
         /** Allocate SSL struct for new connection */

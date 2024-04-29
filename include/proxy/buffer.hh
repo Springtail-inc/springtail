@@ -24,8 +24,9 @@ namespace springtail {
             return _offset;
         }
 
+        /** For a write buffer, _offset & _data_size indicates the size, number of bytes written to the buffer */
         int size() const {
-            return _offset;
+            return _data_size;
         }
 
         int capacity() const {
@@ -56,30 +57,36 @@ namespace springtail {
             assert(_offset < _capacity);
             sendint8(byte, _buffer.data() + _offset);
             _offset++;
+            _data_size++;
         }
 
         void put16(uint16_t i) {
             assert(_offset + 2 <= _capacity);
             sendint16(i, _buffer.data() + _offset);
             _offset += 2;
+            _data_size += 2;
         }
 
         void put32(uint32_t i) {
             assert(_offset + 4 <= _capacity);
             sendint32(i, _buffer.data() + _offset);
             _offset += 4;
+            _data_size += 4;
         }
 
         void putString(const std::string_view s) {
-            assert(_offset + s.size() + 1 <= _capacity);
-            memcpy(_buffer.data() + _offset, s.data(), s.size() + 1); // copy null byte
-            _offset += s.size() + 1;
+            int ssize = s.size();
+            assert(_offset + ssize + 1 <= _capacity);
+            memcpy(_buffer.data() + _offset, s.data(), ssize + 1); // copy null byte
+            _offset += ssize + 1;
+            _data_size += ssize + 1;
         }
 
         void putBytes(const char *bytes, int size) {
             assert(_offset + size <= _capacity);
             memcpy(_buffer.data() + _offset, bytes, size);
             _offset += size;
+            _data_size += size;
         }
 
         int8_t get() {
@@ -106,12 +113,9 @@ namespace springtail {
         std::string getString() {
             int str_len = ::strnlen(_buffer.data() + _offset, _data_size - _offset);
             assert(str_len < _data_size - _offset);
-            if (str_len < _data_size - _offset) {
-                std::string s(_buffer.data() + _offset);
-                _offset += str_len + 1; // skip null byte
-                return s;
-            }
-            return {};
+            std::string s(_buffer.data() + _offset);
+            _offset += str_len + 1; // skip null byte
+            return s;
         }
 
         void getBytes(char *bytes, int32_t len) {
