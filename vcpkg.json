@@ -17,6 +17,6 @@
         "thrift",
         "gtest",
         "vincentlaucsb-csv-parser",
-        "cppzmq"
+        "openssl"
     ]
 }

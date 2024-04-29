@@ -45,8 +45,15 @@ find_package(Backward CONFIG REQUIRED)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
-find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
+# Boost settings
+set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
+set(Boost_USE_DEBUG_LIBS        OFF)  # ignore debug libs and
+set(Boost_USE_RELEASE_LIBS       ON)  # only find release libs
+set(Boost_USE_MULTITHREADED      ON)
+set(Boost_USE_STATIC_RUNTIME     ON)  # link Boost Static libraries
+
+## enable google testing framework
 enable_testing()
 include(GoogleTest)
 
@@ -59,6 +66,9 @@ else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
 endif()
 
+## include external projects
+include(ExternalProjects)
+
 ## source modules
 add_subdirectory(src/common)
 add_subdirectory(src/storage)
@@ -69,6 +79,8 @@ add_subdirectory(src/write_cache)
 add_subdirectory(src/pg_log_mgr)
 add_subdirectory(src/xid_mgr)
 add_subdirectory(src/thrift)
+add_subdirectory(src/proxy)
+
 
 ## Messages keep at end of file
 message(STATUS "xxhash: " ${xxhash_DIR})

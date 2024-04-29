@@ -3,6 +3,7 @@ set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc 
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
+find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 ## main library
