@@ -1,11 +1,10 @@
+DROP TABLE IF EXISTS test_ingest;
+
 CREATE TABLE test_ingest (
-  table_id INTEGER,
-  name VARCHAR(50),
-  offset INTEGER,
-  PRIMARY KEY (table_id)
+  id SERIAL PRIMARY KEY,
+  table_id INT,
+  name VARCHAR(255),
+  "offset" INT
 );
 
-COPY persons(table_id,name,offset)
-FROM './src/storage/test/test_btree_simple.csv'
-DELIMITER ','
-CSV HEADER;
+\copy test_ingest(table_id, name, "offset") FROM '../../storage/test/test_btree_simple.csv' DELIMITER ',' CSV HEADER;

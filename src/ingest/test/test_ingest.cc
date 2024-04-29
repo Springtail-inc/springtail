@@ -20,7 +20,7 @@ namespace {
 
             _base_dir = std::filesystem::temp_directory_path() / "test_ingest";
 
-            system("psql postgresql://username:password@localhost/springtail_test -f ./sample.sql");
+            system("psql postgresql://username:password@localhost/springtail_test -f sample.sql");
             _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
         }
 
