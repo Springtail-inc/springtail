@@ -7,6 +7,7 @@ set(INGEST_SOURCES
 # dependencies
 find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(GTest CONFIG REQUIRED)
 
 # destination library
 add_library(springtail_ingest ${INGEST_SOURCES})
@@ -20,6 +21,7 @@ target_link_libraries(springtail_ingest
     PUBLIC springtail_pg
     PUBLIC springtail_storage
     PRIVATE Boost::program_options
+    PRIVATE Boost::thread
     PRIVATE nlohmann_json::nlohmann_json
 )
 
