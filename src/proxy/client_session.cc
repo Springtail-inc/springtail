@@ -19,15 +19,12 @@
 #include <proxy/auth/scram.hh>
 
 namespace springtail {
-    static int id=0;
-
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server)
 
-        : Session(connection, server, CLIENT),
-          _id(id++)
+        : Session(connection, server, CLIENT)
     {
-        SPDLOG_DEBUG("Client connected: {}, id={}", connection->endpoint(), _id);
+        SPDLOG_DEBUG("Client connected: endpoint={}, id={}", connection->endpoint(), _id);
 
         // initialize pid and key for cancellation
         get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
@@ -68,6 +65,8 @@ namespace springtail {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
+        SPDLOG_DEBUG("Client session got message from server session: {:d}", (int8_t)msg->type);
+
         // get any pending messages for the server, and clear them
         SessionMsgPtr pending_msg = get_pending_msg();
         if (pending_msg == nullptr) {
@@ -107,7 +106,7 @@ namespace springtail {
         }
 
         // notify server of pending message if any
-        if (pending_msg != nullptr) {
+        if (_state != ERROR && pending_msg != nullptr) {
             assert(get_associated_session() != nullptr);
             notify_server(pending_msg, std::static_pointer_cast<ServerSession>(get_associated_session()));
         }
@@ -618,16 +617,14 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Simple Query: {}", query);
 
-        // get a server session from the pool, there should be one (for now at least)
-        // Type session_type = select_session_type(query);
+        // create message for server for query
         SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, query);
 
+        // select a server session and notify it of this message
+        // if no server is available a new server session will be connected
+        // and this message will be delayed until after the session is ready
         ServerSessionPtr server_session = _select_session_and_notify(PRIMARY, msg);
         assert (server_session != nullptr);
-
-        // notify server of client message, response comes in _process_msg()
-
-        notify_server(msg, server_session);
     }
 
     ServerSessionPtr

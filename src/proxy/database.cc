@@ -53,6 +53,8 @@ namespace springtail {
         if (it != _sessions.end()) {
             it->second->release_session(session);
             _active_sessions--;
+            assert(_active_sessions >= 0);
+            SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_sessions);
         }
     }
 
@@ -103,7 +105,7 @@ namespace springtail {
         DatabasePoolPtr pool;
         if (it == _sessions.end()) {
             pool = std::make_shared<DatabasePool>();
-            _sessions[{session->database(), session->username()}] = pool;
+            _sessions[{database, user->username()}] = pool;
         } else {
             pool = it->second;
         }

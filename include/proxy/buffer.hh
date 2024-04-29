@@ -107,8 +107,9 @@ namespace springtail {
             int str_len = ::strnlen(_buffer.data() + _offset, _data_size - _offset);
             assert(str_len < _data_size - _offset);
             if (str_len < _data_size - _offset) {
+                std::string s(_buffer.data() + _offset);
                 _offset += str_len + 1; // skip null byte
-                return std::string(_buffer.data() + _offset);
+                return s;
             }
             return {};
         }

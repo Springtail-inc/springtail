@@ -23,7 +23,7 @@ namespace springtail {
         : Session(instance, connection, server, user, database, type)
     {
         _state = STARTUP;
-        SPDLOG_DEBUG("Server connected: {}", connection->endpoint());
+        SPDLOG_DEBUG("Server connected: endpoint={}, id={}", connection->endpoint(), _id);
     }
 
     void

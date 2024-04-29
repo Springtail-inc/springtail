@@ -50,8 +50,6 @@ namespace springtail {
         void _process_msg(SessionMsgPtr msg) override;
 
     private:
-        int _id;
-
         void _process_startup_msg(int32_t code, int32_t msg_length);
         void _process_ssl_request();
 

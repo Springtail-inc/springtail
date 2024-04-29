@@ -11,6 +11,8 @@
 #include <list>
 #include <climits>
 
+#include <common/logging.hh>
+
 #include <proxy/connection.hh>
 #include <proxy/server_session.hh>
 
@@ -64,6 +66,7 @@ namespace springtail {
             std::unique_lock lock(_mutex);
             _free_sessions.push_back(session);
             _active_count--;
+            SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_count);
         }
 
         /**

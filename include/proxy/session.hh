@@ -8,7 +8,6 @@
 #include <atomic>
 
 #include <common/logging.hh>
-
 #include <proxy/connection.hh>
 #include <proxy/buffer.hh>
 #include <proxy/auth/scram.hh>
@@ -90,34 +89,35 @@ namespace springtail {
         // before giving thread up
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
 
-        /** Construct a session with the given socket. */
+        /**
+         * @brief Construct a session with a connection and server ptr.
+         * For client sessions.
+         * @param connection connection
+         * @param server     main server
+         * @param type       type of session (default=CLIENT)
+         * @return Session object
+         */
         Session(ProxyConnectionPtr connection,
                 ProxyServerPtr server,
-                Type type=CLIENT)
-            : _connection(connection),
-              _server(server),
-              _type(type)
-        {
-            _read_buffer.reset();
-            _write_buffer.reset();
-        }
+                Type type=CLIENT);
 
+        /**
+         * Construct a session with a database instance and user.
+         * For server/replica sessions
+         * @param instance   database instance
+         * @param connection connection
+         * @param server     main server
+         * @param user       user
+         * @param database   database name
+         * @param type       type of session (default=PRIMARY)
+         * @return Session object
+         */
         Session(DatabaseInstancePtr instance,
                 ProxyConnectionPtr connection,
                 ProxyServerPtr server,
                 UserPtr user,
                 const std::string &database,
-                Type type=CLIENT)
-            : _connection(connection),
-              _server(server), _type(type),
-              _user(user),
-              _database(database),
-              _instance(instance)
-        {
-            _state = STARTUP;
-            _read_buffer.reset();
-            _write_buffer.reset();
-        }
+                Type type=PRIMARY);
 
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;
@@ -131,32 +131,33 @@ namespace springtail {
 
         /** Less than operator for std::set */
         bool operator<(const Session &rhs) const {
-            return _connection->get_socket() < rhs._connection->get_socket();
+            return _id < rhs._id;
         }
 
+        /** Get connection associated with this session */
         ProxyConnectionPtr get_connection() const {
             return _connection;
         }
 
-        /** set associated session */
+        /** Set session to be associated with this session */
         void set_associated_session(std::shared_ptr<Session> remote_session) {
             _associated_session = remote_session;
             remote_session->_associated_session = shared_from_this();
             _waiting_on_session = true;
         }
 
-        /** clear waiting on session flag */
+        /** Clear waiting on session flag */
         void clear_waiting_on_session() {
             _waiting_on_session = false;
         }
 
-        /** clear associated session from this and remote session */
+        /** Clear associated session from this and remote session */
         void clear_associated_session() {
             _associated_session->_associated_session = nullptr;
             _associated_session = nullptr;
         }
 
-        /** notify server session of message */
+        /** Notify server session of message */
         void notify_server(SessionMsgPtr msg, SessionPtr remote_session) {
             assert(remote_session->_type == PRIMARY || remote_session->_type == REPLICA);
             SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg->type);
@@ -164,7 +165,7 @@ namespace springtail {
             remote_session->_internal_process_msg(msg);
         }
 
-        /** notify client session of message */
+        /** Notify client session of message */
         void notify_client(SessionMsgPtr msg) {
             assert(_associated_session != nullptr);
             assert(_associated_session->_type == CLIENT);
@@ -173,22 +174,27 @@ namespace springtail {
             _associated_session->_internal_process_msg(msg);
         }
 
+        /** Get remote session associated with this session */
         std::shared_ptr<Session> get_associated_session() const {
             return _associated_session;
         }
 
+        /** Is this session blocked waiting for another session to complete */
         bool is_waiting_on_session() const {
             return _waiting_on_session;
         }
 
+        /** Set database name for this session */
         void set_database(const std::string &database) {
             _database = database;
         }
 
+        /** Get database name for this session */
         const std::string &database() const {
             return _database;
         }
 
+        /** Get user name for this session */
         const std::string &username() const {
             return _user->username();
         }
@@ -208,19 +214,33 @@ namespace springtail {
             _handle_error();
         }
 
+        /** Check if session is in ready state or not */
         bool is_ready() const {
             return _state == READY;
         }
 
+        /**
+         * Set pending msg; to be executed after current message completes
+         * @param msg SessionMsgPtr message to set as pending
+         */
         void set_pending_msg(SessionMsgPtr msg) {
             assert(_pending_msg == nullptr);
             _pending_msg = msg;
         }
 
+        /**
+         * @brief Get the pending msg if one exists
+         * @return SessionMsgPtr or nullptr if no pending msg
+         */
         SessionMsgPtr get_pending_msg() {
             SessionMsgPtr msg = _pending_msg;
             _pending_msg = nullptr;
             return msg;
+        }
+
+        /** Get session id */
+        int id() const {
+            return _id;
         }
 
     protected:
@@ -242,6 +262,8 @@ namespace springtail {
         std::string  _database;    ///< database name associated with this session
 
         DatabaseInstancePtr _instance; ///< database instance associated with this session
+
+        int _id;                   ///< unique id for session
 
         /** Process messages for session connection,
          * must be implemented by derived class */
@@ -284,7 +306,6 @@ namespace springtail {
 
         /** handle fatal error, by shutting down */
         void _handle_error();
-
     };
     using SessionPtr = std::shared_ptr<Session>;
 }

@@ -1,20 +1,58 @@
 #include <memory>
 #include <cassert>
+#include <atomic>
 
 #include <common/logging.hh>
 
 #include <proxy/session.hh>
 #include <proxy/server.hh>
-
+#include <proxy/connection.hh>
 #include <proxy/exception.hh>
 
 namespace springtail {
+
+    /** unique session id counter */
+    static std::atomic<int> session_id(0);
+
+    Session::Session(ProxyConnectionPtr connection,
+                     ProxyServerPtr server,
+                     Type type)
+        : _connection(connection),
+          _server(server),
+          _state(STARTUP),
+          _type(type),
+          _id(session_id++)
+    {
+        _read_buffer.reset();
+        _write_buffer.reset();
+    }
+
+    Session::Session(DatabaseInstancePtr instance,
+                     ProxyConnectionPtr connection,
+                     ProxyServerPtr server,
+                     UserPtr user,
+                     const std::string &database,
+                     Type type)
+        : _connection(connection),
+          _server(server),
+          _state(STARTUP),
+          _type(type),
+          _user(user),
+          _database(database),
+          _instance(instance),
+          _id(session_id++)
+    {
+        _read_buffer.reset();
+        _write_buffer.reset();
+    }
 
     void
     Session::operator()()
     {
         // thread entry point from server
         bool has_data = false;
+
+        SPDLOG_DEBUG("Processing data: session id: {}", _id);
 
         do {
             // thread entry point
@@ -38,7 +76,7 @@ namespace springtail {
             }
 
             if (_waiting_on_session) {
-                SPDLOG_DEBUG("Waiting on external session, socket: {}", _connection->get_socket());
+                SPDLOG_DEBUG("Waiting on external session, id: {}", _id);
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
@@ -60,6 +98,8 @@ namespace springtail {
     Session::_internal_process_msg(SessionMsgPtr msg)
     {
         // send message to session
+        SPDLOG_DEBUG("Processing message: session id: {}", _id);
+
         try {
             _process_msg(msg);
         } catch (const ProxyIOError &e) {
@@ -212,7 +252,8 @@ namespace springtail {
 
         // general error handling
         // cleanup this session and check for associated session
-        SPDLOG_ERROR("Error state, closing connection: type={}", _type == Type::PRIMARY ? "PRIMARY" : "CLIENT");
+        SPDLOG_ERROR("Error state, closing connection: type={} for session id={}",
+                     _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
         std::cout << this << std::endl;
 
         // close connection
