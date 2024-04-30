@@ -13,35 +13,74 @@ extern "C" {
 namespace springtail {
     class Parser {
     public:
+        /**
+         * @brief Context for a single statement in a query
+         * Contains info about the query and whether it is readonly safe
+         */
+        struct StmtContext {
+            // offset and length of this query if multiple
+            int stmt_location;
+            int stmt_length;
 
-        static bool is_query_readonly(const std::string &query);
+            // statement types
+            bool is_var_set_stmt=false;
+            bool is_var_set_local_stmt=false;
+            bool is_select_stmt=false;
+            bool is_prepare_stmt=false;
+            bool is_execute_stmt=false;
+            bool is_transaction_stmt=false;
+            bool is_deallocate_stmt=false;
+            bool is_unsupported_stmt=false;
 
-    private:
-        struct ParseContext {
-            bool has_error=false;
-            bool has_select=false;
-            bool has_insert=false;
-            bool has_update=false;
-            bool has_delete=false;
-            bool has_truncate=false;
-            bool in_funccall=false;
-            bool has_funccall=false;
-            bool locking_clause=false;
-            bool set_operation=false;
-            bool set_is_local=false;
+            // clauses
+            bool has_locking=false;
             bool has_into=false;
+
+            // state
+            bool has_error=false;
+            bool is_readonly=false;
+
+            /** prepared statement name (for execute, deallocate, prepare) */
+            std::string prepared_name = {};
 
             /** set of functions */
             std::set<std::string> functions;
 
             /** set of <schema, tablename> pairs */
             std::set<std::pair<std::string, std::string>> tables;
+
+            StmtContext(int location, int length)
+              : stmt_location(location),
+                stmt_length(length)
+            {}
+        };
+        using StmtContextPtr = std::shared_ptr<StmtContext>;
+
+        static std::vector<StmtContextPtr> parse_query(const std::string &query);
+
+        static void dump_parse_tree(const std::string &query);
+
+    private:
+
+        struct ParseContext {
+            bool has_error=false;
+
+            // internal state
+            bool in_funccall=false;
+            std::string func_name = {};
+
+            std::vector<StmtContextPtr> stmts;
         };
 
+        static bool _is_query_readonly(StmtContext &context);
         static bool _node_walker(Node *node, void *ctx);
         static void _parse_query(const std::string &query, ParseContext &context);
         static bool _is_function_readonly_safe(const std::string &funcname);
         static bool _is_table_readonly_safe(const std::pair<std::string, std::string> &table);
+        static bool _check_stmt(Node *node);
+
+        static void _dump_context(StmtContext &context);
+
     };
     using ParserPtr = std::shared_ptr<Parser>;
 }

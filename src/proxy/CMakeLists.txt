@@ -14,12 +14,12 @@ set(PROXY_SOURCES
     server_session.cc
     user_mgr.cc
     request_handler.cc
-    #parser.cc
+    parser.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
 target_include_directories(springtail_proxy
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
+PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
@@ -37,15 +37,33 @@ target_link_libraries(springtail_proxy
 )
 
 # test parser executable
-add_executable(parser test/test_parser.cc)
-target_include_directories(parser
+add_executable(test_parser test/test_parser.cc)
+target_include_directories(test_parser
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
 )
-target_link_libraries(parser PRIVATE pg_query)
+target_link_libraries(test_parser
+    PRIVATE springtail_proxy
+    PRIVATE GTest::gtest_main
+)
 
+gtest_discover_tests(test_parser)
+
+# test server daemon executable
+add_executable(parsing test/parsing.cc)
+target_include_directories(parsing
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+)
+target_link_libraries(parsing
+    PUBLIC springtail_proxy
+)
 
 # test server daemon executable
 add_executable(daemon test/daemon.cc)

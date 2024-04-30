@@ -5,6 +5,23 @@
 
 namespace springtail {
 
+    static const std::set<std::string> proxy_unsafe_ops {
+        /* https://www.postgresql.org/docs/current/sql-commands.html */
+        "COPY",
+        "CREATE",
+        "DELETE",
+        "DROP",
+        "REFRESH",
+        "REINDEX",
+        "RESET",
+        "REVOKE",
+        "ALTER",
+        "TRUNCATE",
+        "UPDATE",
+        "VACUUM",
+        "ANALYZE"
+    };
+
     static const std::set<std::string> proxy_unsafe_functions {
         "nextval",
         "setval",
