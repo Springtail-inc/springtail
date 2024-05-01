@@ -13,6 +13,7 @@
 namespace springtail
 {
     Ingest::Ingest(std::shared_ptr<PgStreamTable> source, const std::filesystem::path path) {
+        source->get_table_oid();
         std::string pg_xids = source->get_xact_xids();
         PgTableSchema pg_schema = source->get_schema();
 

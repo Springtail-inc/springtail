@@ -43,6 +43,7 @@ namespace springtail
         PgTableSchema get_schema();
         void copy_data();
         std::optional<FieldArrayPtr> next_row();
+        uint32_t get_table_oid();
 
     private:
         /** magic number for header of the file */
@@ -62,10 +63,9 @@ namespace springtail
         PgTableSchema _schema;
 
         // retrieve schema, write out schema and copy data
-        void get_table_oid();
         void get_pkeys();
         void write_schema();
-        std::optional<FieldArrayPtr> parse_row();
+        std::optional<FieldArrayPtr> parse_row(int size);
 
         // read in schema, copy header, copy data
         void verify_copy_header();
@@ -90,7 +90,6 @@ namespace springtail
          * @param db_name database name
          * @param schema_name schema name
          * @param table_name table name
-         * @param filename output filename
          */
         PgStreamTable(const std::string &db_name,
                     const std::string &schema_name,
@@ -113,7 +112,6 @@ namespace springtail
          * @param hostname DB hostname
          * @param username DB username
          * @param password DB password
-         * @param snapshot Snapshot ID
          * @param port     DB port
          */
         void connect(const std::string &hostname,

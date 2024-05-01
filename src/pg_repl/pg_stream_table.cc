@@ -114,7 +114,7 @@ namespace springtail
     /**
      * @brief Get table's oid based on schema / table, store in schema
      */
-    void PgStreamTable::get_table_oid()
+    uint32_t PgStreamTable::get_table_oid()
     {
         _connection.exec(fmt::format(TABLE_OID_QUERY, _table_name, _schema_name));
         if (_connection.ntuples() == 0) {
@@ -126,6 +126,8 @@ namespace springtail
         _schema.table_oid = _connection.get_int32(0, 0);
 
         _connection.clear();
+
+        return _schema.table_oid;
     }
 
 
@@ -140,6 +142,9 @@ namespace springtail
     {
         std::unique_ptr<char[]> table_name = _connection.escape_string(_table_name);
         std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema_name);
+
+        std::cout << (fmt::format(SCHEMA_QUERY, _schema.table_oid,
+                                     schema_name.get(), table_name.get()));
 
         _connection.exec(fmt::format(SCHEMA_QUERY, _schema.table_oid,
                                      schema_name.get(), table_name.get()));
@@ -245,8 +250,60 @@ namespace springtail
         _buffer = nullptr;
     }
 
+    /**
+     * @brief Validate copy header
+     * @details Header contents:
+     *          11B signature starts with COPY_SIGNATURE
+     *           4B flags; bit 16 oid flag
+     *           4B header extension length
+     */
+    void PgStreamTable::verify_copy_header()
+    {
+        // char header[19];
+
+        /*
+         * 11B signature
+         *  4B flags
+         *  4B extension length
+         */
+        // int r = std::fread(header, 1, 19, _file);
+        int r = _connection.get_copy_data(false);
+        _buffer = _connection.get_copy_buffer();
+        if (r < 19) {
+            std::cerr << "Couldn't read signature\n";
+            throw PgIOError();
+        }
+
+        // verify signature
+        r = std::memcmp(_buffer, COPY_SIGNATURE, 11);
+        if (r != 0) {
+            std::cerr << "Signature doesn't match\n";
+            throw PgUnknownMessageError();
+        }
+
+        int32_t flags = recvint32(&_buffer[11]);
+        std::cout << fmt::format("header flags: 0x{:X}\n", flags);
+        if ((flags >> 16) & 0x1) {
+            // bit 16 tells us if oids are present
+            _oid_flag = true;
+        }
+
+        // skip any header extension
+        int32_t ext_length = recvint32(&_buffer[15]);
+        if (ext_length > 0) {
+            int32_t seeked_length = 0;
+            while ((seeked_length += _connection.get_copy_data(false))) {
+                _connection.get_copy_buffer();
+                if (seeked_length >= ext_length) break;
+                std::cout << "seeked " << r << " bytes to skip header extension\n";
+            }
+        }
+        _buffer = nullptr;
+    }
+
     std::optional<FieldArrayPtr> PgStreamTable::next_row() {
         std::optional<FieldArrayPtr> result;
+        verify_copy_header();
         while (true) {
             // these two lines put a full row of data into the buffer
             int r = _connection.get_copy_data(false);
@@ -272,7 +329,7 @@ namespace springtail
             // got a non-zero result, r indicates number of bytes
             // (shouldn't be null but check anyway)
             std::cout << fmt::format("Copy got: {} bytes\n", r);
-            result = parse_row();
+            result = parse_row(r);
 
             _connection.free_copy_buffer();
             _buffer = nullptr;
@@ -280,9 +337,10 @@ namespace springtail
         return result;
     }
 
-    std::optional<FieldArrayPtr> PgStreamTable::parse_row() {
+    std::optional<FieldArrayPtr> PgStreamTable::parse_row(int size) {
         std::stringstream row_stream;
-        row_stream << _buffer;
+        row_stream.write((char const*) _buffer, size);
+
         // start with 16 bit integer -- number of fields
         int16_t num_columns = read_int16(row_stream);
         if (num_columns == -1) {
