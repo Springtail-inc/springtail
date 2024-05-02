@@ -315,6 +315,16 @@ namespace springtail {
             _populate_vhash();
         }
 
+        Extent(Extent &&other)
+            : _schema(other._schema),
+              _header(other._header),
+              _fixed_data(other._fixed_data),
+              _variable_data(other._variable_data),
+              _row_size(other._row_size)
+        {
+            _populate_vhash();
+        }
+
         ExtentHeader &header() {
             return _header;
         }

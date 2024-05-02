@@ -12,6 +12,9 @@ namespace springtail::constant {
     /** Represents the most recent LSN available. */
     static constexpr uint64_t MAX_LSN = std::numeric_limits<uint64_t>::max();
 
+    /** Represents an invalid table ID. */
+    static constexpr uint64_t INVALID_TABLE = 0;
+
     /** The target maximum extent size. */
     static constexpr uint64_t MAX_EXTENT_SIZE = 64 * 1024;
 
