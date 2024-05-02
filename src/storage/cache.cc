@@ -43,78 +43,22 @@ namespace springtail {
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid || target_xid == constant::LATEST_XID) {
-            // XXX implement based on the number of ExtentRef entries
-            return std::make_shared<Page>(file, extent_id);
+            return _page_cache.get(file, extent_id, access_xid);
         }
 
         // if the target is ahead of the access, but there is no provided table_id then it means the
         // caller is going to perform the mutations (for non-data extents)
-        if (table_id == constant::INVALID_TABLE) {
-            return std::make_shared<Page>(file, extent_id);
+        if (table_id == 0) {
+            // note: we know that the provided extent_id is valid at the access_xid, so we get the
+            //       page at the target_xid using that original extent_id so that the caller can
+            //       modify it from that point forward
+            return _page_cache.get(file, extent_id, target_xid);
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
         assert(0);
 
 #if 0
-        // XXX this is basically where the GC-2 will take place
-
-        // check if we have a page at the requested target_xid already in the Redis cache, if so return it
-        auto extents = _global_page_cache->find(file, extent_id, target_xid);
-        if (extents != nullptr) {
-            return std::make_shared<Page>(file, extent_id, *extents);
-        }
-
-        // check if there are pending changes we need to apply to this page
-        bool has_changes = gc::extent_handler->check_changes(table_id, extent_id, access_xid, target_xid);
-        if (!has_changes) {
-            return std::make_shared<Page>(file, { extent_id });
-        }
-
-        // pass the page to the garbage collector to apply pending changes
-        page = gc::apply_changes(table_id, page, access_xid, target_xid);
-
-        // update the global page cache with the details of the extents
-        _global_page_cache->update(file, extent_id, target_xid, page->flush());
-
-        return page;
-#endif
-    }
-
-#if 0
-    StorageCache::PagePtr
-    StorageCache::get(const std::filesystem::path &file,
-                      uint64_t extent_id,
-                      uint64_t access_xid,
-                      uint64_t target_xid,
-                      uint64_t table_id)
-    {
-        // note: target_xid must be at or beyond the access_xid
-        assert(target_xid >= access_xid);
-
-        boost::unique_lock lock(_mutex);
-
-        // if target is the same as access, get the page and return it
-        if (target_xid == access_xid || target_xid == constant::LATEST_XID) {
-            return _get_page(file, extent_id, access_xid);
-        }
-
-        // if the target is ahead of the access, but there is no provided table_id then it means the
-        // caller is going to perform the mutations (for non-data extents)
-        if (table_id == 0) {
-            // check if we have a page at the requested target_xid already in the cache, if so return it
-            PagePtr page = _try_get_page(file, extent_id, target_xid);
-            if (page != nullptr) {
-                return page;
-            }
-
-            // XXX create a copy of the page at the access_xid and then add it to the cache at the target_xid
-
-            return page;
-        }
-
-        // note: from here forward, we know we are dealing with a roll-forward table data page
-
         // XXX take ownership of the roll-forward process, or block until it's complete
 
         // check if there are pending changes we need to apply to this page
@@ -138,18 +82,151 @@ namespace springtail {
         // XXX cache the new page valid from the target_xid and return to the caller
 
         return page;
+#endif
+    }
+
+    void
+    StorageCache::put(PagePtr page)
+    {
+        _page_cache.put(page);
     }
 
     StorageCache::PagePtr
-    StorageCache::_try_get_page(const std::filesystem::path &file,
-                                uint64_t extent_id,
-                                uint64_t xid)
+    StorageCache::PageCache::try_get(const std::filesystem::path &file,
+                                     uint64_t extent_id,
+                                     uint64_t xid)
+    {
+        boost::unique_lock lock(_mutex);
+        return _try_get(file, extent_id, xid);
+    }
+
+    StorageCache::PagePtr
+    StorageCache::PageCache::get(const std::filesystem::path &file,
+                                 uint64_t extent_id,
+                                 uint64_t xid)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // check if the page already exists in the cache
+        PagePtr page = _try_get(file, extent_id, xid);
+        if (page != nullptr) {
+            return page;
+        }
+
+        // note: not in the cache, need to create a new Page
+        return _create(file, extent_id, xid, { extent_id });
+    }
+
+    void
+    StorageCache::PageCache::put(PagePtr page)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // release the page back to the cache
+        _put(page);
+    }
+
+    void
+    StorageCache::PageCache::_put(PagePtr page)
+    {
+        // decrement it's use count
+        --(page->_use_count);
+
+        // if the page has no users, place it onto the back of the LRU list
+        if (page->_use_count == 0) {
+            page->_lru_pos = _lru.insert(_lru.end(), page);
+        }
+    }
+
+    StorageCache::PagePtr
+    StorageCache::PageCache::_create(const std::filesystem::path &file,
+                                     uint64_t extent_id,
+                                     uint64_t xid,
+                                     const std::vector<uint64_t> &offsets)
+    {
+        // make space for the page; evict if we need to make space
+        _make_space(offsets.size());
+
+        // create the page object with the given <file, extent_id> valid at the requested XID
+        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
+
+        // add it to the cache; note: use count starts at 1
+        _cache[page->key()].insert({ xid, page });
+
+        // return it
+        return page;
+    }
+
+    void
+    StorageCache::PageCache::_try_evict(PagePtr page)
+    {
+        // issue the associated callback for the page's eviction
+        bool success = true;
+        if (page->_evict_callback) {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            lock.unlock();
+
+            success = page->_evict_callback(page);
+
+            lock.lock();
+            lock.release();
+        }
+
+        if (!success || page->_use_count > 1) {
+            // if page can't be evicted then release the page back to the cache
+            _put(page);
+            return;
+        }
+
+        // if evict was successful, remove the page from the cache
+        auto cache_i = _cache.find(page->key());
+        cache_i->second.erase(page->xid());
+        if (cache_i->second.empty()) {
+            _cache.erase(cache_i);
+        }
+
+        // update the sizes
+        _size -= page->_extents.size();
+    }
+
+    void
+    StorageCache::PageCache::_make_space(uint32_t size)
+    {
+        // if there is space in the cache, utilize it
+        while (_size + size > _max_size) {
+            // try to use any space that is available
+            if (_size < _max_size) {
+                size -= _max_size - _size;
+                _size = _max_size;
+            }
+
+            // evict a page from the LRU and then check the sizes again
+            auto page = _lru.front();
+            _lru.pop_front();
+
+            // take ownership of this page for the eviction
+            ++(page->_use_count);
+
+            // try to evict the page
+            _try_evict(page);
+
+            // note: once we've performed an eviction, try again to get the space we need
+        }
+
+        // at this point we know there is enough space in the cache for the remaining size
+        _size += size;
+    }
+
+    StorageCache::PagePtr
+    StorageCache::PageCache::_try_get(const std::filesystem::path &file,
+                                      uint64_t extent_id,
+                                      uint64_t xid)
     {
         CacheKey key(file, extent_id);
 
         // check for the key in the hash map
-        auto write_i = _page_cache.find(key);
-        if (write_i == _page_cache.end()) {
+        auto write_i = _cache.find(key);
+        if (write_i == _cache.end()) {
             return nullptr;
         }
 
@@ -160,83 +237,33 @@ namespace springtail {
         }
 
         // check if the page is valid through the requested xid
-        auto page = page_i->second.first;
+        auto page = page_i->second;
         if (!page->check_xid_valid(xid)) {
             return nullptr;
         }
 
         // if the page is on the LRU list, remove it
-        if (page_i->second.second != _page_lru.end()) {
-            _page_lru.erase(page_i->second.second);
+        if (page->_use_count == 0) {
+            _lru.erase(page->_lru_pos);
         }
 
         // increment it's use count
-        ++(page->use_count);
+        ++(page->_use_count);
 
         return page;
-    }
-
-    StorageCache::PagePtr
-    StorageCache::_get_page(const std::filesystem::path &file,
-                            uint64_t extent_id,
-                            uint64_t xid)
-    {
-        // check if the page already exists in the cache
-        PagePtr page = _try_get_page(file, extent_id, xid);
-        if (page != nullptr) {
-            return page;
-        }
-        // note: not in the cache, need to create a new Page
-
-        // get a Page from the pool, evict if we need to make space
-        _page_make_space();
-
-        // create the page object with the given <file, extent_id> valid at the requested XID
-        page = std::make_shared<Page>(file, extent_id, xid, xid);
-
-        // add it to the cache; note: use count starts at 1
-        _page_cache[page->key()].insert({xid, WriteCacheValue(page, _page_lru.end()) });
-
-        // return it
-        return page;
-    }
-
-    void
-    StorageCache::put(PagePtr page)
-    {
-        boost::unique_lock lock(_mutex);
-
-        // find the cache entry
-        auto page_i = _page_cache.find(page->key());
-        assert(page_i != _page_cache.end());
-
-        // decrement it's use count
-        --(page->use_count);
-
-        // if the page has no users, place it onto the back of the LRU list
-        if (page->use_count == 0) {
-            page_i->second[page->xid()].second = _page_lru.insert(_page_lru.end(), page);
-        }
-    }
-
-#endif
-
-    StorageCache::Page::Page(const std::filesystem::path &file,
-                             uint64_t extent_id)
-        : _is_dirty(false),
-          _file(file),
-          _extent_id(extent_id)
-    {
-        // single un-modified extent 
-        _extents.push_back({ _extent_id, false });
     }
 
     StorageCache::Page::Page(const std::filesystem::path &file,
                              uint64_t extent_id,
+                             uint64_t start_xid,
+                             uint64_t end_xid,
                              const std::vector<uint64_t> &offsets)
-        : _is_dirty(false),
+        : _use_count(1),
+          _is_dirty(false),
           _file(file),
-          _extent_id(extent_id)
+          _extent_id(extent_id),
+          _start_xid(start_xid),
+          _end_xid(end_xid)
     {
         for (auto offset : offsets) {
             _extents.push_back({ offset, false });

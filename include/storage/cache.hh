@@ -55,6 +55,7 @@ namespace springtail {
         //    perform the allocation.
 
         class DataCache;
+        class PageCache;
 
         /** Key for cache entries. */
         using CacheKey = std::pair<std::filesystem::path, uint64_t>;
@@ -298,11 +299,11 @@ namespace springtail {
          * be paged to disk.
          */
         class Page {
-        public:
-            Page(const std::filesystem::path &file, uint64_t extent_id);
+            friend PageCache;
 
+        public:
             Page(const std::filesystem::path &file, uint64_t extent_id,
-                 const std::vector<uint64_t> &offsets);
+                 uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
 
             /**
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
@@ -557,11 +558,10 @@ namespace springtail {
             // HELPER FUNCTIONS
             void _check_split(std::vector<ExtentRef>::iterator pos, CacheExtentPtr extent);
 
-        public:
-            /** A count of the number of users of this page. */
-            std::atomic<uint16_t> use_count;
-
         private:
+            /** A count of the number of users of this page. */
+            std::atomic<uint16_t> _use_count;
+
             /** A mutex to protect access. */
             boost::shared_mutex _mutex;
 
@@ -583,6 +583,9 @@ namespace springtail {
             /** The ending XID up through which this page is known valid. */
             uint64_t _end_xid;
 
+            /** The position on the LRU list; only valid when _use_count is zero. */
+            std::list<std::shared_ptr<Page>>::iterator _lru_pos;
+
             /** The schema of the underlying extent data. */
             ExtentSchemaPtr _schema;
 
@@ -590,15 +593,54 @@ namespace springtail {
             std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
             std::vector<std::string> _sort_keys;
 
-            /** XXX Callbacks. */
-            /** Callback to see if this page can be safely evicted?  May not need it since the underlying extents can always be flushed and the page will remain valid.  */
-            
-            /** Callback to perform additional actions after the page flush?  Is this necessary now that the pages won't be evicted by the cache?  Would be necessary to notify the BTree that a page's extents have been written?  Or is it enough to get the list of extent IDs on flush? */
+            /** Callback to be issued if the page is evicted. */
+            std::function<bool(std::shared_ptr<Page>)> _evict_callback;
         };
         using PagePtr = std::shared_ptr<Page>;
 
-        using XidPageMap = std::map<uint64_t, PagePtr>;
-        using PageCache = std::unordered_map<CacheKey, XidPageMap, boost::hash<CacheKey>>;
+
+    private:
+        /**
+         * LRU cache of Page objects.  Maintains a maximum number of extent references across all of the pages.
+         */
+        class PageCache {
+        public:
+            PageCache(uint64_t max_size)
+                : _max_size(max_size),
+                  _size(0)
+            { }
+
+            PagePtr try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+
+            PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+
+            void update_size(PagePtr page);
+
+            void put(PagePtr page);
+
+        private:
+            void _put(PagePtr page);
+
+            PagePtr _try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+
+            void _try_evict(PagePtr page);
+
+            PagePtr _create(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid, const std::vector<uint64_t> &offsets);
+
+            void _make_space(uint32_t size);
+
+        private:
+            using XidMap = std::map<uint64_t, PagePtr>;
+            using CacheMap = std::unordered_map<CacheKey, XidMap, boost::hash<CacheKey>>;
+
+            boost::mutex _mutex;
+
+            CacheMap _cache;
+            std::list<PagePtr> _lru;
+
+            uint64_t _max_size;
+            uint64_t _size;
+        };
 
     public:
         // PUBLIC INTERFACES
@@ -651,18 +693,6 @@ namespace springtail {
         void put(PagePtr page);
 
     private:
-        // INTERNAL HELPER FUNCTIONS
-
-        /**
-         * Try to get a page from the cache if it exists.  Return nullptr if it doesn't.
-         */
-        PagePtr _try_get_page(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
-
-        /**
-         * Get a page from the cache, if it doesn't exist, create it.
-         */
-        PagePtr _get_page(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
-
         // INTERNAL MEMBER VARIABLES
 
         /**
@@ -675,12 +705,12 @@ namespace springtail {
          */
         DataCache _data_cache;
 
-#if 0
         /**
          * The lookup map for Page objects.
          */
         PageCache _page_cache;
 
+#if 0
         /** The maximum size of the storage cache in bytes. */
         uint64_t _max_size;
 
