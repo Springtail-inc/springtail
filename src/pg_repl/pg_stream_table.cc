@@ -116,6 +116,8 @@ namespace springtail
      */
     uint32_t PgStreamTable::get_table_oid()
     {
+        if(_schema.table_oid != -1) return _schema.table_oid;
+
         _connection.exec(fmt::format(TABLE_OID_QUERY, _table_name, _schema_name));
         if (_connection.ntuples() == 0) {
             _connection.clear();

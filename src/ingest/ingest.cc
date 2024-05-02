@@ -13,7 +13,7 @@
 namespace springtail
 {
     Ingest::Ingest(std::shared_ptr<PgStreamTable> source, const std::filesystem::path path) {
-        source->get_table_oid();
+        int oid = source->get_table_oid();
         std::string pg_xids = source->get_xact_xids();
         PgTableSchema pg_schema = source->get_schema();
 
@@ -22,7 +22,7 @@ namespace springtail
         //TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
 
         // set up io_handle path for extents
-        std::filesystem::path extent_path = path;
+        std::filesystem::path extent_path = path / std::to_string(oid);
         extent_path /= "raw";
         std::shared_ptr<IOHandle> io_handle = IOMgr::get_instance()->open(extent_path, IOMgr::IO_MODE::APPEND, true);
         

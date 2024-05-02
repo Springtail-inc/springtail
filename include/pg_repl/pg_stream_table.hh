@@ -1,9 +1,7 @@
 #pragma once
 
 #include "storage/field.hh"
-#include <cstdio>
 #include <string>
-#include <memory>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -97,7 +95,9 @@ namespace springtail
             _db_name(db_name),
             _schema_name(schema_name),
             _table_name(table_name)
-        {}
+        {
+            _schema.table_oid = -1;
+        }
 
 
         ~PgStreamTable()

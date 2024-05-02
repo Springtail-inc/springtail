@@ -19,6 +19,9 @@ namespace {
             springtail_init();
 
             _base_dir = std::filesystem::temp_directory_path() / "test_ingest";
+            std::filesystem::create_directories(_base_dir);
+
+            std::cout << "writing to " << _base_dir << "\n";
 
             system("psql postgresql://username:password@localhost/springtail_test -f sample.sql");
             _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
@@ -26,7 +29,7 @@ namespace {
 
         void TearDown() override {
             // remove any files created during the run
-            std::filesystem::remove_all(_base_dir);
+            //std::filesystem::remove_all(_base_dir);
         }
 
     };
@@ -36,15 +39,17 @@ namespace {
         source->connect("localhost", "username", "password", 5432);
         auto ingest = std::make_shared<Ingest>(source, _base_dir);
 
+        int oid = source->get_table_oid();
+
         auto tbl_mgr = TableMgr::get_instance();
 
         // create an access table
-        TablePtr table = tbl_mgr->get_table(1, 0, 0);
+        TablePtr table = tbl_mgr->get_table(oid, 0, 0);
         auto fields = table->extent_schema()->get_fields();
 
-        // auto table = std::make_shared<Table>(1001,
-        //                                      table_info->id(),
-        //                                      _base_dir / "1001",
+        // auto table = std::make_shared<Table>(oid,
+        //                                      oid,
+        //                                      _base_dir / std::to_string(oid),
         //                                      table_info->primary_key(),
         //                                      std::vector<std::vector<std::string>>(),
         //                                      0,
