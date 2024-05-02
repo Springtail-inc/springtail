@@ -90,6 +90,16 @@ namespace springtail {
                   _cache_id(0)
             { }
 
+            CacheExtent(const ExtentHeader &header,
+                        const std::filesystem::path &file)
+                : Extent(header),
+                  _file(file),
+                  _extent_id(constant::UNKNOWN_EXTENT),
+                  _use_count(1),
+                  _state(State::DIRTY),
+                  _cache_id(0)
+            { }
+
             /**
              * Copy constructor.
              */
@@ -183,7 +193,11 @@ namespace springtail {
          */
         class DataCache {
         public:
-            DataCache() = default;
+            DataCache(uint64_t max_size)
+                : _size(0),
+                  _max_size(max_size),
+                  _next_cache_id(0)
+            { }
 
             /**
              * Retrieve an extent from the cache based on a file and extent ID.  Must be released
@@ -236,15 +250,20 @@ namespace springtail {
             void remove_empty(CacheExtentPtr extent);
             std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent);
 
+            CacheExtentPtr get_empty(const std::filesystem::path &file,
+                                     uint64_t table_id,
+                                     uint64_t index_id,
+                                     uint64_t xid);
+
         private:
-            CacheExtentPtr _get_clean(boost::unique_lock<boost::mutex> &lock, const CacheKey &key);
+            CacheExtentPtr _get_clean(const CacheKey &key);
 
             /**
              * Internal helper to make space for a new extent within the cache by evicting another extent.
              *
              * @param lock The lock currently holding the cache mutex.
              */
-            void _make_space(boost::unique_lock<boost::mutex> &lock);
+            void _make_space();
 
             /**
              * Internal helper to release an extent back to the cache.  Reduces use count and places
@@ -254,10 +273,9 @@ namespace springtail {
              */
             void _release(CacheExtentPtr extent);
 
-            void _flush(boost::unique_lock<boost::mutex> &lock, CacheExtentPtr extent);
+            void _flush(CacheExtentPtr extent);
 
-            CacheExtentPtr _read_extent(boost::unique_lock<boost::mutex> &lock,
-                                        const CacheKey &key, std::function<void(CacheExtentPtr)> callback);
+            CacheExtentPtr _read_extent(const CacheKey &key, std::function<void(CacheExtentPtr)> callback);
 
             void _gen_cache_id(CacheExtentPtr extent);
 
@@ -278,6 +296,7 @@ namespace springtail {
 
             uint64_t _size; ///< The current size of the cache.
             uint64_t _max_size; ///< The maximum allowed size of the cache.
+            uint64_t _next_cache_id; ///< The next cache ID to assign.
         };
 
     public:
@@ -304,6 +323,9 @@ namespace springtail {
         public:
             Page(const std::filesystem::path &file, uint64_t extent_id,
                  uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
+
+            Page(const std::filesystem::path &file,
+                 uint64_t table_id, uint64_t index_id, uint64_t xid);
 
             /**
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
@@ -332,8 +354,16 @@ namespace springtail {
             /**
              * Check if the requested XID is within the bounds of the valid XIDs for this page.
              */
-            bool check_xid_valid(uint64_t xid) {
+            bool check_xid_valid(uint64_t xid) const {
                 return (_start_xid <= xid && xid <= _end_xid);
+            }
+
+            /**
+             * Registers an eviction callback.
+             */
+            void register_evict(std::function<bool(std::shared_ptr<Page>)> callback) {
+                boost::unique_lock lock(_mutex);
+                _evict_callback = callback;
             }
 
         private:
@@ -595,6 +625,10 @@ namespace springtail {
 
             /** Callback to be issued if the page is evicted. */
             std::function<bool(std::shared_ptr<Page>)> _evict_callback;
+
+            // table and index IDs?
+            uint64_t _table_id;
+            uint64_t _index_id;
         };
         using PagePtr = std::shared_ptr<Page>;
 
@@ -613,6 +647,8 @@ namespace springtail {
             PagePtr try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
 
             PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+
+            PagePtr get_empty(const std::filesystem::path &file, uint64_t table_id, uint64_t index_id, uint64_t xid);
 
             void update_size(PagePtr page);
 
@@ -661,16 +697,21 @@ namespace springtail {
          *                   roll-forward data extent, this is the XID up-to-which in-flight
          *                   mutations must be applied.  If this is the same as the access_xid (or
          *                   LATEST_XID), then no changes are applied.
-         * @param table_id If valid, then specifies that the requested extent is raw data from
+         * @param table_id The ID of the table being modified.
+         * @param index_id If INDEX_DATA, then specifies that the requested extent is raw data from
          *                 the table with this ID and that the cache should do a roll-forward of the
          *                 extent to the target_xid.
-         *                 If invalid, then the caller is assumed to be performing mutations to bring
+         *                 Otherwise, then the caller is assumed to be performing mutations to bring
          *                 the page forward to the target_xid, meaning that the cache will return
          *                 the same in-flight dirty page to other callers.
          * @return The retrieved Page object.
          */
-        PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t access_xid,
-                    uint64_t target_xid = constant::LATEST_XID, uint64_t table_id = constant::INVALID_TABLE);
+        PagePtr get(const std::filesystem::path &file,
+                    uint64_t extent_id,
+                    uint64_t table_id, 
+                    uint64_t access_xid,
+                    uint64_t target_xid = constant::LATEST_XID,
+                    uint64_t index_id = constant::INDEX_DATA);
 
         // // get a page at the same xid at which the extent_id was identified
         // PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t access_xid);

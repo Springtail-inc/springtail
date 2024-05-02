@@ -305,6 +305,25 @@ namespace springtail {
             _populate_vhash();
         }
 
+        Extent(const ExtentHeader &header)
+            : _header(header)
+        {
+            // empty extent
+            _fixed_data = std::make_shared<std::vector<char>>();
+            _variable_data = std::make_shared<std::vector<char>>();
+
+            // get the schema data
+            SchemaMgr *mgr = SchemaMgr::get_instance();
+
+            if (_header.index_id == constant::INDEX_DATA) {
+                _schema = mgr->get_extent_schema(_header.table_id, _header.xid);
+            } else {
+                _schema = mgr->get_extent_schema(_header.table_id, _header.xid, _header.index_id, _header.type);
+            }
+
+            _row_size = _schema->row_size();
+        }
+
         Extent(const Extent &extent)
             : _schema(extent._schema),
               _header(extent._header),

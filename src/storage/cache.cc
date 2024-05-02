@@ -32,14 +32,20 @@ namespace springtail {
     StorageCache::PagePtr
     StorageCache::get(const std::filesystem::path &file,
                       uint64_t extent_id,
-                      uint64_t access_xid,
                       uint64_t target_xid,
-                      uint64_t table_id)
+                      uint64_t access_xid,
+                      uint64_t table_id,
+                      uint64_t index_id)
     {
         // note: target_xid must be at or beyond the access_xid
         assert(target_xid >= access_xid);
 
         boost::unique_lock lock(_mutex);
+
+        // if the extent ID is UNKNOWN, then we will get an empty page for the file
+        if (extent_id == constant::UNKNOWN_EXTENT) {
+            return _page_cache.get_empty(file, table_id, index_id, target_xid);
+        }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid || target_xid == constant::LATEST_XID) {
@@ -117,13 +123,33 @@ namespace springtail {
         return _create(file, extent_id, xid, { extent_id });
     }
 
-    void
-    StorageCache::PageCache::put(PagePtr page)
+    StorageCache::PagePtr
+    StorageCache::PageCache::get_empty(const std::filesystem::path &file,
+                                       uint64_t table_id,
+                                       uint64_t index_id,
+                                       uint64_t xid)
     {
         boost::unique_lock lock(_mutex);
 
+        _make_space(1);
+        return std::make_shared<Page>(file, table_id, index_id, xid);
+    }
+
+    void
+    StorageCache::PageCache::put(PagePtr page)
+    {
+        if (page->_extent_id == constant::UNKNOWN_EXTENT) {
+            // note: we cannot release a dirty page with no original extent ID back to the cache
+            assert(!page->_is_dirty);
+
+            // release the space back to the cache
+            --_size;
+            return;
+        }
+
         // release the page back to the cache
-        _put(page);
+        boost::unique_lock lock(_mutex);
+       _put(page);
     }
 
     void
@@ -145,13 +171,15 @@ namespace springtail {
                                      const std::vector<uint64_t> &offsets)
     {
         // make space for the page; evict if we need to make space
-        _make_space(offsets.size());
+        _make_space(1);
 
         // create the page object with the given <file, extent_id> valid at the requested XID
         auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
 
-        // add it to the cache; note: use count starts at 1
-        _cache[page->key()].insert({ xid, page });
+        if (extent_id != constant::UNKNOWN_EXTENT) {
+            // add it to the cache; note: use count starts at 1
+            _cache[page->key()].insert({ xid, page });
+        }
 
         // return it
         return page;
@@ -270,6 +298,20 @@ namespace springtail {
         }
     }
 
+    StorageCache::Page::Page(const std::filesystem::path &file,
+                             uint64_t table_id,
+                             uint64_t index_id,
+                             uint64_t xid)
+        : _use_count(1),
+          _is_dirty(true),
+          _file(file),
+          _extent_id(constant::UNKNOWN_EXTENT),
+          _start_xid(xid),
+          _end_xid(xid),
+          _table_id(table_id),
+          _index_id(index_id)
+    { }
+
     std::vector<uint64_t>
     StorageCache::Page::flush(uint64_t flush_xid,
                               ExtentType type,
@@ -354,6 +396,14 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        // if the page is empty, create an empty extent to back it
+        if (_extents.empty()) {
+            auto cache = StorageCache::get_instance();
+            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            _extents.push_back({ extent->cache_id(), true });
+            cache->_data_cache.put(extent);
+        }
+
         // extract the key to find the insert position
         auto key = _schema->tuple_subset(tuple, _sort_keys);
 
@@ -399,6 +449,14 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
+        // if the page is empty, create an empty extent to back it
+        if (_extents.empty()) {
+            auto cache = StorageCache::get_instance();
+            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            _extents.push_back({ extent->cache_id(), true });
+            cache->_data_cache.put(extent);
+        }
+
         // retrieve the last extent
         auto extent_i = --_extents.end();
         SafeExtent extent(_file, *extent_i, true);
@@ -418,6 +476,14 @@ namespace springtail {
     {
         boost::shared_lock lock(_mutex);
         _is_dirty = true;
+
+        // if the page is empty, create an empty extent to back it
+        if (_extents.empty()) {
+            auto cache = StorageCache::get_instance();
+            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            _extents.push_back({ extent->cache_id(), true });
+            cache->_data_cache.put(extent);
+        }
 
         // extract the key to find the insert position
         auto key = _schema->tuple_subset(tuple, _sort_keys);
@@ -575,11 +641,14 @@ namespace springtail {
     StorageCache::DataCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id)
     {
+        // note: must get_empty() UNKNOWN extents
+        assert(extent_id != constant::UNKNOWN_EXTENT);
+
         CacheKey key(file, extent_id);
         boost::unique_lock lock(_mutex);
 
         // call the internal get() helper
-        return _get_clean(lock, key);
+        return _get_clean(key);
     }
 
     StorageCache::CacheExtentPtr
@@ -596,7 +665,7 @@ namespace springtail {
             auto key_i = _cache_id_map.find(cache_id);
             assert(key_i != _cache_id_map.end());
 
-            extent = _read_extent(lock, key_i->second, [this, cache_id](CacheExtentPtr extent) {
+            extent = _read_extent(key_i->second, [this, cache_id](CacheExtentPtr extent) {
                 // mark it as mutable
                 extent->_state = CacheExtent::State::MUTABLE;
 
@@ -638,6 +707,28 @@ namespace springtail {
         return extent;
     }
 
+    StorageCache::CacheExtentPtr
+    StorageCache::DataCache::get_empty(const std::filesystem::path &file,
+                                       uint64_t table_id,
+                                       uint64_t index_id,
+                                       uint64_t xid)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // make space for the new extent
+        _make_space();
+
+        // create an empty extent
+        ExtentHeader header(ExtentType(), xid, table_id, index_id);
+        auto extent = std::make_shared<CacheExtent>(header, file);
+
+        // assign the extent a unique cache ID and add it to the dirty cache
+        _gen_cache_id(extent);
+        _dirty_cache.insert({ extent->_cache_id, extent });
+
+        return extent;
+    }
+
     void
     StorageCache::DataCache::put(CacheExtentPtr extent)
     {
@@ -655,7 +746,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // get the clean extent from the cache
-        auto extent = _get_clean(lock, key);
+        auto extent = _get_clean(key);
 
         // check if the caller is the only user
         if (extent->_use_count == 1) {
@@ -674,7 +765,7 @@ namespace springtail {
         }
 
         // make space in the cache for a new dirty extent owned by a page
-        _make_space(lock);
+        _make_space();
 
         // there are other users, so we need to return a copy of this extent
         auto new_extent = std::make_shared<CacheExtent>(*extent);
@@ -723,7 +814,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // call the internal flush() helper
-        _flush(lock, extent);
+        _flush(extent);
     }
 
     void
@@ -752,8 +843,8 @@ namespace springtail {
         assert(extent->_state == CacheExtent::State::DIRTY);
 
         // make space for two new extents
-        _make_space(lock);
-        _make_space(lock);
+        _make_space();
+        _make_space();
 
         // XXX this is extremely inefficient right now... results in two data copies
         // split the provided extent in two
@@ -787,8 +878,7 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::_get_clean(boost::unique_lock<boost::mutex> &lock,
-                                        const CacheKey &key)
+    StorageCache::DataCache::_get_clean(const CacheKey &key)
     {
         CacheExtentPtr extent = nullptr;
         while (extent == nullptr) {
@@ -813,7 +903,7 @@ namespace springtail {
             // extent not cached, so read from disk
             // note: may return nullptr, indicating someone else just read the extent from disk and
             //       that we should check the cache again si
-            extent = _read_extent(lock, key, [this, key](CacheExtentPtr extent) {
+            extent = _read_extent(key, [this, key](CacheExtentPtr extent) {
                 // insert the extent into the cache
                 // note: we don't place into the LRU list since the extent will be in-use
                 _clean_cache.insert({ key, extent });
@@ -824,25 +914,28 @@ namespace springtail {
     }
 
     void
-    StorageCache::DataCache::_flush(boost::unique_lock<boost::mutex> &lock,
-                                    CacheExtentPtr extent)
+    StorageCache::DataCache::_flush(CacheExtentPtr extent)
     {
         // mark the extent as FLUSHING so that other callers will block until flush complete
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();
 
         // perform the flush
-        lock.unlock();
+        {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+            lock.unlock();
 
-        auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
-        auto response = extent->async_flush(handle);
+            auto handle = IOMgr::get_instance()->open(extent->_file, IOMgr::IO_MODE::APPEND, true);
+            auto response = extent->async_flush(handle);
 
-        // XXX we could do this asynchronously and return a future that completes when the extent ID
-        //     becomes available... should be safe to do so since we are already putting the extent
-        //     into an exclusive FLUSHING state
-        extent->_extent_id = response.get()->offset;
+            // XXX we could do this asynchronously and return a future that completes when the extent ID
+            //     becomes available... should be safe to do so since we are already putting the extent
+            //     into an exclusive FLUSHING state
+            extent->_extent_id = response.get()->offset;
 
-        lock.lock();
+            lock.lock();
+            lock.release();
+        }
 
         // update the cache ID as pointing to the new extent ID
         _cache_id_map[extent->_cache_id] = extent->key();
@@ -856,7 +949,7 @@ namespace springtail {
     }
 
     void
-    StorageCache::DataCache::_make_space(boost::unique_lock<boost::mutex> &lock)
+    StorageCache::DataCache::_make_space()
     {
         // check if there is space in the cache
         if (_size < _max_size) {
@@ -874,7 +967,7 @@ namespace springtail {
             ++(dirty->_use_count);
 
             // flush the extent
-            _flush(lock, dirty);
+            _flush(dirty);
 
             // release the extent back to the cache
             _release(dirty);
@@ -891,6 +984,7 @@ namespace springtail {
     {
         // if the extent is invalid, do not place back into the cache
         if (extent->_state == CacheExtent::State::INVALID) {
+            --_size;
             return;
         }
 
@@ -914,18 +1008,20 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::_read_extent(boost::unique_lock<boost::mutex> &lock,
-                                          const CacheKey &key,
+    StorageCache::DataCache::_read_extent(const CacheKey &key,
                                           std::function<void(CacheExtentPtr)> callback)
     {
         // extent not cached, check if someone is reading it from disk
         auto io_i = _io_map.find(key);
         if (io_i != _io_map.end()) {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+
             // wait for the read to complete
             auto cv = io_i->second;
             cv->wait(lock);
 
             // note: try to retrieve from the cache again
+            lock.release();
             return nullptr;
         }
 
@@ -934,9 +1030,10 @@ namespace springtail {
         _io_map[key] = cv;
 
         // make space for a new extent in the cache
-        _make_space(lock);
+        _make_space();
 
         // unlock before IO
+        boost::unique_lock lock(_mutex, boost::adopt_lock);
         lock.unlock();
 
         // read the extent
@@ -946,6 +1043,7 @@ namespace springtail {
 
         // reacquire the lock once IO complete
         lock.lock();
+        lock.release();
 
         // callback to initialize state before returning the extent to the callers
         callback(extent);
@@ -962,20 +1060,11 @@ namespace springtail {
     void
     StorageCache::DataCache::_gen_cache_id(CacheExtentPtr extent)
     {
-        // start with 1 as the initial cache ID
-        if (_cache_id_map.empty()) {
-            extent->_cache_id = 1;
-        } else {
-            auto it = _cache_id_map.begin();
-            if (it->first > 1) {
-                // try to use an ID one less than the lowest ID
-                extent->_cache_id = it->first - 1;
-            } else {
-                // otherwise use an ID one larger than the largest ID
-                extent->_cache_id = _cache_id_map.rbegin()->first + 1;
-            }
-        }
+        // note: start with 1 as the initial cache ID
+        extent->_cache_id = ++_next_cache_id;
 
-        _cache_id_map[extent->_cache_id] = extent->key();
+        if (extent->_extent_id != constant::UNKNOWN_EXTENT) {
+            _cache_id_map[extent->_cache_id] = extent->key();
+        }
     }
 }
