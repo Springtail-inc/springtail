@@ -382,9 +382,9 @@ namespace springtail {
                     : _extent(nullptr)
                 {
                     if (ref.second) {
-                        _extent = StorageCache::get_instance()->_data_cache.get(ref.first);
+                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first);
                     } else {
-                        _extent = StorageCache::get_instance()->_data_cache.get(file, ref.first);
+                        _extent = StorageCache::get_instance()->_data_cache->get(file, ref.first);
                     }
                 }
 
@@ -394,11 +394,11 @@ namespace springtail {
                     : _extent(nullptr)
                 {
                     if (ref.second) {
-                        _extent = StorageCache::get_instance()->_data_cache.get(ref.first);
+                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first);
                     } else if (!is_mutable) {
-                        _extent = StorageCache::get_instance()->_data_cache.get(file, ref.first);
+                        _extent = StorageCache::get_instance()->_data_cache->get(file, ref.first);
                     } else {
-                        _extent = StorageCache::get_instance()->_data_cache.extract(file, ref.first);
+                        _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.first);
 
                         // XXX
                         ref.first = _extent->cache_id();
@@ -417,7 +417,7 @@ namespace springtail {
                 }
 
                 SafeExtent &operator=(SafeExtent &&other) {
-                    StorageCache::get_instance()->_data_cache.put(_extent);
+                    StorageCache::get_instance()->_data_cache->put(_extent);
 
                     _extent = other._extent;
                     other._extent = nullptr;
@@ -428,7 +428,7 @@ namespace springtail {
                 ~SafeExtent()
                 {
                     if (_extent) {
-                        StorageCache::get_instance()->_data_cache.put(_extent);
+                        StorageCache::get_instance()->_data_cache->put(_extent);
                     }
                 }
 
@@ -516,6 +516,14 @@ namespace springtail {
 
                     return *this;
                 }
+
+                bool operator==(const Iterator &rhs) {
+                    return (_page == rhs._page &&
+                            _extent_i == rhs._extent_i &&
+                            _row == rhs._row);
+                }
+
+                bool operator!=(const Iterator &rhs) { return !(*this == rhs); }
 
             private:
                 Iterator(Page *page,
@@ -744,19 +752,11 @@ namespace springtail {
         /**
          * The lookup map for read-only CacheExtent objects.
          */
-        DataCache _data_cache;
+        std::shared_ptr<DataCache> _data_cache;
 
         /**
          * The lookup map for Page objects.
          */
-        PageCache _page_cache;
-
-#if 0
-        /** The maximum size of the storage cache in bytes. */
-        uint64_t _max_size;
-
-        /** The current size of the storage cache in bytes. */
-        uint64_t _size;
-#endif
+        std::shared_ptr<PageCache> _page_cache;
     };
 }

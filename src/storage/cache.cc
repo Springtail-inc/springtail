@@ -1,3 +1,6 @@
+#include <common/json.hh>
+#include <common/properties.hh>
+
 #include <storage/cache.hh>
 
 namespace springtail {
@@ -29,6 +32,17 @@ namespace springtail {
         }
     }
 
+    StorageCache::StorageCache()
+    {
+        // get the cache size
+        uint64_t size;
+        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+        Json::get_to<uint64_t>(json, "cache_size", size, 16384);
+
+        _data_cache = std::make_shared<DataCache>(size);
+        _page_cache = std::make_shared<PageCache>(size);
+    }
+
     StorageCache::PagePtr
     StorageCache::get(const std::filesystem::path &file,
                       uint64_t extent_id,
@@ -44,12 +58,12 @@ namespace springtail {
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return _page_cache.get_empty(file, table_id, index_id, target_xid);
+            return _page_cache->get_empty(file, table_id, index_id, target_xid);
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid || target_xid == constant::LATEST_XID) {
-            return _page_cache.get(file, extent_id, access_xid);
+            return _page_cache->get(file, extent_id, access_xid);
         }
 
         // if the target is ahead of the access, but there is no provided table_id then it means the
@@ -58,7 +72,7 @@ namespace springtail {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return _page_cache.get(file, extent_id, target_xid);
+            return _page_cache->get(file, extent_id, target_xid);
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -94,7 +108,7 @@ namespace springtail {
     void
     StorageCache::put(PagePtr page)
     {
-        _page_cache.put(page);
+        _page_cache->put(page);
     }
 
     StorageCache::PagePtr
@@ -340,10 +354,10 @@ namespace springtail {
 
                 // append the extent to the file
                 // XXX could do these asynchronously to get better parallelism when there are multiple extents
-                StorageCache::get_instance()->_data_cache.flush(*e);
+                StorageCache::get_instance()->_data_cache->flush(*e);
                 
                 // return the clean extent back to the read cache
-                StorageCache::get_instance()->_data_cache.reinsert(*e);
+                StorageCache::get_instance()->_data_cache->reinsert(*e);
 
                 // save the extent ID of the now-unmodified extent
                 ref.first = (*e)->key().second;
@@ -399,9 +413,9 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             auto cache = StorageCache::get_instance();
-            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
             _extents.push_back({ extent->cache_id(), true });
-            cache->_data_cache.put(extent);
+            cache->_data_cache->put(extent);
         }
 
         // extract the key to find the insert position
@@ -452,9 +466,9 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             auto cache = StorageCache::get_instance();
-            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
             _extents.push_back({ extent->cache_id(), true });
-            cache->_data_cache.put(extent);
+            cache->_data_cache->put(extent);
         }
 
         // retrieve the last extent
@@ -480,9 +494,9 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             auto cache = StorageCache::get_instance();
-            auto extent = cache->_data_cache.get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
             _extents.push_back({ extent->cache_id(), true });
-            cache->_data_cache.put(extent);
+            cache->_data_cache->put(extent);
         }
 
         // extract the key to find the insert position
@@ -608,7 +622,7 @@ namespace springtail {
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {
-            StorageCache::get_instance()->_data_cache.remove_empty(*extent);
+            StorageCache::get_instance()->_data_cache->remove_empty(*extent);
             _extents.erase(extent_i);
         }
     }
@@ -624,7 +638,7 @@ namespace springtail {
         }
 
         // split the extent
-        auto &&pair = StorageCache::get_instance()->_data_cache.split(extent);
+        auto &&pair = StorageCache::get_instance()->_data_cache->split(extent);
 
         // remove the old extent reference
         pos = _extents.erase(pos);

@@ -63,6 +63,15 @@ target_link_libraries(test_table_mgr
     PUBLIC springtail_common springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
 
+# cache test
+add_executable(test_cache test/test_cache.cc)
+target_include_directories(test_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_cache PRIVATE "--coverage")
+
+target_link_libraries(test_cache
+    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
+
 # extent test
 add_executable(test_extent test/test_extent.cc)
 target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -75,5 +84,7 @@ gtest_discover_tests(test_btree
 gtest_discover_tests(test_table
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 gtest_discover_tests(test_table_mgr
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
+gtest_discover_tests(test_cache
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 gtest_discover_tests(test_io)
