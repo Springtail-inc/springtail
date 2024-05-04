@@ -38,6 +38,7 @@ namespace springtail {
         SchemaType type;
         bool exists;
         bool nullable;
+        std::optional<uint32_t> pkey_position;
         std::optional<std::string> default_value;
         SchemaUpdateType update_type;
 
@@ -50,6 +51,7 @@ namespace springtail {
                      SchemaType type,
                      bool exists,
                      bool nullable,
+                     std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
             : xid(xid),
               lsn(lsn),
@@ -58,6 +60,7 @@ namespace springtail {
               type(type),
               exists(exists),
               nullable(nullable),
+              pkey_position(pkey_position),
               default_value(default_value)
         { }
 
@@ -65,6 +68,7 @@ namespace springtail {
                      uint32_t position,
                      SchemaType type,
                      bool nullable,
+                     std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
             : xid(0),
               lsn(0),
@@ -72,6 +76,7 @@ namespace springtail {
               position(position),
               type(type),
               nullable(nullable),
+              pkey_position(pkey_position),
               default_value(default_value)
         { }
 
@@ -119,6 +124,9 @@ namespace springtail {
 
         /** The sort columns of the schema. */
         std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
+
+        /** The sort column names of the schema. */
+        std::vector<std::string> _sort_keys;
 
     protected:
         /**
@@ -210,6 +218,13 @@ namespace springtail {
          */
         std::shared_ptr<std::vector<FieldPtr>> get_sort_fields() const {
             return _sort_fields;
+        }
+
+        /**
+         * Return a list of field names that form the sort columns of this schema.
+         */
+        const std::vector<std::string> &get_sort_keys() const {
+            return _sort_keys;
         }
 
         /**

@@ -179,6 +179,13 @@ namespace springtail {
             // note: positions should be in-order, so don't need to read them
 
             if (index_id == 0) {
+                // update the columns with the primary key positions
+                // XXX not handling changes in the primary index
+                for (auto &column : _column_map[column_id][xid]) {
+                    column.pkey_position = _primary_index.size();
+                }
+
+                // note the primary key
                 _primary_index[xid].push_back(column_id);
             } else {
                 _secondary_indexes[index_id][xid].push_back(column_id);

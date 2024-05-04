@@ -11,6 +11,9 @@ namespace springtail {
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn> columns)
     {
+        // track how many primary key columns there are
+        uint32_t pkey_count = 0;
+
         // first calculate the row size of the non-bitwise data
         uint32_t fixed_bytes = 0;
         for (auto &&pair : columns) {
@@ -51,7 +54,16 @@ namespace springtail {
 
             // set the column order
             _column_order.push_back(column.name);
+
+            // save the pkey mappings
+            if (column.pkey_position) {
+                ++pkey_count;
+            }
         }
+
+        // construct the sorting vectors
+        _sort_fields = std::make_shared<std::vector<FieldPtr>>(pkey_count);
+        _sort_keys.resize(pkey_count);
 
         // then construct the fields
         uint32_t byte_pos = 0;
@@ -135,6 +147,13 @@ namespace springtail {
 
             // store the field into the base map
             _field_map[column.name] = { field, idx };
+
+            // handle primary key data
+            if (column.pkey_position) {
+                _sort_fields->at(*column.pkey_position) = field;
+                _sort_keys[*column.pkey_position] = column.name;
+            }
+
             ++idx;
         }
 

@@ -172,7 +172,9 @@ namespace springtail {
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
                                                          _convert_pg_type(col.udt_type),
-                                                         true, col.is_nullable, col.default_value);
+                                                         true, col.is_nullable,
+                                                         col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
+                                                         col.default_value);
             }
 
             auto update = SchemaMgr::get_instance()->generate_update(old_columns, new_columns, xid, lsn);

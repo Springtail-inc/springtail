@@ -322,6 +322,7 @@ namespace springtail {
 
         public:
             Page(const std::filesystem::path &file, uint64_t extent_id,
+                 uint64_t table_id, uint64_t index_id,
                  uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
 
             Page(const std::filesystem::path &file,
@@ -417,7 +418,9 @@ namespace springtail {
                 }
 
                 SafeExtent &operator=(SafeExtent &&other) {
-                    StorageCache::get_instance()->_data_cache->put(_extent);
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->put(_extent);
+                    }
 
                     _extent = other._extent;
                     other._extent = nullptr;
@@ -518,9 +521,10 @@ namespace springtail {
                 }
 
                 bool operator==(const Iterator &rhs) {
-                    return (_page == rhs._page &&
-                            _extent_i == rhs._extent_i &&
-                            _row == rhs._row);
+                    if (_page == rhs._page && _extent_i == rhs._extent_i) {
+                        return (_extent_i == _page->_extents.end() || _row == rhs._row);
+                    }
+                    return false;
                 }
 
                 bool operator!=(const Iterator &rhs) { return !(*this == rhs); }
@@ -627,10 +631,6 @@ namespace springtail {
             /** The schema of the underlying extent data. */
             ExtentSchemaPtr _schema;
 
-            // XXX these should actually be kept in the ExtentSchema
-            std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
-            std::vector<std::string> _sort_keys;
-
             /** Callback to be issued if the page is evicted. */
             std::function<bool(std::shared_ptr<Page>)> _evict_callback;
 
@@ -652,11 +652,11 @@ namespace springtail {
                   _size(0)
             { }
 
-            PagePtr try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+            PagePtr get(const std::filesystem::path &file,
+                        uint64_t extent_id, uint64_t table_id, uint64_t index_id, uint64_t xid);
 
-            PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
-
-            PagePtr get_empty(const std::filesystem::path &file, uint64_t table_id, uint64_t index_id, uint64_t xid);
+            PagePtr get_empty(const std::filesystem::path &file,
+                              uint64_t table_id, uint64_t index_id, uint64_t xid);
 
             void update_size(PagePtr page);
 
@@ -669,7 +669,9 @@ namespace springtail {
 
             void _try_evict(PagePtr page);
 
-            PagePtr _create(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid, const std::vector<uint64_t> &offsets);
+            PagePtr _create(const std::filesystem::path &file, uint64_t extent_id,
+                            uint64_t table_id, uint64_t index_id,
+                            uint64_t xid, const std::vector<uint64_t> &offsets);
 
             void _make_space(uint32_t size);
 
@@ -719,7 +721,8 @@ namespace springtail {
                     uint64_t table_id, 
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
-                    uint64_t index_id = constant::INDEX_DATA);
+                    uint64_t index_id = constant::INDEX_DATA,
+                    bool do_rollforward = false);
 
         // // get a page at the same xid at which the extent_id was identified
         // PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t access_xid);

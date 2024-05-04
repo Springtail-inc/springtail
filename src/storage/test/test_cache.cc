@@ -21,9 +21,9 @@ namespace {
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
-                    { "table_id", 0, SchemaType::UINT64, false },
+                    { "table_id", 0, SchemaType::INT64, false },
                     { "name", 1, SchemaType::TEXT, false },
-                    { "offset", 2, SchemaType::UINT64, false }
+                    { "offset", 2, SchemaType::INT64, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 
@@ -50,20 +50,24 @@ namespace {
         uint64_t xid = 1;
         uint64_t lsn = 0;
         uint32_t table_id = 100000;
-        std::filesystem::path file(fmt::format("/tmp/springtail/table/{}/raw", table_id));
+        std::filesystem::path table_dir(fmt::format("/tmp/springtail/table/{}", table_id));
+        std::filesystem::path file = table_dir / "raw";
 
         // create a table
         PgMsgTable create_msg;
         create_msg.lsn = 0;
         create_msg.oid = table_id;
-        create_msg.xid = xid++;
+        create_msg.xid = xid;
         create_msg.schema = "public";
         create_msg.table = "test";
         create_msg.columns.push_back({"table_id", "int8", std::nullopt, 0, 0, true, false, false});
         create_msg.columns.push_back({"name", "text", std::nullopt, 1, 0, false, true, false});
-        create_msg.columns.push_back({"offset", "int8", "0", 1, 0, false, false, false});
+        create_msg.columns.push_back({"offset", "int8", "0", 2, 0, false, false, false});
 
-        TableMgr::get_instance()->create_table(xid, lsn, create_msg);
+        TableMgr::get_instance()->create_table(xid++, lsn, create_msg);
+
+        // make sure that the table directory exists
+        std::filesystem::create_directory(table_dir);
 
         // get() an empty Page
         auto page = cache->get(file, constant::UNKNOWN_EXTENT, table_id, xid);
