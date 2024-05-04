@@ -11,8 +11,6 @@
 
 #include <openssl/ssl.h>
 
-#include <proxy/buffer.hh>
-
 namespace springtail {
     /** Connection object */
     class ProxyConnection : public std::enable_shared_from_this<ProxyConnection> {
@@ -27,10 +25,7 @@ namespace springtail {
             close();
         }
 
-        ssize_t read(char *buffer, int size, int at_least = 0);
-        ssize_t read(ProxyBuffer &buffer, int at_least = 0);
-        ssize_t read(ProxyBuffer &buffer, int max_size, int at_least);
-        ssize_t read_fully(ProxyBuffer &buffer, int size);
+        ssize_t read(char *buffer, int max_size, int at_least = 0);
         ssize_t write(const char *buffer, int size, bool more = false);
 
         void close() {

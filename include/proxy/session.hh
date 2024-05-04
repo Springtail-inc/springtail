@@ -9,9 +9,9 @@
 
 #include <common/logging.hh>
 #include <proxy/connection.hh>
-#include <proxy/buffer.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/user_mgr.hh>
+#include <proxy/buffer_pool.hh>
 
 namespace springtail {
     // forward declarations to avoid circular dependencies
@@ -53,16 +53,21 @@ namespace springtail {
             enum SessionMsgType : int8_t {
                 // client to server messages
                 MSG_CLIENT_SERVER_STARTUP=0,
-                MSG_CLIENT_SERVER_SIMPLE_QUERY=1,
+                MSG_CLIENT_SERVER_SIMPLE_QUERY=1,  // data contains query string
 
                 // server to client messages
-                MSG_SERVER_CLIENT_AUTH_DONE=10,
-                MSG_SERVER_CLIENT_READY=11,
+                MSG_SERVER_CLIENT_AUTH_DONE=10,    // no data
+                MSG_SERVER_CLIENT_READY=11,        // data contains transaction status 'I', 'T', 'E'
                 MSG_SERVER_CLIENT_FATAL_ERROR=99
             } type;
 
             // union of message types based on SessionMsg type
-            std::variant<std::string> data;
+            std::variant<std::string,
+                        char> data;
+
+            SessionMsg(SessionMsgType type, char data)
+                : type(type), data(data)
+            {}
 
             SessionMsg(SessionMsgType type, std::string data)
                 : type(type), data(data)
@@ -250,9 +255,6 @@ namespace springtail {
         State        _state = STARTUP;    ///< state of session, governs process()
         Type         _type;               ///< type of session
 
-        ProxyBuffer  _read_buffer{1024};
-        ProxyBuffer  _write_buffer{1024};
-
         UserPtr      _user;        ///< user associated with this session
         UserLoginPtr _login;       ///< user login creds, temporary
 
@@ -265,6 +267,8 @@ namespace springtail {
 
         uint64_t _id;                   ///< unique id for session
 
+        bool _in_transaction = false;   ///< is this session in a transaction
+
         /** Process messages for session connection,
          * must be implemented by derived class */
         virtual void _process_connection() = 0;
@@ -275,13 +279,10 @@ namespace springtail {
         UserLoginPtr _get_user_login();
 
         /** Read full message from data connection, returns header: 1B code, 4B length */
-        std::pair<char,int32_t> _read_msg();
+        void _read_msg(BufferList &buffer_list);
 
         /** Read header: 1B code, 4B length from data connection */
         std::pair<char,int32_t> _read_hdr();
-
-        /** If we've just read the header, read the actual data into the local write buffer */
-        void _read_remaining(int32_t msg_length);
 
         /** Stream data from one connection directly to the other */
         void _stream_to_remote_session(char code, int32_t msg_length);

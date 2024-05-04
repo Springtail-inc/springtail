@@ -5,10 +5,8 @@
 #include <memory>
 
 extern "C" {
-    #include "pg_query.h"
-    #include "pg_query_internal.h"
-    #include "nodes/nodeFuncs.h"
-}
+    struct Node;
+};
 
 namespace springtail {
     class Parser {
@@ -56,7 +54,7 @@ namespace springtail {
         };
         using StmtContextPtr = std::shared_ptr<StmtContext>;
 
-        static std::vector<StmtContextPtr> parse_query(const std::string &query);
+        static std::vector<StmtContextPtr> parse_query(const std::string_view query);
 
         static void dump_parse_tree(const std::string &query);
 
@@ -74,7 +72,7 @@ namespace springtail {
 
         static bool _is_query_readonly(StmtContext &context);
         static bool _node_walker(Node *node, void *ctx);
-        static void _parse_query(const std::string &query, ParseContext &context);
+        static void _parse_query(const std::string_view query, ParseContext &context);
         static bool _is_function_readonly_safe(const std::string &funcname);
         static bool _is_table_readonly_safe(const std::pair<std::string, std::string> &table);
         static bool _check_stmt(Node *node);

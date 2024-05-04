@@ -2,6 +2,7 @@
 
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
+#include <proxy/buffer_pool.hh>
 
 namespace springtail {
     /**
@@ -57,7 +58,7 @@ namespace springtail {
         void _handle_ssl_response();
 
         /** Authentication */
-        void _handle_auth(int32_t msg_length);
+        void _handle_auth(BufferPtr buffer);
 
         /** Handle replies from server */
         void _handle_message();
@@ -66,18 +67,19 @@ namespace springtail {
         void _handle_simple_query(const std::string &query);
 
         /** Handle error code 'E' */
-        void _handle_error_code(const char *data, int32_t size);
+        void _handle_error_code(BufferPtr buffer);
 
-        /** Encode md5 auth response */
-        void _encode_auth_md5();
+        /** Handle md5 auth send response */
+        void _handle_auth_md5(BufferPtr buffer);
 
-        /** Encode scram-sha-256 auth response */
-        void _encode_auth_scram();
+        /** Handle scram-sha-256 auth send response */
+        void _handle_auth_scram(BufferPtr buffer);
 
-        /** Encode scram continue auth response */
-        void _encode_auth_scram_continue(const std::string &data);
+        /** Handle scram continue auth send response */
+        void _handle_auth_scram_continue(BufferPtr buffer);
 
-        void _handle_auth_scram_complete(const std::string &data);
+        /** Handle scram complete, update client key */
+        void _handle_auth_scram_complete(BufferPtr buffer);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
 }

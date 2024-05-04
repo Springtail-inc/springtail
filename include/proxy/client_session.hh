@@ -6,10 +6,11 @@
 
 #include <proxy/session.hh>
 #include <proxy/request_handler.hh>
-#include <proxy/buffer.hh>
+#include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
+#include <proxy/query_stmt_cache.hh>
 
 namespace springtail {
     class ProxyServer;
@@ -19,13 +20,14 @@ namespace springtail {
     {
     public:
         constexpr static char SERVER_VERSION[] = "16.0 (Springtail)";
+        constexpr static int STATEMENT_CACHE_SIZE = 100;
 
         ClientSession(const ClientSession&) = delete;
         ClientSession& operator=(const ClientSession&) = delete;
 
-        /// Construct a connection with the given socket.
-        explicit ClientSession(ProxyConnectionPtr connection,
-                               ProxyServerPtr server);
+        /** Construct a connection with the given socket. */
+        ClientSession(ProxyConnectionPtr connection,
+                      ProxyServerPtr server);
 
         ~ClientSession();
 
@@ -50,29 +52,40 @@ namespace springtail {
         void _process_msg(SessionMsgPtr msg) override;
 
     private:
+        QueryStmtCache _prepared_stmt_cache;
+        QueryStmtCache _portal_cache;
+
         void _process_startup_msg(int32_t code, int32_t msg_length);
         void _process_ssl_request();
 
-        void _encode_parameter_status(const std::string &key, const std::string &value);
-
-        void _encode_auth_md5();
-        void _encode_auth_ok();
-        void _encode_auth_scram();
-
-        void _create_primary_server_session();
+        void _encode_parameter_status(BufferPtr buffer, const std::string &key, const std::string &value);
+        void _encode_auth_md5(BufferPtr buffer);
+        void _encode_auth_ok(BufferPtr buffer);
+        void _encode_auth_scram(BufferPtr buffer);
 
         void _handle_request();
         void _handle_startup();
         void _handle_ssl_handshake();
         void _handle_auth();
-        void _handle_scram_auth(const std::string &data);
-        void _handle_scram_auth_continue(const std::string &data);
+        void _handle_scram_auth(const std::string_view data);
+        void _handle_scram_auth_continue(const std::string_view data);
         void _handle_server_error(const std::string_view msg);
-        void _handle_simple_query(const std::string &query);
+
+        void _handle_simple_query(BufferPtr buffer);
+        void _handle_parse(BufferPtr buffer);
+        void _handle_bind(BufferPtr buffer);
 
         void _send_auth_req();
         void _send_auth_done();
 
+
+        /** Create a primary server session */
+        void _create_primary_server_session();
+
+        /** Parse a query and return type of server session that can handle it */
+        Type _parse_query(const std::string_view query);
+
+        /** Select a server session based on type */
         ServerSessionPtr _select_session_and_notify(Type type, SessionMsgPtr msg);
 
         /** Release server session back to session pool */

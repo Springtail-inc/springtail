@@ -5,6 +5,12 @@
 #include <proxy/parser.hh>
 #include <proxy/pg_functions.hh>
 
+extern "C" {
+    #include "pg_query.h"
+    #include "pg_query_internal.h"
+    #include "nodes/nodeFuncs.h"
+}
+
 namespace springtail {
 
     /* XXX to shutdown we should call:  pg_query_exit(); */
@@ -42,7 +48,7 @@ namespace springtail {
     }
 
     std::vector<Parser::StmtContextPtr>
-    Parser::parse_query(const std::string &query)
+    Parser::parse_query(const std::string_view query)
     {
         ParseContext context;
 
@@ -150,13 +156,13 @@ namespace springtail {
     }
 
     void
-    Parser::_parse_query(const std::string &query, ParseContext &context)
+    Parser::_parse_query(const std::string_view query, ParseContext &context)
     {
         MemoryContext ctx = NULL;
 
         ctx = pg_query_enter_memory_context();
 
-        PgQueryInternalParsetreeAndError tree = pg_query_raw_parse(query.c_str(), PG_QUERY_PARSE_DEFAULT);
+        PgQueryInternalParsetreeAndError tree = pg_query_raw_parse(query.data(), PG_QUERY_PARSE_DEFAULT);
         if (tree.error) {
             SPDLOG_ERROR("Query parse error {} at {}, for query {}", tree.error->message, tree.error->cursorpos, query);
             context.has_error = true;

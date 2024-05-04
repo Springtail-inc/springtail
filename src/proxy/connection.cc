@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include <common/logging.hh>
-#include <proxy/buffer.hh>
 #include <proxy/exception.hh>
 #include <proxy/connection.hh>
 
@@ -207,38 +206,6 @@ namespace springtail {
         } while (at_least > 0);
 
         return bytes_read;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), buffer.capacity(), at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int max_size, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), max_size, at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read_fully(ProxyBuffer &buffer, int size)
-    {
-        ssize_t n = read(buffer.next_data(), size, size);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
     }
 
     static std::string hostname_to_ip(const std::string &hostname)

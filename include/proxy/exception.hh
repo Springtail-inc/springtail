@@ -40,4 +40,18 @@ namespace springtail {
         }
     };
 
+    class ProxyMessageError : public ProxyError {
+    public:
+        const char *what() const noexcept {
+            return "Error processing message";
+        }
+    };
+
+    class ProxyMessagePreparedError : public ProxyMessageError {
+    public:
+        const char *what() const noexcept {
+            return "Error processing prepared statement";
+        }
+    };
+
 } // namespace springtail

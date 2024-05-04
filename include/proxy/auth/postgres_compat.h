@@ -24,10 +24,6 @@ extern "C" {
 
 #define lengthof(array) (sizeof (array) / sizeof ((array)[0]))
 
-#ifndef pg_hton32
-#define pg_hton32(x) htonl(x)
-#endif
-
 #define pg_attribute_noreturn() _NORETURN
 
 #define HIGHBIT					(0x80)

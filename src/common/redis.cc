@@ -17,7 +17,7 @@ namespace springtail {
     RedisMgr *
     RedisMgr::get_instance()
     {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
+        std::unique_lock<std::mutex> lock(_instance_mutex);
 
         if (_instance == nullptr) {
             _instance = new RedisMgr();

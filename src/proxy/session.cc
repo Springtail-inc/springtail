@@ -8,6 +8,7 @@
 #include <proxy/server.hh>
 #include <proxy/connection.hh>
 #include <proxy/exception.hh>
+#include <proxy/buffer_pool.hh>
 
 namespace springtail {
 
@@ -22,10 +23,7 @@ namespace springtail {
           _state(STARTUP),
           _type(type),
           _id(session_id++)
-    {
-        _read_buffer.reset();
-        _write_buffer.reset();
-    }
+    {}
 
     Session::Session(DatabaseInstancePtr instance,
                      ProxyConnectionPtr connection,
@@ -41,10 +39,7 @@ namespace springtail {
           _database(database),
           _instance(instance),
           _id(session_id++)
-    {
-        _read_buffer.reset();
-        _write_buffer.reset();
-    }
+    {}
 
     void
     Session::operator()()
@@ -134,52 +129,56 @@ namespace springtail {
     std::pair<char,int32_t>
     Session::_read_hdr()
     {
-        // if there is still data in the buffer use that
-        if (_read_buffer.remaining() < 5) {
-            _read_buffer.reset();
-            ssize_t n = _connection->read(_read_buffer, 5, 5); // read at most 5B
-            assert(n == 5);
-        }
+        char buffer[5];
+        ssize_t n = _connection->read(buffer, 5, 5); // read at most 5B
+        assert(n == 5);
 
         // op code
-        char code = _read_buffer.get();
+        char code = buffer[0];
         // message length includes length field but not code byte
         // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32() - 4;
-
-        return {code, msg_length};
-    }
-
-    std::pair<char,int32_t>
-    Session::_read_msg()
-    {
-        // if there is still data in the buffer use that
-        if (_read_buffer.remaining() < 5) {
-            _read_buffer.reset();
-            ssize_t n = _connection->read(_read_buffer, 5); // read at least 5B
-            assert(n >= 5);
-        }
-
-        // op code
-        char code = _read_buffer.get();
-        // message length includes length field but not code byte
-        // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32() - 4;
-
-        // if we didn't read the whole message, read the rest
-        if (msg_length > _read_buffer.remaining()) {
-            SPDLOG_DEBUG("Need to read more data for message, this may block");
-            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
-        }
+        int32_t msg_length = recvint32(&buffer[1]) - 4;
 
         return {code, msg_length};
     }
 
     void
-    Session::_read_remaining(int32_t msg_length)
+    Session::_read_msg(BufferList &blist)
     {
-        if (msg_length > _read_buffer.remaining()) {
-            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
+        char buffer[1024];
+        int offset = 0;
+
+        // read at least 5 bytes, more if available, read into
+        // existing buffer to avoid doing multiple system calls
+        ssize_t n = _connection->read(buffer, 5);
+        assert(n >= 5);
+
+        ssize_t msg_length = 0;
+
+        while (offset < n) {
+            // code is first byte, skip over it
+            // message length includes length field but not code byte
+            // so really msg_length -= 4
+            msg_length = recvint32(buffer + offset + 1) + 1;
+
+            // allocate a buffer from the buffer pool and copy data in
+            BufferPtr bufferp = blist.get(msg_length);
+
+            // copy data into buffer
+            bufferp->copy_into(buffer + offset, std::min(n, msg_length));
+
+            // incr by full message length instead of by n
+            // this allows us to find out if we read too little for a full buffer
+            offset += msg_length;
+        }
+
+        // if we didn't get all the data for the last buffer
+        if (offset > n) {
+            // read remaining data into tail buffer
+            SPDLOG_DEBUG("Need to read more data for message, this may block");
+            BufferPtr tail = blist.buffers.back();
+            int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
+            assert(rd == offset-n);
         }
     }
 

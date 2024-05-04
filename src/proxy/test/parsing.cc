@@ -29,6 +29,7 @@ static const std::vector<std::string> tests = {
     "SELECT a FROM b UNION SELECT x FROM y LIMIT 10",
     "ALTER TABLE foo ADD COLUMN bar INT",
     "EXPLAIN ANALYZE SELECT * FROM foo",
+    "RESET ALL" // maps to VariableSetStmt kind=VAR_RESET_ALL
 };
 
 int main(void)

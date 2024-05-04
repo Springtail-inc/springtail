@@ -15,11 +15,12 @@ set(PROXY_SOURCES
     user_mgr.cc
     request_handler.cc
     parser.cc
+    buffer_pool.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
 target_include_directories(springtail_proxy
-PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include

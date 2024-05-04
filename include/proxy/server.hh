@@ -17,6 +17,7 @@
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
 
+#include <proxy/buffer_pool.hh>
 #include <proxy/database.hh>
 
 namespace springtail {
