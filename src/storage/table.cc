@@ -434,7 +434,6 @@ namespace springtail {
         // flush and wait for completion
         extent->async_flush(root_handle).wait();
         root_handle->sync();
-        SPDLOG_DEBUG_MODULE(LOG_BTREE, "{}", "foo");
 
         // swap the symlink
         std::filesystem::create_symlink(_table_dir / filename, _table_dir / "roots.new");

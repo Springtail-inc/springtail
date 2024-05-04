@@ -225,6 +225,7 @@ namespace springtail {
     {
         // determine the columns for the extent XID
         auto &&columns = _get_columns_for_xid(extent_xid);
+        assert(!columns.empty());
 
         // use the vector of columns to generate the schema
         return std::make_shared<ExtentSchema>(columns);
