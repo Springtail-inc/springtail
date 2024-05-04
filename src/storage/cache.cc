@@ -382,14 +382,13 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // perform a lower-bound check to find the appropriate extent
-        auto extent_i = std::ranges::lower_bound(_extents, *tuple,
-                                                 [](const Tuple &lhs, const Tuple &rhs) {
-                                                     return lhs.less_than(rhs);
-                                                 },
-                                                 [this](const ExtentRef &ref) {
-                                                     SafeExtent extent(_file, ref);
-                                                     return FieldTuple(_schema->get_sort_fields(), (*extent)->back());
-                                                 });
+        // note: we don't use std::ranges::lower_bound() here because the projection causes the
+        //       SafeExtent to go out of scope before it is used in the comparison
+        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
+                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                             SafeExtent extent(_file, ref);
+                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                         });
         if (extent_i == _extents.end()) {
             return end();
         }
@@ -439,19 +438,12 @@ namespace springtail {
         auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
-        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key, [this](const ExtentRef &ref, const Tuple &key) {
-            SafeExtent extent(_file, ref);
-            return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
-        });
-                                         
-        // auto extent_i = std::ranges::lower_bound(_extents, *key,
-        //                                          [](const Tuple &lhs, const Tuple &rhs) {
-        //                                              return lhs.less_than(rhs);
-        //                                          },
-        //                                          [this](const ExtentRef &ref) {
-        //                                              SafeExtent extent(_file, ref);
-        //                                              return FieldTuple(_schema->get_sort_fields(), (*extent)->back());
-        //                                          });
+        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
+                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                             SafeExtent extent(_file, ref);
+                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                         });
+
         if (extent_i == _extents.end()) {
             extent_i = --_extents.end();
         }
@@ -488,10 +480,20 @@ namespace springtail {
 
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
+            // create an empty extent
             auto cache = StorageCache::get_instance();
+
+            // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
             _extents.push_back({ extent->cache_id(), true });
+
+            // insert the tuple into the extent
+            auto row = extent->append();
+            MutableTuple(extent->schema()->get_mutable_fields(), row).assign(tuple);
+
+            // release back to the cache
             cache->_data_cache->put(extent);
+            return;
         }
 
         // retrieve the last extent
@@ -516,24 +518,31 @@ namespace springtail {
 
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
+            // create an empty extent
             auto cache = StorageCache::get_instance();
+
+            // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
             _extents.push_back({ extent->cache_id(), true });
+
+            // insert the tuple into the extent
+            auto row = extent->append();
+            MutableTuple(extent->schema()->get_mutable_fields(), row).assign(tuple);
+
+            // release back to the cache
             cache->_data_cache->put(extent);
+            return;
         }
 
         // extract the key to find the insert position
         auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
-        auto extent_i = std::ranges::lower_bound(_extents, *key,
-                                                 [](const Tuple &lhs, const Tuple &rhs) {
-                                                     return lhs.less_than(rhs);
-                                                 },
-                                                 [this](const ExtentRef &ref) {
-                                                     SafeExtent extent(_file, ref);
-                                                     return FieldTuple(_schema->get_sort_fields(), (*extent)->back());
-                                                 });
+        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
+                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                             SafeExtent extent(_file, ref);
+                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                         });
         if (extent_i == _extents.end()) {
             extent_i = --_extents.end();
         }
@@ -574,14 +583,11 @@ namespace springtail {
         auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
-        auto extent_i = std::ranges::lower_bound(_extents, *key,
-                                                 [](const Tuple &lhs, const Tuple &rhs) {
-                                                     return lhs.less_than(rhs);
-                                                 },
-                                                 [this](const ExtentRef &ref) {
-                                                     SafeExtent extent(_file, ref);
-                                                     return FieldTuple(_schema->get_sort_fields(), (*extent)->back());
-                                                 });
+        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
+                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                             SafeExtent extent(_file, ref);
+                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                         });
         // note: key should exist
         assert(extent_i == _extents.end());
 
@@ -614,14 +620,11 @@ namespace springtail {
         _is_dirty = true;
 
         // find the extent to modify via lower_bound
-        auto extent_i = std::ranges::lower_bound(_extents, *key,
-                                                 [](const Tuple &lhs, const Tuple &rhs) {
-                                                     return lhs.less_than(rhs);
-                                                 },
-                                                 [this](const ExtentRef &ref) {
-                                                     SafeExtent extent(_file, ref);
-                                                     return FieldTuple(_schema->get_sort_fields(), (*extent)->back());
-                                                 });
+        auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
+                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                             SafeExtent extent(_file, ref);
+                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                         });
         // note: key should exist
         assert(extent_i == _extents.end());
 
