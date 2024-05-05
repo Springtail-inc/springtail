@@ -115,6 +115,16 @@ namespace springtail
     }
 
     /**
+     * @brief Copy 8bit int/char into buffer
+     * @param i value to copy into buffer
+     * @param buffer pointer to preallocated buffer
+     */
+    static inline void sendint8(int8_t i, char *buffer)
+    {
+        *buffer = i;
+    }
+
+    /**
      * @brief Copy 64 bit int from buffer from network format to host format
      *
      * @param buffer buffer containing data
@@ -156,6 +166,17 @@ namespace springtail
         std::memcpy(&n16, buffer, 2);
         n16 = pg_ntoh16(n16);
         return n16;
+    }
+
+    /**
+     * @brief Copy 8 bit int from buffer
+     *
+     * @param buffer buffer containing data
+     * @return 8 bit int
+     */
+    static inline int8_t recvint8(const char *buffer)
+    {
+        return *buffer;
     }
 
     static inline int16_t recvint16(std::fstream &stream)
