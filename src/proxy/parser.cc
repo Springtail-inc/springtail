@@ -58,6 +58,7 @@ namespace springtail {
         // if we have a parse error, return false
         if (context.has_error && context.stmts.empty()) {
             // make empty context
+            SPDLOG_WARN("Parse error in query: {}", query);
             StmtContextPtr res = std::make_shared<StmtContext>(0, 0);
             res->has_error = true;
             res->is_readonly = false;
@@ -66,6 +67,7 @@ namespace springtail {
 
         // if we have a single statement, we can return early
         if (context.stmts.size() == 1) {
+            SPDLOG_DEBUG("Single query is_readonly: {}", _is_query_readonly(*context.stmts[0]));
             context.stmts[0]->is_readonly = _is_query_readonly(*context.stmts[0]);
             return context.stmts;
         }
@@ -204,7 +206,7 @@ namespace springtail {
             context = parse_context->stmts.back();
         }
 
-        SPDLOG_DEBUG("Parser node: node tag: {}", (int)nodeTag(node));
+        // SPDLOG_DEBUG("Parser node: node tag: {}", (int)nodeTag(node));
 
         switch(nodeTag(node)) {
 

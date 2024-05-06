@@ -81,6 +81,9 @@ namespace springtail {
         /** Create a primary server session */
         void _create_primary_server_session();
 
+        /** Does primary server pool exist */
+        bool _primary_pool_exists();
+
         /** Parse a query and return type of server session that can handle it */
         Type _parse_query(const std::string_view query);
 

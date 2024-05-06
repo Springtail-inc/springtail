@@ -150,7 +150,7 @@ namespace springtail {
 
         // read at least 5 bytes, more if available, read into
         // existing buffer to avoid doing multiple system calls
-        ssize_t n = _connection->read(buffer, 5);// 1024, 5);
+        ssize_t n = _connection->read(buffer, 1024, 5);
         assert(n >= 5);
 
         ssize_t msg_length = 0;

@@ -30,7 +30,8 @@ namespace springtail {
 
         /** factory to create session */
         static std::shared_ptr<ServerSession>
-        create(ProxyServerPtr server, UserPtr user, const std::string &database, DatabaseInstancePtr instance, Session::Type type);
+        create(ProxyServerPtr server, UserPtr user, const std::string &database,
+               DatabaseInstancePtr instance, Session::Type type);
 
     protected:
         void _process_connection() override;

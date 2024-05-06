@@ -586,7 +586,7 @@ namespace springtail {
         auto connection = instance->create_connection();
         if (connection == nullptr) {
             SPDLOG_ERROR("Failed to create connection for server db");
-            return nullptr;
+            throw ProxyIOConnectionError();
         }
 
         SPDLOG_DEBUG("Created connection for server session, to: db={}", database);

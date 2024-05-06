@@ -19,7 +19,7 @@ namespace springtail {
 
     DatabasePoolPtr
     DatabaseInstance::get_pool(const std::string &dbname,
-                                const std::string &username) const
+                               const std::string &username) const
     {
         std::shared_lock lock(_mutex);
         // get size of pool based on dbname and username
@@ -51,7 +51,7 @@ namespace springtail {
         std::unique_lock lock(_mutex);
         auto it = _sessions.find({session->database(), session->username()});
         if (it == _sessions.end()) {
-            SPDLOG_WARN("Session not found in pool: {:d}", session->id());
+            SPDLOG_WARN("Database pool not found for: {}:{}", session->database(), session->username());
             return;
         }
 
@@ -78,8 +78,7 @@ namespace springtail {
     ServerSessionPtr
     DatabaseInstance::allocate_session(ProxyServerPtr server,
                                        UserPtr user,
-                                       const std::string &database,
-                                       Session::Type type)
+                                       const std::string &database)
     {
         std::unique_lock lock(_mutex);
 
@@ -123,7 +122,7 @@ namespace springtail {
         lock.unlock();
 
         // create a new session
-        session = ServerSession::create(server, user, database, shared_from_this(), type);
+        session = ServerSession::create(server, user, database, shared_from_this(), _type);
 
         return session;
     }

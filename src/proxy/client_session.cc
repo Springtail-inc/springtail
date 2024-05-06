@@ -55,6 +55,8 @@ namespace springtail {
         ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
         assert(server_session != nullptr);
 
+        SPDLOG_DEBUG("Releasing server session: id={}", server_session->id());
+
         // clear associated session from the client session
         clear_waiting_on_session();
         clear_associated_session();
@@ -83,10 +85,6 @@ namespace springtail {
 
                 assert(_state == AUTH);
                 _send_auth_done();
-
-                SPDLOG_DEBUG("Authentication complete, setting READY state");
-                _state = READY;
-
                 // the client session is established as is a server session.
                 // the replica session will be created on-demand
                 break;
@@ -509,27 +507,39 @@ namespace springtail {
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
-        _create_primary_server_session();
+        // auth successful on client side; see if a primary server side pool exists
+        if (_primary_pool_exists()) {
+            // auth is done, send auth done messages
+            _send_auth_done();
+        } else {
+            // no pool exists, create a new server session for primary
+            _create_primary_server_session();
+            // wait until this is done before auth done messages are sent
+            // server session will notify client through _process_message
+        }
+    }
+
+    bool
+    ClientSession::_primary_pool_exists()
+    {
+        DatabaseInstancePtr primary = _server->get_primary_instance();
+        assert (primary != nullptr);
+        DatabasePoolPtr pool = primary->get_pool(_database, _user->username());
+        if (pool == nullptr || pool->total_count() == 0) {
+            return false;
+        }
+
+        return true;
     }
 
     void
     ClientSession::_create_primary_server_session()
     {
-        // see if any primary session pool exists for this user/database combo
-        // if not, create a new one
         DatabaseInstancePtr primary = _server->get_primary_instance();
-        assert (primary != nullptr);
-        if (primary->get_pool(_database, _user->username()) != nullptr) {
-            return;
-        }
 
         // create a new server session; will initiate the connection to the server
-        ServerSessionPtr server_session = ServerSession::create(_server, _user, _database, primary, REPLICA);
-        if (server_session == nullptr) {
-            SPDLOG_ERROR("Failed to create server session");
-            _state = ERROR;
-            return;
-        }
+        SPDLOG_DEBUG("Allocating new server session: {}:{}", _database, _user->username());
+        ServerSessionPtr server_session = primary->allocate_session(_server, _user, _database);
 
         // register server session connection with server
         _server->register_session(server_session);
@@ -538,7 +548,8 @@ namespace springtail {
         SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
         notify_server(msg, server_session);
 
-        // at this point we'll return through process()
+        // at this point we'll return through _process_message with
+        // a message of SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
         // most likely with _waiting_on_session set, in which case this
         // session will be removed from the server poll list
     }
@@ -584,6 +595,11 @@ namespace springtail {
 
         // free login info
         _login.reset();
+
+        // set state to ready
+        _state = READY;
+
+        SPDLOG_DEBUG("Client session auth done, ready for queries");
     }
 
     void
@@ -772,10 +788,13 @@ namespace springtail {
     ClientSession::_select_session_and_notify(Session::Type type,
                                               SessionMsgPtr pending_msg)
     {
+        SPDLOG_DEBUG("Selecting server session: type={}", (int8_t)type);
+
         // if in a transaction and have an associated session, use that
         if (_in_transaction && get_associated_session() != nullptr) {
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
             notify_server(pending_msg, session);
+            SPDLOG_DEBUG("Using associated session: id={}", session->id());
             return session;
         }
 
@@ -794,8 +813,10 @@ namespace springtail {
         ServerSessionPtr session = instance->get_session(_database, _user->username());
         if (session == nullptr) {
             // need to allocate a new session
-            session = instance->allocate_session(_server, _user, _database, type);
+            SPDLOG_DEBUG("Allocating new server session: {}:{}", _database, _user->username());
+            session = instance->allocate_session(_server, _user, _database);
         }
+        SPDLOG_DEBUG("Got server session: id={}, is_ready={}", session->id(), session->is_ready());
 
         if (session->is_ready()) {
             // session is ready, we can use it
