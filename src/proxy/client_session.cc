@@ -56,6 +56,7 @@ namespace springtail {
         assert(server_session != nullptr);
 
         // clear associated session from the client session
+        clear_waiting_on_session();
         clear_associated_session();
 
         // release session back to instance pool
@@ -122,13 +123,14 @@ namespace springtail {
         // get any pending messages for the server, and clear them
         SessionMsgPtr pending_msg = get_pending_msg();
         if (pending_msg != nullptr) {
+            SPDLOG_DEBUG("Found pending message, sending to server session");
             assert(get_associated_session() != nullptr);
             notify_server(pending_msg, std::static_pointer_cast<ServerSession>(get_associated_session()));
-        }
-
-        // release server session if not in a transaction
-        if (!_in_transaction) {
-            _release_server_session();
+        } else {
+            // release server session if not in a transaction
+            if (!_in_transaction) {
+                _release_server_session();
+            }
         }
     }
 
@@ -185,10 +187,7 @@ namespace springtail {
     {
         char buffer[8];
         ssize_t n = _connection->read(buffer, 8);
-        if (n <= 0) {
-            _state = ERROR;
-            return;
-        }
+        assert(n == 8);
 
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
@@ -234,12 +233,12 @@ namespace springtail {
         ssize_t n = _connection->read(buffer, remaining);
         assert(n == remaining);
 
-        Buffer _read_buffer(buffer, remaining);
+        Buffer read_buffer(buffer, remaining, remaining);
 
         // seems to be a trailing null byte on the end
-        while (_read_buffer.remaining() > 0) {
-            key = _read_buffer.get_string();
-            value = _read_buffer.get_string();
+        while (read_buffer.remaining() > 1) {
+            key = read_buffer.get_string();
+            value = read_buffer.get_string();
 
             SPDLOG_DEBUG("Parameter: {}={}", key, value);
 
@@ -250,7 +249,7 @@ namespace springtail {
             }
         }
         // read last null byte
-        char c = _read_buffer.get();
+        char c = read_buffer.get();
         assert(c == '\0');
 
         // get user info and store it
@@ -350,7 +349,7 @@ namespace springtail {
             char code = buffer->get();
             assert(code == 'p');
 
-            int32_t msg_length = buffer->get32();
+            int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
             SPDLOG_DEBUG("Auth continue: msg_length={}", msg_length);
 

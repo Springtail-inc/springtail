@@ -208,7 +208,7 @@ namespace springtail {
                 _send_to_remote_session(code, 1, &status);
 
                 // notify client session that we are ready for query
-                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY);
+                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, status);
                 notify_client(msg);
 
                 break;

@@ -150,7 +150,7 @@ namespace springtail {
 
         // read at least 5 bytes, more if available, read into
         // existing buffer to avoid doing multiple system calls
-        ssize_t n = _connection->read(buffer, 5);
+        ssize_t n = _connection->read(buffer, 5);// 1024, 5);
         assert(n >= 5);
 
         ssize_t msg_length = 0;
@@ -160,6 +160,7 @@ namespace springtail {
             // message length includes length field but not code byte
             // so really msg_length -= 4
             msg_length = recvint32(buffer + offset + 1) + 1;
+            SPDLOG_DEBUG("Read message length: {}", msg_length);
 
             // allocate a buffer from the buffer pool and copy data in
             BufferPtr bufferp = blist.get(msg_length);
@@ -175,9 +176,10 @@ namespace springtail {
         // if we didn't get all the data for the last buffer
         if (offset > n) {
             // read remaining data into tail buffer
-            SPDLOG_DEBUG("Need to read more data for message, this may block");
+            SPDLOG_DEBUG("Need to read more data for message: {}", offset-n);
             BufferPtr tail = blist.buffers.back();
             int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
+            tail->incr_size(rd);
             assert(rd == offset-n);
         }
     }

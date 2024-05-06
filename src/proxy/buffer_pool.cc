@@ -40,8 +40,7 @@ namespace springtail {
         }
 
         // can't use make_shared because constructor is private
-        Buffer *buffer = new Buffer(size);
-        return std::shared_ptr<Buffer>(buffer);
+        return Buffer::create(size);
     }
 
     void

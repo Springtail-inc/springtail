@@ -69,8 +69,11 @@ namespace springtail {
     /** Class representing a single buffer, holding a single packet/message worth of data */
     class Buffer : public std::enable_shared_from_this<Buffer> {
     public:
-        /** Construct a buffer from a pre-allocated buffer */
-        Buffer(char *buffer, int size) : _capacity(size), _buffer(buffer), _dynamic(false) {}
+        /** Construct a buffer from a pre-allocated buffer, optionally specifying data size */
+        Buffer(char *buffer, int capacity, int data_size=0)
+            : _capacity(capacity), _data_size(data_size),
+              _buffer(buffer), _dynamic(false)
+        {}
 
         Buffer(const Buffer&) = delete;
         Buffer& operator=(const Buffer&) = delete;
@@ -121,7 +124,13 @@ namespace springtail {
 
         /** Set the size of data contents, e.g., if data is copied in */
         void set_size(int size) {
+            assert (size <= _capacity);
             _data_size = size;
+        }
+
+        void incr_size(int size) {
+            assert(_data_size + size <= _capacity);
+            _data_size += size;
         }
 
         void put(char byte) {
@@ -207,6 +216,14 @@ namespace springtail {
     private:
         /** Dynamically allocate a buffer of a certain size */
         Buffer(int size) : _capacity(size), _dynamic(true) { _buffer = new char[size]; }
+
+        /** Factory method to create a buffer */
+        static BufferPtr create(int size) {
+            struct make_shared_enabler : public Buffer {
+                make_shared_enabler(int size) : Buffer(size) {}
+            };
+            return std::make_shared<make_shared_enabler>(size);
+        }
 
         /** capacity in bytes of buffer, max it can hold */
         int _capacity=0;
