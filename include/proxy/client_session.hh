@@ -5,7 +5,6 @@
 #include <utility>
 
 #include <proxy/session.hh>
-#include <proxy/request_handler.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/md5.h>

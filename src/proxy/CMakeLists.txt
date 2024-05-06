@@ -13,7 +13,6 @@ set(PROXY_SOURCES
     client_session.cc
     server_session.cc
     user_mgr.cc
-    request_handler.cc
     parser.cc
     buffer_pool.cc
 )

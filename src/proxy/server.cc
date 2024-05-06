@@ -35,8 +35,7 @@ namespace springtail {
                              const std::filesystem::path &cert_file,
                              const std::filesystem::path &key_file,
                              bool enable_ssl)
-      : _request_handler(std::make_shared<ProxyRequestHandler>()),
-        _user_mgr(std::make_shared<UserMgr>()),
+      : _user_mgr(std::make_shared<UserMgr>()),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl)
     {

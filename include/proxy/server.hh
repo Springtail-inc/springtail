@@ -13,7 +13,6 @@
 #include <common/thread_pool.hh>
 
 #include <proxy/connection.hh>
-#include <proxy/request_handler.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
 
@@ -112,8 +111,6 @@ namespace springtail {
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
-
-        ProxyRequestHandlerPtr _request_handler;
 
         UserMgrPtr _user_mgr;                ///< user manager object
 
