@@ -15,7 +15,11 @@ namespace {
     class StorageCache_Test : public testing::Test {
     protected:
         static void SetUpTestSuite() {
-            std::filesystem::remove_all("/tmp/springtail/table");
+            _cleanup_files();
+        }
+
+        static void TearDownTestSuite() {
+            _cleanup_files();
         }
 
         void SetUp() override {
@@ -24,10 +28,18 @@ namespace {
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
                     { "table_id", 0, SchemaType::INT64, false },
-                    { "name", 1, SchemaType::TEXT, false },
-                    { "offset", 2, SchemaType::INT64, false }
+                    { "name", 1, SchemaType::TEXT, false, 0 },
+                    { "offset", 2, SchemaType::INT64, false, 1 }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
+
+            std::vector<SchemaColumn> columns2({
+                    { "table_id", 0, SchemaType::INT64, false },
+                    { "name", 1, SchemaType::TEXT, false, 0 },
+                    { "offset", 2, SchemaType::INT64, false },
+                    { "index", 3, SchemaType::INT16, false, 1 }
+                });
+            _schema2 = std::make_shared<ExtentSchema>(columns2);
 
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();
@@ -41,46 +53,27 @@ namespace {
 
         }
 
-        ExtentSchemaPtr _schema;
+        static void _cleanup_files() {
+            std::filesystem::remove("/tmp/test_cache_Basic");
+            std::filesystem::remove("/tmp/test_cache_Insert50K");
+        }
+
+        ExtentSchemaPtr _schema, _schema2;
         FieldArrayPtr _fields, _csv_fields;
     };
 
     TEST_F(StorageCache_Test, Basic) {
         auto cache = StorageCache::get_instance();
-
-        // XID / LSN for operations
+        std::filesystem::path file("/tmp/test_cache_Basic");
         uint64_t xid = 1;
-        uint64_t lsn = 0;
-        uint32_t table_id = 100000;
-        std::filesystem::path table_dir(fmt::format("/tmp/springtail/table/{}", table_id));
-        std::filesystem::path file = table_dir / "raw";
-
-        // create a table
-        PgMsgTable create_msg;
-        create_msg.lsn = 0;
-        create_msg.oid = table_id;
-        create_msg.xid = xid;
-        create_msg.schema = "public";
-        create_msg.table = "test";
-        create_msg.columns.push_back({"table_id", "int8", std::nullopt, 0, 0, true, false, false});
-        create_msg.columns.push_back({"name", "text", std::nullopt, 1, 0, false, true, false});
-        create_msg.columns.push_back({"offset", "int8", "0", 2, 0, false, false, false});
-
-        TableMgr::get_instance()->create_table(xid++, lsn, create_msg);
-
-        // make sure that the table directory exists
-        std::filesystem::create_directory(table_dir);
-
-        // get the table schema
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid, constant::INDEX_DATA, ExtentType());
 
         // get() an empty Page
         auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
 
         // populate data into the Page
         csv::CSVReader reader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            page->insert(std::make_shared<FieldTuple>(_csv_fields, r), schema);
+        for (auto &r : reader) {
+            page->insert(std::make_shared<FieldTuple>(_csv_fields, r), _schema);
         }
 
         auto &&offsets = page->flush(xid++, ExtentType());
@@ -111,33 +104,9 @@ namespace {
 
     TEST_F(StorageCache_Test, Insert50K) {
         auto cache = StorageCache::get_instance();
+        std::filesystem::path file("/tmp/test_cache_Insert50K");
+        uint64_t xid = 1;
 
-        // XID / LSN for operations
-        uint64_t xid = 3;
-        uint64_t lsn = 0;
-        uint32_t table_id = 100001;
-        std::filesystem::path table_dir(fmt::format("/tmp/springtail/table/{}", table_id));
-        std::filesystem::path file = table_dir / "raw";
-
-        // create a table
-        PgMsgTable create_msg;
-        create_msg.lsn = 0;
-        create_msg.oid = table_id;
-        create_msg.xid = xid;
-        create_msg.schema = "public";
-        create_msg.table = "test2";
-        create_msg.columns.push_back({"table_id", "int8", std::nullopt, 0, 0, true, false, false});
-        create_msg.columns.push_back({"name", "text", std::nullopt, 1, 0, false, true, false});
-        create_msg.columns.push_back({"offset", "int8", "0", 2, 0, false, false, false});
-        create_msg.columns.push_back({"index", "int2", std::nullopt, 3, 1, false, true, false});
-
-        TableMgr::get_instance()->create_table(xid++, lsn, create_msg);
-
-        // make sure that the table directory exists
-        std::filesystem::create_directory(table_dir);
-
-        // get the table schema
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid, constant::INDEX_DATA, ExtentType());
         // get() an empty Page
         auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
 
@@ -148,7 +117,7 @@ namespace {
                 auto extra = std::make_shared<FieldArray>();
                 extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
-                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), schema);
+                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema2);
             }
         }
 

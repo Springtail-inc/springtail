@@ -72,6 +72,7 @@ namespace springtail {
         ExtentHeader(ExtentType type, uint64_t xid, uint32_t row_size, uint64_t prev = 0)
             : type(type),
               xid(xid),
+              row_size(row_size),
               prev_offset(prev)
         { }
 
