@@ -71,16 +71,19 @@ namespace {
         // make sure that the table directory exists
         std::filesystem::create_directory(table_dir);
 
+        // get the table schema
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid, constant::INDEX_DATA, ExtentType());
+
         // get() an empty Page
-        auto page = cache->get(file, constant::UNKNOWN_EXTENT, table_id, xid);
+        auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
 
         // populate data into the Page
         csv::CSVReader reader("test_btree_simple.csv");
         for (auto &&r : reader) {
-            page->insert(std::make_shared<FieldTuple>(_csv_fields, r));
+            page->insert(std::make_shared<FieldTuple>(_csv_fields, r), schema);
         }
 
-        auto &&offsets = page->flush(xid++, ExtentType(), table_id, constant::INDEX_DATA);
+        auto &&offsets = page->flush(xid++, ExtentType());
 
         // put() the mutated Page
         cache->put(page);
@@ -90,7 +93,7 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, table_id, xid);
+            page = cache->get(file, offset, xid);
 
             for (auto row : (*page)) {
                 if (prev != "") {
@@ -133,8 +136,10 @@ namespace {
         // make sure that the table directory exists
         std::filesystem::create_directory(table_dir);
 
+        // get the table schema
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid, constant::INDEX_DATA, ExtentType());
         // get() an empty Page
-        auto page = cache->get(file, constant::UNKNOWN_EXTENT, table_id, xid);
+        auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
 
         // populate data into the Page
         for (int i = 0; i < 10; i++) {
@@ -143,11 +148,11 @@ namespace {
                 auto extra = std::make_shared<FieldArray>();
                 extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
-                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r));
+                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), schema);
             }
         }
 
-        auto &&offsets = page->flush(xid++, ExtentType(), table_id, constant::INDEX_DATA);
+        auto &&offsets = page->flush(xid++, ExtentType());
 
         // put() the mutated Page
         cache->put(page);
@@ -157,7 +162,7 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, table_id, xid);
+            page = cache->get(file, offset, xid);
 
             for (auto row : (*page)) {
                 if (prev != "") {

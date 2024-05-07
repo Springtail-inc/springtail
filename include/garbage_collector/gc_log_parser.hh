@@ -322,7 +322,8 @@ namespace springtail {
              * Packs the provided Postgres tuple into an Extent with a single row containing the data.
              * 
              */
-            std::shared_ptr<MutableTuple> _pack_extent(ExtentPtr extent, const PgMsgTupleData &data);
+            std::shared_ptr<MutableTuple> _pack_extent(ExtentPtr extent, const PgMsgTupleData &data,
+                                                       ExtentSchemaPtr schema);
 
         private:
             ParserQueuePtr _parser_queue;

@@ -380,7 +380,7 @@ namespace springtail {
         auto search_key = sys_tbl::TableNames::Secondary::key_tuple(table_id, xid, lsn);
 
         // find the row that matches the name of the table_id at the given XID/LSN
-        auto row_i = table_names_t->index(1)->inverse_upper_bound(search_key, xid);
+        auto row_i = table_names_t->index(1)->inverse_upper_bound(search_key);
         if (row_i == table_names_t->index(1)->end() ||
             schema->get_field("table_id")->get_uint64(*row_i) != table_id ||
             schema->get_field("exists")->get_bool(*row_i) == false) {

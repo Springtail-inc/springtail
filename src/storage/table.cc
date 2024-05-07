@@ -38,7 +38,7 @@ namespace springtail {
                 auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
                 auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
                 auto response = root_handle->read(0);
-                auto extent = std::make_shared<Extent>(_roots_schema, response->data);
+                auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
                     root_offsets.push_back(_roots_root_f->get_uint64(row));
                 }
@@ -60,10 +60,8 @@ namespace springtail {
         SchemaColumn row_c("row_id", 0, SchemaType::UINT32, false);
         auto primary_schema = _schema->create_schema(primary_key, { extent_c });
         _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
-                                                 _primary_key,
-                                                 primary_schema,
-                                                 _cache,
                                                  xid,
+                                                 primary_schema,
                                                  root_offsets[0]);
 
         _primary_extent_id_f = primary_schema->get_field("extent_id");
@@ -78,10 +76,8 @@ namespace springtail {
             secondary_key.push_back("row_id");
 
             auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
-                                                 secondary_key,
-                                                 secondary_schema,
-                                                 _cache,
                                                  xid,
+                                                 secondary_schema,
                                                  root_offsets[i + 1]);
             _secondary_indexes.push_back(btree);
         }
@@ -97,7 +93,7 @@ namespace springtail {
     Table::primary_lookup(TuplePtr tuple)
     {
         // always returns an iterator to a leaf entry where the key *could* exist in the table
-        auto &&i = _primary_index->lower_bound(tuple, _xid, true);
+        auto &&i = _primary_index->lower_bound(tuple, true);
         if (i == _primary_index->end()) {
             // this can only happen if the table is empty, in which case we need to use a
             // special extent_id that indicates an append
@@ -145,7 +141,7 @@ namespace springtail {
     Table::Iterator
     Table::begin()
     {
-        auto &&index_i = _primary_index->begin(_xid);
+        auto &&index_i = _primary_index->begin();
         if (index_i == _primary_index->end()) {
             return end();
         }
@@ -173,7 +169,7 @@ namespace springtail {
     Table::_read_extent(uint64_t extent_id) const
     {
         auto response = _handle->read(extent_id);
-        return std::make_shared<Extent>(_schema, response->data);
+        return std::make_shared<Extent>(response->data);
     }
 
 
@@ -210,7 +206,7 @@ namespace springtail {
                 auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
                 auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
                 auto response = root_handle->read(0);
-                auto extent = std::make_shared<Extent>(_roots_schema, response->data);
+                auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
                     root_offsets.push_back(_roots_root_f->get_uint64(row));
                 }
@@ -239,10 +235,8 @@ namespace springtail {
         _primary_index->set_xid(_target_xid);
 
         _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
-                                                  _primary_key,
-                                                  primary_schema,
-                                                  read_cache,
                                                   _target_xid,
+                                                  primary_schema,
                                                   root_offsets[0]);
 
         _primary_extent_id_f = primary_schema->get_field("extent_id");
@@ -422,7 +416,7 @@ namespace springtail {
         }
 
         // store the roots into a look-aside root file
-        auto extent = std::make_shared<Extent>(_roots_schema, ExtentType(), _target_xid);
+        auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
         for (auto root : roots) {
             auto &&row = extent->append();
             _roots_root_f->set_uint64(row, root);
@@ -483,7 +477,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid, true);
+        auto i = _primary_lookup->lower_bound(search_key, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
@@ -516,7 +510,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid, true);
+        auto i = _primary_lookup->lower_bound(search_key, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
@@ -549,7 +543,7 @@ namespace springtail {
                                     uint64_t xid)
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
-        auto i = _primary_lookup->lower_bound(key, xid, true);
+        auto i = _primary_lookup->lower_bound(key, true);
 
         // if the key isn't available, then it may be in the 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
@@ -576,7 +570,7 @@ namespace springtail {
 
         // scan the index
         bool found = false;
-        auto &&i = _primary_lookup->begin(xid);
+        auto &&i = _primary_lookup->begin();
         while (!found && i != _primary_lookup->end()) {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
@@ -624,7 +618,7 @@ namespace springtail {
     {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto search_key = _schema->tuple_subset(value, _primary_key);
-        auto i = _primary_lookup->lower_bound(search_key, xid, true);
+        auto i = _primary_lookup->lower_bound(search_key, true);
 
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {

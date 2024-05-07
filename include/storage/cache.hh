@@ -220,6 +220,14 @@ namespace springtail {
             CacheExtentPtr get(uint64_t cache_id);
 
             /**
+             * Increment the use count on a cache extent.
+             */
+            void use(CacheExtentPtr extent) {
+                boost::unique_lock lock(_mutex);
+                ++(extent->_use_count);
+            }
+
+            /**
              * Releases an extent back to the cache, reducing it's use count.
              *
              * @param extent The extent to release back to the cache.
@@ -248,12 +256,9 @@ namespace springtail {
 
             void flush(CacheExtentPtr extent);
             void remove_empty(CacheExtentPtr extent);
-            std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent);
+            std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
 
-            CacheExtentPtr get_empty(const std::filesystem::path &file,
-                                     uint64_t table_id,
-                                     uint64_t index_id,
-                                     uint64_t xid);
+            CacheExtentPtr get_empty(const std::filesystem::path &file, uint64_t xid, ExtentSchemaPtr schema);
 
         private:
             CacheExtentPtr _get_clean(const CacheKey &key);
@@ -322,11 +327,9 @@ namespace springtail {
 
         public:
             Page(const std::filesystem::path &file, uint64_t extent_id,
-                 uint64_t table_id, uint64_t index_id,
                  uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
 
-            Page(const std::filesystem::path &file,
-                 uint64_t table_id, uint64_t index_id, uint64_t xid);
+            Page(const std::filesystem::path &file, uint64_t xid);
 
             /**
              * Writes all of the dirty in-memory extents to disk and returns the full set of extent
@@ -336,7 +339,7 @@ namespace springtail {
              *                  considered valid from this XID forward.
              * @return The ordered list of extent IDs that represent the data of the Page.
              */
-            std::vector<uint64_t> flush(uint64_t flush_xid, ExtentType type, uint64_t table_id, uint64_t index_id);
+            std::vector<uint64_t> flush(uint64_t flush_xid, ExtentType type);
 
             /**
              * Returns the cache key of this page.
@@ -407,9 +410,16 @@ namespace springtail {
                     }
                 }
 
-                // no copying
-                SafeExtent(const SafeExtent &) = delete;
-                SafeExtent &operator=(const SafeExtent &) = delete;
+                // copy causes the use count to be incremented
+                SafeExtent(const SafeExtent &other) {
+                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    _extent = other._extent;
+                }
+                SafeExtent &operator=(const SafeExtent &other) {
+                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    _extent = other._extent;
+                    return *this;
+                }
 
                 // move handling
                 SafeExtent(SafeExtent &&other) {
@@ -464,6 +474,23 @@ namespace springtail {
                 using pointer           = const Extent::Row *;  // or also value_type*
                 using reference         = const Extent::Row &;  // or also value_type&
 
+                // Iterator(const Iterator &rhs)
+                //     : _page(rhs._page),
+                //       _extent_i(rhs._extent_i),
+                //       _extent(_page->_file, *_extent_i),
+                //       _row(rhs._row)
+                // { }
+
+                // Iterator &operator=(const Iterator &rhs)
+                // {
+                //     _page = rhs._page;
+                //     _extent_i = rhs._extent_i;
+                //     _extent = SafeExtent(_page->_file, *_extent_i);
+                //     _row = rhs._row;
+
+                //     return *this;
+                // }
+
                 reference operator*() const {
                     return *_row;
                 }
@@ -498,6 +525,9 @@ namespace springtail {
                     return *this;
                 }
 
+                Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+
+
                 // Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
                 Iterator &operator--() {
                     // try to move to the prev row
@@ -520,7 +550,9 @@ namespace springtail {
                     return *this;
                 }
 
-                bool operator==(const Iterator &rhs) {
+                Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
+
+                bool operator==(const Iterator &rhs) const {
                     if (_page == rhs._page && _extent_i == rhs._extent_i) {
                         return (_extent_i == _page->_extents.end() || _row == rhs._row);
                     }
@@ -573,6 +605,16 @@ namespace springtail {
             }
 
             /**
+             * Returns an iterator to the last row of the page.
+             */
+            Iterator last() {
+                boost::shared_lock lock(_mutex);
+                SafeExtent extent(_file, _extents.back());
+                auto row_i = (*extent)->last();
+                return Iterator(this, --_extents.end(), std::move(extent), row_i);
+            }
+
+            /**
              * Returns an iterator past the last row of the page.
              */
             Iterator end() {
@@ -584,28 +626,36 @@ namespace springtail {
              * Returns the first row of the page with columns >= the matching columns of the provided tuple.
              * @param tuple A tuple holding data that matches the sort columns of the extent.
              */
-            Iterator lower_bound(TuplePtr tuple);
+            Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Returns the extent header data of the original extent the Page is based on.
+             */
+            ExtentHeader header() const {
+                SafeExtent extent(_file, _extents.front());
+                return (*extent)->header();
+            }
 
         public:
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page
 
-            void insert(TuplePtr tuple);
-            void append(TuplePtr tuple);
-            void upsert(TuplePtr tuple);
-            void update(TuplePtr tuple);
-            void remove(TuplePtr key);
+            void insert(TuplePtr tuple, ExtentSchemaPtr schema);
+            void append(TuplePtr tuple, ExtentSchemaPtr schema);
+            void upsert(TuplePtr tuple, ExtentSchemaPtr schema);
+            void update(TuplePtr tuple, ExtentSchemaPtr schema);
+            void remove(TuplePtr key, ExtentSchemaPtr schema);
 
         private:
             // HELPER FUNCTIONS
-            void _check_split(std::vector<ExtentRef>::iterator pos, CacheExtentPtr extent);
+            void _check_split(std::vector<ExtentRef>::iterator pos, CacheExtentPtr extent, ExtentSchemaPtr schema);
 
         private:
             /** A count of the number of users of this page. */
             std::atomic<uint16_t> _use_count;
 
             /** A mutex to protect access. */
-            boost::shared_mutex _mutex;
+            mutable boost::shared_mutex _mutex;
 
             /** The extents that make up this page. */
             std::vector<ExtentRef> _extents;
@@ -633,10 +683,6 @@ namespace springtail {
 
             /** Callback to be issued if the page is evicted. */
             std::function<bool(std::shared_ptr<Page>)> _evict_callback;
-
-            // table and index IDs?
-            uint64_t _table_id;
-            uint64_t _index_id;
         };
         using PagePtr = std::shared_ptr<Page>;
 
@@ -652,11 +698,9 @@ namespace springtail {
                   _size(0)
             { }
 
-            PagePtr get(const std::filesystem::path &file,
-                        uint64_t extent_id, uint64_t table_id, uint64_t index_id, uint64_t xid);
+            PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
 
-            PagePtr get_empty(const std::filesystem::path &file,
-                              uint64_t table_id, uint64_t index_id, uint64_t xid);
+            PagePtr get_empty(const std::filesystem::path &file, uint64_t xid);
 
             void update_size(PagePtr page);
 
@@ -670,7 +714,6 @@ namespace springtail {
             void _try_evict(PagePtr page);
 
             PagePtr _create(const std::filesystem::path &file, uint64_t extent_id,
-                            uint64_t table_id, uint64_t index_id,
                             uint64_t xid, const std::vector<uint64_t> &offsets);
 
             void _make_space(uint32_t size);
@@ -718,10 +761,8 @@ namespace springtail {
          */
         PagePtr get(const std::filesystem::path &file,
                     uint64_t extent_id,
-                    uint64_t table_id, 
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
-                    uint64_t index_id = constant::INDEX_DATA,
                     bool do_rollforward = false);
 
         // // get a page at the same xid at which the extent_id was identified

@@ -84,14 +84,6 @@ namespace {
             return btree;
         }
 
-        std::shared_ptr<BTree>
-        _get_btree(const std::filesystem::path &name,
-                   uint64_t extent_id)
-        {
-            // construct a mutable b-tree for inserting data
-            return std::make_shared<BTree>(name, _keys, _schema, _read_cache, 1, extent_id);
-        }
-
         std::shared_ptr<Tuple>
         _create_key(const std::string &name,
                     uint64_t table_id)
@@ -113,16 +105,16 @@ namespace {
         }
 
         void
-        _verify_names(BTreePtr tree, uint64_t xid, int target) {
+        _verify_names(BTreePtr tree, int target) {
             int count = 0;
 
             std::string prev = "";
-            for (auto &&i = tree->begin(xid); i != tree->end(); ++i) {
+            for (auto row : *tree) {
                 if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(*i), prev);
+                    ASSERT_GE(_name_f->get_text(row), prev);
                 }
 
-                prev = _name_f->get_text(*i);
+                prev = _name_f->get_text(row);
                 ++count;
             }
 
@@ -130,21 +122,21 @@ namespace {
         }
 
         void
-        _verify_unique_names(BTreePtr tree, uint64_t xid, int target) {
+        _verify_unique_names(BTreePtr tree, int target) {
             int count = 0;
 
             std::string prev = "";
             std::map<std::string, int> counts;
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (_name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", _name_f->get_text(*i), prev);
+            for (auto row : *tree) {
+                if (_name_f->get_text(row) < prev) {
+                    SPDLOG_ERROR("{} < {}", _name_f->get_text(row), prev);
                 }
 
                 if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(*i), prev);
+                    ASSERT_GE(_name_f->get_text(row), prev);
                 }
 
-                prev = _name_f->get_text(*i);
+                prev = _name_f->get_text(row);
                 ++counts[prev];
                 ++count;
             }
@@ -200,11 +192,13 @@ namespace {
     };
 
     TEST_F(BTree_Test, Insert10) {
+        uint64_t xid = 0;
+
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "Insert10", 0);
+        auto btree = _create_mutable_btree(_base_dir / "Insert10", xid++);
 
         // set the XID
-        btree->set_xid(1);
+        btree->set_xid(xid++);
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
@@ -228,8 +222,8 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "Insert10", offset);
-        _verify_names(tree, 1, 10);
+        auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset);
+        _verify_names(tree, 10);
     }
 
     TEST_F(BTree_Test, InsertAll) {
@@ -259,8 +253,8 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAll", offset);
-        _verify_names(tree, 1, 5000);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAll", 1, _schema, offset);
+        _verify_names(tree, 5000);
     }
 
     TEST_F(BTree_Test, Search) {
@@ -290,18 +284,18 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // get a pointer to the read-only btree
-        auto tree = _get_btree(_base_dir / "Search", offset);
-        auto begin_i = tree->begin(1);
+        auto tree = std::make_shared<BTree>(_base_dir / "Search", 1, _schema, offset);
+        auto begin_i = tree->begin();
         auto end_i = tree->end();
 
         // search for an entry before all of the keys
         {
             auto tuple = _create_key("aaaa", 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_TRUE(find_i == end_i);
             ASSERT_TRUE(lb_i == begin_i);
@@ -313,15 +307,15 @@ namespace {
         {
             auto tuple = _create_key("aabbatini8y", 323);
 
-            auto find_i = tree->find(tuple, 1);
+            auto find_i = tree->find(tuple);
 
             ASSERT_EQ(_name_f->get_text(*find_i), "aabbatini8y");
             ASSERT_EQ(_table_id_f->get_uint64(*find_i), 323);
             ASSERT_EQ(_offset_f->get_uint64(*find_i), 6448);
 
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(lb_i, find_i);
             ASSERT_EQ(ffu_i, find_i);
@@ -332,15 +326,15 @@ namespace {
         {
             auto tuple = _create_key("mplainu", 31);
 
-            auto find_i = tree->find(tuple, 1);
+            auto find_i = tree->find(tuple);
 
             ASSERT_EQ(_table_id_f->get_uint64(*find_i), 31);
             ASSERT_EQ(_name_f->get_text(*find_i), "mplainu");
             ASSERT_EQ(_offset_f->get_uint64(*find_i), 30122);
 
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(lb_i, find_i);
             ASSERT_EQ(ffu_i, find_i);
@@ -353,10 +347,10 @@ namespace {
         {
             auto tuple = _create_key("m", 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(find_i, end_i);
 
@@ -375,10 +369,10 @@ namespace {
         {
             auto tuple = _create_key("zzzzzzzzzz", 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(find_i, end_i);
             ASSERT_EQ(lb_i, end_i);
@@ -402,7 +396,7 @@ namespace {
         _populate_btree(btree);
 
         // finalize the tree
-        uint64_t offset = btree->finalize();
+        uint64_t offset_1 = btree->finalize();
 
         // set the next XID
         btree->set_xid(2);
@@ -419,16 +413,17 @@ namespace {
         }
 
         // finalize the tree
-        offset = btree->finalize();
+        auto offset_2 = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAndRemove", offset);
 
         // check XID 1 for all entries
-        _verify_names(tree, 1, 5000);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
 
         // check XID 2 for half the entries
-        _verify_names(tree, 2, 2500);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 2, _schema, offset_2);
+        _verify_names(tree, 2500);
     }
 
     TEST_F(BTree_Test, InsertAndRemoveAll) {
@@ -442,7 +437,7 @@ namespace {
         _populate_btree(btree);
 
         // finalize the tree
-        uint64_t offset = btree->finalize();
+        uint64_t offset_1 = btree->finalize();
 
         // set the next XID
         btree->set_xid(2);
@@ -455,16 +450,17 @@ namespace {
         }
 
         // finalize the tree
-        offset = btree->finalize();
+        auto offset_2 = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAndRemoveAll", offset);
 
         // check XID 1 for all entries
-        _verify_names(tree, 1, 5000);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
 
         // check XID 2 for no entries
-        _verify_names(tree, 2, 0);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 2, _schema, offset_2);
+        _verify_names(tree, 0);
     }
 
     TEST_F(BTree_Test, InsertSame) {
@@ -485,18 +481,18 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = _get_btree(_base_dir / "InsertSame", offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertSame", 1, _schema, offset);
 
         // check for all entries
         int count = 0;
 
         std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
+        for (auto row : *tree) {
             if (prev != "") {
-                ASSERT_EQ(_name_f->get_text(*i), prev);
+                ASSERT_EQ(_name_f->get_text(row), prev);
             }
 
-            prev = _name_f->get_text(*i);
+            prev = _name_f->get_text(row);
             ++count;
         }
 
@@ -518,10 +514,10 @@ namespace {
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = _get_btree(_base_dir / "InsertMany", offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertMany", 1, _schema, offset);
 
         // check for all entries
-        _verify_names(tree, 1, 50000);
+        _verify_names(tree, 50000);
     }
 
     TEST_F(BTree_Test, ThreadedInserts) {
@@ -558,10 +554,10 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = _get_btree(_base_dir / "ThreadedInserts", offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInserts", 1, _schema, offset);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 50000);
+            _verify_unique_names(tree, 50000);
         });
 
         // run the phases using 4 threads (just one phase here)
@@ -600,10 +596,10 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertAndRemove", 1, _schema, offset);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 5000);
+            _verify_unique_names(tree, 5000);
 
             // set the next XID
             btree->set_xid(2);
@@ -627,10 +623,10 @@ namespace {
             uint64_t offset = btree->finalize();
             std::cout << offset << std::endl;
 
-            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertAndRemove", 2, _schema, offset);
 
             // check for all entries
-            _verify_names(tree, 2, 0);
+            _verify_names(tree, 0);
         });
 
         // run the phases using 4 threads (just one phase here)
@@ -678,16 +674,16 @@ namespace {
             uint64_t offset2 = btree2->finalize();
 
             // check the first file
-            auto tree = _get_btree(_base_dir / "ThreadedInsertsOne", offset1);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsOne", 1, _schema, offset1);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 50000);
+            _verify_unique_names(tree, 50000);
 
             // check the second file
-            tree = _get_btree(_base_dir / "ThreadedInsertsTwo", offset2);
+            tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsTwo", 1, _schema, offset2);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 50000);
+            _verify_unique_names(tree, 50000);
         });
 
         // run the phases using 4 threads (just one phase here)

@@ -179,7 +179,7 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->index(1)->begin(1) == table->index(1)->end());
+        ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
     }
 
     TEST_F(Table_Test, Inserts) {
@@ -310,8 +310,8 @@ namespace {
         count = 0;
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
-        for (auto row_i = secondary->begin(1); row_i != secondary->end(); ++row_i) {
-            auto current = table_id_f->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -399,8 +399,8 @@ namespace {
         count = 0;
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = table_id_f->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -482,8 +482,8 @@ namespace {
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -570,8 +570,8 @@ namespace {
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -666,8 +666,8 @@ namespace {
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -752,8 +752,8 @@ namespace {
             count = 0;
             uint64_t table_id = 0;
             auto table_id_f = secondary->get_schema()->get_field("table_id");
-            for (auto row_i = secondary->begin(target_xid); row_i != secondary->end(); ++row_i) {
-                auto current = table_id_f->get_uint64(*row_i);
+            for (auto row : *secondary) {
+                auto current = table_id_f->get_uint64(row);
                 ASSERT_LE(table_id, current);
                 table_id = current;
                 ++count;

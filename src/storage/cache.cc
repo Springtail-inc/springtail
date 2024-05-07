@@ -46,10 +46,8 @@ namespace springtail {
     StorageCache::PagePtr
     StorageCache::get(const std::filesystem::path &file,
                       uint64_t extent_id,
-                      uint64_t table_id,
                       uint64_t access_xid,
                       uint64_t target_xid,
-                      uint64_t index_id,
                       bool do_rollforward)
     {
         // note: target_xid must be at or beyond the access_xid
@@ -62,21 +60,21 @@ namespace springtail {
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return _page_cache->get_empty(file, table_id, index_id, target_xid);
+            return _page_cache->get_empty(file, target_xid);
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return _page_cache->get(file, extent_id, table_id, index_id, access_xid);
+            return _page_cache->get(file, extent_id, access_xid);
         }
 
-        // if the target is ahead of the access, but there is no provided table_id then it means the
-        // caller is going to perform the mutations (for non-data extents)
+        // if the target is ahead of the access, but there is roll-forward request, then it means
+        // the caller is going to perform the roll-forward mutations (for non-data extents)
         if (!do_rollforward) {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return _page_cache->get(file, extent_id, table_id, index_id, target_xid);
+            return _page_cache->get(file, extent_id, target_xid);
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -118,8 +116,6 @@ namespace springtail {
     StorageCache::PagePtr
     StorageCache::PageCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id,
-                                 uint64_t table_id,
-                                 uint64_t index_id,
                                  uint64_t xid)
     {
         boost::unique_lock lock(_mutex);
@@ -131,19 +127,17 @@ namespace springtail {
         }
 
         // note: not in the cache, need to create a new Page
-        return _create(file, extent_id, table_id, index_id, xid, { extent_id });
+        return _create(file, extent_id, xid, { extent_id });
     }
 
     StorageCache::PagePtr
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
-                                       uint64_t table_id,
-                                       uint64_t index_id,
                                        uint64_t xid)
     {
         boost::unique_lock lock(_mutex);
 
         _make_space(1);
-        return std::make_shared<Page>(file, table_id, index_id, xid);
+        return std::make_shared<Page>(file, xid);
     }
 
     void
@@ -178,8 +172,6 @@ namespace springtail {
     StorageCache::PagePtr
     StorageCache::PageCache::_create(const std::filesystem::path &file,
                                      uint64_t extent_id,
-                                     uint64_t table_id,
-                                     uint64_t index_id,
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
@@ -187,7 +179,7 @@ namespace springtail {
         _make_space(1);
 
         // create the page object with the given <file, extent_id> valid at the requested XID
-        auto page = std::make_shared<Page>(file, extent_id, table_id, index_id, xid, xid, offsets);
+        auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
 
         if (extent_id != constant::UNKNOWN_EXTENT) {
             // add it to the cache; note: use count starts at 1
@@ -296,8 +288,6 @@ namespace springtail {
 
     StorageCache::Page::Page(const std::filesystem::path &file,
                              uint64_t extent_id,
-                             uint64_t table_id,
-                             uint64_t index_id,
                              uint64_t start_xid,
                              uint64_t end_xid,
                              const std::vector<uint64_t> &offsets)
@@ -306,38 +296,28 @@ namespace springtail {
           _file(file),
           _extent_id(extent_id),
           _start_xid(start_xid),
-          _end_xid(end_xid),
-          _table_id(table_id),
-          _index_id(index_id)
+          _end_xid(end_xid)
     {
         for (auto offset : offsets) {
             _extents.push_back({ offset, false });
         }
-
-        _schema = SchemaMgr::get_instance()->get_extent_schema(table_id, _start_xid, index_id, ExtentType());
     }
 
     StorageCache::Page::Page(const std::filesystem::path &file,
-                             uint64_t table_id,
-                             uint64_t index_id,
                              uint64_t xid)
         : _use_count(1),
           _is_dirty(true),
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
-          _end_xid(xid),
-          _table_id(table_id),
-          _index_id(index_id)
+          _end_xid(xid)
     {
-        _schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid, index_id, ExtentType());
+        // intentionally empty
     }
 
     std::vector<uint64_t>
     StorageCache::Page::flush(uint64_t flush_xid,
-                              ExtentType type,
-                              uint64_t table_id,
-                              uint64_t index_id)
+                              ExtentType type)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = false;
@@ -351,13 +331,9 @@ namespace springtail {
 
                 // update the extent header
                 auto &header = (*e)->header();
-                header.type = type;
+                header.type = type; // XXX this should be set correctly already, do we need this?
                 header.xid = flush_xid;
                 header.prev_offset = _extent_id;
-
-                // XXX do we need to set these?  they should already be set correctly I think
-                header.table_id = table_id;
-                header.index_id = index_id;
 
                 // append the extent to the file
                 // XXX could do these asynchronously to get better parallelism when there are multiple extents
@@ -377,7 +353,7 @@ namespace springtail {
     }
 
     StorageCache::Page::Iterator
-    StorageCache::Page::lower_bound(TuplePtr tuple)
+    StorageCache::Page::lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
         boost::shared_lock lock(_mutex);
 
@@ -385,9 +361,9 @@ namespace springtail {
         // note: we don't use std::ranges::lower_bound() here because the projection causes the
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
-                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                         [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              SafeExtent extent(_file, ref);
-                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
@@ -400,8 +376,8 @@ namespace springtail {
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
                                               },
-                                              [this](const Extent::Row &row) {
-                                                  return FieldTuple(_schema->get_sort_fields(), row);
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
         // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
@@ -411,7 +387,8 @@ namespace springtail {
     }
 
     void
-    StorageCache::Page::insert(TuplePtr tuple)
+    StorageCache::Page::insert(TuplePtr tuple,
+                               ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -422,12 +399,12 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
             auto row = extent->append();
-            MutableTuple(extent->schema()->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
             // release back to the cache
             cache->_data_cache->put(extent);
@@ -435,13 +412,13 @@ namespace springtail {
         }
 
         // extract the key to find the insert position
-        auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
+        auto key = schema->tuple_subset(tuple, schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
-                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                         [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              SafeExtent extent(_file, ref);
-                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
 
         if (extent_i == _extents.end()) {
@@ -456,24 +433,25 @@ namespace springtail {
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
                                               },
-                                              [this](const Extent::Row &row) {
-                                                  return FieldTuple(_schema->get_sort_fields(), row);
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
         // note: row's key should *not* match the tuple's key
         assert(row_i == (*extent)->end() ||
-               !FieldTuple(_schema->get_sort_fields(), *row_i).equal(*key));
+               !FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // insert the tuple into the extent
         auto row = (*extent)->insert(row_i);
-        MutableTuple((*extent)->schema()->get_mutable_fields(), row).assign(tuple);
+        MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
         // check for split
-        _check_split(extent_i, *extent);
+        _check_split(extent_i, *extent, schema);
     }
 
     void
-    StorageCache::Page::append(TuplePtr tuple)
+    StorageCache::Page::append(TuplePtr tuple,
+                               ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -484,12 +462,12 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
             auto row = extent->append();
-            MutableTuple(extent->schema()->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
             // release back to the cache
             cache->_data_cache->put(extent);
@@ -504,14 +482,15 @@ namespace springtail {
         auto row = (*extent)->append();
 
         // set the value
-        MutableTuple((*extent)->schema()->get_mutable_fields(), row).assign(tuple);
+        MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
         // check for split
-        _check_split(extent_i, *extent);
+        _check_split(extent_i, *extent, schema);
     }
 
     void
-    StorageCache::Page::upsert(TuplePtr tuple)
+    StorageCache::Page::upsert(TuplePtr tuple,
+                               ExtentSchemaPtr schema)
     {
         boost::shared_lock lock(_mutex);
         _is_dirty = true;
@@ -522,12 +501,12 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _table_id, _index_id, _start_xid);
+            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
             auto row = extent->append();
-            MutableTuple(extent->schema()->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
             // release back to the cache
             cache->_data_cache->put(extent);
@@ -535,13 +514,13 @@ namespace springtail {
         }
 
         // extract the key to find the insert position
-        auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
+        auto key = schema->tuple_subset(tuple, schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
-                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                         [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              SafeExtent extent(_file, ref);
-                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             extent_i = --_extents.end();
@@ -555,38 +534,39 @@ namespace springtail {
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
                                               },
-                                              [this](const Extent::Row &row) {
-                                                  return FieldTuple(_schema->get_sort_fields(), row);
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
         // see if the row's key matches the tuple's key
-        if (row_i != (*extent)->end() && FieldTuple(_schema->get_sort_fields(), *row_i).equal(*key)) {
+        if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal(*key)) {
             // update the existing row
-            MutableTuple((*extent)->schema()->get_mutable_fields(), *row_i).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
         } else {
             // insert the tuple into the extent
             auto row = (*extent)->insert(row_i);
-            MutableTuple((*extent)->schema()->get_mutable_fields(), row).assign(tuple);
+            MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
         }
 
         // check for split
-        _check_split(extent_i, *extent);
+        _check_split(extent_i, *extent, schema);
     }
 
     void
-    StorageCache::Page::update(TuplePtr tuple)
+    StorageCache::Page::update(TuplePtr tuple,
+                               ExtentSchemaPtr schema)
     {
         boost::shared_lock lock(_mutex);
         _is_dirty = true;
 
         // extract the key to find the insert position
-        auto key = _schema->tuple_subset(tuple, _schema->get_sort_keys());
+        auto key = schema->tuple_subset(tuple, schema->get_sort_keys());
 
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
-                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                         [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              SafeExtent extent(_file, ref);
-                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i == _extents.end());
@@ -599,31 +579,32 @@ namespace springtail {
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
                                               },
-                                              [this](const Extent::Row &row) {
-                                                  return FieldTuple(_schema->get_sort_fields(), row);
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
         // note: row's key should match the tuple's key
-        assert(FieldTuple(_schema->get_sort_fields(), *row_i).equal(*key));
+        assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // update the existing row
-        MutableTuple((*extent)->schema()->get_mutable_fields(), *row_i).assign(tuple);
+        MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
 
         // check for split
-        _check_split(extent_i, *extent);
+        _check_split(extent_i, *extent, schema);
     }
 
     void
-    StorageCache::Page::remove(TuplePtr key)
+    StorageCache::Page::remove(TuplePtr key,
+                               ExtentSchemaPtr schema)
     {
         boost::shared_lock lock(_mutex);
         _is_dirty = true;
 
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
-                                         [this](const ExtentRef &ref, const Tuple &key) {
+                                         [this, &schema](const ExtentRef &ref, const Tuple &key) {
                                              SafeExtent extent(_file, ref);
-                                             return FieldTuple(_schema->get_sort_fields(), (*extent)->back()).less_than(key);
+                                             return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i == _extents.end());
@@ -636,12 +617,12 @@ namespace springtail {
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
                                               },
-                                              [this](const Extent::Row &row) {
-                                                  return FieldTuple(_schema->get_sort_fields(), row);
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
         // note: row's key should match the tuple's key
-        assert(FieldTuple((*extent)->schema()->get_fields(), *row_i).equal(*key));
+        assert(FieldTuple(schema->get_fields(), *row_i).equal(*key));
 
         // remove the row
         (*extent)->remove(row_i);
@@ -655,7 +636,8 @@ namespace springtail {
 
     void
     StorageCache::Page::_check_split(std::vector<ExtentRef>::iterator pos,
-                                     CacheExtentPtr extent)
+                                     CacheExtentPtr extent,
+                                     ExtentSchemaPtr schema)
     {
         // if the size of the extent is below the threshold, or it can't be split because
         // it's a single row, then return immediately
@@ -664,7 +646,7 @@ namespace springtail {
         }
 
         // split the extent
-        auto &&pair = StorageCache::get_instance()->_data_cache->split(extent);
+        auto &&pair = StorageCache::get_instance()->_data_cache->split(extent, schema);
 
         // remove the old extent reference
         pos = _extents.erase(pos);
@@ -749,9 +731,8 @@ namespace springtail {
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get_empty(const std::filesystem::path &file,
-                                       uint64_t table_id,
-                                       uint64_t index_id,
-                                       uint64_t xid)
+                                       uint64_t xid,
+                                       ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
 
@@ -759,7 +740,7 @@ namespace springtail {
         _make_space();
 
         // create an empty extent
-        ExtentHeader header(ExtentType(), xid, table_id, index_id);
+        ExtentHeader header(ExtentType(), xid, schema->row_size());
         auto extent = std::make_shared<CacheExtent>(header, file);
 
         // assign the extent a unique cache ID and add it to the dirty cache
@@ -875,7 +856,7 @@ namespace springtail {
     }
 
     std::pair<StorageCache::ExtentRef, StorageCache::ExtentRef>
-    StorageCache::DataCache::split(CacheExtentPtr extent)
+    StorageCache::DataCache::split(CacheExtentPtr extent, ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
 
@@ -888,16 +869,11 @@ namespace springtail {
 
         // XXX this is extremely inefficient right now... results in two data copies
         // split the provided extent in two
-        auto &&pair = extent->split();
+        auto &&pair = extent->split(schema);
 
         // create CacheExtent objects from the two halves
         auto first = std::make_shared<CacheExtent>(std::move(*(pair.first)), *extent);
-        first->header().table_id = extent->header().table_id;
-        first->header().index_id = extent->header().index_id;
-
         auto second = std::make_shared<CacheExtent>(std::move(*(pair.second)), *extent);
-        second->header().table_id = extent->header().table_id;
-        second->header().index_id = extent->header().index_id;
 
         // remove the old extent from the cache
         _dirty_cache.erase(extent->_cache_id);

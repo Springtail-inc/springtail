@@ -29,7 +29,7 @@ namespace springtail {
         // construct an empty extent at XID 0 -- an invalid XID
         // note: this extent will be replaced after mutations to the tree are performed following
         //       a call to set_xid()
-        ExtentPtr extent = std::make_shared<Extent>(_leaf_schema, ExtentType(false, true), 0);
+        ExtentPtr extent = std::make_shared<Extent>(ExtentType(false, true), 0, _leaf_schema->row_size());
 
         // create an empty root page
         // note: the implementation depends on a root always existing, but we still consider
@@ -219,8 +219,12 @@ namespace springtail {
             return false;
         }
 
+        ExtentSchemaPtr schema = (type.is_branch())
+            ? _btree->_branch_schema
+            : _btree->_leaf_schema;
+
         // perform the split if the referenced extent size exceeds the max
-        auto &&pair = e->split();
+        auto &&pair = e->split(schema);
         this->size -= e->byte_count();
 
         // remove the old extent
@@ -409,7 +413,7 @@ namespace springtail {
         //     in it
         if (is_root && _extents.size() == 1 && _extents.front()->empty()) {
             // reset the root to an empty leaf
-            _extents[0] = std::make_shared<Extent>(_btree->_leaf_schema, ExtentType(false, true), _btree->_xid);
+            _extents[0] = std::make_shared<Extent>(ExtentType(false, true), _btree->_xid, _btree->_leaf_schema->row_size());
             this->type = ExtentType(false, true);
         }
 
@@ -714,10 +718,10 @@ namespace springtail {
         ExtentPtr extent;
         MutableFieldArrayPtr key_fields;
         if (header.type.is_branch()) {
-            extent = std::make_shared<Extent>(_branch_schema, response->data);
+            extent = std::make_shared<Extent>(response->data);
             key_fields = _branch_keys;
         } else {
-            extent = std::make_shared<Extent>(_leaf_schema, response->data);
+            extent = std::make_shared<Extent>(response->data);
             key_fields = _leaf_keys;
         }
 
@@ -961,7 +965,7 @@ namespace springtail {
         PagePtr new_root;
         if (new_pages.size() > 1) {
             // construct the new root's extent
-            ExtentPtr extent = std::make_shared<Extent>(_branch_schema, ExtentType(true, true), _xid);
+            ExtentPtr extent = std::make_shared<Extent>(ExtentType(true, true), _xid, _branch_schema->row_size());
             extent->header().prev_offset = page->extent_id;
 
             // add pointers to the new root for each new page

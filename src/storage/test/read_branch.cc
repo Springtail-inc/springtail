@@ -33,7 +33,7 @@ main(int argc,
 
     uint64_t extent_id = std::stoull(argv[2]);
     auto response = handle->read(extent_id);
-    Extent extent(branch_schema, response->data);
+    Extent extent(response->data);
 
     int count = 0;
     for (auto &&row : extent) {

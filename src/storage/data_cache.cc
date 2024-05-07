@@ -12,7 +12,7 @@ namespace springtail {
         // read the initial extent
         ExtentPtr extent;
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            extent = std::make_shared<Extent>(_table->schema(), ExtentType(), _table->target_xid());
+            extent = std::make_shared<Extent>(ExtentType(), _table->target_xid(), _table->schema()->row_size());
         } else {
             extent = _read_extent(_id);
         }
@@ -246,7 +246,7 @@ namespace springtail {
         ExtentHeader header(response->data[0]);
 
         // construct the extent
-        ExtentPtr extent = std::make_shared<Extent>(_table->schema(), response->data);
+        ExtentPtr extent = std::make_shared<Extent>(response->data);
 
         if (_cache->_for_gc) {
             // we assume that the extent is being read for modification, so we need to
@@ -281,7 +281,7 @@ namespace springtail {
         }
 
         // extent has grown too large, split it
-        auto &&pair = e->split();
+        auto &&pair = e->split(_table->schema());
         _size -= e->byte_count();
 
         // remove the existing entry and insert the two new ones
