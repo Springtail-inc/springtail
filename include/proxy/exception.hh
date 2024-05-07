@@ -12,6 +12,13 @@ namespace springtail {
         {}
     };
 
+    class ProxyServerError : public ProxyError {
+    public:
+        const char *what() const noexcept {
+            return "Server error";
+        }
+    };
+
     class ProxyIOError : public ProxyError {
     public:
         const char *what() const noexcept {

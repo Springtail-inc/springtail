@@ -30,7 +30,7 @@ namespace springtail {
     ServerSession::_process_msg(SessionMsgPtr msg)
     {
         // entry point for message processing from client session
-        switch(msg->type) {
+        switch(msg->type()) {
         case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
             // this is the startup message from client session
             if (_server->is_ssl_enabled()) {
@@ -40,14 +40,17 @@ namespace springtail {
                 // otherwise send the startup message
                 _send_startup_msg();
             }
+
+            // block more messages until we are ready
+            block_messages();
             break;
 
         case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
-            _handle_simple_query(std::get<std::string>(msg->data));
+            _handle_simple_query(msg->get_str());
             break;
 
         default:
-            SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg->type);
+            SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg->type());
             break;
         }
     }
@@ -75,6 +78,11 @@ namespace springtail {
         default:
             _state = ERROR;
             break;
+        }
+
+        if (is_ready()) {
+            // if we are ready, then we can process more messages
+            enable_messages();
         }
     }
 
@@ -200,16 +208,16 @@ namespace springtail {
                     // server authentication is done, and we can complete
                     // the client session authentication
                     SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
-                    notify_client(msg);
+                    queue_msg(msg);
                     break;
                 }
 
                 // send ready for query to client
                 _send_to_remote_session(code, 1, &status);
 
-                // notify client session that we are ready for query
+                // queue msg for client session that we are ready for query
                 SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, status);
-                notify_client(msg);
+                queue_msg(msg);
 
                 break;
             }

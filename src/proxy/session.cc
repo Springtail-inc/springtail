@@ -70,18 +70,28 @@ namespace springtail {
                 return;
             }
 
+            // see if remote session has messages that need to be processed
+            if (_associated_session != nullptr) {
+                _associated_session->_internal_process_msgs(true);
+            }
+
             if (_waiting_on_session) {
                 SPDLOG_DEBUG("Waiting on external session, id: {}", _id);
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
                 // at that time it should be added back to the server poll list
+
                 return;
             }
+
+            // check if we have messages pending that still need to be processed
+            _internal_process_msgs(false);
 
             // check if there is more data to process
             // checks buffered data in ssl connection
             has_data = _connection->has_pending();
+            SPDLOG_DEBUG("Has data: {}", has_data);
         } while (has_data);
 
         // signal server to wait on this connection
@@ -90,31 +100,56 @@ namespace springtail {
     }
 
     void
-    Session::_internal_process_msg(SessionMsgPtr msg)
+    Session::_internal_process_msgs(bool is_remote)
     {
-        // send message to session
-        SPDLOG_DEBUG("Processing message: session id: {}", _id);
+        while (_ready_for_message && !_msg_queue.empty()) {
+            SPDLOG_DEBUG("Processing messages: session id: {}", _id);
 
-        try {
-            _process_msg(msg);
-        } catch (const ProxyIOError &e) {
-            SPDLOG_ERROR("ProxyIOError: {}", e.what());
-            _state = ERROR;
-        } catch (const std::exception &e) {
-            SPDLOG_ERROR("Exception: {}", e.what());
-            _state = ERROR;
-        } catch (...) {
-            SPDLOG_ERROR("Unknown exception");
-            _state = ERROR;
-        }
+            SessionMsgPtr msg = get_msg();
+            if (msg == nullptr) {
+                break;
+            }
 
-        if (_state == ERROR || _connection->closed()) {
-            _handle_error();
-            return;
+            // send message to session
+            SPDLOG_DEBUG("Processing message: type={}, session id: {}", (int8_t)msg->type(), _id);
+
+            try {
+                _process_msg(msg);
+            } catch (const ProxyIOError &e) {
+                SPDLOG_ERROR("ProxyIOError: {}", e.what());
+                _state = ERROR;
+            } catch (const std::exception &e) {
+                SPDLOG_ERROR("Exception: {}", e.what());
+                _state = ERROR;
+            } catch (...) {
+                SPDLOG_ERROR("Unknown exception");
+                _state = ERROR;
+            }
+
+            if (_state == ERROR || _connection->closed()) {
+                _handle_error();
+                return;
+            }
         }
 
         // re-enable processing, add socket to poll list
-        _enable_processing();
+        if (is_remote) {
+            _enable_processing();
+        }
+    }
+
+    void
+    Session::_enable_processing()
+    {
+        if (_waiting_on_session) {
+            // if we are waiting on a session, we should not be processing
+            // incoming data from our connection
+            assert(_associated_session != nullptr);
+            return;
+        }
+
+        // add session connection to server poll list
+        _server->signal(_connection);
     }
 
     UserLoginPtr
@@ -230,20 +265,6 @@ namespace springtail {
     }
 
     void
-    Session::_enable_processing()
-    {
-        if (_waiting_on_session) {
-            // if we are waiting on a session, we should not be processing
-            // incoming data from our connection
-            assert(_associated_session != nullptr);
-            return;
-        }
-
-        // add session connection to server poll list
-        _server->signal(_connection);
-    }
-
-    void
     Session::_handle_error()
     {
         bool shutting_down = _shut_down_flag.test_and_set();
@@ -265,9 +286,12 @@ namespace springtail {
 
         // check for associated client session, and notify of error
         if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
-            // notify client session of error
+            // notify client session of error; treat this as an interrupt of sorts
             SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
-            notify_client(msg);
+            _associated_session->_msg_queue.clear();
+            _associated_session->_ready_for_message = true;
+            queue_msg(msg);
+            _associated_session->_internal_process_msgs(true);
         }
         SPDLOG_ERROR("Shutdown complete");
     }

@@ -118,9 +118,18 @@ namespace springtail {
             return _queue.empty();
         }
 
+        /** get size of queue */
         int size() {
             std::unique_lock<std::mutex> write_lock{_mutex};
             return _queue.size();
+        }
+
+        /** clear the queue */
+        void clear() {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            while (!_queue.empty()) {
+                _queue.pop();
+            }
         }
 
     protected:

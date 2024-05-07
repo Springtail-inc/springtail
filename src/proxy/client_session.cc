@@ -58,7 +58,6 @@ namespace springtail {
         SPDLOG_DEBUG("Releasing server session: id={}", server_session->id());
 
         // clear associated session from the client session
-        clear_waiting_on_session();
         clear_associated_session();
 
         // release session back to instance pool
@@ -72,32 +71,31 @@ namespace springtail {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
-        SPDLOG_DEBUG("Client session got message from server session: {:d}", (int8_t)msg->type);
+        SPDLOG_DEBUG("Client session got message from server session: {:d}", (int8_t)msg->type());
 
         // entry point for messages from server session
-        switch(msg->type) {
+        switch(msg->type()) {
             case SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
                 SPDLOG_DEBUG("Client session got auth done from server session");
                 if (_state == READY) {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
                 }
-
                 assert(_state == AUTH);
+
                 _send_auth_done();
                 // the client session is established as is a server session.
                 // the replica session will be created on-demand
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
-                _state = ERROR;
-                break;
+                throw ProxyServerError();
 
             case SessionMsg::MSG_SERVER_CLIENT_READY:
                 SPDLOG_DEBUG("Client session got ready from server session");
 
                 // check if we are in/still in a transaction
-                if (std::get<char>(msg->data) == 'I') {
+                if (msg->get_char() == 'I') {
                     _in_transaction = false;
                 } else {
                     // either 'E' or 'T' -- error requiring rollback or in transaction.
@@ -109,26 +107,17 @@ namespace springtail {
                 break;
 
             default:
-                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg->type);
+                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg->type());
                 break;
         }
 
-        if (_state == ERROR) {
-            // error will be handled in session code
-            return;
+        if (is_ready()) {
+            enable_messages();
         }
 
-        // get any pending messages for the server, and clear them
-        SessionMsgPtr pending_msg = get_pending_msg();
-        if (pending_msg != nullptr) {
-            SPDLOG_DEBUG("Found pending message, sending to server session");
-            assert(get_associated_session() != nullptr);
-            notify_server(pending_msg, std::static_pointer_cast<ServerSession>(get_associated_session()));
-        } else {
-            // release server session if not in a transaction
-            if (!_in_transaction) {
-                _release_server_session();
-            }
+        // release server session if not in a transaction
+        if (!_in_transaction && is_msg_queue_empty()) {
+            _release_server_session();
         }
     }
 
@@ -544,14 +533,10 @@ namespace springtail {
         // register server session connection with server
         _server->register_session(server_session);
 
-        // notify server of client message, response comes in _process_msg()
+        // queue a message to server, response comes in _process_msg()
+        // with a message type of SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
         SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
-        notify_server(msg, server_session);
-
-        // at this point we'll return through _process_message with
-        // a message of SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
-        // most likely with _waiting_on_session set, in which case this
-        // session will be removed from the server poll list
+        queue_msg(msg, server_session);
     }
 
     void
@@ -786,14 +771,14 @@ namespace springtail {
 
     ServerSessionPtr
     ClientSession::_select_session_and_notify(Session::Type type,
-                                              SessionMsgPtr pending_msg)
+                                              SessionMsgPtr msg)
     {
         SPDLOG_DEBUG("Selecting server session: type={}", (int8_t)type);
 
         // if in a transaction and have an associated session, use that
         if (_in_transaction && get_associated_session() != nullptr) {
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
-            notify_server(pending_msg, session);
+            queue_msg(msg, session);
             SPDLOG_DEBUG("Using associated session: id={}", session->id());
             return session;
         }
@@ -820,25 +805,18 @@ namespace springtail {
 
         if (session->is_ready()) {
             // session is ready, we can use it
-            if (pending_msg != nullptr) {
-                notify_server(pending_msg, session);
-            }
+            queue_msg(msg, session);
             return session;
-        }
-
-        // session is not ready, we need to wait for it
-        if (pending_msg != nullptr) {
-            // set the pending message on the session, this message will be sent after session is ready
-            set_pending_msg(pending_msg);
         }
 
         // we need to do authentication and wait for session to become ready
         // register server session connection with server
         _server->register_session(session);
 
-        // notify server of client message, response comes in _process_msg()
-        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
-        notify_server(msg, session);
+        // queue client startup message, response comes in _process_msg()
+        SessionMsgPtr startup_msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        queue_msg(startup_msg);
+        queue_msg(msg, session);
 
         // at this point we'll return through process()
         // most likely with _waiting_on_session set, in which case this
