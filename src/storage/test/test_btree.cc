@@ -21,8 +21,8 @@ namespace {
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
-                    { "table_id", 0, SchemaType::UINT64, false },
-                    { "name", 1, SchemaType::TEXT, false },
+                    { "table_id", 0, SchemaType::UINT64, false, 1},
+                    { "name", 1, SchemaType::TEXT, false, 0 },
                     { "offset", 2, SchemaType::UINT64, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
@@ -109,7 +109,11 @@ namespace {
             int count = 0;
 
             std::string prev = "";
-            for (auto row : *tree) {
+            auto ib = tree->begin();
+            auto ie = tree->end();
+            for (; ib != ie; ++ib) {
+                //for (auto row : *tree) {
+                auto row = *ib;
                 if (prev != "") {
                     ASSERT_GE(_name_f->get_text(row), prev);
                 }

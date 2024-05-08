@@ -636,6 +636,22 @@ namespace springtail {
                 return (*extent)->header();
             }
 
+            bool empty() const {
+                // if no extents, empty
+                if (_extents.empty()) {
+                    return true;
+                }
+
+                // if more than one extent, can't be empty
+                if (_extents.size() > 1) {
+                    return false;
+                }
+
+                // if one extent, and the extent is empty, then empty
+                SafeExtent extent(_file, _extents.front());
+                return (*extent)->empty();
+            }
+
         public:
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page

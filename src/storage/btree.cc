@@ -31,6 +31,11 @@ namespace springtail {
     BTree::Iterator
     BTree::begin() const
     {
+        // check if the root is empty
+        if (_root->empty()) {
+            return end();
+        }
+
         // create a node for the root
         auto node = std::make_shared<Node>(_root);
 

@@ -168,12 +168,13 @@ namespace springtail {
     }
 
     std::shared_ptr<ExtentSchema>
-    ExtentSchema::create_schema(const std::vector<std::string> &columns,
+    ExtentSchema::create_schema(const std::vector<std::string> &sort_columns,
                                 const std::vector<SchemaColumn> &new_columns) const
     {
         // create SchemaColumn entries for the existing fields
+        uint32_t pkey_pos = 0;
         std::vector<SchemaColumn> all_columns;
-        for (auto &&column : columns) {
+        for (auto &&column : sort_columns) {
             auto &&i = _field_map.find(column);
 
             uint32_t size = all_columns.size();
@@ -181,7 +182,8 @@ namespace springtail {
                     column,
                     size,
                     i->second.first->get_type(),
-                    i->second.first->can_be_null()
+                    i->second.first->can_be_null(),
+                    pkey_pos++
                 });
         }
 

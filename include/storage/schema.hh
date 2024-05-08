@@ -200,7 +200,7 @@ namespace springtail {
          * additional provided columns.  Used in the creation of schemas for BTree indexes.
          */
         std::shared_ptr<ExtentSchema>
-        create_schema(const std::vector<std::string> &columns,
+        create_schema(const std::vector<std::string> &sort_columns,
                       const std::vector<SchemaColumn> &new_columns) const;
 
         /**
