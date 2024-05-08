@@ -28,16 +28,16 @@ namespace springtail {
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() const { return *(_extent_i); }
-            pointer operator->() { return &(*(_extent_i)); }
+            reference operator*() const { return *(_page_i); }
+            pointer operator->() { return &(*(_page_i)); }
 
             /**
              * Move the iterator forward to the next row.
              */
             Iterator& operator++() {
                 // move to the next row in the data extent
-                ++_extent_i;
-                if (_extent_i != _extent->end()) {
+                ++_page_i;
+                if (_page_i != _page->end()) {
                     return *this;
                 }
 
@@ -48,8 +48,8 @@ namespace springtail {
                 }
                 
                 // retrieve the data extent
-                _extent = _table->_read_extent_via_primary(_btree_i);
-                _extent_i = _extent->begin();
+                _page = _table->_read_page_via_primary(_btree_i);
+                _page_i = _page->begin();
 
                 return *this;
             }
@@ -64,7 +64,7 @@ namespace springtail {
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
                 return (a._btree_i == b._btree_i &&
-                        (a._btree_i == a._btree->end() || a._extent_i == b._extent_i));
+                        (a._btree_i == a._btree->end() || a._page_i == b._page_i));
             }
 
             /**
@@ -78,18 +78,19 @@ namespace springtail {
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree->end()),
-                  _extent(nullptr)
+                  _page(nullptr)
             { }
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     ExtentPtr extent, const Extent::Iterator &extent_i)
+                     StorageCache::PagePtr page,
+                     const StorageCache::Page::Iterator &page_i)
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree_i),
-                  _extent(extent),
-                  _extent_i(extent_i)
+                  _page(page),
+                  _page_i(page_i)
             { }
 
         private:
@@ -98,8 +99,8 @@ namespace springtail {
             BTreePtr _btree; ///< A pointer to the BTree of the primary index.
             BTree::Iterator _btree_i; ///< An iterator into the BTree.
 
-            ExtentPtr _extent; ///< A pointer to the data Extent currently being processed.
-            Extent::Iterator _extent_i; ///< An iterator into the Extent.
+            StorageCache::PagePtr _page; ///< A pointer to the data page currently being processed.
+            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
         };
 
     public:
@@ -112,8 +113,7 @@ namespace springtail {
               const std::vector<std::string> &primary_key,
               const std::vector<std::vector<std::string>> &secondary_keys,
               std::vector<uint64_t> root_offsets,
-              ExtentSchemaPtr schema,
-              ExtentCachePtr cache);
+              ExtentSchemaPtr schema);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -176,25 +176,25 @@ namespace springtail {
 
         /**
          * Reads an extent from the tree and returns it.
-         * @param extent_id The extent to read.
-         * @return A pointer to the requested extent.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
          */
-        ExtentPtr read_extent(uint64_t extent_id) const;
+        StorageCache::PagePtr read_page(uint64_t extent_id) const;
 
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
          * @param pos The primary index btree iterator.
-         * @return A pointer to the requested extent.
+         * @return A pointer to the requested page.
          */
-        ExtentPtr _read_extent_via_primary(BTree::Iterator &pos) const;
+        StorageCache::PagePtr _read_page_via_primary(BTree::Iterator &pos) const;
 
         /**
          * Reads an extent from the tree and returns it.
-         * @param extent_id The extent to read.
-         * @return A pointer to the requested extent.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
          */
-        ExtentPtr _read_extent(uint64_t extent_id) const;
+        StorageCache::PagePtr _read_page(uint64_t extent_id) const;
 
     private:
         /** The ID of the table. */
@@ -205,7 +205,6 @@ namespace springtail {
         std::vector<std::string> _primary_key; ///< The primary index key columns.
         std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns for each secondary index.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
-        ExtentCachePtr _cache; ///< The cache of clean extents.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
         FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.

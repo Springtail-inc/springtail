@@ -22,7 +22,7 @@ main(int argc,
 
     SchemaColumn child("child", 0, SchemaType::UINT64, false);
     auto keys = std::vector<std::string>({"name", "table_id"});
-    auto branch_schema = schema->create_schema(keys, { child });
+    auto branch_schema = schema->create_schema(keys, { child }, keys);
     auto name_f = branch_schema->get_field("name");
     auto child_f = branch_schema->get_field("child");
 

@@ -14,15 +14,13 @@ namespace springtail {
                  const std::vector<std::string> &primary_key,
                  const std::vector<std::vector<std::string>> &secondary_keys,
                  std::vector<uint64_t> root_offsets,
-                 ExtentSchemaPtr schema,
-                 ExtentCachePtr cache)
+                 ExtentSchemaPtr schema)
         : _id(table_id),
           _xid(xid),
           _table_dir(table_dir),
           _primary_key(primary_key),
           _secondary_keys(secondary_keys),
-          _schema(schema),
-          _cache(cache)
+          _schema(schema)
     {
         // make sure that the table directory exists
         std::filesystem::create_directory(_table_dir);
@@ -56,24 +54,25 @@ namespace springtail {
 
         _handle = IOMgr::get_instance()->open(table_dir / "raw", IOMgr::IO_MODE::READ, true);
 
-        SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
-        SchemaColumn row_c("row_id", 0, SchemaType::UINT32, false);
-        auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, false);
+        auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
                                                  xid,
                                                  primary_schema,
                                                  root_offsets[0]);
 
-        _primary_extent_id_f = primary_schema->get_field("extent_id");
+        _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
 
         for (int i = 0; i < secondary_keys.size(); i++) {
             auto secondary_key = secondary_keys[i];
-            auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
 
             // add the additional secondary key columns
-            secondary_key.push_back("extent_id");
-            secondary_key.push_back("row_id");
+            secondary_key.push_back(constant::INDEX_EID_FIELD);
+            secondary_key.push_back(constant::INDEX_RID_FIELD);
+
+            auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
             auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
                                                  xid,
@@ -126,16 +125,18 @@ namespace springtail {
         }
 
         // read the extent and find the lower_bound() of the key within it
-        ExtentPtr extent = _read_extent_via_primary(i);
+        auto page = _read_page_via_primary(i);
 
         // find the lower_bound() of the key within the data extent
-        auto &&j = std::lower_bound(extent->begin(), extent->end(), search_key,
-                                    [this](const Extent::Row &row, TuplePtr key)
-                                    {
-                                        return FieldTuple(this->_pkey_fields, row).less_than(key);
-                                    });
+        auto &&j = page->lower_bound(search_key, _schema);
 
-        return Iterator(this, _primary_index, i, extent, j);
+// std::lower_bound(page->begin(), page->end(), search_key,
+//                                     [this](const Extent::Row &row, TuplePtr key)
+//                                     {
+//                                         return FieldTuple(this->_pkey_fields, row).less_than(key);
+//                                     });
+
+        return Iterator(this, _primary_index, i, page, j);
     }
 
     Table::Iterator
@@ -146,30 +147,28 @@ namespace springtail {
             return end();
         }
 
-        auto extent = _read_extent_via_primary(index_i);
-        return Iterator(this, _primary_index, index_i, extent, extent->begin());
+        auto page = _read_page_via_primary(index_i);
+        return Iterator(this, _primary_index, index_i, page, page->begin());
     }
 
     // XXX we should encapsulate the extent access
-    ExtentPtr
-    Table::read_extent(uint64_t extent_id) const
+    StorageCache::PagePtr
+    Table::read_page(uint64_t extent_id) const
     {
-        return _read_extent(extent_id);
+        return _read_page(extent_id);
     }
 
-
-    ExtentPtr
-    Table::_read_extent_via_primary(BTree::Iterator &pos) const
+    StorageCache::PagePtr
+    Table::_read_page_via_primary(BTree::Iterator &pos) const
     {
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
-        return _read_extent(extent_id);
+        return _read_page(extent_id);
     }
 
-    ExtentPtr
-    Table::_read_extent(uint64_t extent_id) const
+    StorageCache::PagePtr
+    Table::_read_page(uint64_t extent_id) const
     {
-        auto response = _handle->read(extent_id);
-        return std::make_shared<Extent>(response->data);
+        return StorageCache::get_instance()->get(_table_dir / "raw", extent_id, _xid);
     }
 
 
@@ -220,9 +219,10 @@ namespace springtail {
         }
 
         // construct the primary index btree
-        SchemaColumn extent_c("extent_id", 0, SchemaType::UINT64, false);
-        SchemaColumn row_c("row_id", 1, SchemaType::UINT32, false);
-        auto primary_schema = _schema->create_schema(primary_key, { extent_c });
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, false);
+
+        auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
                                                         primary_key,
                                                         page_cache,
@@ -239,17 +239,17 @@ namespace springtail {
                                                   primary_schema,
                                                   root_offsets[0]);
 
-        _primary_extent_id_f = primary_schema->get_field("extent_id");
+        _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
         // construct the secondary index btrees
         for (int i = 0; i < secondary_keys.size(); i++) {
             int idx = i + 1;
 
             auto secondary_key = secondary_keys[i];
+            secondary_key.push_back(constant::INDEX_EID_FIELD);
+            secondary_key.push_back(constant::INDEX_RID_FIELD);
 
-            auto secondary_schema = _schema->create_schema(secondary_key, { extent_c, row_c });
-            secondary_key.push_back("extent_id");
-            secondary_key.push_back("row_id");
+            auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
             auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
                                                         secondary_key, page_cache, secondary_schema);

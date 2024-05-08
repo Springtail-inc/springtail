@@ -30,7 +30,7 @@ namespace springtail {
             Row &&insert_row = first->append();
 
             MutableTuple tuple(mutable_array, insert_row);
-            tuple.assign(FieldTuple(array, this->at(i)));
+            tuple.assign(FieldTuple(array, *(this->at(i))));
         }
 
         // copy the remaining rows from this extent to the first half extent
@@ -38,7 +38,7 @@ namespace springtail {
             Row &&insert_row = second->append();
 
             MutableTuple tuple(mutable_array, insert_row);
-            tuple.assign(FieldTuple(array, this->at(i)));
+            tuple.assign(FieldTuple(array, *(this->at(i))));
         }
 
         return std::pair<ExtentPtr, ExtentPtr>(first, second);

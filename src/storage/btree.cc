@@ -18,7 +18,7 @@ namespace springtail {
 
         // construct the schema for the branches
         SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
-        _branch_schema = _leaf_schema->create_schema(keys, { child });
+        _branch_schema = _leaf_schema->create_schema(keys, { child }, keys);
 
         // construct the field tuples for the branch nodes
         _branch_keys = _branch_schema->get_fields(keys);
@@ -58,6 +58,11 @@ namespace springtail {
     BTree::lower_bound(TuplePtr search_key,
                        bool for_update) const
     {
+        // check if the root is empty
+        if (_root->empty()) {
+            return end();
+        }
+
         // iterate through the levels until we find a leaf node
         StorageCache::PagePtr current = _root;
         NodePtr node = nullptr;

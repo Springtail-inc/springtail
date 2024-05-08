@@ -168,28 +168,44 @@ namespace springtail {
     }
 
     std::shared_ptr<ExtentSchema>
-    ExtentSchema::create_schema(const std::vector<std::string> &sort_columns,
-                                const std::vector<SchemaColumn> &new_columns) const
+    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
+                                const std::vector<SchemaColumn> &new_columns,
+                                const std::vector<std::string> &sort_columns) const
     {
         // create SchemaColumn entries for the existing fields
-        uint32_t pkey_pos = 0;
         std::vector<SchemaColumn> all_columns;
-        for (auto &&column : sort_columns) {
-            auto &&i = _field_map.find(column);
+        for (auto &&name : old_columns) {
+            auto &&i = _field_map.find(name);
 
             uint32_t size = all_columns.size();
-            all_columns.push_back({
-                    column,
-                    size,
-                    i->second.first->get_type(),
-                    i->second.first->can_be_null(),
-                    pkey_pos++
-                });
+
+            auto pos = std::ranges::find(sort_columns, name);
+            if (pos == sort_columns.end()) {
+                all_columns.push_back({
+                        name,
+                        size,
+                        i->second.first->get_type(),
+                        i->second.first->can_be_null()
+                    });
+            } else {
+                all_columns.push_back({
+                        name,
+                        size,
+                        i->second.first->get_type(),
+                        i->second.first->can_be_null(),
+                        (pos - sort_columns.begin())
+                    });
+            }
         }
 
         // add in the new columns
-        for (auto &&column : new_columns) {
+        for (auto column : new_columns) {
             int size = all_columns.size();
+
+            auto pos = std::ranges::find(sort_columns, column.name);
+            if (pos != sort_columns.end()) {
+                column.pkey_position = (pos - sort_columns.begin());
+            }
             all_columns.push_back(column);
             all_columns.back().position = size;
         }

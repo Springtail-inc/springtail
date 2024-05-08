@@ -22,7 +22,7 @@ namespace {
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
                     { "table_id", 0, SchemaType::UINT64, false },
-                    { "name", 1, SchemaType::TEXT, false },
+                    { "name", 1, SchemaType::TEXT, false, 0 },
                     { "offset", 2, SchemaType::UINT64, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
@@ -78,8 +78,7 @@ namespace {
                                            _primary_keys,
                                            _secondary_keys,
                                            roots,
-                                           _schema,
-                                           _read_cache);
+                                           _schema);
         }
 
         MutableTablePtr

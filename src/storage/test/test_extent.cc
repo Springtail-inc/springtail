@@ -155,11 +155,11 @@ namespace {
         EXPECT_EQ(i, extent->end()); // make sure we made it to the end()
 
         // check that the data of the second entry matches
-        Extent::Row second_row = extent->at(1);
-        EXPECT_EQ(variable_f->get_text(second_row).compare("duplicate"), 0);
-        EXPECT_EQ(fixed_f->get_uint64(second_row), 15);
-        EXPECT_FALSE(bit_f->get_bool(second_row));
-        EXPECT_TRUE(nullable_f->is_null(second_row));
+        auto second_row = extent->at(1);
+        EXPECT_EQ(variable_f->get_text(*second_row).compare("duplicate"), 0);
+        EXPECT_EQ(fixed_f->get_uint64(*second_row), 15);
+        EXPECT_FALSE(bit_f->get_bool(*second_row));
+        EXPECT_TRUE(nullable_f->is_null(*second_row));
 
         // check the data of the last entry matches
         Extent::Row back_row = extent->back();

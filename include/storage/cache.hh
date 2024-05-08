@@ -474,6 +474,10 @@ namespace springtail {
                 using pointer           = const Extent::Row *;  // or also value_type*
                 using reference         = const Extent::Row &;  // or also value_type&
 
+                Iterator()
+                    : _page(nullptr)
+                { }
+
                 // Iterator(const Iterator &rhs)
                 //     : _page(rhs._page),
                 //       _extent_i(rhs._extent_i),
@@ -629,6 +633,12 @@ namespace springtail {
             Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
+             * Returns an iterator to the row at the provided index within the page.
+             * @param index The index within the page to retrieve the row.
+             */
+            Iterator at(uint32_t index);
+
+            /**
              * Returns the extent header data of the original extent the Page is based on.
              */
             ExtentHeader header() const {
@@ -693,9 +703,6 @@ namespace springtail {
 
             /** The position on the LRU list; only valid when _use_count is zero. */
             std::list<std::shared_ptr<Page>>::iterator _lru_pos;
-
-            /** The schema of the underlying extent data. */
-            ExtentSchemaPtr _schema;
 
             /** Callback to be issued if the page is evicted. */
             std::function<bool(std::shared_ptr<Page>)> _evict_callback;

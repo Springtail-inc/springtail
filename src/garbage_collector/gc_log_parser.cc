@@ -541,7 +541,7 @@ namespace springtail {
 
                     // generate an extent with a row holding the PG tuple data
                     auto schema = table->extent_schema();
-                    auto pkey_schema = schema->create_schema(table->primary_key(), {});
+                    auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
 
                     auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
                     auto &&tuple = _pack_extent(extent, delete_msg.tuple, pkey_schema);
@@ -567,7 +567,7 @@ namespace springtail {
 
                     // generate extents for the delete data and insert data
                     auto schema = table->extent_schema();
-                    auto pkey_schema = schema->create_schema(table->primary_key(), {});
+                    auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
 
                     auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
                     auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple, pkey_schema);

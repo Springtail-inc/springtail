@@ -386,6 +386,26 @@ namespace springtail {
         return Iterator(this, extent_i, std::move(extent), row_i);
     }
 
+    StorageCache::Page::Iterator
+    StorageCache::Page::at(uint32_t index)
+    {
+        // iterate through the extents to find the requested index in the page
+        for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
+            SafeExtent extent(_file, *extent_i);
+
+            uint32_t row_count = (*extent)->row_count();
+            if (index < row_count) {
+                // construct the iterator to the requested position and return it
+                return Iterator(this, extent_i, std::move(extent), (*extent)->at(index));
+            }
+
+            index -= row_count;
+        }
+
+        // index is beyond the end of the page
+        return end();
+    }
+
     void
     StorageCache::Page::insert(TuplePtr tuple,
                                ExtentSchemaPtr schema)

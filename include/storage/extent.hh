@@ -326,9 +326,9 @@ namespace springtail {
         }
 
         /** Find an existing row in the extent. */
-        Row at(uint32_t index) {
+        Iterator at(uint32_t index) {
             assert(index * _header.row_size < _fixed_data->size());
-            return Row(this, index * _header.row_size);
+            return Iterator(this, index * _header.row_size);
         }
 
         /** Allocates space for a row to the end of the extent and returns an accessor to set the data in the row. */

@@ -240,8 +240,7 @@ namespace springtail {
                                            sys_tbl::TableNames::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::TableRoots::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, xid);
@@ -253,8 +252,7 @@ namespace springtail {
                                            sys_tbl::TableRoots::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::Indexes::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, xid);
@@ -266,8 +264,7 @@ namespace springtail {
                                            sys_tbl::Indexes::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::Schemas::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, xid);
@@ -279,8 +276,7 @@ namespace springtail {
                                            sys_tbl::Schemas::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         default:
             return nullptr;
@@ -391,11 +387,11 @@ namespace springtail {
         auto secondary_fields = table_names_t->index(1)->get_schema()->get_fields();
         auto extent_id = secondary_fields->at(sys_tbl::TableNames::Secondary::EXTENT_ID)->get_uint64(*row_i);
         auto row_id = secondary_fields->at(sys_tbl::TableNames::Secondary::ROW_ID)->get_uint32(*row_i);
-        auto extent = table_names_t->read_extent(extent_id);
-        auto row = extent->at(row_id);
+        auto page = table_names_t->read_page(extent_id);
+        auto row = page->at(row_id);
 
-        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
-        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
+        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
+        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
         return { old_namespace, old_name };
     }
 

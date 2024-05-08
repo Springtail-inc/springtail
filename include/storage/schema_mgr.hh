@@ -50,18 +50,6 @@ namespace springtail {
         std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid);
 
         /**
-         * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
-         * updating the extent.  This function assumes we are retrieving the schema of an index
-         * file, using the extent type to determine if we need the branch schema or the leaf schema.
-         *
-         * @param table_id The table we need the schema for.
-         * @param xid The XID that we need the schema at.
-         * @param index_id The index of the table that we need the schema for.
-         * @param type The extent type we are accessing -- used to determine branch vs. leaf
-         */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid, uint64_t index_id, ExtentType type);
-
-        /**
          * Helper function to generate a SchemaUpdate that defines the change between the old and
          * new schema.  The old and new schema must be guaranteed to be the result of only a single
          * schema modification.
