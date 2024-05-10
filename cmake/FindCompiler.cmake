@@ -28,7 +28,7 @@ function(check_gcc_function RESULT_VAR COMPILER)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
-    if(NOT GCC_MAJOR_VERSION OR GCC_MAJOR_VERSION LESS 14)
+    if(NOT GCC_MAJOR_VERSION OR GCC_MAJOR_VERSION LESS 13)
         set(${RESULT_VAR} FALSE PARENT_SCOPE)
     endif()
 
@@ -49,14 +49,14 @@ set(SEARCH_PATHS
 
 # Find the GCC compiler
 find_program(GCC_C_COMPILER
-    NAMES gcc gcc-14
+    NAMES gcc gcc-13
     HINTS ${SEARCH_PATHS} ENV PATH
     VALIDATOR check_gcc_function
 )
 
 # Find the G++ compiler
 find_program(GCC_CXX_COMPILER
-    NAMES g++ g++-14
+    NAMES g++ g++-13
     HINTS ${SEARCH_PATHS} ENV PATH
     VALIDATOR check_gcc_function
 )
@@ -71,6 +71,9 @@ endif()
 
 set(CMAKE_C_COMPILER ${GCC_C_COMPILER})
 set(CMAKE_CXX_COMPILER ${GCC_CXX_COMPILER})
+
+message(STATUS "CMAKE_C_COMPILER: ${CMAKE_C_COMPILER}")
+message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
 set(ENV{CC} ${GCC_C_COMPILER})
 set(ENV{CXX} ${GCC_CXX_COMPILER})
