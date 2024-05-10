@@ -1,0 +1,19 @@
+name: PR Actions
+
+on:
+  # By default, this workflow will be triggered when PR is opened or reopened or when the head
+  # branch of the pull request is updated. You can also invoke this manually.
+  # pull_request:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+    with:
+      builder_image_version_tag: ${{ vars.BUILDER_IMAGE_VERSION }}
+    secrets:
+      ecr_pw: ${{ secrets.ECR_PW }}

@@ -16,6 +16,7 @@
           "features": ["cxx17"] },
         "thrift",
         "gtest",
-        "vincentlaucsb-csv-parser"
+        "vincentlaucsb-csv-parser",
+        "openssl"
     ]
 }
