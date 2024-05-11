@@ -29,21 +29,14 @@ namespace {
             std::vector<SchemaColumn> columns({
                     { "table_id", 0, SchemaType::INT64, false },
                     { "name", 1, SchemaType::TEXT, false, 0 },
-                    { "offset", 2, SchemaType::INT64, false, 1 }
+                    { "offset", 2, SchemaType::INT64, false, 1 },
+                    { "index", 3, SchemaType::INT16, false, 2 }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 
-            std::vector<SchemaColumn> columns2({
-                    { "table_id", 0, SchemaType::INT64, false },
-                    { "name", 1, SchemaType::TEXT, false, 0 },
-                    { "offset", 2, SchemaType::INT64, false },
-                    { "index", 3, SchemaType::INT16, false, 1 }
-                });
-            _schema2 = std::make_shared<ExtentSchema>(columns2);
-
             _fields = _schema->get_fields();
             _csv_fields = std::make_shared<FieldArray>();
-            for (int i = 0; i < _fields->size(); i++) {
+            for (int i = 0; i < _fields->size() - 1; i++) {
                 auto &&field = _fields->at(i);
                 _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
             }
@@ -58,7 +51,7 @@ namespace {
             std::filesystem::remove("/tmp/test_cache_Insert50K");
         }
 
-        ExtentSchemaPtr _schema, _schema2;
+        ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
     };
 
@@ -73,10 +66,14 @@ namespace {
         // populate data into the Page
         csv::CSVReader reader("test_btree_simple.csv");
         for (auto &r : reader) {
-            page->insert(std::make_shared<FieldTuple>(_csv_fields, r), _schema);
+            auto extra = std::make_shared<FieldArray>();
+            extra->push_back(std::make_shared<ConstTypeField<int16_t>>(0));
+
+            page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
         }
 
-        auto &&offsets = page->flush(xid++, ExtentType());
+        ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
+        auto &&offsets = page->flush(header);
 
         // put() the mutated Page
         cache->put(page);
@@ -117,11 +114,12 @@ namespace {
                 auto extra = std::make_shared<FieldArray>();
                 extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
-                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema2);
+                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
             }
         }
 
-        auto &&offsets = page->flush(xid++, ExtentType());
+        ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
+        auto &&offsets = page->flush(header);
 
         // put() the mutated Page
         cache->put(page);

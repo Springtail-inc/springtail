@@ -226,13 +226,14 @@ namespace springtail {
         _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
                                                         primary_key,
                                                         page_cache,
-                                                        primary_schema);
+                                                        primary_schema,
+                                                        _target_xid);
         if (root_offsets[0] != constant::UNKNOWN_EXTENT) {
             _primary_index->init(root_offsets[0]);
         } else {
             _primary_index->init_empty();
         }
-        _primary_index->set_xid(_target_xid);
+        // _primary_index->set_xid(_target_xid);
 
         _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
                                                   _target_xid,
@@ -252,14 +253,15 @@ namespace springtail {
             auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
             auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
-                                                        secondary_key, page_cache, secondary_schema);
+                                                        secondary_key, page_cache, secondary_schema,
+                                                        _target_xid);
 
             if (root_offsets[idx] != constant::UNKNOWN_EXTENT) {
                 btree->init(root_offsets[idx]);
             } else {
                 btree->init_empty();
             }
-            btree->set_xid(_target_xid);
+            // btree->set_xid(_target_xid);
             _secondary_indexes.push_back(btree);
         }
     }

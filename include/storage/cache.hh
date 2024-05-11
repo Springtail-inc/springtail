@@ -108,7 +108,7 @@ namespace springtail {
                   _file(extent._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
-                  _state(State::MUTABLE),
+                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -131,10 +131,13 @@ namespace springtail {
                 return CacheKey(_file, _extent_id);
             }
 
+#if 0
             /**
              * Flush the extent to disk.
              */
             uint64_t flush() {
+                // XXX should be using DataCache::flush()
+
                 assert(_extent_id == constant::UNKNOWN_EXTENT);
 
                 // write the data to disk
@@ -144,6 +147,7 @@ namespace springtail {
 
                 return _extent_id;
             }
+#endif
 
             uint64_t cache_id() const {
                 return _cache_id;
@@ -215,9 +219,10 @@ namespace springtail {
              * released back to the cache after use with put().  May block due to IO.
              * 
              * @param cache_id The unique cache ID of the extent.
+             * @param mark_dirty Mark the extent as DIRTY while retrieving.
              * @return A pointer to the extent.
              */
-            CacheExtentPtr get(uint64_t cache_id);
+            CacheExtentPtr get(uint64_t cache_id, bool mark_dirty = false);
 
             /**
              * Increment the use count on a cache extent.
@@ -258,7 +263,7 @@ namespace springtail {
             void remove_empty(CacheExtentPtr extent);
             std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
 
-            CacheExtentPtr get_empty(const std::filesystem::path &file, uint64_t xid, ExtentSchemaPtr schema);
+            CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header);
 
         private:
             CacheExtentPtr _get_clean(const CacheKey &key);
@@ -339,7 +344,8 @@ namespace springtail {
              *                  considered valid from this XID forward.
              * @return The ordered list of extent IDs that represent the data of the Page.
              */
-            std::vector<uint64_t> flush(uint64_t flush_xid, ExtentType type);
+            std::vector<uint64_t> flush(const ExtentHeader &header);
+            // std::vector<uint64_t> flush(uint64_t flush_xid, ExtentType type);
 
             /**
              * Returns the cache key of this page.
@@ -394,12 +400,12 @@ namespace springtail {
 
                 SafeExtent(const std::filesystem::path &file,
                            ExtentRef &ref,
-                           bool is_mutable = false)
+                           bool mark_dirty = false)
                     : _extent(nullptr)
                 {
                     if (ref.second) {
-                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first);
-                    } else if (!is_mutable) {
+                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first, mark_dirty);
+                    } else if (!mark_dirty) {
                         _extent = StorageCache::get_instance()->_data_cache->get(file, ref.first);
                     } else {
                         _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.first);
@@ -662,6 +668,10 @@ namespace springtail {
                 return (*extent)->empty();
             }
 
+            uint32_t extent_count() const {
+                return _extents.size();
+            }
+
         public:
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page
@@ -766,7 +776,8 @@ namespace springtail {
          * Note that the returned Page is pinned until is it put() back into the cache.
          *
          * @param file The file to read the page from.
-         * @param extent_id The extent_id that this page represents.
+         * @param extent_id The extent_id that this page represents.  If UNKNOWN then creates an
+         *                  empty page that will be appended to the file on flush.
          * @param access_xid The XID at which this extent_id was found.  This is an XID at which the
          *                   on-disk extent is known valid.
          * @param target_xid The XID at which we actually want to operate at.  In the case of a

@@ -1115,6 +1115,15 @@ namespace springtail {
         }
     };
 
+
+    // FIELD ARRAYS
+
+    typedef std::vector<FieldPtr> FieldArray;
+    typedef std::shared_ptr<FieldArray> FieldArrayPtr;
+
+    typedef std::vector<MutableFieldPtr> MutableFieldArray;
+    typedef std::shared_ptr<MutableFieldArray> MutableFieldArrayPtr;
+
     /**
      * An array of values, encapsulated such that they can be compared even when coming from
      * different tables or different rows within a table, or are just fixed values (e.g., ValueTuple).
@@ -1133,6 +1142,7 @@ namespace springtail {
 
         virtual std::size_t size() const = 0;
         virtual FieldPtr field(int idx) const = 0;
+        virtual FieldArrayPtr fields() const = 0;
 
         bool less_than(std::shared_ptr<Tuple> rhs, bool nulls_last=false) const {
             return this->less_than(*rhs, nulls_last);
@@ -1249,12 +1259,6 @@ namespace springtail {
     };
     typedef std::shared_ptr<Tuple> TuplePtr;
 
-    typedef std::vector<FieldPtr> FieldArray;
-    typedef std::shared_ptr<FieldArray> FieldArrayPtr;
-
-    typedef std::vector<MutableFieldPtr> MutableFieldArray;
-    typedef std::shared_ptr<MutableFieldArray> MutableFieldArrayPtr;
-
     class FieldTuple : public Tuple {
     public:
         FieldTuple(const FieldTuple &tuple) = default;
@@ -1264,12 +1268,16 @@ namespace springtail {
               _array(array)
         { }
 
-        std::size_t size() const {
+        std::size_t size() const override {
             return _array->size();
         }
 
-        FieldPtr field(int idx) const {
+        FieldPtr field(int idx) const override {
             return _array->at(idx);
+        }
+
+        FieldArrayPtr fields() const override {
+            return _array;
         }
 
     private:
@@ -1285,16 +1293,27 @@ namespace springtail {
               _value(value)
         { }
 
-        std::size_t size() const {
+        std::size_t size() const override {
             return _key->size() + _value->size();
         }
 
-        FieldPtr field(int idx) const {
+        FieldPtr field(int idx) const override {
             if (idx < _key->size()) {
                 return _key->at(idx);
             } else {
                 return _value->at(idx - _key->size());
             }
+        }
+
+        FieldArrayPtr fields() const override {
+            auto combined = std::make_shared<FieldArray>();
+            for (auto f : *_key) {
+                combined->push_back(f);
+            }
+            for (auto f : *_value) {
+                combined->push_back(f);
+            }
+            return combined;
         }
 
     private:
@@ -1319,6 +1338,14 @@ namespace springtail {
 
         FieldPtr field(int idx) const override {
             return _array->at(idx);
+        }
+
+        FieldArrayPtr fields() const override {
+            auto array = std::make_shared<FieldArray>();
+            for (auto f : *_array) {
+                array->push_back(f);
+            }
+            return array;
         }
 
         MutableFieldPtr mutable_field(int idx) const {
@@ -1576,12 +1603,20 @@ namespace springtail {
               _fields(fields)
         { }
 
-        std::size_t size() const {
+        std::size_t size() const override {
             return _fields.size();
         }
 
-        FieldPtr field(int idx) const {
+        FieldPtr field(int idx) const override {
             return _fields[idx];
+        }
+
+        FieldArrayPtr fields() const override {
+            auto array = std::make_shared<FieldArray>();
+            for (auto f : _fields) {
+                array->push_back(f);
+            }
+            return array;
         }
     };
     typedef std::shared_ptr<ValueTuple> ValueTuplePtr;

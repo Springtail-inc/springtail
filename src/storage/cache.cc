@@ -118,11 +118,14 @@ namespace springtail {
                                  uint64_t extent_id,
                                  uint64_t xid)
     {
+        SPDLOG_DEBUG("{}, {}, {}", file, extent_id, xid);
+
         boost::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache
         PagePtr page = _try_get(file, extent_id, xid);
         if (page != nullptr) {
+            SPDLOG_DEBUG("Found in cache");
             return page;
         }
 
@@ -134,6 +137,7 @@ namespace springtail {
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
                                        uint64_t xid)
     {
+        SPDLOG_DEBUG("{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_space(1);
@@ -175,6 +179,8 @@ namespace springtail {
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
+        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, xid, offsets.size());
+
         // make space for the page; evict if we need to make space
         _make_space(1);
 
@@ -316,11 +322,20 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    StorageCache::Page::flush(uint64_t flush_xid,
-                              ExtentType type)
+    StorageCache::Page::flush(const ExtentHeader &header)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = false;
+
+        auto cache = StorageCache::get_instance();
+
+        // check if we are flushing an empty extent
+        if (_extents.empty()) {
+            // create an empty extent
+            auto extent = cache->_data_cache->get_empty(_file, header);
+            _extents.push_back({ extent->cache_id(), true });
+            cache->_data_cache->put(extent);
+        }
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
@@ -330,21 +345,24 @@ namespace springtail {
                 SafeExtent e(_file, ref);
 
                 // update the extent header
-                auto &header = (*e)->header();
-                header.type = type; // XXX this should be set correctly already, do we need this?
-                header.xid = flush_xid;
-                header.prev_offset = _extent_id;
+                (*e)->header() = header;
+                // auto &header = (*e)->header();
+                // header.type = type; // XXX this should be set correctly already, do we need this?
+                // header.xid = flush_xid;
+                // header.prev_offset = _extent_id;
 
                 // append the extent to the file
                 // XXX could do these asynchronously to get better parallelism when there are multiple extents
-                StorageCache::get_instance()->_data_cache->flush(*e);
-                
+                cache->_data_cache->flush(*e);
+
                 // return the clean extent back to the read cache
-                StorageCache::get_instance()->_data_cache->reinsert(*e);
+                cache->_data_cache->reinsert(*e);
 
                 // save the extent ID of the now-unmodified extent
                 ref.first = (*e)->key().second;
                 ref.second = false;
+
+                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.first);
             }
 
             offsets.push_back(ref.first);
@@ -419,7 +437,8 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            auto extent = cache->_data_cache->get_empty(_file, header);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
@@ -482,7 +501,8 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            auto extent = cache->_data_cache->get_empty(_file, header);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
@@ -521,7 +541,8 @@ namespace springtail {
             auto cache = StorageCache::get_instance();
 
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
-            auto extent = cache->_data_cache->get_empty(_file, _start_xid, schema);
+            ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
+            auto extent = cache->_data_cache->get_empty(_file, header);
             _extents.push_back({ extent->cache_id(), true });
 
             // insert the tuple into the extent
@@ -627,7 +648,7 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
-        assert(extent_i == _extents.end());
+        assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
@@ -642,7 +663,7 @@ namespace springtail {
                                               });
 
         // note: row's key should match the tuple's key
-        assert(FieldTuple(schema->get_fields(), *row_i).equal(*key));
+        assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // remove the row
         (*extent)->remove(row_i);
@@ -694,7 +715,8 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::get(uint64_t cache_id)
+    StorageCache::DataCache::get(uint64_t cache_id,
+                                 bool mark_dirty)
     {
         boost::unique_lock lock(_mutex);
 
@@ -746,13 +768,19 @@ namespace springtail {
         // increase the use-count
         ++(extent->_use_count);
 
+        // optionally mark the extent as DIRTY
+        if (mark_dirty) {
+            extent->_state = CacheExtent::State::DIRTY;
+        }
+
         return extent;
     }
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get_empty(const std::filesystem::path &file,
-                                       uint64_t xid,
-                                       ExtentSchemaPtr schema)
+                                       const ExtentHeader &header)
+                                       // uint64_t xid,
+                                       // ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
 
@@ -760,7 +788,7 @@ namespace springtail {
         _make_space();
 
         // create an empty extent
-        ExtentHeader header(ExtentType(), xid, schema->row_size());
+        // ExtentHeader header(ExtentType(), xid, schema->row_size());
         auto extent = std::make_shared<CacheExtent>(header, file);
 
         // assign the extent a unique cache ID and add it to the dirty cache
@@ -791,12 +819,12 @@ namespace springtail {
 
         // check if the caller is the only user
         if (extent->_use_count == 1) {
-            // this is the only user, so we can convert the extent to MUTABLE
+            // this is the only user, so we can simply convert the extent to DIRTY
             // note: no need to adjust the LRU queue since the extent cannot be on it
             _clean_cache.erase(extent->key());
 
-            // mark the extent as MUTABLE
-            extent->_state = CacheExtent::State::MUTABLE;
+            // mark the extent as DIRTY
+            extent->_state = CacheExtent::State::DIRTY;
 
             // assign the extent a unique cache ID and add it to the dirty cache
             _gen_cache_id(extent);

@@ -6,16 +6,15 @@ namespace springtail {
     MutableBTree::MutableBTree(const std::filesystem::path &file,
                                const std::vector<std::string> &keys,
                                PageCachePtr cache,
-                               ExtentSchemaPtr schema)
-        : _cache(cache),
-          _file(file),
+                               ExtentSchemaPtr schema,
+                               uint64_t xid)
+        : _file(file),
           _sort_keys(keys),
-          _xid(0),
+          _xid(xid),
           _finalized(true)
     {
-        // create a file handle
-        _handle = IOMgr::get_instance()->open(_file, IOMgr::IO_MODE::APPEND, true);
-
+        _cache = std::make_shared<PageCache>(512);
+          
         // initialize the schema information
         _init_schemas(schema, keys);
     }
@@ -29,17 +28,21 @@ namespace springtail {
         // construct an empty extent at XID 0 -- an invalid XID
         // note: this extent will be replaced after mutations to the tree are performed following
         //       a call to set_xid()
-        ExtentPtr extent = std::make_shared<Extent>(ExtentType(false, true), 0, _leaf_schema->row_size());
+        // XXX is this how we should handle the XID now with the unified cache?
+        auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
+        // ExtentPtr extent = std::make_shared<Extent>(ExtentType(false, true), 0, _leaf_schema->row_size());
 
-        // create an empty root page
+        // create an empty root
         // note: the implementation depends on a root always existing, but we still consider
         //       the tree finalized at the provided XID until a new target XID is set
-        _root = std::make_shared<Page>(shared_from_this(), extent, _leaf_keys);
+        _root = std::make_shared<Page>(shared_from_this(), cache_page, _leaf_schema);
 
         // add the root to the cache
-        // note: we do not release it, leaving it's use-count permanently at 1
+        // note: we do not release the root, leaving it's use-count permanently at 1
         boost::unique_lock cache_lock(_cache->mutex);
         _cache_insert(_root, cache_lock, false);
+
+        _finalized = false;
     }
 
     void
@@ -55,17 +58,21 @@ namespace springtail {
         _read_page_internal(_root);
 
         // set the XID based on the root
-        _xid = _root->xid();
+        // _xid = _root->xid();
 
         // add the root to the cache
         // note: we do not release it, leaving it's use-count permanently at 1
         boost::unique_lock cache_lock(_cache->mutex);
         _cache_insert(_root, cache_lock, false);
+
+        _finalized = false;
     }
 
     void
     MutableBTree::set_xid(uint64_t xid)
     {
+        // XXX to make this work we'd need to clear the internal page cache
+
         // acquire an exclusive lock on the tree
         boost::unique_lock lock(_mutex);
 
@@ -199,7 +206,8 @@ namespace springtail {
         }
 
         // sync the file
-        _handle->sync();
+        // XXX need to make a call into the cache to flush all the extents associated with a file
+        // _handle->sync();
 
         // mark the tree as finalized so that additional changes can't be made at this XID
         _finalized = true;
@@ -208,6 +216,7 @@ namespace springtail {
         return _root->extent_id;
     }
 
+#if 0
     bool
     MutableBTree::Page::_check_split(std::vector<ExtentPtr>::iterator pos)
     {
@@ -238,36 +247,39 @@ namespace springtail {
 
         return true;
     }
+#endif
 
     MutableBTree::Page::Iterator
     MutableBTree::Page::lower_bound(TuplePtr search_key)
     {
-        // if the page is empty then return end()
-        if (this->empty()) {
-            return this->end();
-        }
+        return _cache_page->lower_bound(search_key, _schema);
 
-        // find the extent that might contain the search key
-        auto &&i = std::lower_bound(_extents.begin(), _extents.end(), search_key,
-                                    [this](const ExtentPtr &extent, TuplePtr key) {
-                                        return MutableTuple(this->_key_fields, extent->back()).less_than(key);
-                                    });
-        if (i == _extents.end()) {
-            return this->end();
-        }
+        // // if the page is empty then return end()
+        // if (this->empty()) {
+        //     return this->end();
+        // }
 
-        // try to find the row within the extent
-        ExtentPtr e = *i;
-        auto &&row_i = std::lower_bound(e->begin(), e->end(), search_key,
-                                        [this](const Extent::Row &row, TuplePtr key) {
-                                            return MutableTuple(this->_key_fields, row).less_than(key);
-                                        });
-        if (row_i == e->end()) {
-            return this->end();
-        }
+        // // find the extent that might contain the search key
+        // auto &&i = std::lower_bound(_extents.begin(), _extents.end(), search_key,
+        //                             [this](const ExtentPtr &extent, TuplePtr key) {
+        //                                 return MutableTuple(this->_key_fields, extent->back()).less_than(key);
+        //                             });
+        // if (i == _extents.end()) {
+        //     return this->end();
+        // }
 
-        // construct an iterator to this entry
-        return Iterator(this, i, row_i);
+        // // try to find the row within the extent
+        // ExtentPtr e = *i;
+        // auto &&row_i = std::lower_bound(e->begin(), e->end(), search_key,
+        //                                 [this](const Extent::Row &row, TuplePtr key) {
+        //                                     return MutableTuple(this->_key_fields, row).less_than(key);
+        //                                 });
+        // if (row_i == e->end()) {
+        //     return this->end();
+        // }
+
+        // // construct an iterator to this entry
+        // return Iterator(this, i, row_i);
     }
 
     MutableBTree::Page::Iterator
@@ -294,16 +306,20 @@ namespace springtail {
                                       std::vector<std::shared_ptr<Page>> new_pages,
                                       MutableFieldPtr offset_f)
     {
-        // remove the old child page from the entries
-        // note: key should always exist since it's a pointer to an existing child
-        auto &&page_i = this->find(old_page->prev_key);
-        assert(page_i != this->end());
-        ExtentPtr e = *(page_i._extent_i);
+        // // remove the old child page from the entries
+        // // note: key should always exist since it's a pointer to an existing child
+        // auto &&page_i = this->find(old_page->prev_key);
+        // assert(page_i != this->end());
+        // ExtentPtr e = *(page_i._extent_i);
 
-        // remove the old page while updating the page size
-        this->size -= e->byte_count();
-        e->remove(page_i._row_i);
-        this->size += e->byte_count();
+        // // remove the old page while updating the page size
+        // this->size -= e->byte_count();
+        // e->remove(page_i._row_i);
+        // this->size += e->byte_count();
+
+        // remove the old page's key from this branch page
+        // note: key should always exist since it's a pointer to an existing child
+        _cache_page->remove(old_page->prev_key, _schema);
 
         // mark the page dirty
         _dirty = true;
@@ -311,23 +327,31 @@ namespace springtail {
         // add the new child pages to the entries
         // note: add them in reverse order so we can keep inserting at the same position
         for (auto &&i = new_pages.rbegin(); i != new_pages.rend(); i++) {
-            auto &&page = *i;
+            auto &page = *i;
 
-            // add an entry at the current position
-            this->size -= e->byte_count();
-            Extent::Row row = e->insert(page_i._row_i);
+            SPDLOG_INFO("Adding branch entry to child extent_id: {}", page->extent_id);
 
-            MutableTuple(_key_fields, row).assign(page->prev_key);
-            offset_f->set_uint64(row, page->extent_id);
+            // XXX add each entry
+            auto value = std::make_shared<FieldArray>();
+            value->push_back(std::make_shared<ConstTypeField<uint64_t>>(page->extent_id));
+            auto kv = std::make_shared<KeyValueTuple>(page->prev_key->fields(), value, page->prev_key->row());
+            _cache_page->insert(kv, _schema);
 
-            this->size += e->byte_count();
+            // // add an entry at the current position
+            // this->size -= e->byte_count();
+            // Extent::Row row = e->insert(page_i._row_i);
+
+            // MutableTuple(_key_fields, row).assign(page->prev_key);
+            // offset_f->set_uint64(row, page->extent_id);
+
+            // this->size += e->byte_count();
                     
-            // check if we need to split the extent
-            bool did_split = _check_split(page_i._extent_i);
-            if (did_split) {
-                // re-find the insert position
-                page_i = this->find(page->prev_key);
-            }
+            // // check if we need to split the extent
+            // bool did_split = _check_split(page_i._extent_i);
+            // if (did_split) {
+            //     // re-find the insert position
+            //     page_i = this->find(page->prev_key);
+            // }
         }
     }
 
@@ -339,83 +363,96 @@ namespace springtail {
         // mark this page as dirty
         _dirty = true;
 
-        // handle the empty page case
-        if (this->empty()) {
-            ExtentPtr e = _extents.front();
+        // insert into the backing page
+        _cache_page->insert(value, _schema);
 
-            // add a row
-            Extent::Row row = e->append();
+        // // handle the empty page case
+        // if (_cache_page->empty()) {
+        //     ExtentPtr e = _extents.front();
+
+        //     // add a row
+        //     Extent::Row row = e->append();
                     
-            // save the value into the row
-            MutableTuple(fields, row).assign(value);
+        //     // save the value into the row
+        //     MutableTuple(fields, row).assign(value);
 
-            // update the page size
-            this->size = e->byte_count();
+        //     // update the page size
+        //     this->size = e->byte_count();
+        //     return;
+        // }
 
-            return;
-        }
+        // // find the position to perform the insert
+        // auto &&i = this->lower_bound(search_key);
 
-        // find the position to perform the insert
-        auto &&i = this->lower_bound(search_key);
+        // // set the correct iterators
+        // ExtentPtr e = *i._extent_i;
+        // uint32_t old_size = e->byte_count();
 
-        // set the correct iterators
-        ExtentPtr e = *i._extent_i;
-        uint32_t old_size = e->byte_count();
+        // // add a row, if at end() will append
+        // Extent::Row row = e->insert(i._row_i);
 
-        // add a row, if at end() will append
-        Extent::Row row = e->insert(i._row_i);
+        // // save the value into the row
+        // MutableTuple(fields, row).assign(value);
 
-        // save the value into the row
-        MutableTuple(fields, row).assign(value);
+        // // update the size of the page
+        // uint32_t new_size = e->byte_count();
+        // this->size = this->size - old_size + new_size;
 
-        // update the size of the page
-        uint32_t new_size = e->byte_count();
-        this->size = this->size - old_size + new_size;
-
-        // check split of the last extent in the vector
-        _check_split(i._extent_i);
+        // // check split of the last extent in the vector
+        // _check_split(i._extent_i);
     }
 
     void
     MutableBTree::Page::remove(TuplePtr search_key, bool is_root)
     {
-        // find the position to perform the remove
-        auto &&i = this->find(search_key);
-        if (i == this->end()) {
-            SPDLOG_INFO("Failed to remove entry: {}", search_key->to_string());
-            return; // no such entry found
-        }
-        ExtentPtr e = *(i._extent_i);
-
-        // temporarily remove the size of this extent from the page size
-        this->size -= e->byte_count();
-
-        // remove the row from the extent
-        // note: if this needs to remove all matching rows, then additional logic is
-        //       required; currently only removes a single row
-        e->remove(i._row_i);
-
         // mark this page as dirty
         _dirty = true;
 
-        // update the page size
-        this->size += e->byte_count();
+        // remove the entry from the backing page
+        _cache_page->remove(search_key, _schema);
 
-        // if the extent is empty, remove it from the set
-        if (e->empty()) {
-            if (_extents.size() > 1) {
-                _extents.erase(i._extent_i);
-            }
-        }
+        // // find the position to perform the remove
+        // auto &&i = this->find(search_key);
+        // if (i == this->end()) {
+        //     SPDLOG_INFO("Failed to remove entry: {}", search_key->to_string());
+        //     return; // no such entry found
+        // }
+        // ExtentPtr e = *(i._extent_i);
 
-        // changes the root to a branch when it has no more children
+        // // temporarily remove the size of this extent from the page size
+        // this->size -= e->byte_count();
+
+        // // remove the row from the extent
+        // // note: if this needs to remove all matching rows, then additional logic is
+        // //       required; currently only removes a single row
+        // e->remove(i._row_i);
+
+        // // mark this page as dirty
+        // _dirty = true;
+
+        // // update the page size
+        // this->size += e->byte_count();
+
+        // // if the extent is empty, remove it from the set
+        // if (e->empty()) {
+        //     if (_extents.size() > 1) {
+        //         _extents.erase(i._extent_i);
+        //     }
+        // }
+
+        // changes the root to a leaf when it has no more children
         // XXX it would be better if the root re-positioned down a level once it had only one entry
         //     in it
-        if (is_root && _extents.size() == 1 && _extents.front()->empty()) {
-            // reset the root to an empty leaf
-            _extents[0] = std::make_shared<Extent>(ExtentType(false, true), _btree->_xid, _btree->_leaf_schema->row_size());
-            this->type = ExtentType(false, true);
+        if (is_root && _cache_page->empty()) {
+            // XXX reset the root to an empty leaf
+            _schema = _btree->_leaf_schema;
         }
+
+        // if (is_root && _extents.size() == 1 && _extents.front()->empty()) {
+        //     // reset the root to an empty leaf
+        //     _extents[0] = std::make_shared<Extent>(ExtentType(false, true), _btree->_xid, _btree->_leaf_schema->row_size());
+        //     this->type = ExtentType(false, true);
+        // }
 
         // XXX re-merge extents if possible?
 
@@ -431,22 +468,40 @@ namespace springtail {
     {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
-        // since this is an empty root, ensure that it is now a leaf node
-        ExtentType type(false, true);
+        assert(_cache_page->empty());
 
-        // update the extent header
-        _extents[0]->header().xid = xid;
-        _extents[0]->header().prev_offset = this->extent_id;
-        _extents[0]->header().type = type;
+        // XXX we need to force a flush of an empty extent somehow?  or can we just return an empty page?
+        //assert(0);
+        ExtentHeader header(this->type, xid, _schema->row_size(), this->extent_id);
+        auto ids = _cache_page->flush(header);
 
-        // write the empty extent
-        auto &&response = _extents[0]->async_flush(_btree->_handle).get();
+        // note: flushing an empty page, so only ever one extent
+        assert(ids.size() == 1);
 
-        // construct the page this way to ensure we don't try to extract a prev_key
-        PagePtr page = std::make_shared<Page>(_btree, response->offset);
-        page->set_extent(_extents[0], _key_fields);
+        // XXX how to handle the XIDs?
+        auto cache_page = StorageCache::get_instance()->get(_btree->_file, ids[0], _btree->_xid);
+        auto page = std::make_shared<Page>(_btree, ids[0]);
+        page->set_cache_page(cache_page, _schema);
 
         return std::vector<PagePtr>({page});
+
+
+        // // since this is an empty root, ensure that it is now a leaf node
+        // ExtentType type(false, true);
+
+        // // update the extent header
+        // _extents[0]->header().xid = xid;
+        // _extents[0]->header().prev_offset = this->extent_id;
+        // _extents[0]->header().type = type;
+
+        // // write the empty extent
+        // auto &&response = _extents[0]->async_flush(_btree->_handle).get();
+
+        // // construct the page this way to ensure we don't try to extract a prev_key
+        // PagePtr page = std::make_shared<Page>(_btree, response->offset);
+        // page->set_extent(_extents[0], _key_fields);
+
+        // return std::vector<PagePtr>({page});
     }
 
     std::vector<std::shared_ptr<MutableBTree::Page>>
@@ -456,59 +511,79 @@ namespace springtail {
         std::vector<PagePtr> new_pages;
 
         // if the root was split, then remove the root flag from the type
-        ExtentType type = (_extents.size() > 1)
+        ExtentType type = (_cache_page->extent_count() > 1)
             ? ExtentType(this->type.is_branch())
             : this->type;
+        // ExtentType type = (_extents.size() > 1)
+        //     ? ExtentType(this->type.is_branch())
+        //     : this->type;
 
-        // write all of the extents in parallel using async_flush()
-        std::vector<std::future<std::shared_ptr<IOResponseAppend>>> futures;
-        for (auto &&e : _extents) {
-            // set the extent header correctly
-            e->header().xid = xid;
-            e->header().prev_offset = this->extent_id;
-            e->header().type = type;
+        // flush the backing page
+        ExtentHeader header(type, xid, _schema->row_size(), this->extent_id);
+        auto ids = _cache_page->flush(header);
+        for (auto id : ids) {
+            // XXX how to handle XIDs?
+            auto cache_page = StorageCache::get_instance()->get(_btree->_file, id, _btree->_xid);
 
-            futures.push_back(e->async_flush(_btree->_handle));
-        }
-
-        // as the writes complete, create the new pages
-        for (int i = 0; i < futures.size(); i++) {
-            auto &&response = futures[i].get();
-
-            auto key = std::make_shared<MutableTuple>(_key_fields, _extents[i]->back());
+            auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
-            PagePtr page = std::make_shared<Page>(_btree, response->offset,
-                                                  value_key, _extents[i], _key_fields);
+
+            auto page = std::make_shared<Page>(_btree, id, value_key, cache_page, _schema);
+
+            SPDLOG_INFO("Creating MutableBTree Page: {} {}", id, page->extent_id);
 
             new_pages.push_back(page);
         }
+
+        // // write all of the extents in parallel using async_flush()
+        // std::vector<std::future<std::shared_ptr<IOResponseAppend>>> futures;
+        // for (auto &&e : _extents) {
+        //     // set the extent header correctly
+        //     e->header().xid = xid;
+        //     e->header().prev_offset = this->extent_id;
+        //     e->header().type = type;
+
+        //     futures.push_back(e->async_flush(_btree->_handle));
+        // }
+
+        // // as the writes complete, create the new pages
+        // for (int i = 0; i < futures.size(); i++) {
+        //     auto &&response = futures[i].get();
+
+        //     auto key = std::make_shared<MutableTuple>(_key_fields, _extents[i]->back());
+        //     ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
+        //     PagePtr page = std::make_shared<Page>(_btree, response->offset,
+        //                                           value_key, _extents[i], _key_fields);
+
+        //     new_pages.push_back(page);
+        // }
 
         return new_pages;
     }
 
     void
-    MutableBTree::Page::set_extent(ExtentPtr extent,
-                                   MutableFieldArrayPtr key_fields)
+    MutableBTree::Page::set_cache_page(StorageCache::PagePtr cache_page,
+                                       ExtentSchemaPtr schema)
     {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
         // note: page should be empty when this is called
-        assert(_extents.size() == 0);
+        assert(_cache_page == nullptr || _cache_page->empty());
 
-        // put the extent into the list
-        _extents.push_back(extent);
-        this->size = extent->byte_count();
+        // replace the backing page
+        _cache_page = cache_page;
 
         // set the type based on the extent header
-        this->type = extent->type();
+        this->type = cache_page->header().type;
 
         // set the key fields for the page
-        _key_fields = key_fields;
+        _schema = schema;
+        _key_fields = schema->get_mutable_fields(schema->get_sort_keys());
 
         // if the page is not the root then we store the key of the entry we used to find this page
         if (!this->type.is_root()) {
             // force a copy of the values into a ValueTuple
-            auto key = std::make_shared<MutableTuple>(key_fields, extent->back());
+            auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
             this->prev_key = std::make_shared<ValueTuple>(key);
         }
     }
@@ -595,7 +670,7 @@ namespace springtail {
 
         // update the size of the cache based on the new size of the entry
         // note: atomic access to the size
-        uint32_t page_size = update_page->size;
+        uint32_t page_size = 1; // update_page->size;
 
         _cache->size = _cache->size - std::get<3>(entry) + page_size;
         std::get<3>(entry) = page_size;
@@ -709,24 +784,18 @@ namespace springtail {
     MutableBTree::_read_page_internal(PagePtr page)
     {
         // now populate the page
-        auto response = _handle->read(page->extent_id);
 
-        // unpack the header to determine the extent type
-        ExtentHeader header(response->data[0]);
+        // get the backing page
+        // XXX how should we handle the access XID here??
+        auto cache_page = StorageCache::get_instance()->get(_file, page->extent_id, _xid);
 
-        // construct the extent
-        ExtentPtr extent;
-        MutableFieldArrayPtr key_fields;
-        if (header.type.is_branch()) {
-            extent = std::make_shared<Extent>(response->data);
-            key_fields = _branch_keys;
-        } else {
-            extent = std::make_shared<Extent>(response->data);
-            key_fields = _leaf_keys;
-        }
+        // determine the schema for this page
+        ExtentSchemaPtr schema = (cache_page->header().type.is_branch())
+            ? _branch_schema
+            : _leaf_schema;
 
-        // put the extent data into the page
-        page->set_extent(extent, key_fields);
+        // tie the backing page into the btree page
+        page->set_cache_page(cache_page, schema);
     }
 
     MutableBTree::NodePtr
@@ -965,25 +1034,45 @@ namespace springtail {
         PagePtr new_root;
         if (new_pages.size() > 1) {
             // construct the new root's extent
-            ExtentPtr extent = std::make_shared<Extent>(ExtentType(true, true), _xid, _branch_schema->row_size());
-            extent->header().prev_offset = page->extent_id;
+            auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
+
+            // ExtentPtr extent = std::make_shared<Extent>(ExtentType(true, true), _xid, _branch_schema->row_size());
+
+            // XXX do we need to do this here, or can we do it later in flush()?
+            // extent->header().prev_offset = page->extent_id;
 
             // add pointers to the new root for each new page
             for (PagePtr child : new_pages) {
-                Extent::Row row = extent->append();
-                MutableTuple(_branch_keys, row).assign(child->index_key());
-                _branch_child_f->set_uint64(row, child->extent_id);
+                auto key = child->index_key();
+
+                SPDLOG_INFO("Adding root entry to child extent_id: {}", child->extent_id);
+
+                auto value = std::make_shared<FieldArray>();
+                value->push_back(std::make_shared<ConstTypeField<uint64_t>>(child->extent_id));
+
+                auto kv = std::make_shared<KeyValueTuple>(key->fields(), value, key->row());
+
+                cache_page->append(kv, _branch_schema);
+
+                // Extent::Row row = extent->append();
+                // MutableTuple(_branch_keys, row).assign(child->index_key());
+                // _branch_child_f->set_uint64(row, child->extent_id);
             }
 
             // write the new extent to disk
-            auto &&future = extent->async_flush(_handle);
+            ExtentHeader header(ExtentType(true, true), _xid, _branch_schema->row_size(), page->extent_id);
+            auto &&ids = cache_page->flush(header);
+
+
+            // auto &&future = extent->async_flush(_handle);
 
             // construct a new root page based on the new extent
-            uint64_t extent_id = future.get()->offset;
-            auto key = std::make_shared<MutableTuple>(_branch_keys, extent->back());
+            uint64_t extent_id = ids[0]; // future.get()->offset;
+            auto key = std::make_shared<MutableTuple>(_branch_keys, *(cache_page->last()));
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
+
             new_root = std::make_shared<Page>(shared_from_this(), extent_id,
-                                              value_key, extent, _branch_keys);
+                                              value_key, cache_page, _branch_schema);
 
             // note: we don't need to add these new pages as children because they are clean
             //       pages that haven't been traversed for modification
