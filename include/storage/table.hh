@@ -230,15 +230,14 @@ namespace springtail {
          * Mutable table constructor.
          */
         MutableTable(uint64_t id,
+                     uint64_t access_xid,
                      uint64_t target_xid,
                      std::vector<uint64_t> root_offsets,
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
                      ExtentSchemaPtr schema,
-                     DataCachePtr cache,
-                     MutableBTree::PageCachePtr page_cache,
-                     ExtentCachePtr read_cache);
+                     DataCachePtr cache);
 
         /**
          * Returns the file of the raw data associated with the table.

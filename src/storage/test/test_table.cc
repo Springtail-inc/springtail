@@ -34,9 +34,6 @@ namespace {
                 _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
             }
 
-            _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
-            _write_cache = MutableBTree::create_cache(2*1024*1024);
-
             _primary_keys = std::vector<std::string>({"name"});
             _secondary_keys = { std::vector<std::string>({"table_id"}) };
 
@@ -60,8 +57,6 @@ namespace {
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
 
-        std::shared_ptr<ExtentCache> _read_cache;
-        MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _primary_keys;
         std::vector<std::vector<std::string>> _secondary_keys;
 
@@ -85,15 +80,14 @@ namespace {
         _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
             return std::make_shared<MutableTable>(table_id,
+                                                  xid - 1,
                                                   xid,
                                                   roots,
                                                   _base_dir / fmt::format("{}", table_id),
                                                   _primary_keys,
                                                   _secondary_keys,
                                                   _schema,
-                                                  _data_cache,
-                                                  _write_cache,
-                                                  _read_cache);
+                                                  _data_cache);
         }
 
         std::shared_ptr<Tuple>

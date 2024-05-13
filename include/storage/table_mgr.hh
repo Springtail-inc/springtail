@@ -34,7 +34,7 @@ namespace springtail {
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t xid);
+        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Create a new table.
@@ -68,7 +68,7 @@ namespace springtail {
         /**
          * Construct a mutable system table.
          */
-        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t xid);
+        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Retrieve the namespace and name of the table at a given xid/lsn.

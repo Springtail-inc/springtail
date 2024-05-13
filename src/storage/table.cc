@@ -173,15 +173,14 @@ namespace springtail {
 
 
     MutableTable::MutableTable(uint64_t id,
+                               uint64_t access_xid,
                                uint64_t target_xid,
                                std::vector<uint64_t> root_offsets,
                                const std::filesystem::path &table_dir,
                                const std::vector<std::string> &primary_key,
                                const std::vector<std::vector<std::string>> &secondary_keys,
                                ExtentSchemaPtr schema,
-                               DataCachePtr cache,
-                               MutableBTree::PageCachePtr page_cache,
-                               ExtentCachePtr read_cache)
+                               DataCachePtr cache)
     : _id(id),
       _target_xid(target_xid),
       _table_dir(table_dir),
@@ -223,9 +222,9 @@ namespace springtail {
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, false);
 
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+
         _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
                                                         primary_key,
-                                                        page_cache,
                                                         primary_schema,
                                                         _target_xid);
         if (root_offsets[0] != constant::UNKNOWN_EXTENT) {
@@ -236,7 +235,7 @@ namespace springtail {
         // _primary_index->set_xid(_target_xid);
 
         _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
-                                                  _target_xid,
+                                                  access_xid,
                                                   primary_schema,
                                                   root_offsets[0]);
 
@@ -253,7 +252,7 @@ namespace springtail {
             auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
             auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
-                                                        secondary_key, page_cache, secondary_schema,
+                                                        secondary_key, secondary_schema,
                                                         _target_xid);
 
             if (root_offsets[idx] != constant::UNKNOWN_EXTENT) {

@@ -70,19 +70,12 @@ namespace springtail {
             boost::shared_mutex mutex;
 
         public:
-            explicit PageCache(uint64_t max_size)
+            explicit PageCache(uint64_t max_size = 512)
                 : size(0),
                   max_size(max_size)
             { }
         };
         typedef std::shared_ptr<PageCache> PageCachePtr;
-
-        /**
-         * Function for creating a page cache that can be shared among btrees.
-         */
-        static PageCachePtr create_cache(uint64_t size) {
-            return std::make_shared<PageCache>(size);
-        }
 
     public:
         /**
@@ -95,7 +88,6 @@ namespace springtail {
          */
         MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
-                     PageCachePtr cache,
                      ExtentSchemaPtr schema,
                      uint64_t xid);
 
@@ -108,13 +100,6 @@ namespace springtail {
          * Initialize a tree with a given root offset.
          */
         void init(uint64_t root_offset);
-
-        /**
-         * Mark the BTree as making modifications for a given target XID.
-         *
-         * @param xid The target XID for the mutations we are about to apply.
-         */
-        void set_xid(uint64_t xid);
 
         /**
          * Inserts a new entry into the tree.

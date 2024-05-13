@@ -65,7 +65,7 @@ namespace springtail {
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return _page_cache->get(file, extent_id, access_xid);
+            return _page_cache->get(file, extent_id, access_xid, target_xid);
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -74,7 +74,7 @@ namespace springtail {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return _page_cache->get(file, extent_id, target_xid);
+            return _page_cache->get(file, extent_id, access_xid, target_xid);
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -116,21 +116,26 @@ namespace springtail {
     StorageCache::PagePtr
     StorageCache::PageCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id,
-                                 uint64_t xid)
+                                 uint64_t access_xid,
+                                 uint64_t target_xid)
     {
-        SPDLOG_DEBUG("{}, {}, {}", file, extent_id, xid);
+        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
 
-        // check if the page already exists in the cache
-        PagePtr page = _try_get(file, extent_id, xid);
+        // check if the page already exists in the cache for the given target XID
+        PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
             SPDLOG_DEBUG("Found in cache");
             return page;
         }
 
+        // XXX eventually use the access_xid and extent_id to get the proper set of extents to start
+        //     from; for now we assume that the single extent_id *is* the full list of extents for
+        //     the access XID and that the query nodes won't perform any roll-forward on their own.
+
         // note: not in the cache, need to create a new Page
-        return _create(file, extent_id, xid, { extent_id });
+        return _create(file, extent_id, target_xid, { extent_id });
     }
 
     StorageCache::PagePtr
@@ -316,7 +321,8 @@ namespace springtail {
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
-          _end_xid(xid)
+          _end_xid(xid),
+          _target_xid(xid)
     {
         // intentionally empty
     }
@@ -857,7 +863,7 @@ namespace springtail {
     {
         boost::unique_lock lock(_mutex);
 
-        // note: the extent must be MUTABLE and not in-use by others when reinsert()'d
+        // note: the extent must be MUTABLE (not DIRTY) and not in-use by others when reinsert()'d
         assert(extent->_state == CacheExtent::State::MUTABLE);
         assert(extent->_use_count == 1);
 

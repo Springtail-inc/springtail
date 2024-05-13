@@ -27,10 +27,7 @@ namespace {
                     { "index", 3, SchemaType::UINT16, false, 2 }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
-            _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
             _keys = std::vector<std::string>({"name", "table_id", "index"});
-
-            _write_cache = MutableBTree::create_cache(2*1024*1024);
 
             _base_dir = std::filesystem::temp_directory_path() / "test_btree";
             std::filesystem::create_directories(_base_dir);
@@ -56,9 +53,6 @@ namespace {
         FieldPtr _table_id_f, _name_f, _offset_f;
         FieldArrayPtr _fields, _csv_fields;
 
-        std::shared_ptr<MutableBTree> _write_tree;
-        std::shared_ptr<ExtentCache> _read_cache;
-        MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _keys;
 
         std::filesystem::path _base_dir;
@@ -68,7 +62,7 @@ namespace {
                               uint64_t xid)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema, xid);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
 
             btree->init_empty();
             return btree;
@@ -80,7 +74,7 @@ namespace {
                            uint64_t extent_id)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema, xid);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
             btree->init(extent_id);
             return btree;
         }
@@ -605,10 +599,10 @@ namespace {
         std::filesystem::path filename = _base_dir / "ThreadedInsertAndRemove";
 
         // get a mutable btree to perform inserts
-        auto btree1 = std::make_shared<MutableBTree>(filename, _keys, _write_cache, _schema, 1);
+        auto btree1 = std::make_shared<MutableBTree>(filename, _keys, _schema, 1);
         btree1->init_empty();
 
-        auto btree2 = std::make_shared<MutableBTree>(filename, _keys, _write_cache, _schema, 2);
+        auto btree2 = std::make_shared<MutableBTree>(filename, _keys, _schema, 2);
         // auto btree1 = _create_mutable_btree(_base_dir / "ThreadedInsertAndRemove", 1);
         // auto btree2 = _create_mutable_btree(_base_dir / "ThreadedInsertAndRemove", 1);
 

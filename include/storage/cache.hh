@@ -331,9 +331,18 @@ namespace springtail {
             friend PageCache;
 
         public:
+            /**
+             * Constructor for creating a page based on an existing set of extent IDs.  The provided
+             * access XID defines the start / end XIDs for the new page.  If the target XID is the
+             * same as the access XID, then the page is not going to be rolled forward.
+             */
             Page(const std::filesystem::path &file, uint64_t extent_id,
                  uint64_t start_xid, uint64_t end_xid, const std::vector<uint64_t> &offsets);
 
+            /**
+             * Constructor for creating an empty page.  Starts marked dirty and uses the provided
+             * XID as the start, end and target XID for the page.
+             */
             Page(const std::filesystem::path &file, uint64_t xid);
 
             /**
@@ -362,7 +371,7 @@ namespace springtail {
             }
 
             /**
-             * Check if the requested XID is within the bounds of the valid XIDs for this page.
+             * Check if the requested XID is within the bounds of the valid XIDs for accessing this page.
              */
             bool check_xid_valid(uint64_t xid) const {
                 return (_start_xid <= xid && xid <= _end_xid);
@@ -705,11 +714,15 @@ namespace springtail {
             /** The original extent_id of this page. */
             uint64_t _extent_id;
 
-            /** The starting XID that this page is known valid from. */
+            /** The starting XID from which this page is known valid for access. */
             uint64_t _start_xid;
 
-            /** The ending XID up through which this page is known valid. */
+            /** The ending XID up through which this page is known valid for access. */
             uint64_t _end_xid;
+
+            /** The target XID to which we are moving this page.  Set to LATEST_XID if we aren't
+                moving a page forward to a new XID. */
+            uint64_t _target_xid;
 
             /** The position on the LRU list; only valid when _use_count is zero. */
             std::list<std::shared_ptr<Page>>::iterator _lru_pos;
@@ -723,6 +736,15 @@ namespace springtail {
     private:
         /**
          * LRU cache of Page objects.  Maintains a maximum number of extent references across all of the pages.
+         *
+         * Pages are valid over a given XID range.  When requesting a page, it should be requested
+         * based on a given extent_id using a given access XID and target XID.
+         * 
+         * The access XID specifies the XID at which the Page will be starting.  This is used to
+         * check for any known changes to the extent ID that occurred up to the given access XID.
+         *
+         * The target XID specifies the XID at to which the Page will be modified.  If the target
+         * XID matches the access XID, it implies that the Page will not be modified.
          */
         class PageCache {
         public:
@@ -731,7 +753,8 @@ namespace springtail {
                   _size(0)
             { }
 
-            PagePtr get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
+            PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
+                        uint64_t access_xid, uint64_t target_xid);
 
             PagePtr get_empty(const std::filesystem::path &file, uint64_t xid);
 
