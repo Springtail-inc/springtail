@@ -19,7 +19,7 @@ namespace springtail {
 
     // names of StmtContext types
     static std::map<int8_t, std::string> _stmt_names = {
-        {Parser::StmtContext::UNUSED, "UNUSED"},
+        {Parser::StmtContext::INVALID, "INVALID"},
         {Parser::StmtContext::UNSUPPORTED_STMT, "UNSUPPORTED_STMT"},
         {Parser::StmtContext::VAR_SET_STMT, "VAR_SET_STMT"},
         {Parser::StmtContext::VAR_SET_TRANSACTION_ISOLATION_STMT, "VAR_SET_TRANSACTION_ISOLATION_STMT"},
@@ -46,6 +46,7 @@ namespace springtail {
 
     /** Unsafe statements for replicas */
     static std::set<int8_t> _replica_unsafe_stmts = {
+        Parser::StmtContext::INVALID,
         Parser::StmtContext::UNSUPPORTED_STMT,
         Parser::StmtContext::LISTEN_STMT,
         Parser::StmtContext::UNLISTEN_STMT,
@@ -122,6 +123,8 @@ namespace springtail {
     {
         // debugging
         dump_context(context);
+
+        assert(context.type != StmtContext::INVALID);
 
         // check conditions or clauses that indicate updates/writes
         if (_replica_unsafe_stmts.contains(context.type) || context.has_error ||
@@ -256,7 +259,7 @@ namespace springtail {
 
         case T_SelectStmt: // select stmt
             SPDLOG_DEBUG("Parser node: selectstmt");
-            if (context->type == StmtContext::UNUSED) {
+            if (context->type == StmtContext::INVALID) {
                 context->type = StmtContext::SELECT_STMT;
             } else {
                 context->has_select_query = true;

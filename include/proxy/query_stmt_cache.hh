@@ -180,6 +180,10 @@ namespace springtail {
     };
     using QueryStmtCachePtr = std::shared_ptr<QueryStmtCache>;
 
+    /**
+     * Cache of history for either a session or transaction
+     * Contains state modifying commands that can be replayed
+     */
     class SessionHistoryCache {
     public:
         /** History entry for session, excludes prepared statements and portals */
@@ -195,6 +199,9 @@ namespace springtail {
                 DISCARD = 8,     // discard all if name is empty, otherwise not
                 LISTEN = 9,      // listen for notification on channel name
                 UNLISTEN = 10,   // unlisten on channel name or all channels if name empty
+                SAVEPOINT = 11,  // savepoint name
+                ROLLBACK_TO_SAVEPOINT = 12, // rollback to savepoint name
+                RELEASE_SAVEPOINT = 13,     // release savepoint name
             };
 
             Type type;

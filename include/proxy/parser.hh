@@ -22,7 +22,7 @@ namespace springtail {
 
             // statement types
             enum Type : int8_t {
-                UNUSED=0,
+                INVALID=0,
                 UNSUPPORTED_STMT,
                 VAR_SET_STMT,
                 VAR_SET_TRANSACTION_ISOLATION_STMT,
@@ -45,7 +45,7 @@ namespace springtail {
                 SAVEPOINT_STMT,
                 ROLLBACK_TO_SAVEPOINT_STMT,
                 RELEASE_SAVEPOINT_STMT
-            } type = UNUSED;
+            } type = INVALID;
 
             // clauses
             bool has_select_query=false;
