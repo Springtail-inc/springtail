@@ -3,6 +3,7 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 
 # source files
 set(PROXY_SOURCES
@@ -34,6 +35,7 @@ target_link_libraries(springtail_proxy
     PRIVATE auth
     PRIVATE OpenSSL::SSL
     PRIVATE OpenSSL::Crypto
+    PRIVATE xxHash::xxhash
 )
 
 # test parser executable

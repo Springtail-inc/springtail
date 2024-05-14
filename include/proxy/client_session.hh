@@ -51,8 +51,13 @@ namespace springtail {
         void _process_msg(SessionMsgPtr msg) override;
 
     private:
-        QueryStmtCache _prepared_stmt_cache;
-        QueryStmtCache _portal_cache;
+        /** prepared statement/portal stmt cache; name to query stmt/packet */
+        QueryStmtCache _stmt_cache;
+        /** portal name to prepared name map */
+        std::map<std::string, std::string> _portal_map;
+
+        std::weak_ptr<ServerSession> _primary_session; ///< primary server session
+        std::weak_ptr<ServerSession> _replica_session; ///< replica server session
 
         void _process_startup_msg(int32_t code, int32_t msg_length);
         void _process_ssl_request();
@@ -73,19 +78,20 @@ namespace springtail {
         void _handle_simple_query(BufferPtr buffer);
         void _handle_parse(BufferPtr buffer);
         void _handle_bind(BufferPtr buffer);
+        void _handle_describe(BufferPtr buffer);
+        void _handle_execute(BufferPtr buffer);
+        void _handle_close(BufferPtr buffer);
 
         void _send_auth_req();
         void _send_auth_done();
 
-
-        /** Create a primary server session */
-        void _create_primary_server_session();
+        ServerSessionPtr _create_server_session(Session::Type type);
 
         /** Does primary server pool exist */
         bool _primary_pool_exists();
 
         /** Parse a query and return type of server session that can handle it */
-        Type _parse_query(const std::string_view query);
+        Type _parse_query(const std::string_view query, SessionMsgPtr msg);
 
         /** Select a server session based on type */
         ServerSessionPtr _select_session_and_notify(Type type, SessionMsgPtr msg);

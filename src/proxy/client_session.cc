@@ -25,8 +25,7 @@ namespace springtail {
                                  ProxyServerPtr server)
 
         : Session(connection, server, CLIENT),
-          _prepared_stmt_cache(STATEMENT_CACHE_SIZE),
-          _portal_cache(STATEMENT_CACHE_SIZE)
+          _stmt_cache(STATEMENT_CACHE_SIZE)
     {
         SPDLOG_DEBUG("Client connected: endpoint={}, id={}", connection->endpoint(), _id);
 
@@ -59,6 +58,11 @@ namespace springtail {
 
         // clear associated session from the client session
         clear_associated_session();
+
+        if (server_session->is_pinned()) {
+            // server session is pinned, we can't release it
+            return;
+        }
 
         // release session back to instance pool
         server_session->get_instance()->release_session(server_session);
@@ -298,7 +302,7 @@ namespace springtail {
         switch(_login->_type) {
             case TRUST:
                 SPDLOG_DEBUG("User {} authenticated with trust", _user->username());
-                _create_primary_server_session();
+                _create_server_session(Session::Type::PRIMARY);
                 return; // did send above so we return here
 
             case MD5:
@@ -370,7 +374,7 @@ namespace springtail {
 
                     // auth successful on client side
                     // see if we need to create a server session
-                    _create_primary_server_session();
+                    _create_server_session(Session::Type::PRIMARY);
 
                     return;
                 }
@@ -496,15 +500,15 @@ namespace springtail {
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
-        // auth successful on client side; see if a primary server side pool exists
-        if (_primary_pool_exists()) {
-            // auth is done, send auth done messages
-            _send_auth_done();
-        } else {
-            // no pool exists, create a new server session for primary
-            _create_primary_server_session();
+        // auth successful on client side; see if a primary server side session exists
+        if (_primary_session.expired()) {
+            // create a new server session for primary
+            _create_server_session(Session::Type::PRIMARY);
             // wait until this is done before auth done messages are sent
             // server session will notify client through _process_message
+        } else {
+            // auth is done, send auth done messages
+            _send_auth_done();
         }
     }
 
@@ -519,24 +523,6 @@ namespace springtail {
         }
 
         return true;
-    }
-
-    void
-    ClientSession::_create_primary_server_session()
-    {
-        DatabaseInstancePtr primary = _server->get_primary_instance();
-
-        // create a new server session; will initiate the connection to the server
-        SPDLOG_DEBUG("Allocating new server session: {}:{}", _database, _user->username());
-        ServerSessionPtr server_session = primary->allocate_session(_server, _user, _database);
-
-        // register server session connection with server
-        _server->register_session(server_session);
-
-        // queue a message to server, response comes in _process_msg()
-        // with a message type of SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
-        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
-        queue_msg(msg, server_session);
     }
 
     void
@@ -637,55 +623,35 @@ namespace springtail {
             // handle request
             switch (code) {
             case 'P':
-                // parse
-                // parse a statement -- save query as prepared stmt
-                SPDLOG_DEBUG("Parse request");
+                // parse - save query as prepared stmt
                 _handle_parse(buffer);
                 break;
 
             case 'B':
-                // bind
-                // binds a statement to a portal
-                SPDLOG_DEBUG("Bind request");
+                // bind - binds a prepared statement to a portal
                 _handle_bind(buffer);
                 break;
 
             case 'D': {
-                // describe
-                // references a prepared statement or portal
-                // type: S - statement, P - portal
-                char type = buffer->get();
-
-                // portal or statement
-                std::string_view name = buffer->get_string();
-
-                SPDLOG_DEBUG("Describe request: type={}, name={}", type, name);
+                // describe - describe row format of result when executed
+                _handle_describe(buffer);
                 break;
             }
 
             case 'C': {
-                // close portal -- release it
-                // type: S - statement, P - portal
-                char type = buffer->get();
-                // portal or statement
-                std::string_view name = buffer->get_string();
-
-                SPDLOG_DEBUG("Close request: type={}, name={}", type, name);
+                // close portal or prepared stmt -- release it
+                _handle_close(buffer);
                 break;
             }
 
             case 'E': {
-                // execute
-                // portal string
-                std::string_view portal = buffer->get_string();
-
-                SPDLOG_DEBUG("Execute request: portal={}", portal);
+                // execute portal
+                _handle_execute(buffer);
                 break;
             }
 
             case 'Q':
-                // query
-                // handle simple query
+                // query - handle simple query (semicolon separated)
                 _handle_simple_query(buffer);
                 break;
 
@@ -714,16 +680,23 @@ namespace springtail {
         SPDLOG_DEBUG("Parse: stmt={}, query={}", stmt, query);
 
         // parse the query and determine if it is a read or write query
-        Session::Type type = _parse_query(query);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE, buffer);
+        Session::Type type = _parse_query(query, msg);
 
         // cache the parse packet for the server session
-        if (query.size() >= QueryStmtCache::MAX_STMT_LENGTH) {
-            SPDLOG_DEBUG("Statement too long to cache: {}", query.size());
-            _prepared_stmt_cache.add(stmt.data(), std::make_shared<QueryStmt>());
+        QueryStmtPtr query_stmt = _stmt_cache.add(QueryStmtCache::PREPARED,
+                                                  stmt, buffer, type == REPLICA);
+
+        // cache may decide that the statement is too long to cache, and make it not readonly
+        if (!query_stmt->is_read_safe()) {
             type = PRIMARY;
-        } else {
-            _prepared_stmt_cache.add(stmt.data(), std::make_shared<QueryStmt>(buffer, type == REPLICA));
         }
+
+        // generate message with dependencies/provides
+        msg->add_dependency(query_stmt);
+
+        // select a server session and notify it of this message
+        ServerSessionPtr server_session = _select_session_and_notify(type, msg);
     }
 
     void
@@ -735,19 +708,112 @@ namespace springtail {
         // statement string -- prepared name
         std::string_view stmt = buffer->get_string();
 
-        SPDLOG_DEBUG("Bind: prepared_name={}, portal={}", stmt, portal);
+        SPDLOG_DEBUG("Bind: prepared={}, portal={}", stmt, portal);
 
         // get the prepared statement from the cache
-        QueryStmtPtr query_stmt = _prepared_stmt_cache.get(stmt.data());
-        if (query_stmt == nullptr) {
+        QueryStmtPtr prepared_stmt = _stmt_cache.get(QueryStmtCache::PREPARED, stmt);
+        if (prepared_stmt == nullptr) {
             SPDLOG_ERROR("Prepared statement not found: {}", stmt);
             throw ProxyMessagePreparedError();
         }
 
-        _portal_cache.add(portal.data(),
-            std::make_shared<QueryStmt>(buffer, query_stmt->is_readonly));
+        // add the portal to the cache
+        QueryStmtPtr portal_stmt = _stmt_cache.add(QueryStmtCache::PORTAL,
+                                                   portal, buffer, prepared_stmt->is_read_safe());
+        _portal_map.insert({portal.data(), stmt.data()});
+
+        // get session type
+        Session::Type type = portal_stmt->is_read_safe() ? REPLICA : PRIMARY;
+
+        // create message with dependencies/provides
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, buffer);
+        msg->add_dependency(prepared_stmt);
+        msg->add_provides(portal_stmt->get_hash());
+
+        // select a server session and notify it of this message
+        ServerSessionPtr server_session = _select_session_and_notify(type, msg);
     }
 
+    void
+    ClientSession::_handle_describe(BufferPtr buffer)
+    {
+        // type: S - statement, P - portal
+        char stmt_type = buffer->get();
+
+        // portal or statement name
+        std::string_view name = buffer->get_string();
+
+        SPDLOG_DEBUG("Describe request: type={}, name={}", stmt_type, name);
+
+        // create message with dependencies/provides
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE, buffer);
+
+        // get the statement from the cache
+        QueryStmtPtr query_stmt = _stmt_cache.get(stmt_type, name.data());
+        if (query_stmt == nullptr) {
+            SPDLOG_ERROR("Statement not found: {}", name);
+            throw ProxyMessagePreparedError();
+        }
+
+        // add dependency
+        msg->add_dependency(query_stmt);
+
+        Session::Type type = query_stmt->is_read_safe() ? REPLICA : PRIMARY;
+
+        // send to server session
+        ServerSessionPtr server_session = _select_session_and_notify(type, msg);
+    }
+
+    void
+    ClientSession::_handle_execute(BufferPtr buffer)
+    {
+        // portal name
+        std::string_view name = buffer->get_string();
+
+        SPDLOG_DEBUG("Describe request: name={}", name);
+
+        QueryStmtPtr query_stmt = _stmt_cache.get(QueryStmtCache::PORTAL, name);
+        if (query_stmt == nullptr) {
+            SPDLOG_ERROR("Portal not found: {}", name);
+            throw ProxyMessagePreparedError();
+        }
+
+        // create message with dependencies/provides
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXECUTE, buffer);
+        msg->add_dependency(query_stmt);
+
+        Session::Type type = query_stmt->is_read_safe() ? REPLICA : PRIMARY;
+
+        // select a server session and notify it of this message
+        ServerSessionPtr server_session = _select_session_and_notify(type, msg);
+    }
+
+    void
+    ClientSession::_handle_close(BufferPtr buffer)
+    {
+        // type: S - statement, P - portal
+        char stmt_type = buffer->get();
+
+        // portal or statement
+        std::string_view name = buffer->get_string();
+
+        SPDLOG_DEBUG("Close request: type={}, name={}", stmt_type, name);
+
+        // create message with dependencies/provides
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_CLOSE, buffer);
+
+        QueryStmtPtr query_stmt = _stmt_cache.get(stmt_type, name);
+        msg->add_dependency(query_stmt);
+        _stmt_cache.remove(stmt_type, name);
+
+        Session::Type type = PRIMARY;
+        if (query_stmt != nullptr) {
+            type = query_stmt->is_read_safe() ? REPLICA : PRIMARY;
+        }
+
+        // notify server session
+        ServerSessionPtr server_session = _select_session_and_notify(type, msg);
+    }
 
     void
     ClientSession::_handle_simple_query(BufferPtr buffer)
@@ -756,11 +822,11 @@ namespace springtail {
 
         SPDLOG_DEBUG("Simple Query: {}", query);
 
-        // parse the query and determine if it is a read or write query
-        Session::Type type = _parse_query(query);
-
         // create message for server for query
-        SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, query.data());
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, buffer);
+
+        // parse the query and determine if it is a read or write query
+        Session::Type type = _parse_query(query, msg);
 
         // select a server session and notify it of this message
         // if no server is available a new server session will be connected
@@ -775,14 +841,41 @@ namespace springtail {
     {
         SPDLOG_DEBUG("Selecting server session: type={}", (int8_t)type);
 
-        // if in a transaction and have an associated session, use that
-        if (_in_transaction && get_associated_session() != nullptr) {
+        // if we have an associated session use it (typically in a transaction)
+        if (get_associated_session() != nullptr) {
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
             queue_msg(msg, session);
             SPDLOG_DEBUG("Using associated session: id={}", session->id());
             return session;
         }
 
+        ServerSessionPtr session = nullptr;
+
+        if (type == PRIMARY && !_primary_session.expired()) {
+            // use primary session
+            session = _primary_session.lock();
+            queue_msg(msg, session);
+            return session;
+        }
+
+        if (type == REPLICA && !_replica_session.expired()) {
+            // use replica session
+            session = _replica_session.lock();
+            queue_msg(msg, session);
+            return session;
+        }
+
+        //// Shouldn't get here in common case; only if we need to allocate a new session
+        session = _create_server_session(type);
+        assert (session != nullptr);
+        queue_msg(msg, session);
+
+        return session;
+    }
+
+    ServerSessionPtr
+    ClientSession::_create_server_session(Session::Type type)
+    {
         // get database instance from either primary or replica set
         DatabaseInstancePtr instance = nullptr;
         if (type == PRIMARY) {
@@ -803,9 +896,18 @@ namespace springtail {
         }
         SPDLOG_DEBUG("Got server session: id={}, is_ready={}", session->id(), session->is_ready());
 
+        if (type == PRIMARY) {
+            // store reference to primary session
+            _primary_session = session;
+        } else {
+            // store reference to replica session
+            _replica_session = session;
+        }
+        session->pin_client_session(shared_from_this());
+
+
         if (session->is_ready()) {
             // session is ready, we can use it
-            queue_msg(msg, session);
             return session;
         }
 
@@ -814,9 +916,8 @@ namespace springtail {
         _server->register_session(session);
 
         // queue client startup message, response comes in _process_msg()
-        SessionMsgPtr startup_msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
-        queue_msg(startup_msg);
-        queue_msg(msg, session);
+        SessionMsgPtr startup_msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        queue_msg(startup_msg, session);
 
         // at this point we'll return through process()
         // most likely with _waiting_on_session set, in which case this
@@ -825,37 +926,100 @@ namespace springtail {
         return session;
     }
 
+
     Session::Type
-    ClientSession::_parse_query(const std::string_view query)
+    ClientSession::_parse_query(const std::string_view query,
+                                SessionMsgPtr msg)
     {
         // parse the query and determine if it is a read or write query
-        bool is_readonly = true;
-        std::vector<Parser::StmtContextPtr> parse_contexts = Parser::parse_query(query);
+        bool is_read_safe = true;
+        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query);
+
         for (auto &context : parse_contexts) {
-            if (context->is_prepare_stmt) {
+            // check for PREPARE
+            if (context->type == Parser::StmtContext::PREPARE_STMT) {
                 // handle prepared statement, find substring query from location/length
-                // if statement length is too long, then for now we don't cache the query instead we replay it against
-                // the primary. XXX This is a temporary solution until we can handle large queries in the cache.
-                std::string name = context->prepared_name;
-
-                if (context->stmt_length > QueryStmtCache::MAX_STMT_LENGTH) {
-                    SPDLOG_DEBUG("Prepared statement too long to cache: {}", context->stmt_length);
-                    is_readonly = false;
-
-                    _prepared_stmt_cache.add(name, std::make_shared<QueryStmt>());
-                } else {
-                    auto p_query = query.substr(context->stmt_location, context->stmt_length);
-                    _prepared_stmt_cache.add(name, std::make_shared<QueryStmt>(p_query.data(), context->is_readonly));
+                // cache may decide not to cache query if query is too long, if so it will
+                // revert entry to not readonly (execute on Primary)
+                auto p_query = query.substr(context->stmt_location, context->stmt_length);
+                QueryStmtPtr qs = _stmt_cache.add(QueryStmtCache::PREPARED, context->name, p_query,
+                                                  context->is_read_safe);
+                msg->add_provides(context->name);
+                if (!qs->is_read_safe()) {
+                    context->is_read_safe = false;
                 }
             }
 
+            // check for EXECUTE
+            if (context->type == Parser::StmtContext::EXECUTE_STMT) {
+                // handle execute statement, find prepared statement in cache
+                QueryStmtPtr qs = _stmt_cache.get(QueryStmtCache::PREPARED, context->name);
+                if (qs == nullptr) {
+                    SPDLOG_ERROR("Prepared statement not found: {}", context->name);
+                    throw ProxyMessagePreparedError();
+                }
+                msg->add_dependency(qs);
+                if (!qs->is_read_safe()) {
+                    context->is_read_safe = false;
+                }
+            }
+
+            // check for DECLARE
+            if (context->type == Parser::StmtContext::DECLARE_STMT) {
+                // handle declare statement insert into cache
+                auto p_query = query.substr(context->stmt_location, context->stmt_length);
+                QueryStmtPtr qs = _stmt_cache.add(QueryStmtCache::PORTAL,
+                                                  context->name, p_query,
+                                                  context->is_read_safe);
+                msg->add_dependency(qs);
+                if (!qs->is_read_safe()) {
+                    context->is_read_safe = false;
+                }
+            }
+
+/*
+            // check for DISCARD
+            if (context->type == Parser::StmtContext::DISCARD_STMT) {
+                // handle discard statement, remove prepared statement from cache
+                _stmt_cache.remove(QueryStmtCache::PREPARED, context->name);
+            }
+
+            if (context->type == Parser::StmtContext::DISCARD_ALL) {
+                // handle discard all statement, remove all prepared statements from cache
+                _stmt_cache.remove(QueryStmtCache::PREPARED);
+            }
+
+            // check for DEALLOCATE
+            if (context->type == Parser::StmtContext::DEALLOCATE_STMT) {
+                // handle deallocate statement, remove prepared statement from cache
+                if (context->name.empty()) {
+                    // deallocate all prepared statements
+                    _stmt_cache.remove(QueryStmtCache::PREPARED);
+                } else {
+                    // deallocate specific prepared statement
+                    _stmt_cache.remove(QueryStmtCache::PREPARED, context->name);
+                }
+            }
+
+            // check for CLOSE
+            if (context->type == Parser::StmtContext::CLOSE) {
+                // handle close statement, remove portal from cache
+                if (context->portal_name.empty()) {
+                    // close all portals
+                    _stmt_cache.remove(QueryStmtCache::PORTAL);
+                } else {
+                    // close specific portal
+                    _stmt_cache.remove(QueryStmtCache::PORTAL, context->portal_name);
+                }
+            }
+*/
             // set readonly flag
-            if (!context->is_readonly) {
-                is_readonly = false;
+            if (!context->is_read_safe) {
+                is_read_safe = false;
             }
         }
 
-        return (is_readonly) ? REPLICA : PRIMARY;
+        return (is_read_safe) ? REPLICA : PRIMARY;
     }
 
 }

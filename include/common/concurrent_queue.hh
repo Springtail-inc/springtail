@@ -91,6 +91,29 @@ namespace springtail {
         }
 
         /**
+         * @brief Try and pop an entry from the queue, return nullptr if queue is empty
+         * @return Tptr entry or nullptr if queue is empty
+         */
+        Tptr try_pop()
+        {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            if (_queue.empty()) {
+                return nullptr;
+            }
+
+            Tptr entry = _queue.front();
+            _queue.pop();
+
+            write_lock.unlock();
+
+            if (_queue.size() >= (_limit-1)) {
+                _cv_push.notify_one();
+            }
+
+            return entry;
+        }
+
+        /**
          * @brief Peek at the front of the queue without unlocking
          * Note: another thread may pop this item between front() and pop(); so use carefully
          * @return std::shared_ptr<T> element at front of queue

@@ -42,13 +42,14 @@ namespace springtail {
 
         /** State of session */
         enum State : int8_t {
-            STARTUP=0,
-            SSL_HANDSHAKE=1,
-            AUTH=2,
-            AUTH_SERVER=3,
-            AUTH_DONE=4,
-            READY=5,
-            ERROR=99
+            STARTUP=0,        ///< initial state
+            SSL_HANDSHAKE=1,  ///< SSL handshake
+            AUTH=2,           ///< authentication
+            AUTH_SERVER=3,    ///< server auth
+            AUTH_DONE=4,      ///< auth complete
+            READY=5,          ///< ready for query
+            DEPENDENCIES=6,   ///< waiting on dependencies
+            ERROR=99          ///< fatal error state
         };
 
         constexpr static int32_t MSG_STARTUP_V2 =0x20000;
@@ -202,7 +203,7 @@ namespace springtail {
          * @return SessionMsgPtr or nullptr if no queued msg
          */
         SessionMsgPtr get_msg() {
-            SessionMsgPtr msg = _msg_queue.pop();
+            SessionMsgPtr msg = _msg_queue.try_pop();
             return msg;
         }
 

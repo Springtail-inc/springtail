@@ -102,8 +102,8 @@ namespace springtail {
     void
     Session::_internal_process_msgs(bool is_remote)
     {
-        while (_ready_for_message && !_msg_queue.empty()) {
-            SPDLOG_DEBUG("Processing messages: session id: {}", _id);
+        while (_ready_for_message) {
+            SPDLOG_DEBUG("Looking for messages: session id: {}", _id);
 
             SessionMsgPtr msg = get_msg();
             if (msg == nullptr) {

@@ -46,7 +46,11 @@ namespace springtail {
             break;
 
         case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
-            _handle_simple_query(msg->get_str());
+        case SessionMsg::MSG_CLIENT_SERVER_PARSE:
+        case SessionMsg::MSG_CLIENT_SERVER_BIND:
+        case SessionMsg::MSG_CLIENT_SERVER_DESCRIBE:
+        case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
+            _handle_msg_to_server(msg);
             break;
 
         default:
@@ -73,7 +77,7 @@ namespace springtail {
         case AUTH_DONE:
         case READY:
             // ready for query, handle requests
-            _handle_message();
+            _handle_message_from_server();
             break;
         default:
             _state = ERROR;
@@ -87,7 +91,7 @@ namespace springtail {
     }
 
     void
-    ServerSession::_handle_message()
+    ServerSession::_handle_message_from_server()
     {
         // Read messages from server session
 
@@ -129,6 +133,11 @@ namespace springtail {
             case 'T': // Row description
             case 'D': // Data row
             case 'N': // Notice response
+                if (_state == DEPENDENCIES) {
+                    // we are in dependency checking state, continue with dependencies
+                    _handle_dependency_response();
+                    return;
+                }
                 _stream_to_remote_session(code, msg_length);
                 return;
         }
@@ -209,6 +218,10 @@ namespace springtail {
                     // the client session authentication
                     SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
                     queue_msg(msg);
+                    break;
+                } else if (_state == DEPENDENCIES) {
+                    // we are in dependency checking state, continue with dependencies
+                    _handle_dependency_response();
                     break;
                 }
 
@@ -577,6 +590,84 @@ namespace springtail {
         // if not fatal then wait for ready for query from server
         return;
     }
+
+    void
+    ServerSession::_handle_dependency_response()
+    {
+        // reset state to ready
+        assert (_state == DEPENDENCIES);
+        _state = READY;
+
+        // add dependency to appropriate set
+        auto dep = _current_msg->peek_dependency();
+        _stmts.insert(dep->get_hash());
+
+        // remove this dependency
+        _current_msg->pop_dependency();
+
+        // check for additional dependencies and issue to server
+        _handle_msg_to_server(_current_msg);
+    }
+
+    void
+    ServerSession::_handle_msg_to_server(SessionMsgPtr msg)
+    {
+        _state = READY;
+        _current_msg = msg;
+
+        // get set of dependencies and issue them to the server
+        auto dep = msg->peek_dependency();
+        while (dep != nullptr) {
+            // look at the next dependency
+            if (_send_dependency(dep)) {
+                return;
+            }
+
+            // remove dependency it no msg send necessary;
+            // otherwise dep is removed in _handle_dependency_response
+            msg->pop_dependency();
+        }
+
+        // no more dependencies, send the message to server
+        BufferPtr buffer = msg->get_buffer();
+        ssize_t n = _connection->write(buffer->data(), buffer->size());
+        assert(n == buffer->size());
+    }
+
+    bool
+    ServerSession::_send_dependency(const QueryStmtPtr query_stmt)
+    {
+        _state = DEPENDENCIES;
+
+        // check if we have a buffer to send or a simple query
+        // send the query
+
+        switch (query_stmt->type()) {
+            case QueryStmt::Type::SIMPLE:
+                // send the simple query
+                _handle_simple_query(query_stmt->get_query());
+                return true;
+
+            case QueryStmt::Type::PACKET: {
+                // send the packet
+                BufferPtr buffer = query_stmt->get_buf();
+                ssize_t n = _connection->write(buffer->data(), buffer->size());
+                assert(n == buffer->size());
+                return true;
+            }
+
+            case QueryStmt::Type::NOT_CACHED:
+                SPDLOG_WARN("Query not cached");
+                // nothing to do, it should reside on the primary
+                // continue to next dependency
+
+                // fall through
+            default:
+                _state = READY;
+                return false;
+        }
+    }
+
 
     /** factory to create session */
     std::shared_ptr<ServerSession>

@@ -29,7 +29,18 @@ static const std::vector<std::string> tests = {
     "SELECT a FROM b UNION SELECT x FROM y LIMIT 10",
     "ALTER TABLE foo ADD COLUMN bar INT",
     "EXPLAIN ANALYZE SELECT * FROM foo",
-    "RESET ALL" // maps to VariableSetStmt kind=VAR_RESET_ALL
+    "RESET ALL", // maps to VariableSetStmt kind=VAR_RESET_ALL
+    "DECLARE myportal CURSOR FOR SELECT * FROM foo",
+    "DECLARE myportal CURSOR FOR SELECT * FROM foo FOR UPDATE",
+    "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    "SET TRANSACTION SNAPSHOT 'snapshot_name'",
+    "SET SESSION AUTHORIZATION 'paul'",
+    "LISTEN channel",
+    "UNLISTEN channel",
+    "SAVEPOINT foo",
+    "ROLLBACK TO SAVEPOINT foo",
+    "RELEASE SAVEPOINT foo",
 };
 
 int main(void)
@@ -41,7 +52,7 @@ int main(void)
         std::vector<Parser::StmtContextPtr> res = Parser::parse_query(tests[i]);
         Parser::dump_parse_tree(tests[i]);
         for (auto &r : res) {
-            std::cout << "IS: " << (r->is_readonly ? "readable\n" : "NOT readable\n") << std::endl;
+            std::cout << "IS: " << (r->is_read_safe ? "readable\n" : "NOT readable\n") << std::endl;
         }
     }
     return 0;
