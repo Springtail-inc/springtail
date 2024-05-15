@@ -1,9 +1,7 @@
 #pragma once
 
-#include <common/object_cache.hh>
-
 #include <storage/btree.hh>
-#include <storage/data_cache.hh>
+#include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 #include <storage/schema_mgr.hh>
 
@@ -236,8 +234,7 @@ namespace springtail {
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
-                     ExtentSchemaPtr schema,
-                     DataCachePtr cache);
+                     ExtentSchemaPtr schema);
 
         /**
          * Returns the file of the raw data associated with the table.
@@ -283,6 +280,9 @@ namespace springtail {
          */
         void update(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+
+        void evict_handler(StorageCache::PagePtr page);
+
         /**
          * Remove the entries into the extent from the primary and secondary indexes.
          */
@@ -320,10 +320,18 @@ namespace springtail {
         }
 
     private:
+        bool _flush_handler(StorageCache::PagePtr page);
+
+        void _invalidate_indexes(StorageCache::PagePtr page);
+        void _flush_and_populate_indexes(StorageCache::PagePtr page);
+
+
         /**
          * Inserts a tuple directly into the provided extent at the given XID.
          */
         void _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+
+        void _insert_empty(TuplePtr value, uint64_t xid);
 
         /**
          * Inserts a tuple at the end of the last extent of the table at the given XID.
@@ -342,6 +350,8 @@ namespace springtail {
          */
         void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        void _upsert_empty(TuplePtr value, uint64_t xid);
+
         /**
          * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
          * value, using a primary key lookup to find the containing extent.
@@ -353,6 +363,8 @@ namespace springtail {
          * value.
          */
         void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+
+        void _remove_empty(TuplePtr value, uint64_t xid);
 
         /**
          * Removes a tuple at the given XID that has the same primary key value by using a primary
@@ -372,6 +384,8 @@ namespace springtail {
          */
         void _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        void _update_empty(TuplePtr value, uint64_t xid);
+
         /**
          * Updates an existing row with the matching primary key value at the given XID, using a
          * primary key lookup to find the containing extent.
@@ -382,6 +396,7 @@ namespace springtail {
         /** The ID of the table. */
         uint64_t _id;
 
+        uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
@@ -398,10 +413,10 @@ namespace springtail {
         std::vector<MutableBTreePtr> _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
 
-        DataCachePtr _cache; ///< The cache of table data extents.
-
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
+
+        StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

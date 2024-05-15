@@ -238,6 +238,66 @@ namespace springtail {
         return fields;
     }
 
+    std::shared_ptr<std::vector<FieldPtr>>
+    ExtentSchema::get_min_fields(const std::vector<std::string> &columns) const
+    {
+        auto fields = std::make_shared<std::vector<FieldPtr>>();
+
+        for (auto &&name : columns) {
+            auto pos = _field_map.find(name);
+            assert(pos != _field_map.end());
+
+            FieldPtr field = nullptr;
+            switch (pos->second.first->get_type()) {
+            case(SchemaType::TEXT):
+                field = std::make_shared<ConstTypeField<std::string>>("");
+                break;
+            case(SchemaType::UINT64):
+                field = std::make_shared<ConstTypeField<uint64_t>>(0);
+                break;
+            case(SchemaType::INT64):
+                field = std::make_shared<ConstTypeField<int64_t>>(0);
+                break;
+            case(SchemaType::UINT32):
+                field = std::make_shared<ConstTypeField<uint32_t>>(0);
+                break;
+            case(SchemaType::INT32):
+                field = std::make_shared<ConstTypeField<int32_t>>(0);
+                break;
+            case(SchemaType::UINT16):
+                field = std::make_shared<ConstTypeField<uint16_t>>(0);
+                break;
+            case(SchemaType::INT16):
+                field = std::make_shared<ConstTypeField<int16_t>>(0);
+                break;
+            case(SchemaType::UINT8):
+                field = std::make_shared<ConstTypeField<uint8_t>>(0);
+                break;
+            case(SchemaType::INT8):
+                field = std::make_shared<ConstTypeField<int8_t>>(0);
+                break;
+            case(SchemaType::BOOLEAN):
+                field = std::make_shared<ConstTypeField<bool>>(false);
+                break;
+            case(SchemaType::FLOAT64):
+                field = std::make_shared<ConstTypeField<double>>(0);
+                break;
+            case(SchemaType::FLOAT32):
+                field = std::make_shared<ConstTypeField<float>>(0);
+                break;
+            case(SchemaType::BINARY):
+                field = std::make_shared<ConstTypeField<std::vector<char>>>(std::vector<char>());
+                break;
+            default:
+                throw TypeError();
+            }
+
+            fields->push_back(field);
+        }
+
+        return fields;
+    }
+
     std::shared_ptr<std::vector<MutableFieldPtr>>
     ExtentSchema::get_mutable_fields(const std::vector<std::string> &columns) const
     {

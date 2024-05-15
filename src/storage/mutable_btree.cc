@@ -295,14 +295,11 @@ namespace springtail {
 
         // flushing an empty Page will write an empty extent to disk
         ExtentHeader header(this->type, xid, _schema->row_size(), this->extent_id);
-        auto ids = _cache_page->flush(header);
-
-        // note: flushing an empty page, so only ever one extent returned
-        assert(ids.size() == 1);
+        auto extent_id = _cache_page->flush_empty(header);
 
         // XXX how to handle the XIDs?
-        auto cache_page = StorageCache::get_instance()->get(_btree->_file, ids[0], _btree->_xid);
-        auto page = std::make_shared<Page>(_btree, ids[0]);
+        auto cache_page = StorageCache::get_instance()->get(_btree->_file, extent_id, _btree->_xid);
+        auto page = std::make_shared<Page>(_btree, extent_id);
         page->set_cache_page(cache_page, _schema);
 
         return std::vector<PagePtr>({page});

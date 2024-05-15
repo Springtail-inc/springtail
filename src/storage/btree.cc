@@ -138,6 +138,8 @@ namespace springtail {
     StorageCache::PagePtr
     BTree::_read_extent(uint64_t extent_id) const
     {
+        // XXX need a way to ensure that a put() is called on these
+
         return StorageCache::get_instance()->get(_file, extent_id, _xid);
     }
 }

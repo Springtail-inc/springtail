@@ -13,9 +13,13 @@ namespace springtail {
         // determine a half-way point
         uint32_t half = row_count() / 2;
 
+        // a split extent can no longer be a root
+        ExtentHeader header = _header;
+        header.type = ExtentType(header.type.is_branch());
+
         // create two empty extents
-        ExtentPtr first = std::make_shared<Extent>(_header);
-        ExtentPtr second = std::make_shared<Extent>(_header);
+        ExtentPtr first = std::make_shared<Extent>(header);
+        ExtentPtr second = std::make_shared<Extent>(header);
 
         /* XXX it would be more efficient to direct-copy the fixed data and then check the
            variable-sized data pointers to determine which ones need to be copied over, but

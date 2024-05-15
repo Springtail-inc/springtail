@@ -35,9 +35,6 @@ namespace springtail {
 
     TableMgr::TableMgr()
     {
-        // XXX set the cache sizes and base path from global properties
-        _data_cache = std::make_shared<DataCache>(true);
-
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<std::filesystem::path>(json, "table_dir", _table_base,
@@ -87,15 +84,16 @@ namespace springtail {
         // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
         uint64_t access_xid = xid - 1;
 
-        // add a table -> name mapping that starts the table at the given XID/LSN
+        // 1) add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
         auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
         table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
         table_names_t->finalize();
 
-        // add a table_id -> UNKNOWN_EXTENT extent ID mapping that indicates an empty primary index at the given XID/LSN
-        // note: we perform an upsert because the table records at the XID level and there may have
-        //       been an earlier DROP within the same XID, and we can't insert the same entry twice
+        // add a table_id -> UNKNOWN extent ID mapping that indicates an empty primary index at the given XID/LSN
+
+        // note: we perform an upsert() because the table records at the XID level and there may
+        //       have been an earlier DROP in the same XID, and we can't insert the same entry twice
         auto table_roots_t = get_mutable_table(sys_tbl::TableRoots::ID, access_xid, xid);
         tuple = sys_tbl::TableRoots::Data::tuple(msg.oid, 0, xid, constant::UNKNOWN_EXTENT);
         table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -141,8 +139,54 @@ namespace springtail {
 
         // XXX notify the schema manager of the new schema?
 
+        // XXX don't actually do this, will handle empty table within the table code more gracefully
+        // 5) Create a table with a single empty extent as it's data; this will allow us to
+        //    reference a valid extent ID in the MutableTable when performing the initial insert /
+        //    upsert operation.
+        // auto table_path = _table_base / std::to_string(msg.oid);
+        // auto schema = SchemaMgr::get_instance()->get_extent_schema(msg.oid, xid);
+        // uint64_t primary_offset = _create_empty_table(msg.oid, access_xid, table_path, schema);
+
         // XXX create the table's directory?  create empty index files?
     }
+
+    uint64_t
+    TableMgr::_create_empty_table(uint64_t table_id,
+                                  uint64_t xid,
+                                  const std::filesystem::path &table_dir,
+                                  ExtentSchemaPtr schema)
+    {
+        // make sure that the table directory exists
+        std::filesystem::create_directory(table_dir);
+
+        // construct the primary index btree
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, false);
+        auto primary_key = schema->get_sort_keys();
+        auto primary_schema = schema->create_schema(primary_key, { extent_c }, primary_key);
+
+        auto primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
+                                                            primary_key,
+                                                            primary_schema,
+                                                            xid);
+        primary_index->init_empty();
+
+        // create an empty page in the data file
+        auto data_file = table_dir / "raw";
+        auto page = StorageCache::get_instance()->get(data_file, constant::UNKNOWN_EXTENT, xid);
+        ExtentHeader header(ExtentType(), xid, schema->row_size(), constant::UNKNOWN_EXTENT);
+        auto extent_id = page->flush_empty(header);
+
+        // add the entry to the empty extent into the primary index
+        auto pkey = primary_schema->get_min_fields(primary_key);
+        pkey->push_back(std::make_shared<ConstTypeField<uint64_t>>(extent_id));
+
+        primary_index->insert(std::make_shared<FieldTuple>(pkey, nullptr));
+        uint64_t offset = primary_index->finalize();
+
+        return offset;
+    }
+                                  
 
     void
     TableMgr::alter_table(uint64_t xid,
@@ -315,8 +359,7 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::TableNames::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache);
+                                                  schema);
         }
         case (sys_tbl::TableRoots::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, access_xid);
@@ -329,8 +372,7 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::TableRoots::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache);
+                                                  schema);
         }
         case (sys_tbl::Indexes::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, access_xid);
@@ -343,8 +385,7 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::Indexes::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache);
+                                                  schema);
         }
         case (sys_tbl::Schemas::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, access_xid);
@@ -357,8 +398,7 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::Schemas::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache);
+                                                  schema);
         }
         default:
             return nullptr;

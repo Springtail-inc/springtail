@@ -108,9 +108,16 @@ namespace springtail {
     }
 
     void
-    StorageCache::put(PagePtr page)
+    StorageCache::put(PagePtr page,
+                      std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
-        _page_cache->put(page);
+        _page_cache->put(page, flush_callback);
+    }
+
+    void
+    StorageCache::flush(const std::filesystem::path &file)
+    {
+        _page_cache->flush_file(file);
     }
 
     StorageCache::PagePtr
@@ -150,11 +157,22 @@ namespace springtail {
     }
 
     void
-    StorageCache::PageCache::put(PagePtr page)
+    StorageCache::PageCache::put(PagePtr page,
+                                 std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
+        boost::unique_lock lock(_mutex);
+
+        // set the flush callback for the page if it doesn't have one yet
+        if (flush_callback && !page->_flush_callback) {
+            page->_register_flush(flush_callback);
+
+            auto &list = _flush_list[page->_file];
+            page->_flush_pos = list.insert(list.end(), page);
+        }
+
         if (page->_extent_id == constant::UNKNOWN_EXTENT) {
-            // note: we cannot release a dirty page with no original extent ID back to the cache
-            assert(!page->_is_dirty);
+            // note: we cannot release a dirty page with no original extent ID back to the cache unless it has a flush callback
+            assert(!page->_is_dirty || page->_flush_callback);
 
             // release the space back to the cache
             --_size;
@@ -162,9 +180,63 @@ namespace springtail {
         }
 
         // release the page back to the cache
-        boost::unique_lock lock(_mutex);
        _put(page);
     }
+
+    void
+    StorageCache::PageCache::flush_file(const std::filesystem::path &file)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // go through the dirty page list for the file
+        auto file_i = _flush_list.find(file);
+        if (file_i == _flush_list.end()) {
+            return; // no dirty pages
+        }
+        auto &flush_pages = file_i->second;
+
+        bool done = false;
+        auto page_i = flush_pages.begin();
+
+        // if the list is empty, remove it from the map and return
+        if (page_i == flush_pages.end()) {
+            _flush_list.erase(file_i);
+            return;
+        }
+
+        while (!done) {
+            auto page = *page_i;
+
+            // remove the page from the flush list
+            flush_pages.erase(page->_flush_pos);
+            auto callback = page->_flush_callback;
+            page->_register_flush(nullptr);
+
+            lock.unlock();
+
+            // note: we currently assume that the page has a flush callback
+            assert(callback);
+
+            // issue the flush callback
+            bool success = callback(page);
+
+            // note: we currently assume that the flush callback must succeed here
+            assert(success);
+
+            lock.lock();
+
+            // get the next dirty page
+            page_i = flush_pages.begin();
+            if (page_i == flush_pages.end()) {
+                _flush_list.erase(file);
+                done = true; // no more dirty pages, exit the loop
+            }
+        }
+
+        // flush list for the file must be empty, so remove it
+        _flush_list.erase(file);
+    }
+
 
     void
     StorageCache::PageCache::_put(PagePtr page)
@@ -206,11 +278,16 @@ namespace springtail {
     {
         // issue the associated callback for the page's eviction
         bool success = true;
-        if (page->_evict_callback) {
+        if (page->_flush_callback) {
+            // clear the page from the flush list
+            _flush_list[page->_file].erase(page->_flush_pos);
+            auto callback = page->_flush_callback;
+            page->_flush_callback = nullptr;
+
             boost::unique_lock lock(_mutex, boost::adopt_lock);
             lock.unlock();
 
-            success = page->_evict_callback(page);
+            success = callback(page);
 
             lock.lock();
             lock.release();
@@ -222,7 +299,7 @@ namespace springtail {
             return;
         }
 
-        // if evict was successful, remove the page from the cache
+        // remove the page from the cache
         auto cache_i = _cache.find(page->key());
         cache_i->second.erase(page->xid());
         if (cache_i->second.empty()) {
@@ -327,21 +404,46 @@ namespace springtail {
         // intentionally empty
     }
 
+    uint64_t
+    StorageCache::Page::flush_empty(const ExtentHeader &header)
+    {
+        auto cache = StorageCache::get_instance();
+
+        boost::unique_lock lock(_mutex);
+        _is_dirty = false;
+
+        // note: page must be empty
+        assert(_extents.empty());
+
+        // create an empty extent
+        auto extent = cache->_data_cache->get_empty(_file, header);
+
+        _extents.push_back({ extent->cache_id(), true });
+        cache->_data_cache->put(extent);
+
+        // now perform the usual flush()
+        auto &&offsets = _flush(header);
+
+        return offsets[0];
+    }
+
     std::vector<uint64_t>
     StorageCache::Page::flush(const ExtentHeader &header)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = false;
 
-        auto cache = StorageCache::get_instance();
+        // note: if the page is empty, we should be calling flush_empty()
+        assert(!_extents.empty());
 
-        // check if we are flushing an empty extent
-        if (_extents.empty()) {
-            // create an empty extent
-            auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
-            cache->_data_cache->put(extent);
-        }
+        // perform the usual flush()
+        return _flush(header);
+    }
+
+    std::vector<uint64_t>
+    StorageCache::Page::_flush(const ExtentHeader &header)
+    {
+        auto cache = StorageCache::get_instance();
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
@@ -352,13 +454,9 @@ namespace springtail {
 
                 // update the extent header
                 (*e)->header() = header;
-                // auto &header = (*e)->header();
-                // header.type = type; // XXX this should be set correctly already, do we need this?
-                // header.xid = flush_xid;
-                // header.prev_offset = _extent_id;
 
                 // append the extent to the file
-                // XXX could do these asynchronously to get better parallelism when there are multiple extents
+                // XXX should do these asynchronously to get better parallelism when there are multiple extents
                 cache->_data_cache->flush(*e);
 
                 // return the clean extent back to the read cache
@@ -373,6 +471,7 @@ namespace springtail {
 
             offsets.push_back(ref.first);
         }
+
         return offsets;
     }
 
@@ -616,12 +715,12 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
-        assert(extent_i == _extents.end());
+        assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
 
-        // find the insert position in the extent
+        // find the update position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);
@@ -678,6 +777,26 @@ namespace springtail {
         if ((*extent)->empty()) {
             StorageCache::get_instance()->_data_cache->remove_empty(*extent);
             _extents.erase(extent_i);
+        }
+    }
+
+    void
+    StorageCache::Page::remove(const Iterator &pos,
+                               ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+        _is_dirty = true;
+
+        // make sure that we've got a mutable version of the extent
+        SafeExtent extent(_file, *pos._extent_i, true);
+
+        // remove the row
+        (*extent)->remove(pos._row);
+
+        // if the extent has become empty, remove it from the page
+        if ((*extent)->empty()) {
+            StorageCache::get_instance()->_data_cache->remove_empty(*extent);
+            _extents.erase(pos._extent_i);
         }
     }
 
@@ -785,8 +904,6 @@ namespace springtail {
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get_empty(const std::filesystem::path &file,
                                        const ExtentHeader &header)
-                                       // uint64_t xid,
-                                       // ExtentSchemaPtr schema)
     {
         boost::unique_lock lock(_mutex);
 
@@ -794,7 +911,6 @@ namespace springtail {
         _make_space();
 
         // create an empty extent
-        // ExtentHeader header(ExtentType(), xid, schema->row_size());
         auto extent = std::make_shared<CacheExtent>(header, file);
 
         // assign the extent a unique cache ID and add it to the dirty cache
@@ -986,6 +1102,22 @@ namespace springtail {
     void
     StorageCache::DataCache::_flush(CacheExtentPtr extent)
     {
+        // if already flushing, wait for completion
+        if (extent->_state == CacheExtent::State::FLUSHING) {
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
+
+            auto cv = extent->_flush_cv;
+            cv->wait(lock);
+
+            lock.release();
+            return;
+        }
+
+        // if the extent isn't DIRTY, don't need to flush
+        if (extent->_state != CacheExtent::State::DIRTY) {
+            return;
+        }
+
         // mark the extent as FLUSHING so that other callers will block until flush complete
         extent->_state = CacheExtent::State::FLUSHING;
         extent->_flush_cv = std::make_shared<boost::condition_variable>();

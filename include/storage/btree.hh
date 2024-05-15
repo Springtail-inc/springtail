@@ -258,6 +258,14 @@ namespace springtail {
             return _leaf_schema;
         }
 
+        /**
+         * Returns true if the tree is empty.
+         */
+        bool empty() const
+        {
+            return _root->empty();
+        }
+
     private:
         /** Inverted comparison to ensure XID map is sorted in descending order. */
         class ReverseCompare {

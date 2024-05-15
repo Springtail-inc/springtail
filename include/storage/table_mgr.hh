@@ -80,16 +80,17 @@ namespace springtail {
          */
         SchemaType _convert_pg_type(const std::string &pg_type);
 
+        uint64_t _create_empty_table(uint64_t table_id,
+                                     uint64_t xid,
+                                     const std::filesystem::path &table_dir,
+                                     ExtentSchemaPtr schema);
+
     private:
         // singleton; delete copy constructor
         TableMgr(const TableMgr &) = delete;
         void operator=(const TableMgr &) = delete;
 
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
-
-        ExtentCachePtr _read_cache; ///< A cache of clean extents.
-        DataCachePtr _data_cache; ///< The cache of table data extents.
-        MutableBTree::PageCachePtr _write_cache; ///< The mutable btree cache.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
 }

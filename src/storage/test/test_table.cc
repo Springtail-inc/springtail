@@ -37,8 +37,6 @@ namespace {
             _primary_keys = std::vector<std::string>({"name"});
             _secondary_keys = { std::vector<std::string>({"table_id"}) };
 
-            _data_cache = std::make_shared<DataCache>(true);
-
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
 
@@ -59,8 +57,6 @@ namespace {
 
         std::vector<std::string> _primary_keys;
         std::vector<std::vector<std::string>> _secondary_keys;
-
-        DataCachePtr _data_cache;
 
         std::filesystem::path _base_dir;
 
@@ -86,8 +82,7 @@ namespace {
                                                   _base_dir / fmt::format("{}", table_id),
                                                   _primary_keys,
                                                   _secondary_keys,
-                                                  _schema,
-                                                  _data_cache);
+                                                  _schema);
         }
 
         std::shared_ptr<Tuple>
