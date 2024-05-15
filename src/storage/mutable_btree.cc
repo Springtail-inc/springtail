@@ -25,14 +25,13 @@ namespace springtail {
         assert(_root == nullptr);
 
         // construct an empty extent
-        // XXX is this how we should handle the XID now with the unified cache?
         auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
 
         // create an empty root
         _root = std::make_shared<Page>(shared_from_this(), cache_page, _leaf_schema);
 
         // add the root to the cache
-        // note: we do not release the root, leaving it's use-count in the local permanently at 1
+        // note: we do not release the root, leaving it's use-count in the local cache permanently at 1
         boost::unique_lock cache_lock(_cache->mutex);
         _cache_insert(_root, cache_lock, false);
 
@@ -92,7 +91,7 @@ namespace springtail {
         if (do_flush) {
             // check if this is the root
             if (parent == nullptr) {
-                // XXX is this safe?
+                // no longer need to hold the lock on the entire tree
                 tree_lock.unlock();
 
                 // will exclusive lock the tree and flush the root

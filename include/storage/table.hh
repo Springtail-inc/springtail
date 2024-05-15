@@ -284,16 +284,6 @@ namespace springtail {
         void evict_handler(StorageCache::PagePtr page);
 
         /**
-         * Remove the entries into the extent from the primary and secondary indexes.
-         */
-        void invalidate_indexes(uint64_t extent_id, ExtentPtr extent);
-
-        /**
-         * Add the entries in the extent into the primary and secondary indexes.
-         */
-        void populate_indexes(uint64_t extent_id, ExtentPtr extent);
-
-        /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
          * system tables.
          */
@@ -320,9 +310,20 @@ namespace springtail {
         }
 
     private:
+        /**
+         * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
+         * _flush_and_populate_indexes() on the provided page.
+         */
         bool _flush_handler(StorageCache::PagePtr page);
 
+        /**
+         * Remove the rows in the page from the primary and secondary indexes.
+         */
         void _invalidate_indexes(StorageCache::PagePtr page);
+
+        /**
+         * Flush the page and add it's rows into the primary and secondary indexes.
+         */
         void _flush_and_populate_indexes(StorageCache::PagePtr page);
 
 
@@ -331,6 +332,9 @@ namespace springtail {
          */
         void _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Inserts a tuple into the "empty" Page object.  Used when the Table started empty.
+         */
         void _insert_empty(TuplePtr value, uint64_t xid);
 
         /**
@@ -345,11 +349,14 @@ namespace springtail {
         void _insert_by_lookup(TuplePtr value, uint64_t xid);
 
         /**
-         * Inserts a tuple directly into the provided extent at the given XID, or updates an
-         * existing tuple with the same primary key value.
+         * Either inserts a tuple directly into the provided extent at the given XID, or updates an
+         * existing row with the same primary key value.
          */
         void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Upserts a tuple into the "empty" Page object.  Used when the Table started empty.
+         */
         void _upsert_empty(TuplePtr value, uint64_t xid);
 
         /**
@@ -364,6 +371,9 @@ namespace springtail {
          */
         void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Removes a row from the "empty" Page object.  Used when the Table started empty.
+         */
         void _remove_empty(TuplePtr value, uint64_t xid);
 
         /**
@@ -384,6 +394,9 @@ namespace springtail {
          */
         void _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Updates a row in the "empty" Page object.  Used when the Table started empty.
+         */
         void _update_empty(TuplePtr value, uint64_t xid);
 
         /**

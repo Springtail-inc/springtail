@@ -150,58 +150,6 @@ namespace springtail {
          */
         class Page {
         public:
-#if 0
-            /**
-             * An iterator object for traversing a Page.
-             */
-            class Iterator {
-                friend Page;
-
-            private:
-                const Page *_page; ///< A pointer to the page this iterator is associated with.
-                std::vector<ExtentPtr>::iterator _extent_i; ///< A pointer into the list of extents in this page.
-                Extent::Iterator _row_i; ///< A pointer into the extent referenced by this iterator.
-
-            private:
-                Iterator(const Page *p, std::vector<ExtentPtr>::iterator e, Extent::Iterator r)
-                    : _page(p), _extent_i(e), _row_i(r)
-                { }
-
-            public:
-                using iterator_category = std::forward_iterator_tag;
-                using difference_type   = std::ptrdiff_t;
-                using value_type        = const Extent::Row;
-                using pointer           = const Extent::Row *;  // or also value_type*
-                using reference         = const Extent::Row &;  // or also value_type&
-
-                reference operator*() const { return *(_row_i); }
-                pointer operator->() { return &(*(_row_i)); }
-
-                Iterator& operator++() {
-                    ++_row_i;
-                    if (_row_i == (*_extent_i)->end()) {
-                        // if at the end of the last extent, done iterating
-                        if (*_extent_i == _page->_extents.back()) {
-                            return *this;
-                        }
-
-                        // otherwise, move to the start of the next extent
-                        ++_extent_i;
-                        _row_i = (*_extent_i)->begin();
-                    }
-
-                    return *this;
-                }
-
-                Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-                friend bool operator==(const Iterator& a, const Iterator& b) {
-                    return (a._extent_i == b._extent_i && a._row_i == b._row_i);
-                }
-
-                friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
-            };
-#endif // no self-defined Iterator
             using Iterator = StorageCache::Page::Iterator;
 
         private:

@@ -131,6 +131,9 @@ namespace springtail {
                 return CacheKey(_file, _extent_id);
             }
 
+            /**
+             * Returns the cache ID of a mutable / dirty extent.
+             */
             uint64_t cache_id() const {
                 return _cache_id;
             }
@@ -139,15 +142,15 @@ namespace springtail {
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
 
-            // note: these are only used by the DataCache and are protected by it's mutex
+            // note: the following are only used by the DataCache and are protected by it's mutex
 
-            std::atomic<uint16_t> _use_count; ///< The number of users of this extent.
+            uint16_t _use_count; ///< The number of users of this extent.
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
             State _state; ///< The current state of this extent.
             std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
 
-            uint64_t _cache_id;
+            uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
         };
         using CacheExtentPtr = std::shared_ptr<CacheExtent>;
 
@@ -157,6 +160,9 @@ namespace springtail {
          */
         using ExtentRef = std::pair<uint64_t, bool>;
 
+        /**
+         * A list of CacheExtent objects used for tracking the LRU entry.
+         */
         using ExtentLru = std::list<CacheExtentPtr>;
 
 
@@ -240,14 +246,35 @@ namespace springtail {
              */
             void reinsert(CacheExtentPtr extent);
 
-
+            /**
+             * Write the provided DIRTY extent to disk.  Extent is returned to the MUTABLE state
+             * after the flush() is complete.
+             */
             void flush(CacheExtentPtr extent);
+
+            /**
+             * Invalidates the provided DIRTY extent, ensuring that it is released without being
+             * written to disk.
+             */
             void remove_empty(CacheExtentPtr extent);
+
+            /**
+             * Splits the provided extent into two new extents, each holding roughly half of the
+             * rows.  The provided extent is invalidated and references to the two new DIRTY extents
+             * are returned.
+             */
             std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
 
+            /**
+             * Returns an empty DIRTY extent tied to the provided file.
+             */
             CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header);
 
         private:
+            /**
+             * Helper to retrieve an extent from the clean cache.  If the provided key is not
+             * cached, this function will retrieve the extent from disk.
+             */
             CacheExtentPtr _get_clean(const CacheKey &key);
 
             /**
@@ -265,10 +292,21 @@ namespace springtail {
              */
             void _release(CacheExtentPtr extent);
 
+            /**
+             * Helper to write the provided DIRTY extent to disk.  Extent is returned to the MUTABLE
+             * state after the flush() is complete.
+             */
             void _flush(CacheExtentPtr extent);
 
+            /**
+             * Helper to read a CLEAN extent into memory.  A callback is provided to be run after
+             * the IO to read the extent is complete.
+             */
             CacheExtentPtr _read_extent(const CacheKey &key, std::function<void(CacheExtentPtr)> callback);
 
+            /**
+             * Helper to create a new unique cache ID and associate it with the provided extent.
+             */
             void _gen_cache_id(CacheExtentPtr extent);
 
         private:
@@ -337,6 +375,10 @@ namespace springtail {
              */
             std::vector<uint64_t> flush(const ExtentHeader &header);
 
+            /**
+             * Flushes an empty page to disk by creating an empty extent and flushing that to disk,
+             * returning the single extent offset of that empty extent.
+             */
             uint64_t flush_empty(const ExtentHeader &header);
 
             /**
@@ -359,7 +401,6 @@ namespace springtail {
             bool check_xid_valid(uint64_t xid) const {
                 return (_start_xid <= xid && xid <= _end_xid);
             }
-
 
         private:
             /**
@@ -403,7 +444,7 @@ namespace springtail {
                     } else {
                         _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.first);
 
-                        // XXX
+                        // update the reference in the Page to reflect the extent's cache ID
                         ref.first = _extent->cache_id();
                         ref.second = true;
                     }
@@ -484,7 +525,9 @@ namespace springtail {
                     return &(*_row);
                 }
 
-                // Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+                /**
+                 * Increment operator -- moves to point at the next row in the page.
+                 */
                 Iterator &operator++() {
                     // move to the next row
                     ++_row;
@@ -514,7 +557,9 @@ namespace springtail {
                 Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
 
-                // Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
+                /**
+                 * Decrement operator -- moves to point at the previous row in the page.
+                 */
                 Iterator &operator--() {
                     // try to move to the prev row
                     if (_row != (*_extent)->begin()) {
@@ -538,6 +583,10 @@ namespace springtail {
 
                 Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
+                /**
+                 * Equality operator -- compares if this iterator is at the same row position as the
+                 * provided iterator.
+                 */
                 bool operator==(const Iterator &rhs) const {
                     if (_page == rhs._page && _extent_i == rhs._extent_i) {
                         return (_extent_i == _page->_extents.end() || _row == rhs._row);
@@ -576,10 +625,10 @@ namespace springtail {
                 { }
 
             private:
-                Page *_page;
-                std::vector<ExtentRef>::iterator _extent_i;
-                SafeExtent _extent;
-                Extent::Iterator _row;
+                Page *_page; ///< The associated page.  Used to check for the _extent_i end() condition.
+                std::vector<ExtentRef>::iterator _extent_i; ///< Iterator into the extents of the page.
+                SafeExtent _extent; ///< The current extent.
+                Extent::Iterator _row; ///< Iterator into the current extent.
             };
 
             /**
@@ -629,6 +678,10 @@ namespace springtail {
                 return (*extent)->header();
             }
 
+            /**
+             * Checks if the Page object is empty -- either contains no extents, or a single extent
+             * with no rows.
+             */
             bool empty() const {
                 // if no extents, empty
                 if (_extents.empty()) {
@@ -645,6 +698,9 @@ namespace springtail {
                 return (*extent)->empty();
             }
 
+            /**
+             * Returns the number of extents that are backing the Page.
+             */
             uint32_t extent_count() const {
                 return _extents.size();
             }
@@ -653,18 +709,49 @@ namespace springtail {
             // MUTATIONS
             // note: all mutations will invalidate an Iterator on the page
 
+            /**
+             * Inserts the provided tuple into the Page using the provided ExtentSchema.
+             */
             void insert(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Appends the provided tuple to the Page using the provided ExtentSchema.
+             */
             void append(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Upserts the provided tuple to the Page using the provided ExtentSchema.
+             */
             void upsert(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Updates the row in the Page with a matching key as the provided tuple to fully match
+             * the tuple, using the provided ExtentSchema.
+             */
             void update(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Removes a row with the provided key from the Page using the provided ExtentSchema.
+             */
             void remove(TuplePtr key, ExtentSchemaPtr schema);
 
-            void remove(const Iterator &pos, ExtentSchemaPtr schema);
+            /**
+             * Removes the row at the provided position in the Page.
+             */
+            void remove(const Iterator &pos);
 
         private:
             // HELPER FUNCTIONS
+
+            /**
+             * Checks if the provided extent needs to be split and performs the split if needed.
+             */
             void _check_split(std::vector<ExtentRef>::iterator pos, CacheExtentPtr extent, ExtentSchemaPtr schema);
 
+            /**
+             * Helper to flush the underlying extents of a Page and to return the extent IDs of the
+             * new on-disk positions.
+             */
             std::vector<uint64_t> _flush(const ExtentHeader &header);
 
         private:
@@ -692,10 +779,6 @@ namespace springtail {
 
             /** The ending XID up through which this page is known valid for access. */
             uint64_t _end_xid;
-
-            /** The target XID to which we are moving this page.  Set to LATEST_XID if we aren't
-                moving a page forward to a new XID. */
-            uint64_t _target_xid;
 
             /** The position on the LRU list; only valid when _use_count is zero. */
             std::list<std::shared_ptr<Page>>::iterator _lru_pos;
@@ -730,42 +813,79 @@ namespace springtail {
                   _size(0)
             { }
 
+            /**
+             * Retrieve a Page object from the cache.
+             *
+             * @param file The file from which to retrieve the page.
+             * @param extent_id The extent ID to retrieve from the file.
+             * @param access_xid The XID at which the extent ID is being read.
+             * @param target_xid The XID at which the page will operate and perform mutations.
+             */
             PagePtr get(const std::filesystem::path &file, uint64_t extent_id,
                         uint64_t access_xid, uint64_t target_xid);
 
+            /**
+             * Retrieve an empty Page object from the cache for a given file, operating at the
+             * provided XID.
+             */
             PagePtr get_empty(const std::filesystem::path &file, uint64_t xid);
 
-            void update_size(PagePtr page);
-
+            /**
+             * Returns a page to the cache.  Optionally registers a callback that will be called
+             * against the page when the page is evicted or flush_file() is called.
+             */
             void put(PagePtr page, std::function<bool(std::shared_ptr<Page>)> flush_callback);
 
+            /**
+             * Flushes all of the pages associated with a file that have a registered flush
+             * callback.
+             */
             void flush_file(const std::filesystem::path &file);
 
         private:
+            /**
+             * Helper to return a page to the cache.
+             */
             void _put(PagePtr page);
 
+            /**
+             * Helper to retrieve a page from the cache.  If the page doesn't exist in the cache
+             * then returns a nullptr.
+             */
             PagePtr _try_get(const std::filesystem::path &file, uint64_t extent_id, uint64_t xid);
 
+            /**
+             * Helper to try and evict a page from the cache.  Will silently fail if there is a
+             * registered flush_callback that does not succeed.
+             */
             void _try_evict(PagePtr page);
 
+            /**
+             * Helper to create a Page in the cache, potentially evicting another page to make space
+             * for this new page.
+             */
             PagePtr _create(const std::filesystem::path &file, uint64_t extent_id,
                             uint64_t xid, const std::vector<uint64_t> &offsets);
 
+            /**
+             * Makes space for some number of pages, evicting existing pages in the cache if necessary.
+             */
             void _make_space(uint32_t size);
 
         private:
             using XidMap = std::map<uint64_t, PagePtr>;
             using CacheMap = std::unordered_map<CacheKey, XidMap, boost::hash<CacheKey>>;
 
-            boost::mutex _mutex;
+            boost::mutex _mutex; ///< Mutex to protect the cache members
 
-            CacheMap _cache;
-            std::list<PagePtr> _lru;
+            CacheMap _cache; ///< The page cache, keyed by CacheKey and XID
+            std::list<PagePtr> _lru; ///< LRU list of pages.
 
+            /** List of pages with flush callbacks for each file. */
             std::map<std::filesystem::path, std::list<PagePtr>> _flush_list;
 
-            uint64_t _max_size;
-            uint64_t _size;
+            uint64_t _max_size; ///< The max number of pages in the cache.
+            uint64_t _size; ///< The current number of pages in the cache.
         };
 
     public:

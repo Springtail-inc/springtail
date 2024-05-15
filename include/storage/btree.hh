@@ -41,6 +41,11 @@ namespace springtail {
                   parent(p)
             { }
 
+            ~Node()
+            {
+                StorageCache::get_instance()->put(page);
+            }
+
             bool operator==(const Node& rhs) const { return (page == rhs.page && row_i == rhs.row_i); }
         };
         typedef std::shared_ptr<Node> NodePtr;
@@ -102,12 +107,13 @@ namespace springtail {
                 }
 
                 // now go back down the tree
+                auto cache = StorageCache::get_instance();
                 while (depth > 0) {
                     // read the child's extent ID
                     uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
 
                     // read the child extent
-                    auto child = _btree->_read_extent(extent_id);
+                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;
                     _node = std::make_shared<Node>(child, child->begin(), _node);
@@ -126,8 +132,16 @@ namespace springtail {
             Iterator &operator--() {
                 // special case for end()
                 if (_node == nullptr) {
+                    // if there is no root, shouldn't be decrementing
+                    assert(_btree->_root_offset != constant::UNKNOWN_EXTENT);
+
+                    auto cache = StorageCache::get_instance();
+
+                    // get the root page
+                    auto root = cache->get(_btree->_file, _btree->_root_offset, _btree->_xid);
+
                     // create a node for the root
-                    _node = std::make_shared<Node>(_btree->_root, _btree->_root->last(), nullptr);
+                    _node = std::make_shared<Node>(root, root->last(), nullptr);
 
                     // iterate down to the leaf
                     while (_node->page->header().type.is_branch()) {
@@ -135,7 +149,7 @@ namespace springtail {
                         uint64_t child_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
 
                         // read the extent
-                        auto child = _btree->_read_extent(child_id);
+                        auto child = cache->get(_btree->_file, child_id, _btree->_xid);
 
                         // create a node for the child an move to it
                         _node = std::make_shared<Node>(child, child->last(), _node);
@@ -167,12 +181,13 @@ namespace springtail {
                 --(_node->row_i);
 
                 // iterate down the last entry at each level
+                auto cache = StorageCache::get_instance();
                 while (depth > 0) {
                     // read the child's extent ID
                     uint64_t extent_id = _btree->_branch_child_f->get_uint64(*(_node->row_i));
 
                     // read the child extent
-                    auto child = _btree->_read_extent(extent_id);
+                    auto child = cache->get(_btree->_file, extent_id, _btree->_xid);
 
                     --depth;
                     _node = std::make_shared<Node>(child, child->last(), _node);
@@ -263,7 +278,15 @@ namespace springtail {
          */
         bool empty() const
         {
-            return _root->empty();
+            if (_root_offset == constant::UNKNOWN_EXTENT) {
+                return true;
+            }
+
+            auto root = StorageCache::get_instance()->get(_file, _root_offset, _xid);
+            bool is_empty = root->empty();
+            StorageCache::get_instance()->put(root);
+
+            return is_empty;
         }
 
     private:
@@ -289,7 +312,7 @@ namespace springtail {
         FieldArrayPtr _branch_keys; ///< The branch fields that make up the key of the tree.
         FieldPtr _branch_child_f; ///< The branch field holding the child extent offset.
 
-        StorageCache::PagePtr _root; ///< The root of the btree.
+        uint64_t _root_offset; ///< The extent ID of the root of the tree.
 
     private:
         /**

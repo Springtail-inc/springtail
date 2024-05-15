@@ -80,11 +80,6 @@ namespace springtail {
          */
         SchemaType _convert_pg_type(const std::string &pg_type);
 
-        uint64_t _create_empty_table(uint64_t table_id,
-                                     uint64_t xid,
-                                     const std::filesystem::path &table_dir,
-                                     ExtentSchemaPtr schema);
-
     private:
         // singleton; delete copy constructor
         TableMgr(const TableMgr &) = delete;

@@ -126,6 +126,8 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
+        assert(extent_id != constant::UNKNOWN_EXTENT);
+
         SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
@@ -264,10 +266,8 @@ namespace springtail {
         // create the page object with the given <file, extent_id> valid at the requested XID
         auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
 
-        if (extent_id != constant::UNKNOWN_EXTENT) {
-            // add it to the cache; note: use count starts at 1
-            _cache[page->key()].insert({ xid, page });
-        }
+        // add it to the cache; note: use count starts at 1
+        _cache[page->key()].insert({ xid, page });
 
         // return it
         return page;
@@ -398,8 +398,7 @@ namespace springtail {
           _file(file),
           _extent_id(constant::UNKNOWN_EXTENT),
           _start_xid(xid),
-          _end_xid(xid),
-          _target_xid(xid)
+          _end_xid(xid)
     {
         // intentionally empty
     }
@@ -438,41 +437,6 @@ namespace springtail {
 
         // perform the usual flush()
         return _flush(header);
-    }
-
-    std::vector<uint64_t>
-    StorageCache::Page::_flush(const ExtentHeader &header)
-    {
-        auto cache = StorageCache::get_instance();
-
-        std::vector<uint64_t> offsets;
-        for (auto &ref : _extents) {
-            // check if the reference is a cache ID
-            if (ref.second) {
-                // retrieve the extent; should always have a cache ID given the if-condition
-                SafeExtent e(_file, ref);
-
-                // update the extent header
-                (*e)->header() = header;
-
-                // append the extent to the file
-                // XXX should do these asynchronously to get better parallelism when there are multiple extents
-                cache->_data_cache->flush(*e);
-
-                // return the clean extent back to the read cache
-                cache->_data_cache->reinsert(*e);
-
-                // save the extent ID of the now-unmodified extent
-                ref.first = (*e)->key().second;
-                ref.second = false;
-
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.first);
-            }
-
-            offsets.push_back(ref.first);
-        }
-
-        return offsets;
     }
 
     StorageCache::Page::Iterator
@@ -781,8 +745,7 @@ namespace springtail {
     }
 
     void
-    StorageCache::Page::remove(const Iterator &pos,
-                               ExtentSchemaPtr schema)
+    StorageCache::Page::remove(const Iterator &pos)
     {
         boost::shared_lock lock(_mutex);
         _is_dirty = true;
@@ -822,6 +785,40 @@ namespace springtail {
         _extents.insert(pos, pair.first);
     }
 
+    std::vector<uint64_t>
+    StorageCache::Page::_flush(const ExtentHeader &header)
+    {
+        auto cache = StorageCache::get_instance();
+
+        std::vector<uint64_t> offsets;
+        for (auto &ref : _extents) {
+            // check if the reference is a cache ID
+            if (ref.second) {
+                // retrieve the extent; should always have a cache ID given the if-condition
+                SafeExtent e(_file, ref);
+
+                // update the extent header
+                (*e)->header() = header;
+
+                // append the extent to the file
+                // XXX should do these asynchronously to get better parallelism when there are multiple extents
+                cache->_data_cache->flush(*e);
+
+                // return the clean extent back to the read cache
+                cache->_data_cache->reinsert(*e);
+
+                // save the extent ID of the now-unmodified extent
+                ref.first = (*e)->key().second;
+                ref.second = false;
+
+                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.first);
+            }
+
+            offsets.push_back(ref.first);
+        }
+
+        return offsets;
+    }
 
     // DATA CACHE
 
