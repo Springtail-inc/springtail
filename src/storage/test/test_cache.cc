@@ -14,14 +14,6 @@ namespace {
      */
     class StorageCache_Test : public testing::Test {
     protected:
-        static void SetUpTestSuite() {
-            _cleanup_files();
-        }
-
-        static void TearDownTestSuite() {
-            _cleanup_files();
-        }
-
         void SetUp() override {
             springtail_init();
 
@@ -40,24 +32,24 @@ namespace {
                 auto &&field = _fields->at(i);
                 _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
             }
+
+            _base_dir = std::filesystem::temp_directory_path() / "test_cache";
+            std::filesystem::remove_all(_base_dir);
+            std::filesystem::create_directories(_base_dir);
         }
 
         void TearDown() override {
-
-        }
-
-        static void _cleanup_files() {
-            std::filesystem::remove("/tmp/test_cache_Basic");
-            std::filesystem::remove("/tmp/test_cache_Insert50K");
+            std::filesystem::remove_all(_base_dir);
         }
 
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
+        std::filesystem::path _base_dir;
     };
 
     TEST_F(StorageCache_Test, Basic) {
         auto cache = StorageCache::get_instance();
-        std::filesystem::path file("/tmp/test_cache_Basic");
+        std::filesystem::path file(_base_dir / "Basic");
         uint64_t xid = 1;
 
         // get() an empty Page
@@ -101,7 +93,7 @@ namespace {
 
     TEST_F(StorageCache_Test, Insert50K) {
         auto cache = StorageCache::get_instance();
-        std::filesystem::path file("/tmp/test_cache_Insert50K");
+        std::filesystem::path file(_base_dir / "Insert50K");
         uint64_t xid = 1;
 
         // get() an empty Page
