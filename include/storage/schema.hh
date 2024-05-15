@@ -233,8 +233,6 @@ namespace springtail {
          */
         std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const override;
 
-        std::shared_ptr<std::vector<FieldPtr>> get_min_fields(const std::vector<std::string> &columns) const;
-
         /**
          * Generate a list of fields based on an ordered list of columns.
          */
