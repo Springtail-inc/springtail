@@ -21,15 +21,13 @@ namespace {
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
-                    { "table_id", 0, SchemaType::UINT64, false },
-                    { "name", 1, SchemaType::TEXT, false },
-                    { "offset", 2, SchemaType::UINT64, false }
+                    { "table_id", 0, SchemaType::UINT64, false, 1},
+                    { "name", 1, SchemaType::TEXT, false, 0 },
+                    { "offset", 2, SchemaType::UINT64, false },
+                    { "index", 3, SchemaType::UINT16, false, 2 }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
-            _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
-            _keys = std::vector<std::string>({"name", "table_id"});
-
-            _write_cache = MutableBTree::create_cache(2*1024*1024);
+            _keys = std::vector<std::string>({"name", "table_id", "index"});
 
             _base_dir = std::filesystem::temp_directory_path() / "test_btree";
             std::filesystem::create_directories(_base_dir);
@@ -37,6 +35,13 @@ namespace {
             _table_id_f = _schema->get_field("table_id");
             _name_f = _schema->get_field("name");
             _offset_f = _schema->get_field("offset");
+
+            _fields = _schema->get_fields();
+            _csv_fields = std::make_shared<FieldArray>();
+            for (int i = 0; i < _fields->size() - 1; i++) {
+                auto &&field = _fields->at(i);
+                _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+            }
         }
 
         void TearDown() override {
@@ -46,10 +51,8 @@ namespace {
 
         ExtentSchemaPtr _schema;
         FieldPtr _table_id_f, _name_f, _offset_f;
+        FieldArrayPtr _fields, _csv_fields;
 
-        std::shared_ptr<MutableBTree> _write_tree;
-        std::shared_ptr<ExtentCache> _read_cache;
-        MutableBTree::PageCachePtr _write_cache;
         std::vector<std::string> _keys;
 
         std::filesystem::path _base_dir;
@@ -59,7 +62,7 @@ namespace {
                               uint64_t xid)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
 
             btree->init_empty();
             return btree;
@@ -71,40 +74,56 @@ namespace {
                            uint64_t extent_id)
         {
             // construct a mutable b-tree for inserting data
-            auto btree = std::make_shared<MutableBTree>(name, _keys, _write_cache, _schema);
+            auto btree = std::make_shared<MutableBTree>(name, _keys, _schema, xid);
             btree->init(extent_id);
             return btree;
         }
 
-        std::shared_ptr<BTree>
-        _get_btree(const std::filesystem::path &name,
-                   uint64_t extent_id)
-        {
-            // construct a mutable b-tree for inserting data
-            return std::make_shared<BTree>(name, _keys, _schema, _read_cache, 1, extent_id);
-        }
-
         std::shared_ptr<Tuple>
         _create_key(const std::string &name,
-                    uint64_t table_id)
+                    uint64_t table_id,
+                    uint16_t idx)
         {
-            auto key_fields = std::make_shared<FieldArray>(2);
+            auto key_fields = std::make_shared<FieldArray>(3);
             key_fields->at(0) = std::make_shared<ConstTypeField<std::string>>(name);
             key_fields->at(1) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+            key_fields->at(2) = std::make_shared<ConstTypeField<uint16_t>>(idx);
             return std::make_shared<FieldTuple>(key_fields, nullptr);
         }
 
+        TuplePtr
+        _gen_tuple(csv::CSVRow &row, uint16_t idx) {
+            auto extra = std::make_shared<FieldArray>();
+            extra->push_back(std::make_shared<ConstTypeField<uint16_t>>(idx));
+
+            return std::make_shared<KeyValueTuple>(_csv_fields, extra, row);
+        }
+
         void
-        _verify_names(BTreePtr tree, uint64_t xid, int target) {
+        _populate_btree(MutableBTreePtr btree, uint16_t idx) {
+            // pull data to insert
+            csv::CSVReader reader("test_btree_simple.csv");
+            for (auto &&r : reader) {
+                // insert data to the tree
+                btree->insert(_gen_tuple(r, idx));
+            }
+        }
+
+        void
+        _verify_names(BTreePtr tree, int target) {
             int count = 0;
 
             std::string prev = "";
-            for (auto &&i = tree->begin(xid); i != tree->end(); ++i) {
+            auto ib = tree->begin();
+            auto ie = tree->end();
+            for (; ib != ie; ++ib) {
+                //for (auto row : *tree) {
+                auto row = *ib;
                 if (prev != "") {
-                    ASSERT_GT(_name_f->get_text(*i), prev);
+                    ASSERT_GE(_name_f->get_text(row), prev);
                 }
 
-                prev = _name_f->get_text(*i);
+                prev = _name_f->get_text(row);
                 ++count;
             }
 
@@ -112,21 +131,21 @@ namespace {
         }
 
         void
-        _verify_unique_names(BTreePtr tree, uint64_t xid, int target) {
+        _verify_unique_names(BTreePtr tree, int target) {
             int count = 0;
 
             std::string prev = "";
             std::map<std::string, int> counts;
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (_name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", _name_f->get_text(*i), prev);
+            for (auto row : *tree) {
+                if (_name_f->get_text(row) < prev) {
+                    SPDLOG_ERROR("{} < {}", _name_f->get_text(row), prev);
                 }
 
                 if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(*i), prev);
+                    ASSERT_GE(_name_f->get_text(row), prev);
                 }
 
-                prev = _name_f->get_text(*i);
+                prev = _name_f->get_text(row);
                 ++counts[prev];
                 ++count;
             }
@@ -182,27 +201,17 @@ namespace {
     };
 
     TEST_F(BTree_Test, Insert10) {
+        uint64_t xid = 1;
+
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "Insert10", 0);
-
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto btree = _create_mutable_btree(_base_dir / "Insert10", xid++);
 
         csv::CSVReader reader("test_btree_simple.csv");
 
         auto r = reader.begin();
         for (int i = 0; i < 10; i++) {
             // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, *r));
+            btree->insert(_gen_tuple(*r, 0));
             ++r;
         }
 
@@ -210,80 +219,47 @@ namespace {
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "Insert10", offset);
-        _verify_names(tree, 1, 10);
+        auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset);
+        _verify_names(tree, 10);
     }
 
     TEST_F(BTree_Test, InsertAll) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "InsertAll", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAll", 1);
 
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
-
-        csv::CSVReader reader("test_btree_simple.csv");
-
-        for (auto &&r : reader) {
-            // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
-        }
+        // insert all of the entries from the CSV file
+        _populate_btree(btree, 0);
 
         // finalize the tree
         uint64_t offset = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAll", offset);
-        _verify_names(tree, 1, 5000);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAll", 1, _schema, offset);
+        _verify_names(tree, 5000);
     }
 
     TEST_F(BTree_Test, Search) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "Search", 0);
+        auto btree = _create_mutable_btree(_base_dir / "Search", 1);
 
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
-
-        csv::CSVReader reader("test_btree_simple.csv");
-
-        for (auto &&r : reader) {
-            // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
-        }
+        _populate_btree(btree, 0);
 
         // finalize the tree
         uint64_t offset = btree->finalize();
 
         // get a pointer to the read-only btree
-        auto tree = _get_btree(_base_dir / "Search", offset);
-        auto begin_i = tree->begin(1);
+        auto tree = std::make_shared<BTree>(_base_dir / "Search", 1, _schema, offset);
+        auto begin_i = tree->begin();
         auto end_i = tree->end();
 
         // search for an entry before all of the keys
         {
-            auto tuple = _create_key("aaaa", 0);
+            auto tuple = _create_key("aaaa", 0, 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_TRUE(find_i == end_i);
             ASSERT_TRUE(lb_i == begin_i);
@@ -293,17 +269,17 @@ namespace {
 
         // search for the first entry in the tree
         {
-            auto tuple = _create_key("aabbatini8y", 323);
+            auto tuple = _create_key("aabbatini8y", 323, 0);
 
-            auto find_i = tree->find(tuple, 1);
+            auto find_i = tree->find(tuple);
 
             ASSERT_EQ(_name_f->get_text(*find_i), "aabbatini8y");
             ASSERT_EQ(_table_id_f->get_uint64(*find_i), 323);
             ASSERT_EQ(_offset_f->get_uint64(*find_i), 6448);
 
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(lb_i, find_i);
             ASSERT_EQ(ffu_i, find_i);
@@ -312,17 +288,17 @@ namespace {
 
         // search for an existing entry in the middle
         {
-            auto tuple = _create_key("mplainu", 31);
+            auto tuple = _create_key("mplainu", 31, 0);
 
-            auto find_i = tree->find(tuple, 1);
+            auto find_i = tree->find(tuple);
 
             ASSERT_EQ(_table_id_f->get_uint64(*find_i), 31);
             ASSERT_EQ(_name_f->get_text(*find_i), "mplainu");
             ASSERT_EQ(_offset_f->get_uint64(*find_i), 30122);
 
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(lb_i, find_i);
             ASSERT_EQ(ffu_i, find_i);
@@ -333,12 +309,12 @@ namespace {
 
         // search for a non-existing entry before the last entry
         {
-            auto tuple = _create_key("m", 0);
+            auto tuple = _create_key("m", 0, 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(find_i, end_i);
 
@@ -355,12 +331,12 @@ namespace {
 
         // search for a non-existing entry past the last entry
         {
-            auto tuple = _create_key("zzzzzzzzzz", 0);
+            auto tuple = _create_key("zzzzzzzzzz", 0, 0);
 
-            auto find_i = tree->find(tuple, 1);
-            auto lb_i = tree->lower_bound(tuple, 1);
-            auto ffu_i = tree->lower_bound(tuple, 1, true);
-            auto iub_i = tree->inverse_upper_bound(tuple, 1);
+            auto find_i = tree->find(tuple);
+            auto lb_i = tree->lower_bound(tuple);
+            auto ffu_i = tree->lower_bound(tuple, true);
+            auto iub_i = tree->inverse_upper_bound(tuple);
 
             ASSERT_EQ(find_i, end_i);
             ASSERT_EQ(lb_i, end_i);
@@ -375,210 +351,107 @@ namespace {
 
     TEST_F(BTree_Test, InsertAndRemove) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemove", 0);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemove", 1);
 
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
-
-        csv::CSVReader reader("test_btree_simple.csv");
-
-        for (auto &&r : reader) {
-            // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
-        }
+        // populate the tree
+        _populate_btree(btree, 0);
 
         // finalize the tree
-        uint64_t offset = btree->finalize();
+        uint64_t offset_1 = btree->finalize();
 
-        // set the next XID
-        btree->set_xid(2);
+        // check XID 1 for all entries
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
+
+        // move to the next XID
+        btree = _get_mutable_btree(_base_dir / "InsertAndRemove", 2, offset_1);
 
         // now remove every other row in the csv
         int evens = 0;
-        reader = csv::CSVReader("test_btree_simple.csv");
+        auto reader = csv::CSVReader("test_btree_simple.csv");
         for (auto &&r : reader) {
             // remove data to the tree
             if (evens % 2) {
-                // auto value = std::make_shared<ValueTuple>(std::make_shared<CSVTuple>(r, fields));
-                // auto search_key = _schema->tuple_subset(value, _keys);
-                // btree->remove(search_key);
-
-                btree->remove(std::make_shared<FieldTuple>(csv_fields, r));
+                btree->remove(_gen_tuple(r, 0));
             }
             ++evens;
         }
 
         // finalize the tree
-        offset = btree->finalize();
+        auto offset_2 = btree->finalize();
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAndRemove", offset);
 
         // check XID 1 for all entries
-        _verify_names(tree, 1, 5000);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
 
         // check XID 2 for half the entries
-        _verify_names(tree, 2, 2500);
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemove", 2, _schema, offset_2);
+        _verify_names(tree, 2500);
     }
 
     TEST_F(BTree_Test, InsertAndRemoveAll) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemoveAll", 0);
-
-        // set the XID
-        btree->set_xid(1);
+        auto btree = _create_mutable_btree(_base_dir / "InsertAndRemoveAll", 1);
 
         // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
-
-        csv::CSVReader reader("test_btree_simple.csv");
-
-        for (auto &&r : reader) {
-            // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
-        }
+        _populate_btree(btree, 0);
 
         // finalize the tree
-        uint64_t offset = btree->finalize();
-
-        // set the next XID
-        btree->set_xid(2);
-
-        // now remove every row in the csv
-        reader = csv::CSVReader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            // remove data from the tree
-            btree->remove(std::make_shared<FieldTuple>(csv_fields, r));
-        }
-
-        // finalize the tree
-        offset = btree->finalize();
-
-        // now read the tree back and make sure there are the right number of entries and that they are in-order
-        auto tree = _get_btree(_base_dir / "InsertAndRemoveAll", offset);
+        uint64_t offset_1 = btree->finalize();
 
         // check XID 1 for all entries
-        _verify_names(tree, 1, 5000);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
 
-        // check XID 2 for no entries
-        _verify_names(tree, 2, 0);
-    }
+        // set the next XID
+        btree = _get_mutable_btree(_base_dir / "InsertAndRemoveAll", 2, offset_1);
 
-    TEST_F(BTree_Test, InsertSame) {
-        // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "InsertSame", 0);
-
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
-
-        csv::CSVReader reader("test_btree_simple.csv");
-
-        // insert 5000 of the same row
-        auto &&r = *reader.begin();
-        for (int i = 0; i < 5000; ++i) {
-            // insert data to the tree
-            btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
+        // now remove every row in the csv
+        auto reader = csv::CSVReader("test_btree_simple.csv");
+        for (auto &r : reader) {
+            // remove data from the tree
+            btree->remove(_gen_tuple(r, 0));
         }
 
         // finalize the tree
-        uint64_t offset = btree->finalize();
+        auto offset_2 = btree->finalize();
 
-        auto tree = _get_btree(_base_dir / "InsertSame", offset);
+        // now read the tree back and make sure there are the right number of entries and that they are in-order
 
-        // check for all entries
-        int count = 0;
+        // check XID 1 for all entries
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 1, _schema, offset_1);
+        _verify_names(tree, 5000);
 
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_EQ(_name_f->get_text(*i), prev);
-            }
-
-            prev = _name_f->get_text(*i);
-            ++count;
-        }
-
-        ASSERT_EQ(count, 5000);
+        // check XID 2 for no entries
+        tree = std::make_shared<BTree>(_base_dir / "InsertAndRemoveAll", 2, _schema, offset_2);
+        _verify_names(tree, 0);
     }
 
     TEST_F(BTree_Test, InsertMany) {
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "InsertMany", 0);
-
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto btree = _create_mutable_btree(_base_dir / "InsertMany", 1);
 
         // insert 50k entries
         for (int i = 0; i < 10; i++) {
-            csv::CSVReader reader("test_btree_simple.csv");
-            for (auto &&r : reader) {
-                // insert data to the tree
-                btree->insert(std::make_shared<FieldTuple>(csv_fields, r));
-            }
+            _populate_btree(btree, i);
         }
 
         // finalize the tree
         uint64_t offset = btree->finalize();
 
-        auto tree = _get_btree(_base_dir / "InsertMany", offset);
+        auto tree = std::make_shared<BTree>(_base_dir / "InsertMany", 1, _schema, offset);
 
         // check for all entries
-        int count = 0;
-
-        std::string prev = "";
-        for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-            if (prev != "") {
-                ASSERT_GE(_name_f->get_text(*i), prev);
-            }
-
-            prev = _name_f->get_text(*i);
-            ++count;
-        }
-
-        ASSERT_EQ(count, 50000);
+        _verify_names(tree, 50000);
     }
 
     TEST_F(BTree_Test, ThreadedInserts) {
         PhasedThreadTest<Request> tester;
 
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "ThreadedInserts", 0);
-
-        // set the XID
-        btree->set_xid(1);
+        auto btree = _create_mutable_btree(_base_dir / "ThreadedInserts", 1);
 
         // pull data to insert
         FieldArrayPtr fields = _schema->get_fields();
@@ -593,8 +466,7 @@ namespace {
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
-                auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
-                auto value_tuple = std::make_shared<ValueTuple>(tuple);
+                auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, i));
                 auto request = std::make_shared<Request>(btree, Request::Type::INSERT, value_tuple);
 
                 tester.add_request(request);
@@ -605,32 +477,10 @@ namespace {
         tester.set_verify([this, btree]() {
             uint64_t offset = btree->finalize();
 
-            auto tree = _get_btree(_base_dir / "ThreadedInserts", offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInserts", 1, _schema, offset);
 
             // check for all entries
-            int count = 0;
-            std::string prev = "";
-            std::map<std::string, int> counts;
-            for (auto &&i = tree->begin(1); i != tree->end(); ++i) {
-                if (_name_f->get_text(*i) < prev) {
-                    SPDLOG_ERROR("{} < {}", _name_f->get_text(*i), prev);
-                }
-
-                if (prev != "") {
-                    ASSERT_GE(_name_f->get_text(*i), prev);
-                }
-
-                prev = _name_f->get_text(*i);
-                ++counts[prev];
-                ++count;
-            }
-
-            for (auto &&entry : counts) {
-                if (entry.second < 10) {
-                    SPDLOG_INFO("{} = {}", entry.first, entry.second);
-                }
-            }
-            ASSERT_EQ(count, 50000);
+            _verify_unique_names(tree, 50000);
         });
 
         // run the phases using 4 threads (just one phase here)
@@ -640,66 +490,56 @@ namespace {
     TEST_F(BTree_Test, ThreadedInsertAndRemove) {
         PhasedThreadTest<Request> tester;
 
+        std::filesystem::path filename = _base_dir / "ThreadedInsertAndRemove";
+
         // get a mutable btree to perform inserts
-        auto btree = _create_mutable_btree(_base_dir / "ThreadedInsertAndRemove", 0);
+        auto btree1 = std::make_shared<MutableBTree>(filename, _keys, _schema, 1);
+        btree1->init_empty();
 
-        // set the XID
-        btree->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto btree2 = std::make_shared<MutableBTree>(filename, _keys, _schema, 2);
 
         // preapare 5k inserts
         csv::CSVReader reader("test_btree_simple.csv");
         for (auto &&r : reader) {
-            auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
-            auto value_tuple = std::make_shared<ValueTuple>(tuple);
-            auto request = std::make_shared<Request>(btree, Request::Type::INSERT, value_tuple);
+            auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, 0));
+            auto request = std::make_shared<Request>(btree1, Request::Type::INSERT, value_tuple);
                 
             tester.add_request(request);
         }
 
         // verify the entries
-        tester.set_verify([this, btree]() {
-            uint64_t offset = btree->finalize();
+        tester.set_verify([this, filename, btree1, btree2]() {
+            uint64_t offset = btree1->finalize();
 
-            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
+            auto tree = std::make_shared<BTree>(filename, 1, _schema, offset);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 5000);
+            _verify_unique_names(tree, 5000);
 
             // set the next XID
-            btree->set_xid(2);
+            btree2->init(offset);
         });
 
         // move to phase 2
         tester.next_phase();
 
-        // preapare 5k removes
+        // prepare 5k removes
         csv::CSVReader reader2("test_btree_simple.csv");
         for (auto &&r : reader2) {
-            auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
-            auto value_tuple = std::make_shared<ValueTuple>(tuple);
-            auto request = std::make_shared<Request>(btree, Request::Type::REMOVE, value_tuple);
+            auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, 0));
+            auto request = std::make_shared<Request>(btree2, Request::Type::REMOVE, value_tuple);
                 
             tester.add_request(request);
         }
 
         // verify the entries
-        tester.set_verify([this, btree]() {
-            uint64_t offset = btree->finalize();
-            std::cout << offset << std::endl;
+        tester.set_verify([this, btree2]() {
+            uint64_t offset = btree2->finalize();
 
-            auto tree = _get_btree(_base_dir / "ThreadedInsertAndRemove", offset);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertAndRemove", 2, _schema, offset);
 
             // check for all entries
-            _verify_names(tree, 2, 0);
+            _verify_names(tree, 0);
         });
 
         // run the phases using 4 threads (just one phase here)
@@ -710,28 +550,14 @@ namespace {
         PhasedThreadTest<Request> tester;
 
         // get mutable btrees to perform inserts
-        auto btree1 = _create_mutable_btree(_base_dir / "ThreadedInsertsOne", 0);
-        auto btree2 = _create_mutable_btree(_base_dir / "ThreadedInsertsTwo", 0);
-
-        // set the XID
-        btree1->set_xid(1);
-        btree2->set_xid(1);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto btree1 = _create_mutable_btree(_base_dir / "ThreadedInsertsOne", 1);
+        auto btree2 = _create_mutable_btree(_base_dir / "ThreadedInsertsTwo", 1);
 
         // preapare 100k inserts across two trees
         for (int i = 0; i < 10; i++) {
             csv::CSVReader reader("test_btree_simple.csv");
             for (auto &&r : reader) {
-                auto tuple = std::make_shared<FieldTuple>(csv_fields, r);
-                auto value_tuple = std::make_shared<ValueTuple>(tuple);
+                auto value_tuple = std::make_shared<ValueTuple>(_gen_tuple(r, i));
 
                 auto request1 = std::make_shared<Request>(btree1, Request::Type::INSERT, value_tuple);
                 tester.add_request(request1);
@@ -747,16 +573,16 @@ namespace {
             uint64_t offset2 = btree2->finalize();
 
             // check the first file
-            auto tree = _get_btree(_base_dir / "ThreadedInsertsOne", offset1);
+            auto tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsOne", 1, _schema, offset1);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 50000);
+            _verify_unique_names(tree, 50000);
 
             // check the second file
-            tree = _get_btree(_base_dir / "ThreadedInsertsTwo", offset2);
+            tree = std::make_shared<BTree>(_base_dir / "ThreadedInsertsTwo", 1, _schema, offset2);
 
             // check for all entries
-            _verify_unique_names(tree, 1, 50000);
+            _verify_unique_names(tree, 50000);
         });
 
         // run the phases using 4 threads (just one phase here)

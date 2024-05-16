@@ -8,7 +8,6 @@
 namespace springtail
 {
     class Ingest {
-
     public:
 
         Ingest(std::shared_ptr<PgStreamTable> source, std::filesystem::path path);

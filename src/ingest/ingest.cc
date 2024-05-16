@@ -1,25 +1,44 @@
+#include <boost/algorithm/string.hpp>
+
 #include <common/common.hh>
+
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_stream_table.hh>
+
 #include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io_mgr.hh>
 #include <storage/mutable_btree.hh>
 #include <storage/schema.hh>
 #include <storage/table_mgr.hh>
-#include <boost/algorithm/string.hpp>
+
 #include <ingest/ingest.hh>
 
 namespace springtail
 {
-    Ingest::Ingest(std::shared_ptr<PgStreamTable> source, const std::filesystem::path path) {
+    Ingest::Ingest(std::shared_ptr<PgStreamTable> source,
+                   const std::filesystem::path path)
+    {
         int oid = source->get_table_oid();
         std::string pg_xids = source->get_xact_xids();
         PgTableSchema pg_schema = source->get_schema();
 
         std::vector<std::string> xids;
         boost::split(xids, pg_xids, boost::is_any_of(":"));
-        //TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
+        // TODO: put start_xid and end_xid somewhere: xids.front(), xids.at(1)
+
+        // create the table metadata
+        PgMsgTable create_msg(0, // lsn
+                              pg_schema.table_oid,
+                              0, // xid
+                              pg_schema.schema_name,
+                              pg_schema.table_name,
+                              _map_to_pg_msg(pg_schema.columns, pg_schema.pkeys));
+
+        TableMgr::get_instance()->create_table(0, 0, create_msg);
+
+        // get a mutable table interface
+        auto table = 
 
         // set up io_handle path for extents
         std::filesystem::path extent_path = path / std::to_string(oid);
@@ -40,15 +59,6 @@ namespace springtail
 
         _populate_rows(io_handle, btree, schema, source, pg_schema.pkeys);
 
-        // make PgMsgTable entry and call create_table
-        TableMgr::get_instance()->create_table(pg_schema.table_oid, 0, PgMsgTable{
-            0, //lsn
-            pg_schema.table_oid,
-            0, //xid
-            pg_schema.schema_name,
-            pg_schema.table_name,
-            _map_to_pg_msg(pg_schema.columns, pg_schema.pkeys)
-        });
     }
 
     std::vector<PgMsgSchemaColumn> Ingest::_map_to_pg_msg(const std::vector<PgColumn> pg_columns,

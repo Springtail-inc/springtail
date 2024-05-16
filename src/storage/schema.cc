@@ -11,6 +11,9 @@ namespace springtail {
     void
     ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn> columns)
     {
+        // track how many primary key columns there are
+        uint32_t pkey_count = 0;
+
         // first calculate the row size of the non-bitwise data
         uint32_t fixed_bytes = 0;
         for (auto &&pair : columns) {
@@ -51,7 +54,16 @@ namespace springtail {
 
             // set the column order
             _column_order.push_back(column.name);
+
+            // save the pkey mappings
+            if (column.pkey_position) {
+                ++pkey_count;
+            }
         }
+
+        // construct the sorting vectors
+        _sort_fields = std::make_shared<std::vector<FieldPtr>>(pkey_count);
+        _sort_keys.resize(pkey_count);
 
         // then construct the fields
         uint32_t byte_pos = 0;
@@ -135,6 +147,13 @@ namespace springtail {
 
             // store the field into the base map
             _field_map[column.name] = { field, idx };
+
+            // handle primary key data
+            if (column.pkey_position) {
+                _sort_fields->at(*column.pkey_position) = field;
+                _sort_keys[*column.pkey_position] = column.name;
+            }
+
             ++idx;
         }
 
@@ -149,26 +168,44 @@ namespace springtail {
     }
 
     std::shared_ptr<ExtentSchema>
-    ExtentSchema::create_schema(const std::vector<std::string> &columns,
-                                const std::vector<SchemaColumn> &new_columns) const
+    ExtentSchema::create_schema(const std::vector<std::string> &old_columns,
+                                const std::vector<SchemaColumn> &new_columns,
+                                const std::vector<std::string> &sort_columns) const
     {
         // create SchemaColumn entries for the existing fields
         std::vector<SchemaColumn> all_columns;
-        for (auto &&column : columns) {
-            auto &&i = _field_map.find(column);
+        for (auto &&name : old_columns) {
+            auto &&i = _field_map.find(name);
 
             uint32_t size = all_columns.size();
-            all_columns.push_back({
-                    column,
-                    size,
-                    i->second.first->get_type(),
-                    i->second.first->can_be_null()
-                });
+
+            auto pos = std::ranges::find(sort_columns, name);
+            if (pos == sort_columns.end()) {
+                all_columns.push_back({
+                        name,
+                        size,
+                        i->second.first->get_type(),
+                        i->second.first->can_be_null()
+                    });
+            } else {
+                all_columns.push_back({
+                        name,
+                        size,
+                        i->second.first->get_type(),
+                        i->second.first->can_be_null(),
+                        (pos - sort_columns.begin())
+                    });
+            }
         }
 
         // add in the new columns
-        for (auto &&column : new_columns) {
+        for (auto column : new_columns) {
             int size = all_columns.size();
+
+            auto pos = std::ranges::find(sort_columns, column.name);
+            if (pos != sort_columns.end()) {
+                column.pkey_position = (pos - sort_columns.begin());
+            }
             all_columns.push_back(column);
             all_columns.back().position = size;
         }

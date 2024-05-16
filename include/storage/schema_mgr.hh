@@ -7,6 +7,8 @@
 
 namespace springtail {
 
+    class ExtentType;
+
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
@@ -38,7 +40,9 @@ namespace springtail {
         std::shared_ptr<Schema> get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn=constant::MAX_LSN);
 
         /**
-         * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing / updating the extent.
+         * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
+         * updating the extent.  This function assumes we are retrieving the schema of the table's
+         * underlying data.
          *
          * @param table_id The table we need the schema for.
          * @param xid The XID that we need the schema at.
@@ -67,12 +71,6 @@ namespace springtail {
          */
         SchemaMgr();
 
-        /**
-         * @brief Destroy the SchemaMgr object
-         */
-        ~SchemaMgr(){};
-
-
     private:
         /** A helper class that holds all of the information about a table schema in-memory. */
         class SchemaInfo {
@@ -83,7 +81,13 @@ namespace springtail {
              */
             SchemaInfo(uint64_t table_id);
 
-            std::vector<std::string> get_primary_key(uint64_t xid);
+            /**
+             * Retrieve the keys for an index of the table.
+             *
+             * @param index_id The index to retrieve the keys for.
+             * @param xid The XID at which to retrieve the keys.
+             */
+            std::vector<std::string> get_index_keys(uint64_t index_id, uint64_t xid);
 
             /**
              * Retrieve the schema for an extent written at a specific XID.
@@ -142,14 +146,47 @@ namespace springtail {
              * A map from <xid> to <primary key>, where primary key is defined as an ordered set of
              * columns that make up the primary index.
              */
-            std::map<uint64_t, std::vector<uint32_t>> _primary_index;
+            std::map<uint64_t, std::vector<uint32_t>, std::greater<uint64_t>> _primary_index;
 
-            std::map<uint64_t, std::map<uint64_t, std::vector<uint32_t>>> _secondary_indexes;
+            std::map<uint64_t, std::map<uint64_t, std::vector<uint32_t>, std::greater<uint64_t>>> _secondary_indexes;
         };
 
     private:
+        /**
+         * A key for the system schema cache.
+         */
+        struct SystemKey {
+            uint64_t table_id;
+            uint64_t index_id;
+            bool is_leaf;
+
+            SystemKey(uint64_t t, uint64_t i, bool l)
+                : table_id(t),
+                  index_id(i),
+                  is_leaf(l)
+            { }
+
+            bool operator==(const SystemKey &other) const
+            {
+                return (table_id == other.table_id &&
+                        index_id == other.index_id &&
+                        is_leaf == other.is_leaf);
+            }
+
+            friend std::size_t hash_value(const SystemKey &k)
+            {
+                std::size_t seed = 0;
+
+                boost::hash_combine(seed, k.table_id);
+                boost::hash_combine(seed, k.index_id);
+                boost::hash_combine(seed, k.is_leaf);
+
+                return seed;
+            }
+        };
+
         /** A map of fixed system schemas.  Maps from System Table ID to the ExtentSchema for that table. */
-        std::unordered_map<uint64_t, std::shared_ptr<ExtentSchema>> _system_cache;
+        std::unordered_map<SystemKey, std::shared_ptr<ExtentSchema>, boost::hash<SystemKey>> _system_cache;
 
         /** A cache of SchemaInfo objects. */
         LruObjectCache<uint64_t, SchemaInfo> _cache;
