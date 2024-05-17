@@ -56,7 +56,8 @@ namespace springtail {
             target_xid = access_xid;
         }
 
-        boost::unique_lock lock(_mutex);
+        // XXX I don't think we need this anymore?
+        // boost::unique_lock lock(_mutex);
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
@@ -1031,6 +1032,7 @@ namespace springtail {
         assert(extent->_state == CacheExtent::State::DIRTY);
 
         // make space for two new extents
+        // XXX rename these to _make_extent_space()?
         _make_space();
         _make_space();
 

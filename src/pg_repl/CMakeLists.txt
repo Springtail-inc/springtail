@@ -5,7 +5,6 @@ set(PG_LIB_SOURCES
     pg_repl_connection.cc
     libpq_connection.cc
     pg_copy_table.cc
-    pg_stream_table.cc
     pg_msg_stream.cc
     pg_msg_log_gen.cc
 )
@@ -96,6 +95,23 @@ target_include_directories(test_msg_stream
 gtest_discover_tests(test_msg_stream
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
+
+# copy table test
+add_executable(test_pgcopy test/test_pgcopy.cc)
+
+target_include_directories(test_pgcopy
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_pgcopy
+    PUBLIC springtail_storage springtail_pg
+    PRIVATE GTest::gtest_main
+)
+
+gtest_discover_tests(test_pgcopy
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+
 
 #if (${MACOSX})
 #    add_custom_command(TARGET pg_wal_dump POST_BUILD

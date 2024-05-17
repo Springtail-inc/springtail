@@ -57,7 +57,31 @@ namespace springtail {
             return table;
         }
 
-        throw StorageError();
+        // get the schema of the table
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
+
+        std::vector<uint64_t> roots;
+
+        // get the root of the table's primary index
+        auto roots_t = _get_system_table(sys_tbl::TableRoots::ID, xid);
+        auto roots_key_fields = schema->get_sort_fields();
+
+        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
+        auto it = roots_t->lower_bound(search_key);
+        if (it == roots_t->end() || !FieldTuple(roots_key_fields, *it).equal(*search_key)) {
+            // no roots?  maybe in roots file?
+            roots.push_back(constant::UNKNOWN_EXTENT);
+            // throw StorageError();
+        } else {
+            // retrieve the root extent ID of the primary
+            auto eid_f = schema->get_field("extent_id");
+            roots.push_back(eid_f->get_uint64(*it));
+        }
+
+        // construct the table and return it
+        return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
+                                       schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
+                                       roots, schema);
     }
 
     MutableTablePtr
@@ -109,7 +133,7 @@ namespace springtail {
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
                                                        true, // exists
                                                        column.column_name,
-                                                       static_cast<uint8_t>(convert_pg_type(column.udt_type)),
+                                                       static_cast<uint8_t>(_convert_pg_type(column.udt_type)),
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -174,7 +198,7 @@ namespace springtail {
             std::map<uint32_t, SchemaColumn> new_columns;
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
-                                                         convert_pg_type(col.udt_type),
+                                                         _convert_pg_type(col.udt_type),
                                                          true, col.is_nullable,
                                                          col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
                                                          col.default_value);
@@ -395,7 +419,7 @@ namespace springtail {
     }
 
     SchemaType
-    TableMgr::convert_pg_type(const std::string &pg_type)
+    TableMgr::_convert_pg_type(const std::string &pg_type)
     {
         if (pg_type == "int4" || pg_type == "int" || pg_type == "serial4" || pg_type == "serial" ||
             pg_type == "date") {
