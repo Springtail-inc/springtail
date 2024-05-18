@@ -1,9 +1,9 @@
 DROP TABLE IF EXISTS test_pgcopy;
 
 CREATE TABLE test_pgcopy (
-  id SERIAL PRIMARY KEY,
+--  id SERIAL PRIMARY KEY,
   table_id INT,
-  name VARCHAR(255),
+  name VARCHAR(255) PRIMARY KEY,
   "offset" INT
 );
 

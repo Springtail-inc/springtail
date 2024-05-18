@@ -14,6 +14,7 @@
 #include <pg_repl/libpq_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
 
+#include <storage/system_tables.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 
@@ -525,7 +526,7 @@ namespace springtail
     }
 
     std::optional<std::string_view>
-    PgCopyTable::get_next_row()
+    PgCopyTable::get_next_data()
     {
         char *buffer = nullptr;
         while (true) {
@@ -554,7 +555,7 @@ namespace springtail
     }
 
     void
-    PgCopyTable::release_row()
+    PgCopyTable::release_data()
     {
         // make sure that the connection's copy buffer is cleared
         _connection.free_copy_buffer();
@@ -571,21 +572,21 @@ namespace springtail
 
         // retrieve each row and write it to disk
         while (true) {
-            auto row = get_next_row();
-            if (!row) {
+            auto data = get_next_data();
+            if (!data) {
                 break;
             }
 
             // got a non-zero result, r indicates number of bytes
             // (shouldn't be null but check anyway)
-            std::cout << fmt::format("Copy got: {} bytes\n", row->size());
-            if (std::fwrite(row->data(), 1, row->size(), _file) < row->size()) {
+            std::cout << fmt::format("Copy got: {} bytes\n", data->size());
+            if (std::fwrite(data->data(), 1, data->size(), _file) < data->size()) {
                 std::cerr << "Error writing copy data\n";
-                release_row();
+                release_data();
                 throw PgIOError();
             }
 
-            release_row();
+            release_data();
         }
     }
 
@@ -663,17 +664,19 @@ namespace springtail
                               _schema.table_name,
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
-        // note: we create the system metadata at XID 0
-        TableMgr::get_instance()->create_table(0, 0, create_msg);
+        // note: we create the system metadata at XID 1
+        uint64_t access_xid = 1;
+        TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
 
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, 0);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
 
         // get a mutable table interface
+        auto table_dir = base_dir / fmt::format("{}", _schema.table_oid);
         auto table = std::make_shared<MutableTable>(_schema.table_oid,
-                                                    0, // access XID
+                                                    access_xid, // access XID
                                                     xid, // target XID
                                                     std::vector<uint64_t>{ constant::UNKNOWN_EXTENT }, // primary root
-                                                    base_dir,
+                                                    table_dir,
                                                     schema->get_sort_keys(), // primary keys
                                                     std::vector<std::vector<std::string>>{}, // secondary keys
                                                     schema);
@@ -681,27 +684,54 @@ namespace springtail
         // start the COPY
         prepare_copy();
 
+        // get a chunk of data
+        auto data = get_next_data();        
+        if (!data) {
+            throw PgIOError();
+        }
+        
+        // verify the header before processing the rows
+        int32_t ext_length = verify_copy_header(data->substr(0, 19));
+        size_t pos = 19 + ext_length;
+        
         // scan the rows and populate the table
         while (true) {
-            auto row = get_next_row();
-            if (!row) {
-                break; // finished with the COPY
+            if (data->size() == pos) {
+                // release the row data
+                release_data();
+
+                // try to get more row data
+                pos = 0;
+                data = get_next_data();
+                if (!data) {
+                    break; // finished with the COPY
+                }
+                continue; // got more data, keep processing
+            }
+
+            auto fields = parse_row(*data, pos);
+            if (!fields) {
+                break; // saw footer, finished with the COPY
             }
 
             // construct a tuple from the row
-            auto fields = parse_row(*row);
             auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
 
             // add the row to the table
             table->insert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-            // release the row data
-            release_row();
         }
 
         auto roots = table->finalize();
 
-        // XXX store the roots into the system table
+        // store the roots into the system table
+        auto table_roots_t = TableMgr::get_instance()->get_mutable_table(sys_tbl::TableRoots::ID, xid - 1, xid);
+        for (uint64_t idx = 0; idx < roots.size(); ++idx) {
+            auto tuple = sys_tbl::TableRoots::Data::tuple(_schema.table_oid, idx, xid, roots[idx]);
+            table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
+            SPDLOG_INFO("Updated root {} {} - {}", _schema.table_oid, idx, roots[idx]);
+        }
+        table_roots_t->finalize();
+
 
         return _schema.table_oid;
     }
@@ -717,13 +747,35 @@ namespace springtail
         _file = std::fopen(filename.c_str(), "rb");
 
         read_schema();
-        verify_copy_header();
+        read_header();
         read_copy_data();
 
         std::fclose(_file);
         _file = nullptr;
     }
 
+
+    void
+    PgCopyTable::read_header()
+    {
+        std::vector<char> header(19);
+
+        /*
+         * 11B signature
+         *  4B flags
+         *  4B extension length
+         */
+        int r = std::fread(header.data(), 1, 19, _file);
+        if (r != 19) {
+            std::cerr << "Couldn't read signature\n";
+            throw PgIOError();
+        }
+
+        int32_t ext_length = verify_copy_header(std::string_view(header.data(), 19));
+        if (ext_length > 0) {
+            std::fseek(_file, ext_length, SEEK_CUR);
+        }
+    }
 
     /**
      * @brief Validate copy header
@@ -732,40 +784,24 @@ namespace springtail
      *           4B flags; bit 16 oid flag
      *           4B header extension length
      */
-    void PgCopyTable::verify_copy_header()
+    int32_t PgCopyTable::verify_copy_header(const std::string_view &header)
     {
-        char header[19];
-
-        /*
-         * 11B signature
-         *  4B flags
-         *  4B extension length
-         */
-        int r = std::fread(header, 1, 19, _file);
-        if (r != 19) {
-            std::cerr << "Couldn't read signature\n";
-            throw PgIOError();
-        }
-
         // verify signature
-        r = std::memcmp(header, COPY_SIGNATURE, 11);
+        int r = std::memcmp(header.data(), COPY_SIGNATURE, 11);
         if (r != 0) {
             std::cerr << "Signature doesn't match\n";
             throw PgUnknownMessageError();
         }
 
-        int32_t flags = recvint32(&header[11]);
+        int32_t flags = recvint32(header.data() + 11);
         std::cout << fmt::format("header flags: 0x{:X}\n", flags);
         if ((flags >> 16) & 0x1) {
             // bit 16 tells us if oids are present
             _oid_flag = true;
         }
 
-        // skip any header extension
-        int32_t ext_length = recvint32(&header[15]);
-        if (ext_length > 0) {
-            std::fseek(_file, ext_length, SEEK_CUR);
-        }
+        // return the length of any header extension
+        return recvint32(header.data() + 15);
     }
 
 
@@ -881,10 +917,8 @@ namespace springtail
     }
 
     FieldArrayPtr
-    PgCopyTable::parse_row(const std::string_view &row)
+    PgCopyTable::parse_row(const std::string_view &row, size_t &pos)
     {
-        size_t pos = 0;
-
         // start with 16 bit integer -- number of fields
         int16_t num_columns = recvint16(row.data() + pos);
         if (num_columns == -1) {

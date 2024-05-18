@@ -207,8 +207,6 @@ namespace springtail {
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
         FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
-        std::shared_ptr<IOHandle> _handle; ///< The IO handle for the data file.
-
         /** The primary index of the table. */
         BTreePtr _primary_index;
 

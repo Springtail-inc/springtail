@@ -57,14 +57,11 @@ namespace springtail {
             return table;
         }
 
-        // get the schema of the table
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
-
         std::vector<uint64_t> roots;
 
         // get the root of the table's primary index
         auto roots_t = _get_system_table(sys_tbl::TableRoots::ID, xid);
-        auto roots_key_fields = schema->get_sort_fields();
+        auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
 
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
         auto it = roots_t->lower_bound(search_key);
@@ -74,11 +71,12 @@ namespace springtail {
             // throw StorageError();
         } else {
             // retrieve the root extent ID of the primary
-            auto eid_f = schema->get_field("extent_id");
+            auto eid_f = roots_t->extent_schema()->get_field("extent_id");
             roots.push_back(eid_f->get_uint64(*it));
         }
 
         // construct the table and return it
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
         return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
                                        schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
                                        roots, schema);

@@ -25,11 +25,14 @@ namespace {
             Json::get_to<std::filesystem::path>(json, "table_dir", _base_dir,
                                                 "/opt/springtail/table");
 
+            // cleanup from failed previous run
+            TearDown();
+
             std::filesystem::create_directories(_base_dir);
 
             std::cout << "writing to " << _base_dir << "\n";
 
-            int err = std::system("psql postgresql://username:password@localhost/springtail_test -f sample.sql");
+            int err = std::system("psql postgresql://postgres:springtail@localhost -f sample.sql");
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
             }
@@ -43,26 +46,17 @@ namespace {
     };
 
     TEST_F(PgCopyTable_Test, CopyTable) {
-        auto source = std::make_shared<PgCopyTable>("springtail_test", "public", "test_pgcopy", "");
-        source->connect("localhost", "username", "password", 5432);
+        auto source = std::make_shared<PgCopyTable>("postgres", "public", "test_pgcopy", "");
+        source->connect("localhost", "postgres", "springtail", 5432);
 
         // perform the table copy
-        auto oid = source->copy_to_springtail(_base_dir, 1);
+        uint64_t xid = 2;
+        auto oid = source->copy_to_springtail(_base_dir, xid);
 
         // create an access table
-        auto table = TableMgr::get_instance()->get_table(oid, 1, 0);
+        auto table = TableMgr::get_instance()->get_table(oid, xid, 0);
         auto schema = table->extent_schema();
-
-        // auto schema = SchemaMgr::get_instance()->get_extent_schema(oid, 1);
-        // auto table = std::make_shared<Table>(oid,
-        //                                      1,
-        //                                      _base_dir / std::to_string(oid),
-        //                                      schema->get_sort_keys(),
-        //                                      std::vector<std::vector<std::string>>{},
-        //                                      std::vector<uint64_t>{ constant::UNKNOWN_EXTENT },
-        //                                      schema);
         auto fields = schema->get_fields();
-
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)

@@ -86,17 +86,18 @@ namespace springtail
 
         // functions used to implement copy_data()
         void prepare_copy();
-        std::optional<std::string_view> get_next_row();
-        void release_row();
+        std::optional<std::string_view> get_next_data();
+        void release_data();
 
         // functions used to implement copy_to_springtail()
         std::vector<PgMsgSchemaColumn> _map_to_pg_msg(const std::vector<PgColumn> pg_columns,
                                                       const std::vector<std::string> pkeys);
         int _get_vec_pos(const std::vector<std::string> vec, const std::string element);
-        FieldArrayPtr parse_row(const std::string_view &row);
+        FieldArrayPtr parse_row(const std::string_view &row, size_t &pos);
 
         // read in schema, copy header, copy data
-        void verify_copy_header();
+        int32_t verify_copy_header(const std::string_view &header);
+        void read_header();
         void read_schema();
         void read_copy_data();
 
