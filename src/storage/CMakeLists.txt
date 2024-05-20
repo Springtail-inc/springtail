@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc table_mgr.cc schema_mgr.cc data_cache.cc table.cc system_tables.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc table_mgr.cc schema_mgr.cc table.cc system_tables.cc cache.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -9,7 +9,9 @@ find_package(GTest CONFIG REQUIRED)
 ## main library
 add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(springtail_storage PRIVATE lz4::lz4 xxHash::xxhash)
+target_link_libraries(springtail_storage
+  PRIVATE lz4::lz4 xxHash::xxhash
+  PUBLIC Boost::thread)
 
 
 ## helpers
@@ -20,6 +22,10 @@ target_link_libraries(read_leaf PUBLIC springtail_common springtail_storage)
 add_executable(read_branch test/read_branch.cc)
 target_include_directories(read_branch PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(read_branch PUBLIC springtail_common springtail_storage)
+
+add_executable(dump_system_tables test/dump_system_tables.cc)
+target_include_directories(dump_system_tables PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(dump_system_tables PUBLIC springtail_common springtail_storage)
 
 ## tests
 
@@ -44,7 +50,7 @@ target_link_options(test_btree PRIVATE "--coverage")
 
 target_link_libraries(test_btree
     PUBLIC springtail_common springtail_storage GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
 
 # table test
 add_executable(test_table test/test_table.cc)
@@ -53,7 +59,7 @@ target_link_options(test_table PRIVATE "--coverage")
 
 target_link_libraries(test_table
     PUBLIC springtail_common springtail_storage GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
 
 # table_mgr test
 add_executable(test_table_mgr test/test_table_mgr.cc)
@@ -62,7 +68,16 @@ target_link_options(test_table_mgr PRIVATE "--coverage")
 
 target_link_libraries(test_table_mgr
     PUBLIC springtail_common springtail_storage GTest::gtest_main
-    PRIVATE unofficial::vincentlaucsb-csv-parser::csv Boost::thread ${GCOV_LIB})
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
+
+# cache test
+add_executable(test_cache test/test_cache.cc)
+target_include_directories(test_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_cache PRIVATE "--coverage")
+
+target_link_libraries(test_cache
+    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
 
 # extent test
 add_executable(test_extent test/test_extent.cc)
@@ -76,5 +91,7 @@ gtest_discover_tests(test_btree
 gtest_discover_tests(test_table
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 gtest_discover_tests(test_table_mgr
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
+gtest_discover_tests(test_cache
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 gtest_discover_tests(test_io)

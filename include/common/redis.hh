@@ -102,7 +102,7 @@ namespace springtail {
     template<typename T>
     class RedisQueue {
     public:
-        RedisQueue(const std::string &key)
+        explicit RedisQueue(const std::string &key)
             : _key(key),
               _redis(RedisMgr::get_instance()->get_client())
         { }
@@ -218,7 +218,7 @@ namespace springtail {
     template<typename T>
     class RedisSortedSet {
     public:
-        RedisSortedSet(const std::string &key)
+        explicit RedisSortedSet(const std::string &key)
             : _key(key)
         { }
 

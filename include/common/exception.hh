@@ -24,7 +24,7 @@ namespace springtail {
         }
 
         /** Captures the stack trace on construction. */
-        Error(const std::string &error)
+        explicit Error(const std::string &error)
             : _error(error)
         {
             _trace.load_here();
@@ -38,7 +38,7 @@ namespace springtail {
         }
 
         /** Return the provided error string. */
-        virtual const char *what() const noexcept
+        const char *what() const noexcept override
         {
             return _error.data();
         }

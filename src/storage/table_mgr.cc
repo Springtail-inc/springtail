@@ -35,11 +35,6 @@ namespace springtail {
 
     TableMgr::TableMgr()
     {
-        // XXX set the cache sizes and base path from global properties
-        _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(64 * 1024 * 1024);
-        _write_cache = MutableBTree::create_cache(64 * 1024 * 1024);
-        _data_cache = std::make_shared<DataCache>(true);
-
         // get the base directory for table data
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<std::filesystem::path>(json, "table_dir", _table_base,
@@ -63,51 +58,17 @@ namespace springtail {
         }
 
         throw StorageError();
-
-#if 0
-        // check the table cache
-        // XXX Table vs. Mutable Table?  How to handle XID in Table?
-        auto table = _table_cache.get(table_id);
-        if (table != nullptr) {
-            return table;
-        }
-
-        // read the table metadata from the appropriate system table
-        auto table_roots_t = _system_tables.find(sys_tbl::TableRoots::ID)->second;
-        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, 0, xid);
-
-        // XXX specialized search that finds the entry directly before the lower_bound(search_key)
-        auto pos_i = table_roots_t->primary->inverted_upper_bound(search_key);
-        if (pos_i == table_roots_t->primary->end()) {
-            return nullptr;
-        }
-
-        auto schema = table_roots_t->get_schema(xid, lsn);
-        auto fields = schema->get_fields("table_id", "xid", "lsn");
-
-        // verify that the returned entry references the requested table
-        if (fields->at(0)->get_uint64(*pos_i) != table_id) {
-            // if not, then the table does not exist at the provided XID/LSN
-            return nullptr;
-        }
-
-        auto table = std::make_shared<Table>(table_id,
-                                             _cache,
-                                             fields->at(XID)->get_uint64(*pos_i),
-                                             fields->at(EXTENT_ID)->get_uint64(*pos_i));
-        _table_cache.insert(table_id, table);
-        return table;
-#endif
     }
 
     MutableTablePtr
     TableMgr::get_mutable_table(uint64_t table_id,
-                                uint64_t xid)
+                                uint64_t access_xid,
+                                uint64_t target_xid)
     {
         boost::shared_lock lock(_mutex);
 
         // check the system tables
-        auto table = _get_mutable_system_table(table_id, xid);
+        auto table = _get_mutable_system_table(table_id, access_xid, target_xid);
         if (table != nullptr) {
             return table;
         }
@@ -120,16 +81,20 @@ namespace springtail {
                            uint64_t lsn,
                            const PgMsgTable &msg)
     {
-        // add a table -> name mapping that starts the table at the given XID/LSN
-        auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, xid);
+        // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
+        uint64_t access_xid = xid - 1;
+
+        // 1) add a table -> name mapping that starts the table at the given XID/LSN
+        auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
         auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
         table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
         table_names_t->finalize();
 
-        // add a table_id -> UNKNOWN_EXTENT extent ID mapping that indicates an empty primary index at the given XID/LSN
-        // note: we perform an upsert because the table records at the XID level and there may have
-        //       been an earlier DROP within the same XID, and we can't insert the same entry twice
-        auto table_roots_t = get_mutable_table(sys_tbl::TableRoots::ID, xid);
+        // add a table_id -> UNKNOWN extent ID mapping that indicates an empty primary index at the given XID/LSN
+
+        // note: we perform an upsert() because the table records at the XID level and there may
+        //       have been an earlier DROP in the same XID, and we can't insert the same entry twice
+        auto table_roots_t = get_mutable_table(sys_tbl::TableRoots::ID, access_xid, xid);
         tuple = sys_tbl::TableRoots::Data::tuple(msg.oid, 0, xid, constant::UNKNOWN_EXTENT);
         table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
         table_roots_t->finalize();
@@ -138,7 +103,7 @@ namespace springtail {
         std::map<uint32_t, uint32_t> primary_keys;
 
         // 2) add a row to "schemas" for each column
-        auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, xid);
+        auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, access_xid, xid);
         for (auto &&column : msg.columns) {
             // insert an entry into the schemas table
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
@@ -158,7 +123,7 @@ namespace springtail {
 
         // 3) if there's a primary key, add a row to "indexes" for each key column of the primary key
         if (!primary_keys.empty()) {
-            auto indexes_t = get_mutable_table(sys_tbl::Indexes::ID, xid);
+            auto indexes_t = get_mutable_table(sys_tbl::Indexes::ID, access_xid, xid);
             auto fields = sys_tbl::Indexes::Data::fields(msg.oid, 0, xid, 0, 0);
 
             for (auto &&entry : primary_keys) {
@@ -182,12 +147,15 @@ namespace springtail {
                           uint64_t lsn,
                           const PgMsgTable &msg)
     {
+        // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
+        uint64_t access_xid = xid - 1;
+
         // retrieve the current name of the table
         auto &&old_name = _get_table_name(msg.oid, xid, lsn);
 
         if (old_name.first != msg.schema || old_name.second != msg.table) {
             // 1) if the table name is changed, add two rows to the "tables" -- one with the new name, and one to remove the old name
-            auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, xid);
+            auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
 
             // insert the new name with this oid
             auto new_tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
@@ -207,14 +175,16 @@ namespace springtail {
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
                                                          _convert_pg_type(col.udt_type),
-                                                         true, col.is_nullable, col.default_value);
+                                                         true, col.is_nullable,
+                                                         col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
+                                                         col.default_value);
             }
 
             auto update = SchemaMgr::get_instance()->generate_update(old_columns, new_columns, xid, lsn);
             auto &col = new_columns[update.position];
 
             // apply the changes to the schemas table
-            auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, xid);
+            auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, access_xid, xid);
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, update.position, xid, lsn,
                                                        (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
                                                        col.name, static_cast<uint8_t>(col.type),
@@ -235,10 +205,13 @@ namespace springtail {
                          uint64_t lsn,
                          const PgMsgDropTable &msg)
     {
+        // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
+        uint64_t access_xid = xid - 1;
+
         // 1) update the "table_names" with a drop entry
         //    note: the GC-3 should evict these entries once the data has been brought forward and
         //          we can assume the table_id won't be re-used until that operation is complete
-        auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, xid);
+        auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
         auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, false);
         table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
         table_names_t->finalize();
@@ -273,8 +246,7 @@ namespace springtail {
                                            sys_tbl::TableNames::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::TableRoots::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, xid);
@@ -286,8 +258,7 @@ namespace springtail {
                                            sys_tbl::TableRoots::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::Indexes::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, xid);
@@ -299,8 +270,7 @@ namespace springtail {
                                            sys_tbl::Indexes::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         case (sys_tbl::Schemas::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, xid);
@@ -312,8 +282,7 @@ namespace springtail {
                                            sys_tbl::Schemas::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema,
-                                           _read_cache);
+                                           schema);
         }
         default:
             return nullptr;
@@ -322,7 +291,8 @@ namespace springtail {
 
     MutableTablePtr
     TableMgr::_get_mutable_system_table(uint64_t table_id,
-                                        uint64_t xid)
+                                        uint64_t access_xid,
+                                        uint64_t target_xid)
     {
         // initialize the system tables using the look-aside root files
         std::vector<uint64_t> roots;
@@ -333,64 +303,56 @@ namespace springtail {
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
             secondary_keys.push_back(sys_tbl::TableNames::Secondary::KEY);
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID, xid);
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID, access_xid);
             table_path = _table_base / std::to_string(sys_tbl::TableNames::ID);
 
             return std::make_shared<MutableTable>(sys_tbl::TableNames::ID,
-                                                  xid,
+                                                  access_xid,
+                                                  target_xid,
                                                   roots,
                                                   table_path,
                                                   sys_tbl::TableNames::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache,
-                                                  _write_cache,
-                                                  _read_cache);
+                                                  schema);
         }
         case (sys_tbl::TableRoots::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, xid);
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, access_xid);
             table_path = _table_base / std::to_string(sys_tbl::TableRoots::ID);
 
             return std::make_shared<MutableTable>(sys_tbl::TableRoots::ID,
-                                                  xid,
+                                                  access_xid,
+                                                  target_xid,
                                                   roots,
                                                   table_path,
                                                   sys_tbl::TableRoots::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache,
-                                                  _write_cache,
-                                                  _read_cache);
+                                                  schema);
         }
         case (sys_tbl::Indexes::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, xid);
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, access_xid);
             table_path = _table_base / std::to_string(sys_tbl::Indexes::ID);
 
             return std::make_shared<MutableTable>(sys_tbl::Indexes::ID,
-                                                  xid,
+                                                  access_xid,
+                                                  target_xid,
                                                   roots,
                                                   table_path,
                                                   sys_tbl::Indexes::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache,
-                                                  _write_cache,
-                                                  _read_cache);
+                                                  schema);
         }
         case (sys_tbl::Schemas::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, xid);
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, access_xid);
             table_path = _table_base / std::to_string(sys_tbl::Schemas::ID);
 
             return std::make_shared<MutableTable>(sys_tbl::Schemas::ID,
-                                                  xid,
+                                                  access_xid,
+                                                  target_xid,
                                                   roots,
                                                   table_path,
                                                   sys_tbl::Schemas::Primary::KEY,
                                                   secondary_keys,
-                                                  schema,
-                                                  _data_cache,
-                                                  _write_cache,
-                                                  _read_cache);
+                                                  schema);
         }
         default:
             return nullptr;
@@ -413,22 +375,22 @@ namespace springtail {
         auto search_key = sys_tbl::TableNames::Secondary::key_tuple(table_id, xid, lsn);
 
         // find the row that matches the name of the table_id at the given XID/LSN
-        auto row_i = table_names_t->secondary(0)->inverse_upper_bound(search_key, xid);
-        if (row_i == table_names_t->secondary(0)->end() ||
+        auto row_i = table_names_t->index(1)->inverse_upper_bound(search_key);
+        if (row_i == table_names_t->index(1)->end() ||
             schema->get_field("table_id")->get_uint64(*row_i) != table_id ||
             schema->get_field("exists")->get_bool(*row_i) == false) {
             // XXX error -- table_id doesn't exist at the provided XID
         }
 
         // read the row from the extent and retrieve the FQN
-        auto secondary_fields = table_names_t->secondary(0)->get_schema()->get_fields();
+        auto secondary_fields = table_names_t->index(1)->get_schema()->get_fields();
         auto extent_id = secondary_fields->at(sys_tbl::TableNames::Secondary::EXTENT_ID)->get_uint64(*row_i);
         auto row_id = secondary_fields->at(sys_tbl::TableNames::Secondary::ROW_ID)->get_uint32(*row_i);
-        auto extent = table_names_t->read_extent(extent_id);
-        auto row = extent->at(row_id);
+        auto page = table_names_t->read_page(extent_id);
+        auto row = page->at(row_id);
 
-        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
-        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
+        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
+        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
         return { old_namespace, old_name };
     }
 

@@ -35,7 +35,7 @@ namespace {
 
         class QueueEntry {
         public:
-            QueueEntry(const std::string &value) {
+            explicit QueueEntry(const std::string &value) {
                 _value = std::stoull(value);
             }
 
@@ -53,7 +53,7 @@ namespace {
 
         class SetEntry {
         public:
-            SetEntry(const std::string &value) {
+            explicit SetEntry(const std::string &value) {
                 _value = value;
             }
 

@@ -179,6 +179,13 @@ namespace springtail {
             // note: positions should be in-order, so don't need to read them
 
             if (index_id == 0) {
+                // update the columns with the primary key positions
+                // XXX not handling changes in the primary index
+                for (auto &column : _column_map[column_id][xid]) {
+                    column.pkey_position = _primary_index.size();
+                }
+
+                // note the primary key
                 _primary_index[xid].push_back(column_id);
             } else {
                 _secondary_indexes[index_id][xid].push_back(column_id);
@@ -195,11 +202,16 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    SchemaMgr::SchemaInfo::get_primary_key(uint64_t xid)
+    SchemaMgr::SchemaInfo::get_index_keys(uint64_t index_id, uint64_t xid)
     {
         std::vector<std::string> key;
 
-        auto &&i = _primary_index.lower_bound(xid);
+        // XXX need to handle lookup failure
+        auto &index = (index_id == constant::INDEX_PRIMARY)
+            ? _primary_index
+            : _secondary_indexes[index_id];
+
+        auto &&i = index.lower_bound(xid);
         for (uint32_t column : i->second) {
             // XXX need to handle lookup failure
             key.push_back(_column_map[column].lower_bound(xid)->second.back().name);
@@ -213,6 +225,7 @@ namespace springtail {
     {
         // determine the columns for the extent XID
         auto &&columns = _get_columns_for_xid(extent_xid);
+        assert(!columns.empty());
 
         // use the vector of columns to generate the schema
         return std::make_shared<ExtentSchema>(columns);
@@ -273,17 +286,26 @@ namespace springtail {
     SchemaMgr::SchemaMgr()
         : _cache(1024*1024)
     {
-        _system_cache[sys_tbl::TableNames::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
-        _system_cache[sys_tbl::TableRoots::ID] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
-        _system_cache[sys_tbl::Indexes::ID] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
-        _system_cache[sys_tbl::Schemas::ID] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+
+        // TableNames
+        _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
+
+        // TableRoots
+        _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
+
+        // Indexes
+        _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
+
+        // Schemas
+        _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>
     SchemaMgr::get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn)
     {
         // XXX can't call this for system tables
-        assert(_system_cache.find(table_id) == _system_cache.end());
+        assert(_system_cache.find({ table_id, constant::INDEX_DATA, true }) == _system_cache.end());
 
         std::shared_ptr<SchemaInfo> info = _cache.get(table_id);
         if (info == nullptr) {
@@ -298,7 +320,7 @@ namespace springtail {
     SchemaMgr::get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn)
     {
         // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find(table_id);
+        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
         if (system_i != _system_cache.end()) {
             return system_i->second;
         }
@@ -323,7 +345,7 @@ namespace springtail {
                                  uint64_t xid)
     {
         // first check if it's an immutable system table schema
-        auto &&system_i = _system_cache.find(table_id);
+        auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
         if (system_i != _system_cache.end()) {
             return system_i->second;
         }

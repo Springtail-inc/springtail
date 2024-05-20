@@ -22,7 +22,7 @@ main(int argc,
 
     SchemaColumn child("child", 0, SchemaType::UINT64, false);
     auto keys = std::vector<std::string>({"name", "table_id"});
-    auto branch_schema = schema->create_schema(keys, { child });
+    auto branch_schema = schema->create_schema(keys, { child }, keys);
     auto name_f = branch_schema->get_field("name");
     auto child_f = branch_schema->get_field("child");
 
@@ -33,7 +33,7 @@ main(int argc,
 
     uint64_t extent_id = std::stoull(argv[2]);
     auto response = handle->read(extent_id);
-    Extent extent(branch_schema, response->data);
+    Extent extent(response->data);
 
     int count = 0;
     for (auto &&row : extent) {
