@@ -1009,13 +1009,16 @@ namespace springtail
                     pos += length;
                 }
             } else {
-                assert(0);
+                SPDLOG_WARN("Converting unsupported type '{}' into BINARY", type);
+                if (length == -1) {
+                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::BINARY));
+                } else {
+                    std::string_view tmp(row.data() + pos, length);
+                    std::vector<char> data(tmp.begin(), tmp.end());
+                    fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
+                    pos += length;
+                }
             }
-
-            // a length of 0 indicates empty string
-            // if (length == 0 && (type == "text" || type == "varchar")) {
-            //     std::cout << "\n"; // empty string
-            // }
         }
 
         return fields;
