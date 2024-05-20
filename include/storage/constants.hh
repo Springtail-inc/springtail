@@ -27,12 +27,24 @@ namespace springtail::constant {
     static constexpr uint32_t INDEX_PRIMARY = 0;
 
     /** The name of the child pointer field in a BTree branch extent. */
-    const static std::string BTREE_CHILD_FIELD = "__springtail_child";
+    static const std::string BTREE_CHILD_FIELD = "__springtail_child";
 
     /** The name of the extent ID field in an index leaf extent. */
-    const static std::string INDEX_EID_FIELD = "__springtail_eid";
+    static const std::string INDEX_EID_FIELD = "__springtail_eid";
 
     /** The name of the row ID field in a secondary index leaf extent. */
-    const static std::string INDEX_RID_FIELD = "__springtail_rid";
+    static const std::string INDEX_RID_FIELD = "__springtail_rid";
+
+    /** The format of an index file name. */
+    static constexpr std::string_view INDEX_FILE = "{}.idx";
+    static constexpr std::string_view INDEX_PRIMARY_FILE = "0.idx";
+
+    /** The format of a raw data file name. */
+    static constexpr std::string_view DATA_FILE = "raw";
+
+    /** The format of a roots file. */
+    static constexpr std::string_view ROOTS_FILE = "roots";
+    static constexpr std::string_view ROOTS_XID_FILE = "roots.{}";
+    static constexpr std::string_view ROOTS_TMP_FILE = "roots.tmp";
 
 }

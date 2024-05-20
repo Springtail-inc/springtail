@@ -291,35 +291,14 @@ namespace springtail {
         // TableNames
         _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
 
-        // auto schema = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Primary::SCHEMA);
-        // _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_PRIMARY, true }] = schema;
-        // _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::TableNames::Primary::KEY, { child }, sys_tbl::TableNames::Primary::KEY);
-        
-        // schema = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Secondary::SCHEMA);
-        // _system_cache[{ sys_tbl::TableNames::ID, 1, true }] = schema;
-        // _system_cache[{ sys_tbl::TableNames::ID, 1, false }] = schema->create_schema(sys_tbl::TableNames::Secondary::KEY, { child }, sys_tbl::TableNames::Secondary::KEY);
-
         // TableRoots
         _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Data::SCHEMA);
-
-        // schema = std::make_shared<ExtentSchema>(sys_tbl::TableRoots::Primary::SCHEMA);
-        // _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_PRIMARY, true }] = schema;
-        // _system_cache[{ sys_tbl::TableRoots::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::TableRoots::Primary::KEY, { child }, sys_tbl::TableRoots::Primary::KEY);
 
         // Indexes
         _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Data::SCHEMA);
 
-        // schema = std::make_shared<ExtentSchema>(sys_tbl::Indexes::Primary::SCHEMA);
-        // _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_PRIMARY, true }] = schema;
-        // _system_cache[{ sys_tbl::Indexes::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::Indexes::Primary::KEY, { child }, sys_tbl::Indexes::Primary::KEY);
-
         // Schemas
         _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
-
-        // schema = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Primary::SCHEMA);
-        // _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_PRIMARY, true }] = schema;
-        // _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_PRIMARY, false }] = schema->create_schema(sys_tbl::Schemas::Primary::KEY, { child }, sys_tbl::Schemas::Primary::KEY);
-        
     }
 
     std::map<uint32_t, SchemaColumn>

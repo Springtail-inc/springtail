@@ -31,9 +31,9 @@ namespace springtail {
 
         // handle if the roots were not provided
         if (root_offsets.empty()) {
-            if (std::filesystem::exists(table_dir / "roots")) {
+            if (std::filesystem::exists(table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
-                auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
+                auto roots_path = std::filesystem::read_symlink(table_dir / constant::ROOTS_FILE);
                 auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
                 auto response = root_handle->read(0);
                 auto extent = std::make_shared<Extent>(response->data);
@@ -55,7 +55,7 @@ namespace springtail {
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, false);
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
-        _primary_index = std::make_shared<BTree>(table_dir / "0.idx",
+        _primary_index = std::make_shared<BTree>(table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
                                                  primary_schema,
                                                  root_offsets[0]);
@@ -72,7 +72,7 @@ namespace springtail {
 
             auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
-            auto btree = std::make_shared<BTree>(table_dir / fmt::format("{}.idx", (i + 1)),
+            auto btree = std::make_shared<BTree>(table_dir / fmt::format(constant::INDEX_FILE, (i + 1)),
                                                  xid,
                                                  secondary_schema,
                                                  root_offsets[i + 1]);
@@ -162,7 +162,7 @@ namespace springtail {
     StorageCache::PagePtr
     Table::_read_page(uint64_t extent_id) const
     {
-        return StorageCache::get_instance()->get(_table_dir / "raw", extent_id, _xid);
+        return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
     }
 
 
@@ -178,7 +178,7 @@ namespace springtail {
       _access_xid(access_xid),
       _target_xid(target_xid),
       _table_dir(table_dir),
-      _data_file(table_dir / "raw"),
+      _data_file(table_dir / constant::DATA_FILE),
       _primary_key(primary_key),
       _secondary_keys(secondary_keys),
       _schema(schema)
@@ -192,9 +192,9 @@ namespace springtail {
 
         // handle if the roots were not provided
         if (root_offsets.empty()) {
-            if (std::filesystem::exists(table_dir / "roots")) {
+            if (std::filesystem::exists(table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
-                auto roots_path = std::filesystem::read_symlink(table_dir / "roots");
+                auto roots_path = std::filesystem::read_symlink(table_dir / constant::ROOTS_FILE);
                 auto root_handle = IOMgr::get_instance()->open(roots_path, IOMgr::IO_MODE::READ, true);
                 auto response = root_handle->read(0);
                 auto extent = std::make_shared<Extent>(response->data);
@@ -216,7 +216,7 @@ namespace springtail {
 
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
 
-        _primary_index = std::make_shared<MutableBTree>(table_dir / "0.idx",
+        _primary_index = std::make_shared<MutableBTree>(table_dir / constant::INDEX_PRIMARY_FILE,
                                                         primary_key,
                                                         primary_schema,
                                                         _target_xid);
@@ -226,7 +226,7 @@ namespace springtail {
             _primary_index->init_empty();
         }
 
-        _primary_lookup = std::make_shared<BTree>(table_dir / "0.idx",
+        _primary_lookup = std::make_shared<BTree>(table_dir / constant::INDEX_PRIMARY_FILE,
                                                   access_xid,
                                                   primary_schema,
                                                   root_offsets[0]);
@@ -243,7 +243,7 @@ namespace springtail {
 
             auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
 
-            auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format("{}.idx", idx),
+            auto btree = std::make_shared<MutableBTree>(table_dir / fmt::format(constant::INDEX_FILE, idx),
                                                         secondary_key, secondary_schema,
                                                         _target_xid);
 
@@ -252,7 +252,7 @@ namespace springtail {
             } else {
                 btree->init_empty();
             }
-            // btree->set_xid(_target_xid);
+
             _secondary_indexes.push_back(btree);
         }
     }
@@ -457,7 +457,7 @@ namespace springtail {
             auto &&row = extent->append();
             _roots_root_f->set_uint64(row, root);
         }
-        auto filename = fmt::format("roots.{}", _target_xid);
+        auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
                                                        IOMgr::IO_MODE::APPEND, true);
 
@@ -466,8 +466,10 @@ namespace springtail {
         root_handle->sync();
 
         // swap the symlink
-        std::filesystem::create_symlink(_table_dir / filename, _table_dir / "roots.new");
-        std::filesystem::rename(_table_dir / "roots.new", _table_dir / "roots");
+        std::filesystem::create_symlink(_table_dir / filename,
+                                        _table_dir / constant::ROOTS_TMP_FILE);
+        std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
+                                _table_dir / constant::ROOTS_FILE);
 
         return roots;
     }

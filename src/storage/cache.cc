@@ -312,13 +312,13 @@ namespace springtail {
     }
 
     void
-    StorageCache::PageCache::_make_space(uint32_t size)
+    StorageCache::PageCache::_make_space(uint32_t space_needed)
     {
         // if there is space in the cache, utilize it
-        while (_size + size > _max_size) {
+        while (_size + space_needed > _max_size) {
             // try to use any space that is available
             if (_size < _max_size) {
-                size -= _max_size - _size;
+                space_needed -= _max_size - _size;
                 _size = _max_size;
             }
 
@@ -336,7 +336,7 @@ namespace springtail {
         }
 
         // at this point we know there is enough space in the cache for the remaining size
-        _size += size;
+        _size += space_needed;
     }
 
     StorageCache::PagePtr
@@ -1087,7 +1087,7 @@ namespace springtail {
 
             // extent not cached, so read from disk
             // note: may return nullptr, indicating someone else just read the extent from disk and
-            //       that we should check the cache again si
+            //       that we should check the cache again
             extent = _read_extent(key, [this, key](CacheExtentPtr extent) {
                 // insert the extent into the cache
                 // note: we don't place into the LRU list since the extent will be in-use
