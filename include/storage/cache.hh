@@ -870,7 +870,7 @@ namespace springtail {
             /**
              * Makes space for some number of pages, evicting existing pages in the cache if necessary.
              */
-            void _make_space(uint32_t size);
+            void _make_space(uint32_t space_needed);
 
         private:
             using XidMap = std::map<uint64_t, PagePtr>;

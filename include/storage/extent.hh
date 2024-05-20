@@ -79,8 +79,7 @@ namespace springtail {
         /** Constructor that deserializes the header. */
         ExtentHeader(std::shared_ptr<std::vector<char>> data)
         {
-            type = ExtentType(*reinterpret_cast<uint8_t *>(data->data()));
-            // type = recvint8(data->data());
+            type = recvint8(data->data());
             xid = recvint64(data->data() + 1);
             row_size = recvint32(data->data() + 9);
             prev_offset = recvint64(data->data() + 13);
@@ -91,8 +90,7 @@ namespace springtail {
         {
             std::vector<char> data(21);
 
-            data[0] = static_cast<uint8_t>(type);
-            // sendint8(type, data.data());
+            sendint8(static_cast<uint8_t>(type), data.data());
             sendint64(xid, data.data() + 1);
             sendint32(row_size, data.data() + 9);
             sendint64(prev_offset, data.data() + 13);

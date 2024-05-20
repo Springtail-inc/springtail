@@ -32,16 +32,12 @@ namespace springtail::sys_tbl {
         { "table_id", 0, SchemaType::UINT64, false },
         { "xid", 1, SchemaType::UINT64, false },
         { "lsn", 2, SchemaType::UINT64, false }
-        // { constant::INDEX_EID_FIELD, 3, SchemaType::UINT64, false },
-        // { constant::INDEX_RID_FIELD, 4, SchemaType::UINT32, false }
     };
 
     const std::vector<std::string> TableNames::Secondary::KEY = {
         "table_id",
         "xid",
         "lsn"
-        // constant::INDEX_EID_FIELD,
-        // constant::INDEX_RID_FIELD
     };
 
     // TableRoots

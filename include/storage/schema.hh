@@ -46,7 +46,7 @@ namespace springtail {
 
         SchemaColumn(uint64_t xid,
                      uint64_t lsn,
-                     const std::string &name,
+                     const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
                      bool exists,
@@ -64,7 +64,7 @@ namespace springtail {
               default_value(default_value)
         { }
 
-        SchemaColumn(const std::string &name,
+        SchemaColumn(const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
                      bool nullable,
