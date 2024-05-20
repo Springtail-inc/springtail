@@ -56,9 +56,6 @@ namespace springtail {
             target_xid = access_xid;
         }
 
-        // XXX I don't think we need this anymore?
-        // boost::unique_lock lock(_mutex);
-
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
             return _page_cache->get_empty(file, target_xid);
@@ -155,7 +152,7 @@ namespace springtail {
         SPDLOG_DEBUG("{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
-        _make_space(1);
+        _make_page_space(1);
         return std::make_shared<Page>(file, xid);
     }
 
@@ -262,7 +259,7 @@ namespace springtail {
         SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // make space for the page; evict if we need to make space
-        _make_space(1);
+        _make_page_space(1);
 
         // create the page object with the given <file, extent_id> valid at the requested XID
         auto page = std::make_shared<Page>(file, extent_id, xid, xid, offsets);
@@ -312,7 +309,7 @@ namespace springtail {
     }
 
     void
-    StorageCache::PageCache::_make_space(uint32_t space_needed)
+    StorageCache::PageCache::_make_page_space(uint32_t space_needed)
     {
         // if there is space in the cache, utilize it
         while (_size + space_needed > _max_size) {
@@ -906,7 +903,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // make space for the new extent
-        _make_space();
+        _make_extent_space();
 
         // create an empty extent
         auto extent = std::make_shared<CacheExtent>(header, file);
@@ -954,7 +951,7 @@ namespace springtail {
         }
 
         // make space in the cache for a new dirty extent owned by a page
-        _make_space();
+        _make_extent_space();
 
         // there are other users, so we need to return a copy of this extent
         auto new_extent = std::make_shared<CacheExtent>(*extent);
@@ -1032,9 +1029,8 @@ namespace springtail {
         assert(extent->_state == CacheExtent::State::DIRTY);
 
         // make space for two new extents
-        // XXX rename these to _make_extent_space()?
-        _make_space();
-        _make_space();
+        _make_extent_space();
+        _make_extent_space();
 
         // XXX this is extremely inefficient right now... results in two data copies
         // split the provided extent in two
@@ -1150,7 +1146,7 @@ namespace springtail {
     }
 
     void
-    StorageCache::DataCache::_make_space()
+    StorageCache::DataCache::_make_extent_space()
     {
         // check if there is space in the cache
         if (_size < _max_size) {
@@ -1231,7 +1227,7 @@ namespace springtail {
         _io_map[key] = cv;
 
         // make space for a new extent in the cache
-        _make_space();
+        _make_extent_space();
 
         // unlock before IO
         boost::unique_lock lock(_mutex, boost::adopt_lock);
