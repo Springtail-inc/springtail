@@ -76,7 +76,7 @@ namespace springtail
             _connection.start_transaction();
         } catch (PgQueryError &e) {
             _connection.disconnect();
-            std::cerr << "Error starting transaction failed\n";
+            SPDLOG_ERROR("Error starting transaction failed");
             throw e;
         }
     }
@@ -104,7 +104,7 @@ namespace springtail
         _connection.exec(XID_QUERY);
         if (_connection.ntuples() == 0) {
             _connection.clear();
-            std::cerr << "Unexpected results from query: " << XID_QUERY << std::endl;
+            SPDLOG_ERROR("Unexpected results from query: {}", XID_QUERY);
             throw PgQueryError();
         }
 
@@ -122,7 +122,7 @@ namespace springtail
         _connection.exec(fmt::format(TABLE_OID_QUERY, _table_name, _schema_name));
         if (_connection.ntuples() == 0) {
             _connection.clear();
-            std::cerr << "Unexpected results from query: " << TABLE_OID_QUERY << std::endl;
+            SPDLOG_ERROR("Unexpected results from query: {}", TABLE_OID_QUERY);
             throw PgQueryError();
         }
 
@@ -148,15 +148,14 @@ namespace springtail
                                      schema_name.get(), table_name.get()));
 
         if (_connection.ntuples() == 0) {
-            std::cerr << fmt::format("Table not found: {}.{}\n", _schema_name, _table_name);
+            SPDLOG_ERROR("Table not found: {}.{}", _schema_name, _table_name);
             _connection.clear();
             throw PgQueryError();
         }
 
         if (_connection.nfields() != 6) {
-            std::cerr << "Error: unexpected data from schema query or table not found\n";
-            std::cerr << "fields: " << _connection.nfields() << ", tuples: "
-                      << _connection.ntuples() << std::endl;
+            SPDLOG_ERROR("Error: unexpected data from schema query or table not found");
+            SPDLOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
             throw PgQueryError();
         }
@@ -192,9 +191,10 @@ namespace springtail
                 // is primary key
                 column.is_pkey = _connection.get_boolean(i, 5);
 
-                std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={} pkey={}\n",
-                                         column.name, column.type, column.position, column.is_nullable,
-                                         column.default_value.value_or("NULL"), column.is_pkey);
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL,
+                                    "Column: {} type={} position={} nullable={} default_value={} pkey={}",
+                                    column.name, column.type, column.position, column.is_nullable,
+                                    column.default_value.value_or("NULL"), column.is_pkey);
 
                 _schema.columns[i] = column;
             }
@@ -350,7 +350,7 @@ namespace springtail
         sendint32(val, buffer);
         int r = std::fwrite(buffer, 1, 4, _file);
         if (r != 4) {
-            std::cerr << "write_int32: wrote too few bytes\n";
+            SPDLOG_ERROR("write_int32: wrote too few bytes");
             throw PgIOError();
         }
     }
@@ -395,7 +395,7 @@ namespace springtail
 
         int r = std::fwrite(str, 1, len, _file);
         if (r != len) {
-            std::cerr << fmt::format("write_string: wrote {} bytes instead of {} bytes\n", r, len);
+            SPDLOG_ERROR("write_string: wrote {} bytes instead of {} bytes", r, len);
             throw PgIOError();
         }
     }
@@ -409,7 +409,7 @@ namespace springtail
     void PgCopyTable::write_bool(const bool val) {
         int r = std::putc((val ? 1: 0), _file);
         if (r == EOF) {
-            std::cerr << "Error writing bool, got EOF\n";
+            SPDLOG_ERROR("Error writing bool, got EOF");
             throw PgIOError();
         }
     }
@@ -461,7 +461,7 @@ namespace springtail
     {
         int32_t r = read_int32();
         if (r != HEADER_MAGIC) {
-            std::cerr << "ReadSchema failed, header magic not matching\n";
+            SPDLOG_ERROR("ReadSchema failed, header magic not matching");
             throw PgIOError();
         }
 
@@ -474,9 +474,8 @@ namespace springtail
         int cols = read_int32(); // columns
         _schema.columns.resize(cols);
 
-        std::cout << fmt::format("Schema: {}.{}.{}\nXids: {}\n",
-                                 _schema.db_name, _schema.schema_name, _schema.table_name,
-                                 _schema.xids);
+        std::cout << fmt::format("Schema: {}.{}.{}; Xids: {}\n",
+                                 _schema.db_name, _schema.schema_name, _schema.table_name, _schema.xids);
 
         for (int i = 0; i < cols; i++) {
             _schema.columns[i].position = read_int32();
@@ -504,20 +503,20 @@ namespace springtail
         _connection.exec(fmt::format(COPY_QUERY, schema_name.get(), table_name.get()));
 
         if (_connection.status() != PGRES_COPY_OUT) {
-            std::cerr << "Copy command did not receive PGRES_COPY_OUT\n";
+            SPDLOG_ERROR("Copy command did not receive PGRES_COPY_OUT");
             _connection.clear();
             throw PgQueryError();
         }
 
         // some sanity checks
         if (_connection.binary_tuples() != 1) {
-            std::cerr << "Copy command not outputting binary\n";
+            SPDLOG_ERROR("Copy command not outputting binary");
             _connection.clear();
             throw PgQueryError();
         }
 
         if (_connection.nfields() != _schema.columns.size()) {
-            std::cerr << "Mismatch in copy fields\n";
+            SPDLOG_ERROR("Mismatch in copy fields");
             _connection.clear();
             throw PgQueryError();
         }
@@ -535,7 +534,8 @@ namespace springtail
             if (r == -1) {
                 // end of copy, get final result
                 if (_connection.status() != PGRES_COMMAND_OK) {
-                    std::cerr << "Finished copy, got not-ok status: " << _connection.status() << std::endl;
+                    SPDLOG_ERROR("Finished copy, got not-ok status: {}",
+                                 static_cast<int>(_connection.status()));
                     _connection.clear();
                     throw PgQueryError();
                 }
@@ -544,7 +544,7 @@ namespace springtail
                 return std::nullopt; // no return value means we are at the end of the COPY
             } else if (r == -2) {
                 // an error occured
-                std::cerr << "Copy command error: " << _connection.error_message() << std::endl;
+                SPDLOG_ERROR("Copy command error: {}", _connection.error_message());
                 throw PgQueryError();
             } else if (r == 0 || buffer == nullptr) {
                 continue;
@@ -579,9 +579,9 @@ namespace springtail
 
             // got a non-zero result, r indicates number of bytes
             // (shouldn't be null but check anyway)
-            std::cout << fmt::format("Copy got: {} bytes\n", data->size());
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Copy got: {} bytes", data->size());
             if (std::fwrite(data->data(), 1, data->size(), _file) < data->size()) {
-                std::cerr << "Error writing copy data\n";
+                SPDLOG_ERROR("Error writing copy data");
                 release_data();
                 throw PgIOError();
             }
@@ -743,7 +743,7 @@ namespace springtail
      */
     void PgCopyTable::decode_file(const std::filesystem::path &filename)
     {
-        std::cout << "Opening file: " << filename << std::endl;
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Opening file: {}", filename);
         _file = std::fopen(filename.c_str(), "rb");
 
         read_schema();
@@ -767,7 +767,7 @@ namespace springtail
          */
         int r = std::fread(header.data(), 1, 19, _file);
         if (r != 19) {
-            std::cerr << "Couldn't read signature\n";
+            SPDLOG_ERROR("Couldn't read signature");
             throw PgIOError();
         }
 
@@ -789,12 +789,12 @@ namespace springtail
         // verify signature
         int r = std::memcmp(header.data(), COPY_SIGNATURE, 11);
         if (r != 0) {
-            std::cerr << "Signature doesn't match\n";
+            SPDLOG_ERROR("Signature doesn't match");
             throw PgUnknownMessageError();
         }
 
         int32_t flags = recvint32(header.data() + 11);
-        std::cout << fmt::format("header flags: 0x{:X}\n", flags);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "header flags: 0x{:X}", flags);
         if ((flags >> 16) & 0x1) {
             // bit 16 tells us if oids are present
             _oid_flag = true;
@@ -817,93 +817,92 @@ namespace springtail
                 // this is the footer
                 break;
             }
-            std::cout << "columns: " << num_columns << std::endl;
+            std::cout << fmt::format("columns: {}\n", num_columns);
 
             if (_oid_flag) {
                 int32_t oid = read_int32();
-                std::cout << "oid: " << oid << std::endl;
+                std::cout << fmt::format("oid: {}\n", oid);
             }
 
             // iterate through columns
             for (int i = 0; i < num_columns; i++) {
                 int32_t length = read_int32();
 
-                std::cout << fmt::format(" - column {} type={}, length={}, data=",
-                                         _schema.columns[i].name,
-                                         _schema.columns[i].type, length);
+                std::cout << fmt::format("column {} type={}, length={}",
+                                         _schema.columns[i].name, _schema.columns[i].type, length);
 
                 std::string type = _schema.columns[i].type;
 
                 // NOTE: a length of -1 indicates a NULL value
                 if (length == -1) {
-                    std::cout << "NULL\n";
+                    std::cout << "data=NULL\n";
                 }
 
                 // a length of 0 indicates empty string
                 if (length == 0 && (type == "text" || type == "varchar")) {
-                    std::cout << "\n"; // empty string
+                    std::cout << "data=\n";
                 }
 
                 if (length > 0) {
                     if (type == "int4" || type == "int" || type == "serial4" || type == "serial") {
                         assert(length == 4);
-                        std::cout << read_int32() << std::endl;
+                        std::cout << fmt::format("data={}", read_int32());
                     }
                     else if (type == "text" || type == "varchar") {
-                        std::cout << read_string(length) << std::endl;
+                        std::cout << fmt::format("data={}", read_string(length));
                     }
                     else if (type == "int8" || type == "serial8") {
                         assert(length == 8);
-                        std::cout << read_int64() << std::endl;
+                        std::cout << fmt::format("data={}", read_int64());
                     }
                     else if (type == "bool") {
                         assert(length == 1);
-                        std::cout << read_bool() << std::endl;
+                        std::cout << fmt::format("data={}", read_bool());
                     }
                     else if (type == "bpchar") {
                         // fixed length blank padded char
                         if (length == 1) {
                             char c = read_char();
-                            std::cout << c << std::endl;
+                            std::cout << fmt::format("data={}", c);
                         } else {
                             std::fseek(_file, length, SEEK_CUR);
                         }
                     }
                     else if (type == "int2" || type == "serial2") {
                         assert(length == 2);
-                        std::cout << read_int16() << std::endl;
+                        std::cout << fmt::format("data={}", read_int16());
                     }
                     else if (type == "float4") {
                         assert(length == 4);
                         int32_t num = read_int32();
                         float f = *reinterpret_cast<float *>(&num);
-                        std::cout << f << std::endl;
+                        std::cout << fmt::format("data={}", f);
                     }
                     else if (type == "float8") {
                         assert(length == 8);
                         int64_t num = read_int64();
                         double d = *reinterpret_cast<double *>(&num);
-                        std::cout << d << std::endl;
+                        std::cout << fmt::format("data={}", d);
                     }
                     else if (type == "timestamp" || type == "timestamptz") {
                         // micro seconds since 2000-01-01 00:00:00
                         assert(length == 8);
                         uint64_t ts = read_int64();
                         uint64_t epoch_ms = ts/1000 + MSEC_SINCE_Y2K;
-                        std::cout << ts << " : " << epoch_ms << std::endl;
+                        std::cout << fmt::format("data={}:{}", ts, epoch_ms);
                     }
                     else if (type == "time") {
                         // micro seconds since day start
                         assert(length == 8);
                         uint64_t ts = read_int64();
-                        std::cout << ts << " : " << (ts/1000/1000/60/60) << " hrs\n";
+                        std::cout << fmt::format("data={} : {} hrs", ts, (ts/1000/1000/60/60));
                     }
                     else if (type == "date") {
                         // days since 2000-01-01 00:00:00
                         assert(length == 4);
                         uint32_t dt = read_int32();
                         uint64_t epoch_ms = dt * 24 * 60 * 60 * 1000L + MSEC_SINCE_Y2K;
-                        std::cout << dt << " : " << epoch_ms << std::endl;
+                        std::cout << fmt::format("data={} : {}", dt, epoch_ms);
                     }
                     else if (type == "_bpchar") {
                         // array of blank padded chars
