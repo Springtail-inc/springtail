@@ -42,9 +42,9 @@ namespace springtail {
         // for each column, try to find a valid SchemaColumn for the provided xid
         for (const auto &pair : _column_map) {
             // find the schema column definition for this XID
-            auto &&i = pair.second.upper_bound(xid);
+            auto &&i = pair.second.lower_bound(xid);
 
-            // if there's no entry for this column with a starting XID < xid, go to the next column
+            // if there's no entry for this column with a starting XID <= xid, go to the next column
             if (i == pair.second.end()) {
                 continue;
             }

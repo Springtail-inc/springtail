@@ -52,8 +52,6 @@ namespace springtail {
             }
         }
 
-        _handle = IOMgr::get_instance()->open(table_dir / constant::DATA_FILE, IOMgr::IO_MODE::READ, true);
-
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, false);
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
@@ -119,7 +117,7 @@ namespace springtail {
     Table::lower_bound(TuplePtr search_key)
     {
         // find the extent that could contain the lower_bound() key
-        auto &&i = _primary_index->lower_bound(search_key, _xid);
+        auto &&i = _primary_index->lower_bound(search_key);
         if (i == _primary_index->end()) {
             return end();
         }
@@ -129,6 +127,9 @@ namespace springtail {
 
         // find the lower_bound() of the key within the data extent
         auto &&j = page->lower_bound(search_key, _schema);
+
+        // note: the primary index indicates that there is a value >= the search_key in this page
+        assert(j != page->end());
 
         return Iterator(this, _primary_index, i, page, j);
     }
