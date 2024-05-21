@@ -5,6 +5,8 @@
 #include <map>
 #include <vector>
 
+#include <boost/thread.hpp>
+
 namespace springtail::gc {
     /**
      * Tracks the actions of GC-1 and GC-2 to coordinate the rollforward and to allow query nodes to
@@ -57,6 +59,9 @@ namespace springtail::gc {
             uint64_t xid; ///< The XID at which a mutation occurred.
             std::vector<uint64_t> eids; ///< The new EID(s) that were generated in the XID.
         };
+
+        // note: always lock lookup before forward, before reverse to avoid deadlock
+        boost::mutex _lookup_mutex, _forward_mutex, _reverse_mutex;
 
         /** Map from referenced EID -> latest XID. */
         std::map<uint64_t, uint64_t> _lookup_map;

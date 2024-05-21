@@ -10,6 +10,10 @@ namespace springtail::gc {
     {
         std::vector<uint64_t> reverse_eids;
 
+        // note: always lock forward before reverse to avoid deadlock
+        boost::unique_lock flock(_forward_mutex);
+        boost::unique_lock rlock(_reverse_mutex);
+
         // record the mapping from old_eid -> new_eids at target_xid
         _forward_map[old_eid].push_back({ target_xid, new_eids });
 
@@ -35,6 +39,8 @@ namespace springtail::gc {
     ExtentMapper::set_lookup(uint64_t target_xid,
                              uint64_t extent_id)
     {
+        boost::unique_lock lock(_lookup_mutex);
+
         // save the most recent XID that this extent ID was referenced at within the write cache
         _lookup_map[extent_id] = target_xid;
 
@@ -46,6 +52,8 @@ namespace springtail::gc {
     ExtentMapper::forward_map(uint64_t target_xid,
                               uint64_t old_eid)
     {
+        boost::unique_lock flock(_forward_mutex);
+
         // find the extent ID to see if there are changes to it prior to the target XID
         auto it = _forward_map.find(old_eid);
         if (it == _forward_map.end()) {
@@ -68,6 +76,8 @@ namespace springtail::gc {
                               uint64_t target_xid,
                               uint64_t extent_id)
     {
+        boost::unique_lock rlock(_reverse_mutex);
+
         // find earlier versions of this extent
         auto it = _reverse_map.find(extent_id);
         if (it == _reverse_map.end()) {
@@ -82,6 +92,11 @@ namespace springtail::gc {
     void
     ExtentMapper::expire(uint64_t commit_xid)
     {
+        // note: always lock lookup before forward, before reverse to avoid deadlock
+        boost::unique_lock lock(_lookup_mutex);
+        boost::unique_lock flock(_forward_mutex);
+        boost::unique_lock rlock(_reverse_mutex);
+
         // remove any metadata prior to the provided commit XID
         auto it = _xid_map.begin();
         while (it != _xid_map.end()) {
