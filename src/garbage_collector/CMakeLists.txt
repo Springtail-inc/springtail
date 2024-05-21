@@ -1,5 +1,5 @@
 # source files
-set(GC_SOURCES gc_log_parser.cc)
+set(GC_SOURCES gc_log_parser.cc gc_extent_mapper.cc)
 
 add_library(springtail_gc ${GC_SOURCES})
 target_include_directories(springtail_gc PRIVATE ${CMAKE_SOURCE_DIR}/include)
