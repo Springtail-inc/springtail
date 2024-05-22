@@ -7,7 +7,7 @@ namespace springtail {
     class TypeError : public Error {
     public:
         TypeError() { }
-        TypeError(const std::string &error)
+        explicit TypeError(const std::string &error)
             : Error(error)
         { }
     };
@@ -16,7 +16,7 @@ namespace springtail {
     class SchemaError : public Error {
     public:
         SchemaError() { }
-        SchemaError(const std::string &error)
+        explicit SchemaError(const std::string &error)
             : Error(error)
         { }
     };
@@ -25,7 +25,7 @@ namespace springtail {
     class StorageError : public Error {
     public:
         StorageError() { }
-        StorageError(const std::string &error)
+        explicit StorageError(const std::string &error)
             : Error(error)
         { }
     };
@@ -34,7 +34,7 @@ namespace springtail {
     class ValidationError : public Error {
     public:
         ValidationError() { }
-        ValidationError(const std::string &error)
+        explicit ValidationError(const std::string &error)
             : Error(error)
         { }
     };

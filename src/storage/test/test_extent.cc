@@ -81,7 +81,7 @@ namespace {
         _create_and_populate()
         {
             // create an extent
-            ExtentPtr extent = std::make_shared<Extent>(_schema, ExtentType{false}, 0);
+            ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
 
             // fill it with data
             _populate(extent->append(),
@@ -97,7 +97,7 @@ namespace {
 
     TEST_F(Extent_Test, StartsEmpty) {
         // create an extent
-        ExtentPtr extent = std::make_shared<Extent>(_schema, ExtentType{false}, 0);
+        ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
 
         // make sure it starts empty
         ASSERT_TRUE(extent->empty());
@@ -116,7 +116,7 @@ namespace {
         std::string temp = extent->serialize();
         
         // create an empty extent
-        ExtentPtr new_extent = std::make_shared<Extent>(_schema, ExtentType{false}, 0);
+        ExtentPtr new_extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
         new_extent->deserialize(temp);
 
         // make sure that the data matches exepctations
@@ -155,11 +155,11 @@ namespace {
         EXPECT_EQ(i, extent->end()); // make sure we made it to the end()
 
         // check that the data of the second entry matches
-        Extent::Row second_row = extent->at(1);
-        EXPECT_EQ(variable_f->get_text(second_row).compare("duplicate"), 0);
-        EXPECT_EQ(fixed_f->get_uint64(second_row), 15);
-        EXPECT_FALSE(bit_f->get_bool(second_row));
-        EXPECT_TRUE(nullable_f->is_null(second_row));
+        auto second_row = extent->at(1);
+        EXPECT_EQ(variable_f->get_text(*second_row).compare("duplicate"), 0);
+        EXPECT_EQ(fixed_f->get_uint64(*second_row), 15);
+        EXPECT_FALSE(bit_f->get_bool(*second_row));
+        EXPECT_TRUE(nullable_f->is_null(*second_row));
 
         // check the data of the last entry matches
         Extent::Row back_row = extent->back();
@@ -186,7 +186,7 @@ namespace {
         auto read_resp = handle->read(write_resp->offset);
 
         // read the data back
-        ExtentPtr disk_extent = std::make_shared<Extent>(_schema, read_resp->data);
+        ExtentPtr disk_extent = std::make_shared<Extent>(read_resp->data);
 
         // verify the data against the data we wrote
         ASSERT_EQ(extent->row_count(), disk_extent->row_count());
@@ -251,7 +251,7 @@ namespace {
         ExtentPtr extent = _create_and_populate();
 
         // split it
-        auto pair = extent->split();
+        auto pair = extent->split(_schema);
 
         // verify it against the two extents
         ASSERT_EQ(extent->row_count(),

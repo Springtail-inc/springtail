@@ -62,6 +62,7 @@ add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
+  set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
 endif()

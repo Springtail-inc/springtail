@@ -6,6 +6,8 @@
 
 #include <pg_repl/libpq_connection.hh>
 
+#include <storage/field.hh>
+
 namespace springtail
 {
 
@@ -82,8 +84,20 @@ namespace springtail
         void write_schema();
         void copy_data();
 
+        // functions used to implement copy_data()
+        void prepare_copy();
+        std::optional<std::string_view> get_next_data();
+        void release_data();
+
+        // functions used to implement copy_to_springtail()
+        std::vector<PgMsgSchemaColumn> _map_to_pg_msg(const std::vector<PgColumn> pg_columns,
+                                                      const std::vector<std::string> pkeys);
+        int _get_vec_pos(const std::vector<std::string> vec, const std::string element);
+        FieldArrayPtr parse_row(const std::string_view &row, size_t &pos);
+
         // read in schema, copy header, copy data
-        void verify_copy_header();
+        int32_t verify_copy_header(const std::string_view &header);
+        void read_header();
         void read_schema();
         void read_copy_data();
 
@@ -145,13 +159,19 @@ namespace springtail
          *
          * @param filename name of file to write data to
          */
-        void copy_to_file();
+        void copy_to_file(const std::filesystem::path &filename);
+
+        /**
+         * @brief Copy remote table data into Springtail starting at a given internal XID
+         * @param xid The XID at which the table is to become available.
+         */
+        int32_t copy_to_springtail(const std::filesystem::path &base_dir, uint64_t xid);
 
         /**
          * @brief Decode data written to file by copyToFile()
          *
          * @param filename name of file to read data from
          */
-        void decode_file();
+        void decode_file(const std::filesystem::path &filename);
     };
 }

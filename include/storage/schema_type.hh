@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 
 namespace springtail {
 
@@ -24,5 +25,4 @@ namespace springtail {
         DATE,
         TIMESTAMP
     };
-
 }

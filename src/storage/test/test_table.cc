@@ -22,18 +22,20 @@ namespace {
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
                     { "table_id", 0, SchemaType::UINT64, false },
-                    { "name", 1, SchemaType::TEXT, false },
+                    { "name", 1, SchemaType::TEXT, false, 0 },
                     { "offset", 2, SchemaType::UINT64, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 
-            _read_cache = std::make_shared<LruObjectCache<std::pair<std::filesystem::path, uint64_t>, Extent>>(1024*1024);
-            _write_cache = MutableBTree::create_cache(2*1024*1024);
+            _fields = _schema->get_fields();
+            _csv_fields = std::make_shared<FieldArray>();
+            for (int i = 0; i < _fields->size(); i++) {
+                auto &&field = _fields->at(i);
+                _csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
+            }
 
             _primary_keys = std::vector<std::string>({"name"});
             _secondary_keys = { std::vector<std::string>({"table_id"}) };
-
-            _data_cache = std::make_shared<DataCache>(true);
 
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
@@ -51,14 +53,37 @@ namespace {
         }
 
         ExtentSchemaPtr _schema;
-        std::shared_ptr<ExtentCache> _read_cache;
-        MutableBTree::PageCachePtr _write_cache;
+        FieldArrayPtr _fields, _csv_fields;
+
         std::vector<std::string> _primary_keys;
         std::vector<std::vector<std::string>> _secondary_keys;
 
-        DataCachePtr _data_cache;
-
         std::filesystem::path _base_dir;
+
+        TablePtr
+        _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        {
+            return std::make_shared<Table>(table_id,
+                                           xid,
+                                           _base_dir / fmt::format("{}", table_id),
+                                           _primary_keys,
+                                           _secondary_keys,
+                                           roots,
+                                           _schema);
+        }
+
+        MutableTablePtr
+        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        {
+            return std::make_shared<MutableTable>(table_id,
+                                                  xid - 1,
+                                                  xid,
+                                                  roots,
+                                                  _base_dir / fmt::format("{}", table_id),
+                                                  _primary_keys,
+                                                  _secondary_keys,
+                                                  _schema);
+        }
 
         std::shared_ptr<Tuple>
         _create_key(const std::string &name)
@@ -78,6 +103,15 @@ namespace {
             return std::make_shared<ValueTuple>(v);
         };
 
+        void
+        _populate_table(MutableTablePtr mtable, uint64_t xid)
+        {
+            csv::CSVReader reader("test_btree_simple.csv");
+            for (auto &&r : reader) {
+                // insert data to the tree
+                mtable->insert(std::make_shared<FieldTuple>(_csv_fields, r), xid, constant::UNKNOWN_EXTENT);
+            }
+        }
 
         /**
          * Request for multi-threading tests.
@@ -117,30 +151,15 @@ namespace {
     TEST_F(Table_Test, CreateEmpty) {
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = std::make_shared<MutableTable>(1000,
-                                                     1,
-                                                     roots,
-                                                     _base_dir / "1000",
-                                                     _primary_keys,
-                                                     _secondary_keys,
-                                                     _schema,
-                                                     _data_cache,
-                                                     _write_cache,
-                                                     _read_cache);
+        auto mtable = _create_mtable(1000, 1, roots);
 
         // finalize the empty table
         roots = mtable->finalize();
 
         // create an access table
-        auto table = std::make_shared<Table>(1000,
-                                             1,
-                                             _base_dir / "1000",
-                                             _primary_keys,
-                                             _secondary_keys,
-                                             roots,
-                                             _schema,
-                                             _read_cache);
+        auto table = _create_table(1000, 1, roots);
 
+        // get a key that doesn't exist since the table is empty
         auto key = _create_key("aaaa");
 
         // ensure that it appears empty and everything works as expected (find, lower_bound, etc)
@@ -148,51 +167,22 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->secondary(0)->begin(1) == table->secondary(0)->end());
+        ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
     }
 
     TEST_F(Table_Test, Inserts) {
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = std::make_shared<MutableTable>(1001,
-                                                     1,
-                                                     roots,
-                                                     _base_dir / "1001",
-                                                     _primary_keys,
-                                                     _secondary_keys,
-                                                     _schema,
-                                                     _data_cache,
-                                                     _write_cache,
-                                                     _read_cache);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto mtable = _create_mtable(1001, 1, roots);
 
         // insert a number of rows
-        csv::CSVReader reader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            // insert data to the tree
-            mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), 1, constant::UNKNOWN_EXTENT);
-        }
+        _populate_table(mtable, 1);
 
         // finalize the table
         roots = mtable->finalize();
 
         // create an access table
-        auto table = std::make_shared<Table>(1001,
-                                             1,
-                                             _base_dir / "1001",
-                                             _primary_keys,
-                                             _secondary_keys,
-                                             roots,
-                                             _schema,
-                                             _read_cache);
+        auto table = _create_table(1001, 1, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -200,10 +190,10 @@ namespace {
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
 
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
             ++count;
         }
         ASSERT_EQ(count, 5000);
@@ -214,32 +204,10 @@ namespace {
     TEST_F(Table_Test, SingleXactMutations) {
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = std::make_shared<MutableTable>(1002,
-                                                     1,
-                                                     roots,
-                                                     _base_dir / "1002",
-                                                     _primary_keys,
-                                                     _secondary_keys,
-                                                     _schema,
-                                                     _data_cache,
-                                                     _write_cache,
-                                                     _read_cache);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto mtable = _create_mtable(1002, 1, roots);
 
         // insert a number of rows
-        csv::CSVReader reader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            // insert data to the tree
-            mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), 1, constant::UNKNOWN_EXTENT);
-        }
+        _populate_table(mtable, 1);
 
         // remove rows with unknown positions
         // note: rows with table_id == 1
@@ -295,14 +263,7 @@ namespace {
         roots = mtable->finalize();
 
         // create an access table
-        auto table = std::make_shared<Table>(1002,
-                                             1,
-                                             _base_dir / "1002",
-                                             _primary_keys,
-                                             _secondary_keys,
-                                             roots,
-                                             _schema,
-                                             _read_cache);
+        auto table = _create_table(1002, 1, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -310,35 +271,35 @@ namespace {
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
             }
             if (table_id == 3) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 103); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 103); // upsert updates
             }
 
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
             ++count;
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
         // verify the secondary index
-        auto secondary = table->secondary(0);
+        auto secondary = table->index(1);
 
         count = 0;
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
-        for (auto row_i = secondary->begin(1); row_i != secondary->end(); ++row_i) {
-            auto current = table_id_f->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -351,60 +312,21 @@ namespace {
 
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = std::make_shared<MutableTable>(1003,
-                                                     target_xid,
-                                                     roots,
-                                                     _base_dir / "1003",
-                                                     _primary_keys,
-                                                     _secondary_keys,
-                                                     _schema,
-                                                     _data_cache,
-                                                     _write_cache,
-                                                     _read_cache);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto mtable = _create_mtable(1003, target_xid, roots);
 
         // insert a number of rows
-        csv::CSVReader reader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            // insert data to the tree
-            mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), 1, constant::UNKNOWN_EXTENT);
-        }
+        _populate_table(mtable, 1);
 
         // finalize the table
         roots = mtable->finalize();
         access_xid = target_xid;
 
         // create an access table for lookup
-        auto table = std::make_shared<Table>(1003,
-                                             access_xid,
-                                             _base_dir / "1003",
-                                             _primary_keys,
-                                             _secondary_keys,
-                                             roots,
-                                             _schema,
-                                             _read_cache);
-
+        auto table = _create_table(1003, access_xid, roots);
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = std::make_shared<MutableTable>(1003,
-                                                target_xid,
-                                                roots,
-                                                _base_dir / "1003",
-                                                _primary_keys,
-                                                _secondary_keys,
-                                                _schema,
-                                                _data_cache,
-                                                _write_cache,
-                                                _read_cache);
+        mtable = _create_mtable(1003, target_xid, roots);
 
         // remove rows with unknown positions
         // note: rows with table_id == 1
@@ -439,26 +361,19 @@ namespace {
         access_xid = target_xid;
 
         // create an access table
-        table = std::make_shared<Table>(1003,
-                                        access_xid,
-                                        _base_dir / "1003",
-                                        _primary_keys,
-                                        _secondary_keys,
-                                        roots,
-                                        _schema,
-                                        _read_cache);
+        table = _create_table(1003, access_xid, roots);
 
         // verify the data at this point
         int count = 0;
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
 
@@ -467,13 +382,13 @@ namespace {
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
         // verify the secondary index
-        auto secondary = table->secondary(0);
+        auto secondary = table->index(1);
 
         count = 0;
         uint64_t table_id = 0;
         auto table_id_f = secondary->get_schema()->get_field("table_id");
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = table_id_f->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -482,17 +397,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = std::make_shared<MutableTable>(1003,
-                                                target_xid,
-                                                roots,
-                                                _base_dir / "1003",
-                                                _primary_keys,
-                                                _secondary_keys,
-                                                _schema,
-                                                _data_cache,
-                                                _write_cache,
-                                                _read_cache);
-
+        mtable = _create_mtable(1003, target_xid, roots);
 
         // update some row data with unknown positions
         // note: rows with table_id = 6
@@ -534,33 +439,26 @@ namespace {
         access_xid = target_xid;
 
         // create an access table
-        table = std::make_shared<Table>(1003,
-                                        access_xid,
-                                        _base_dir / "1003",
-                                        _primary_keys,
-                                        _secondary_keys,
-                                        roots,
-                                        _schema,
-                                        _read_cache);
+        table = _create_table(1003, access_xid, roots);
 
         // verify the data at this point
         count = 0;
         prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
             }
 
             ++count;
@@ -568,12 +466,12 @@ namespace {
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -582,16 +480,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = std::make_shared<MutableTable>(1003,
-                                                target_xid,
-                                                roots,
-                                                _base_dir / "1003",
-                                                _primary_keys,
-                                                _secondary_keys,
-                                                _schema,
-                                                _data_cache,
-                                                _write_cache,
-                                                _read_cache);
+        mtable = _create_mtable(1003, target_xid, roots);
 
         // upsert some missing rows with unknown positions
         // note: original rows with table_id = 1
@@ -633,38 +522,31 @@ namespace {
         access_xid = target_xid;
 
         // create an access table
-        table = std::make_shared<Table>(1003,
-                                        access_xid,
-                                        _base_dir / "1003",
-                                        _primary_keys,
-                                        _secondary_keys,
-                                        roots,
-                                        _schema,
-                                        _read_cache);
+        table = _create_table(1003, access_xid, roots);
 
         count = 0;
         prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
             }
             if (table_id == 1501) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 2); // known upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 2); // known upsert inserts
             }
 
             ++count;
@@ -672,12 +554,12 @@ namespace {
         ASSERT_EQ(count, 5000); // removed 10, upserted 10
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -686,16 +568,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = std::make_shared<MutableTable>(1003,
-                                                target_xid,
-                                                roots,
-                                                _base_dir / "1003",
-                                                _primary_keys,
-                                                _secondary_keys,
-                                                _schema,
-                                                _data_cache,
-                                                _write_cache,
-                                                _read_cache);
+        mtable = _create_mtable(1003, target_xid, roots);
 
         // upsert some existing rows with unknown positions
         // note: rows with table_id = 3
@@ -737,14 +610,7 @@ namespace {
         access_xid = target_xid;
 
         // create an access table
-        table = std::make_shared<Table>(1003,
-                                        access_xid,
-                                        _base_dir / "1003",
-                                        _primary_keys,
-                                        _secondary_keys,
-                                        roots,
-                                        _schema,
-                                        _read_cache);
+        table = _create_table(1003, access_xid, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -752,31 +618,31 @@ namespace {
         prev = "";
         for (auto &row : *table) {
             if (prev != "") {
-                ASSERT_GT(fields->at(1)->get_text(row), prev);
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
             }
-            prev = fields->at(1)->get_text(row);
+            prev = _fields->at(1)->get_text(row);
 
             // check that the removes and updates occurred correctly
-            uint64_t table_id = fields->at(0)->get_uint64(row);
+            uint64_t table_id = _fields->at(0)->get_uint64(row);
             ASSERT_NE(table_id, 1); // all table_id == 1 should be removed
             ASSERT_NE(table_id, 2); // all table_id == 2 should be removed
             if (table_id == 6) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 100); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 100); // updates
             }
             if (table_id == 7) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 101); // updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 101); // updates
             }
             if (table_id == 1500) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 1); // upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 1); // upsert inserts
             }
             if (table_id == 1501) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 2); // known upsert inserts
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 2); // known upsert inserts
             }
             if (table_id == 3) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 103); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 103); // upsert updates
             }
             if (table_id == 4) {
-                ASSERT_EQ(fields->at(2)->get_uint64(row), 104); // upsert updates
+                ASSERT_EQ(_fields->at(2)->get_uint64(row), 104); // upsert updates
             }
 
             ++count;
@@ -784,12 +650,12 @@ namespace {
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
         // verify the secondary index
-        secondary = table->secondary(0);
+        secondary = table->index(1);
 
         count = 0;
         table_id = 0;
-        for (auto row_i = secondary->begin(access_xid); row_i != secondary->end(); ++row_i) {
-            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(*row_i);
+        for (auto row : *secondary) {
+            auto current = secondary->get_schema()->get_field("table_id")->get_uint64(row);
             ASSERT_LE(table_id, current);
             table_id = current;
             ++count;
@@ -803,53 +669,24 @@ namespace {
 
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = std::make_shared<MutableTable>(1004,
-                                                     target_xid,
-                                                     roots,
-                                                     _base_dir / "1004",
-                                                     _primary_keys,
-                                                     _secondary_keys,
-                                                     _schema,
-                                                     _data_cache,
-                                                     _write_cache,
-                                                     _read_cache);
-
-        // pull data to insert
-        FieldArrayPtr fields = _schema->get_fields();
-
-        FieldArrayPtr csv_fields = std::make_shared<FieldArray>();
-        for (int i = 0; i < fields->size(); i++) {
-            auto &&field = fields->at(i);
-            csv_fields->push_back(std::make_shared<CSVField>(field->get_type(), i));
-        }
+        auto mtable = _create_mtable(1004, target_xid, roots);
 
         // insert a number of rows
-        csv::CSVReader reader("test_btree_simple.csv");
-        for (auto &&r : reader) {
-            // insert data to the tree
-            mtable->insert(std::make_shared<FieldTuple>(csv_fields, r), target_xid, constant::UNKNOWN_EXTENT);
-        }
+        _populate_table(mtable, target_xid);
 
         // finalize the table
         roots = mtable->finalize();
         uint64_t access_xid = target_xid;
 
         // create an access table and identify extents to be mutated
-        auto table = std::make_shared<Table>(1004,
-                                             access_xid,
-                                             _base_dir / "1004",
-                                             _primary_keys,
-                                             _secondary_keys,
-                                             roots,
-                                             _schema,
-                                             _read_cache);
+        auto table = _create_table(1004, access_xid, roots);
 
         std::map<uint64_t, std::vector<TuplePtr>> tuple_map;
 
         csv::CSVReader reader2("test_btree_simple.csv");
         int count = 0;
         for (auto &&r : reader2) {
-            auto csvtuple = std::make_shared<FieldTuple>(csv_fields, r);
+            auto csvtuple = std::make_shared<FieldTuple>(_csv_fields, r);
             auto search_key = _schema->tuple_subset(csvtuple, _primary_keys);
 
             uint64_t extent_id = table->primary_lookup(search_key);
@@ -863,16 +700,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = std::make_shared<MutableTable>(1004,
-                                                target_xid,
-                                                roots,
-                                                _base_dir / "1004",
-                                                _primary_keys,
-                                                _secondary_keys,
-                                                _schema,
-                                                _data_cache,
-                                                _write_cache,
-                                                _read_cache);
+        mtable = _create_mtable(1004, target_xid, roots);
 
         // mutate the individual extents in separate concurrent threads
         PhasedThreadTest<Request> tester;
@@ -887,28 +715,19 @@ namespace {
             // create an access table
             auto roots = mtable->finalize();
 
-            auto table = std::make_shared<Table>(1004,
-                                                 target_xid,
-                                                 _base_dir / "1004",
-                                                 _primary_keys,
-                                                 _secondary_keys,
-                                                 roots,
-                                                 _schema,
-                                                 _read_cache);
+            auto table = _create_table(1004, target_xid, roots);
 
             // ensure that it has all of the expected rows through both the primary and secondary index
             // and that everything else works as expected (find, lower_bound, etc)
-            FieldArrayPtr fields = _schema->get_fields();
-
             int count = 0;
             std::string prev = "";
             for (auto &row : *table) {
                 if (prev != "") {
-                    ASSERT_GT(fields->at(1)->get_text(row), prev);
+                    ASSERT_GT(_fields->at(1)->get_text(row), prev);
                 }
-                prev = fields->at(1)->get_text(row);
+                prev = _fields->at(1)->get_text(row);
 
-                uint64_t offset = fields->at(2)->get_uint64(row);
+                uint64_t offset = _fields->at(2)->get_uint64(row);
                 ASSERT_EQ(offset, 20000);
 
                 ++count;
@@ -916,13 +735,13 @@ namespace {
             ASSERT_EQ(count, 5000);
 
             // verify the secondary index
-            auto secondary = table->secondary(0);
+            auto secondary = table->index(1);
 
             count = 0;
             uint64_t table_id = 0;
             auto table_id_f = secondary->get_schema()->get_field("table_id");
-            for (auto row_i = secondary->begin(target_xid); row_i != secondary->end(); ++row_i) {
-                auto current = table_id_f->get_uint64(*row_i);
+            for (auto row : *secondary) {
+                auto current = table_id_f->get_uint64(row);
                 ASSERT_LE(table_id, current);
                 table_id = current;
                 ++count;

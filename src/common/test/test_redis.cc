@@ -13,23 +13,24 @@ namespace {
     class Redis_Test : public testing::Test {
     protected:
         void SetUp() override {
+            _has_redis = false;
+
             springtail_init();
 
             // See if redis is enabled
             try {
                 RedisMgr::get_instance()->get_client()->ping();
-                _skip_test = false;
+                _has_redis = true;
+
+                // cleanup in case of previous killed run
+                TearDown();
             } catch (const std::exception &e) {
-                _skip_test = true;
                 GTEST_SKIP() << "Redis is not running, skipping test";
             }
-
-            // cleanup in case of previous killed run
-            TearDown();
         }
 
         void TearDown() override {
-            if (!_skip_test) {
+            if (_has_redis) {
                 RedisMgr::get_instance()->get_client()->del("test_queue");
                 RedisMgr::get_instance()->get_client()->del("test_queue:a");
                 RedisMgr::get_instance()->get_client()->del("test_queue:b");
@@ -39,7 +40,7 @@ namespace {
 
         class QueueEntry {
         public:
-            QueueEntry(const std::string &value) {
+            explicit QueueEntry(const std::string &value) {
                 _value = std::stoull(value);
             }
 
@@ -57,7 +58,7 @@ namespace {
 
         class SetEntry {
         public:
-            SetEntry(const std::string &value) {
+            explicit SetEntry(const std::string &value) {
                 _value = value;
             }
 
@@ -73,7 +74,7 @@ namespace {
             std::string _value;
         };
 
-        bool _skip_test;
+        bool _has_redis;
     };
 
     // tests the basic RedisQueue functionality
