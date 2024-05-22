@@ -443,13 +443,13 @@ namespace springtail
         write_int32(_schema.table_oid);
 
         write_int32(_schema.columns.size());
-        for (std::size_t i = 0; i < _schema.columns.size(); i++) {
-            write_int32(_schema.columns[i].position);
-            write_bool(_schema.columns[i].is_nullable);
-            write_bool(_schema.columns[i].is_pkey);
-            write_string(_schema.columns[i].name);
-            write_string(_schema.columns[i].type);
-            write_string(_schema.columns[i].default_value);
+        for (auto &column : _schema.columns) {
+            write_int32(column.position);
+            write_bool(column.is_nullable);
+            write_bool(column.is_pkey);
+            write_string(column.name);
+            write_string(column.type);
+            write_string(column.default_value);
         }
     }
 
