@@ -12,15 +12,15 @@ function find_compiler() {
 
         for path in $search_paths; do
             if [[ -x "$path/$program_name" ]]; then
-		# get version
+	            # get version
                 program="$path/$program_name"
                 out=$($program --version 2>&1)
 
                 if [[ ! "$out" =~ "Apple clang version" ]]; then
                     out=$($program -dumpversion 2>&1)
 
-		    # Extract the major version using parameter expansion and slicing
-		    major_version=${out%%.*}
+                    # Extract the major version using parameter expansion and slicing
+	                major_version=${out%%.*}
 
                     if [[ "$major_version" -ge 13 ]]; then
                         echo "Found GCC version 13 or higher: $program"
@@ -51,13 +51,13 @@ function find_compiler() {
 DIR=external/vcpkg
 if [ ! -d ${DIR} ]
 then
-    program_names="gcc gcc-13 gcc-14"
+    program_names="gcc  gcc-13"
     if ! find_compiler "$program_names"; then
         echo "No suitable gcc compiler found."
         exit 1
     fi
 
-    program_names="g++ g++-13 g++-14"
+    program_names="g++  g++-13"
     if ! find_compiler "$program_names"; then
         echo "No suitable g++ compiler found."
         exit 1
