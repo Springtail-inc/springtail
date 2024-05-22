@@ -125,7 +125,7 @@ namespace springtail {
 
     protected:
         /** max number of elements in queue */
-        int _limit=-1;
+        std::size_t _limit=-1;
         /** mutex to protect queue */
         std::mutex _mutex;
         /** condition variable for queue to wait on */

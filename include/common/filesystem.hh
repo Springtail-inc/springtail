@@ -9,10 +9,14 @@ namespace springtail {
         /**
          * @brief Find the latest modified file in a directory
          * @param directory directory to search
+         * @param prefix file name prefix (removed to find number)
+         * @param suffix file name suffix (removed to find number)
          * @return std::filesystem::path path to the latest modified file
          */
         static std::filesystem::path
-        find_latest_modified_file(const std::filesystem::path& directory)
+        find_latest_modified_file(const std::filesystem::path& directory,
+                                  const std::string& prefix,
+                                  const std::string& suffix)
         {
             // Initialize variables to store the latest file and its modification time
             std::filesystem::path latest_file;
@@ -31,6 +35,13 @@ namespace springtail {
                 if (latest_file.empty() || current_mtime > latest_mtime) {
                     latest_file = entry;
                     latest_mtime = current_mtime;
+                } else if (current_mtime == latest_mtime) {
+                    int current_id = _extract_id_from_file(entry, prefix, suffix);
+                    int latest_id = _extract_id_from_file(latest_file, prefix, suffix);
+                    if (current_id > latest_id) {
+                        latest_file = entry;
+                        latest_mtime = current_mtime;
+                    }
                 }
             }
 
@@ -41,10 +52,14 @@ namespace springtail {
         /**
          * @brief Find the earliest modified file in a directory
          * @param directory directory to search
+         * @param prefix file name prefix (removed to find number)
+         * @param suffix file name suffix (removed to find number)
          * @return std::filesystem::path path to the earliest modified file
          */
         static std::filesystem::path
-        find_earliest_modified_file(const std::filesystem::path& directory)
+        find_earliest_modified_file(const std::filesystem::path& directory,
+                                    const std::string& prefix,
+                                    const std::string& suffix)
         {
             // Initialize variables to store the earliest file and its modification time
             std::filesystem::path earliest_file;
@@ -63,6 +78,13 @@ namespace springtail {
                 if (earliest_file.empty() || current_mtime < earliest_mtime) {
                     earliest_file = entry;
                     earliest_mtime = current_mtime;
+                } else if (current_mtime == earliest_mtime) {
+                    int current_id = _extract_id_from_file(entry, prefix, suffix);
+                    int earliest_id = _extract_id_from_file(earliest_file, prefix, suffix);
+                    if (current_id < earliest_id) {
+                        earliest_file = entry;
+                        earliest_mtime = current_mtime;
+                    }
                 }
             }
 
@@ -78,7 +100,27 @@ namespace springtail {
          * @return std::filesystem::path new path with incremented number
          */
         static std::filesystem::path
-        get_next_file(const std::filesystem::path& path, const std::string& prefix, const std::string& suffix)
+        get_next_file(const std::filesystem::path& path,
+                      const std::string& prefix,
+                      const std::string& suffix)
+        {
+            int number = _extract_id_from_file(path, prefix, suffix);
+            number++;
+
+            // Add the prefix and suffix back to the file variable
+            std::string file = prefix + std::to_string(number) + suffix;
+
+            // Reconstruct the path with the modified file name
+            std::filesystem::path modified_path = path;
+            modified_path.replace_filename(file);
+
+            return modified_path;
+        }
+    private:
+        static int
+        _extract_id_from_file(const std::filesystem::path& path,
+                              const std::string& prefix,
+                              const std::string& suffix)
         {
             std::string file = path.filename().string();
 
@@ -93,17 +135,7 @@ namespace springtail {
             }
 
             // Convert the remaining part to a number, increment that number, and reconstruct the file name
-            int number = std::stoi(file);
-            number++;
-
-            // Add the prefix and suffix back to the file variable
-            file = prefix + std::to_string(number) + suffix;
-
-            // Reconstruct the path with the modified file name
-            std::filesystem::path modified_path = path;
-            modified_path.replace_filename(file);
-
-            return modified_path;
+            return std::stoi(file);
         }
     };
 } // namespace springtail

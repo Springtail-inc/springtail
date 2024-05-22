@@ -33,12 +33,13 @@ namespace {
     };
 
     TEST_F(TestFS, FindEarliest) {
-        std::filesystem::path p = fs::find_earliest_modified_file("/tmp/test_fs");
+        std::filesystem::path p = fs::find_earliest_modified_file("/tmp/test_fs", "test_", ".log");
+        std::cout << "Earliest:" << p << std::endl;
         ASSERT_EQ(p, "/tmp/test_fs/test_1.log");
     }
 
     TEST_F(TestFS, FindLatest) {
-        std::filesystem::path p2 = fs::find_latest_modified_file("/tmp/test_fs");
+        std::filesystem::path p2 = fs::find_latest_modified_file("/tmp/test_fs", "test_", ".log");
         ASSERT_EQ(p2, "/tmp/test_fs/test_2.log");
     }
 

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <limits>
+#include <cstdint>
 
 namespace springtail::constant {
     /** Used as an extent ID in situations where the extent ID is unknown. */

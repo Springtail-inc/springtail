@@ -328,13 +328,13 @@ namespace springtail
         char *strbuf = new char[len + 1];
         int r = std::fread(strbuf, 1, len, _file);
         if (r != len) {
-            free(strbuf);
+            delete[](strbuf);
             throw PgIOError();
         }
         strbuf[len] = '\0';
 
         std::string str(strbuf);
-        free (strbuf);
+        delete[](strbuf);
 
         return str;
     }
@@ -393,7 +393,7 @@ namespace springtail
             return;
         }
 
-        int r = std::fwrite(str, 1, len, _file);
+        auto r = std::fwrite(str, 1, len, _file);
         if (r != len) {
             SPDLOG_ERROR("write_string: wrote {} bytes instead of {} bytes", r, len);
             throw PgIOError();
@@ -443,13 +443,13 @@ namespace springtail
         write_int32(_schema.table_oid);
 
         write_int32(_schema.columns.size());
-        for (int i = 0; i < _schema.columns.size(); i++) {
-            write_int32(_schema.columns[i].position);
-            write_bool(_schema.columns[i].is_nullable);
-            write_bool(_schema.columns[i].is_pkey);
-            write_string(_schema.columns[i].name);
-            write_string(_schema.columns[i].type);
-            write_string(_schema.columns[i].default_value);
+        for (auto &column : _schema.columns) {
+            write_int32(column.position);
+            write_bool(column.is_nullable);
+            write_bool(column.is_pkey);
+            write_string(column.name);
+            write_string(column.type);
+            write_string(column.default_value);
         }
     }
 
@@ -515,7 +515,7 @@ namespace springtail
             throw PgQueryError();
         }
 
-        if (_connection.nfields() != _schema.columns.size()) {
+        if (static_cast<std::size_t>(_connection.nfields()) != _schema.columns.size()) {
             SPDLOG_ERROR("Mismatch in copy fields");
             _connection.clear();
             throw PgQueryError();

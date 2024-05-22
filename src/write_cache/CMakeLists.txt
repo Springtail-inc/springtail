@@ -14,7 +14,7 @@ target_link_libraries(springtail_write_cache PRIVATE thrift_write_cache nlohmann
 
 # daemon executable
 add_executable(write_cache_daemon write_cache_daemon.cc)
-target_include_directories(write_cache_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(write_cache_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(write_cache_daemon
     PRIVATE springtail_write_cache
     PRIVATE springtail_common

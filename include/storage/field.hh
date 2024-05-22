@@ -730,7 +730,7 @@ namespace springtail {
                  bool bit)
         {
             char * const fixed = row.data() + offset;
-            
+
             char char_mask = static_cast<char>(-1) & mask;
             if (bit) {
                 *fixed |= char_mask;
@@ -1545,7 +1545,7 @@ namespace springtail {
             : Tuple(nullptr)
         {
             // copy the data from the tuple into const fields
-            for (int i = 0; i < tuple->size(); i++) {
+            for (auto i = 0; i < tuple->size(); i++) {
                 std::shared_ptr<Field> field = tuple->field(i);
 
                 if (field->is_null(tuple->row())) {
