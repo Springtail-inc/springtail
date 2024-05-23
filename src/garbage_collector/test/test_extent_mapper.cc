@@ -1,3 +1,4 @@
+#include <chrono>
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
@@ -15,6 +16,11 @@ namespace {
         void SetUp() override {
             springtail_init();
             _extent_mapper = std::make_shared<gc::ExtentMapper>();
+
+            _gc1_xid = 1;
+            _gc2_xid = 1;
+
+            _query_done = false;
         }
 
         void TearDown() override {
@@ -23,20 +29,38 @@ namespace {
 
         std::shared_ptr<gc::ExtentMapper> _extent_mapper;
         uint64_t _lookup_eid;
+
+        boost::mutex _write_cache_mutex;
         std::map<uint64_t, uint64_t> _write_cache;
+
+        std::atomic<uint64_t> _gc1_xid;
+        std::atomic<uint64_t> _gc2_xid;
+        std::atomic<bool> _query_done;
+
+        boost::mutex _cv_mutex;
+        boost::condition_variable _gc2_cv;
 
         // simulate GC-1 step using the current "lookup" extent ID and the provided XID
         void
         _gc1(uint64_t tid, uint64_t xid)
         {
             _extent_mapper->set_lookup(tid, xid, _lookup_eid);
-            _write_cache[xid] = _lookup_eid;
+
+            {
+                boost::unique_lock lock(_write_cache_mutex);
+                _write_cache[xid] = _lookup_eid;
+            }
         }
 
         std::vector<uint64_t>
         _gc2(uint64_t tid, uint64_t xid, int count = 1)
         {
-            auto lookup_eid = _write_cache[xid];
+            uint64_t lookup_eid;
+            {
+                boost::unique_lock lock(_write_cache_mutex);
+                lookup_eid = _write_cache[xid];
+            }
+
             auto &&m = _extent_mapper->forward_map(tid, xid, lookup_eid);
 
             uint64_t update_eid = (m.empty())
@@ -49,6 +73,7 @@ namespace {
             }
 
             _extent_mapper->add_mapping(tid, xid, update_eid, new_eids);
+            _gc2_xid = xid;
 
             return m;
         }
@@ -124,79 +149,82 @@ namespace {
 
     /** Tests multi-threaded functionality of the ExtentMapper */
     TEST_F(ExtentMapper_Test, Threaded) {
-#if 0
-        _extent_mapper->set_lookup(1, 100);
-        _extent_mapper->set_lookup(2, 100);
-        _extent_mapper->set_lookup(4, 100);
-        _extent_mapper->set_lookup(7, 100);
 
-        auto &&m = _extent_mapper->forward_map(2, 100);
-        ASSERT_TRUE(m.empty());
+        // create three threads:
+        // 1) acts like GC-1, performing set_lookup(); occassionally moves the lookup XID forward and does expire()
+        // 2) acts like GC-2, performing forward_map() + add_mapping()
+        // 3) acts like query nodes, performing reverse_map()
 
-        _extent_mapper->add_mapping(2, 100, { 101 });
+        std::thread gc1([this]() {
+            uint64_t lookup_xid = 1;
 
-        m = _extent_mapper->forward_map(4, 100);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 101);
+            while (_gc1_xid < 2000) {
+                // perform GC-1 step
+                _gc1(1, _gc1_xid);
 
-        _extent_mapper->add_mapping(4, 101, { 102 });
+                // signal the gc2 that a step is completed
+                ++_gc1_xid;
+                _gc2_cv.notify_one();
 
-        m = _extent_mapper->forward_map(7, 100);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 102);
+                // occasionally move the lookup XID forward and do an expire()
+                if (std::rand() % 50 == 0) {
+                    // select an XID between the current lookup_xid and the GC-2 xid
+                    uint64_t step = _gc2_xid - lookup_xid;
+                    lookup_xid += step;
+                    {
+                        boost::unique_lock lock(_write_cache_mutex);
+                        _lookup_eid = _write_cache[lookup_xid];
+                    }
 
-        m = _extent_mapper->reverse_map(3, 6, 101);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 100);
+                    // perform the expire()
+                    _extent_mapper->expire(1, lookup_xid);
+                }
 
-        _extent_mapper->add_mapping(7, 102, { 103, 107 });
+                std::this_thread::yield();
+            }
+        });
 
-        m = _extent_mapper->reverse_map(5, 7, 102);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 100);
+        std::thread gc2([this]() {
+            while (_gc2_xid < 2000) {
+                // wait until we can perform the gc2 step
+                if (_gc2_xid == _gc1_xid) {
+                    boost::unique_lock lock(_cv_mutex);
+                    _gc2_cv.wait(lock);
+                }
 
-        _extent_mapper->set_lookup(8, 100);
-        _extent_mapper->set_lookup(9, 107);
-        _extent_mapper->set_lookup(10, 107);
+                // perform the gc2 step
+                _gc2(1, _gc2_xid, (std::rand() % 3) + 1);
 
+                // move to the next XID
+                ++_gc2_xid;
 
-        m = _extent_mapper->forward_map(8, 100);
-        ASSERT_TRUE(m.size() == 2);
-        ASSERT_TRUE(m[0] == 103);
-        ASSERT_TRUE(m[1] == 107);
+                std::this_thread::yield();
+            }
 
-        _extent_mapper->add_mapping(8, 107, { 108 });
+            _query_done = true;
+        });
 
-        m = _extent_mapper->forward_map(9, 107);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 108);
+        std::thread query([this]() {
+            using namespace std::chrono_literals;
 
-        _extent_mapper->add_mapping(9, 108, { 109 });
-        _extent_mapper->add_mapping(10, 109, { 110, 115 });
+            while (!_query_done) {
+                // perform a reverse_map() operation to the latest gc1 XID
+                uint64_t access_xid = _gc2_xid;
+                uint64_t lookup_eid;
+                {
+                    boost::unique_lock lock(_write_cache_mutex);
+                    lookup_eid = _write_cache[access_xid];
+                }
 
-        m = _extent_mapper->reverse_map(9, 10, 108);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 100);
+                _extent_mapper->reverse_map(1, access_xid - 4, _gc1_xid, lookup_eid);
 
-        _extent_mapper->expire(9);
+                std::this_thread::sleep_for(100ms);
+            }
+        });
 
-        m = _extent_mapper->reverse_map(9, 10, 108);
-        ASSERT_TRUE(m.size() == 0);
-
-        _extent_mapper->set_lookup(11, 115);
-        _extent_mapper->set_lookup(12, 115);
-        _extent_mapper->set_lookup(13, 115);
-
-        _extent_mapper->add_mapping(11, 115, { 116 });
-        _extent_mapper->add_mapping(12, 116, { 117 });
-
-        m = _extent_mapper->forward_map(13, 115);
-        ASSERT_TRUE(m.size() == 1);
-        ASSERT_TRUE(m[0] == 117);
-
-        _extent_mapper->add_mapping(13, 117, { 118 });
-        _extent_mapper->expire(13);
-#endif        
+        gc1.join();
+        gc2.join();
+        query.join();
     }
 
 }

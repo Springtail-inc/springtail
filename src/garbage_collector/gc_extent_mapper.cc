@@ -67,8 +67,8 @@ namespace springtail::gc {
         }
 
         // note: forward mapping is always done from the latest GC-2 checkpoint, so the XID of the
-        //       mutation should always be before the target XID
-        assert(it->second.back().xid < target_xid);
+        //       mutation should always be before or at the target XID
+        assert(it->second.back().xid <= target_xid);
 
         // store the set of new EIDs
         // note: updates are performed during add_mapping to ensure that this list is always
