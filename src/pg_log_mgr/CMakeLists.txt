@@ -17,7 +17,7 @@ target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/src/xid_mgr/gen-cpp # for thrift headers
 )
 target_link_libraries(springtail_pglog
-    PUBLIC springtail_pg springtail_common springtail_xid_mgr
+    PUBLIC springtail_pg springtail_common springtail_xid_mgr springtail_storage
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt)
 
