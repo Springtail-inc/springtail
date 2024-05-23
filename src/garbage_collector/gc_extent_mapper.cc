@@ -1,18 +1,18 @@
 #include <cassert>
 
+#include <common/logging.hh>
 #include <garbage_collector/gc_extent_mapper.hh>
 
 namespace springtail::gc {
     void
-    ExtentMapper::add_mapping(uint64_t target_xid,
-                              uint64_t old_eid,
-                              const std::vector<uint64_t> &new_eids)
+    TableExtentMapper::add_mapping(uint64_t target_xid,
+                                   uint64_t old_eid,
+                                   const std::vector<uint64_t> &new_eids)
     {
         std::vector<uint64_t> reverse_eids;
 
         // note: always lock forward before reverse to avoid deadlock
-        boost::unique_lock flock(_forward_mutex);
-        boost::unique_lock rlock(_reverse_mutex);
+        boost::unique_lock lock(_mutex);
 
         // record the mapping from old_eid -> new_eids at target_xid
         _forward_map[old_eid].push_back({ target_xid, new_eids });
@@ -36,26 +36,31 @@ namespace springtail::gc {
     }
 
     void
-    ExtentMapper::set_lookup(uint64_t target_xid,
-                             uint64_t extent_id)
+    TableExtentMapper::set_lookup(uint64_t target_xid,
+                                  uint64_t extent_id)
     {
-        boost::unique_lock lock(_lookup_mutex);
+        boost::unique_lock lock(_mutex);
 
         // save the most recent XID that this extent ID was referenced at within the write cache
-        _lookup_map[extent_id] = target_xid;
+        auto it = _lookup_map.lower_bound(extent_id);
+        if (it != _lookup_map.end() && it->first == extent_id) {
+            _lookup_map[extent_id].latest_xid = target_xid;
+        } else {
+            _lookup_map.insert(it, { extent_id, { target_xid, target_xid } });
+        }
 
         // store the XID mapping
         _xid_map[target_xid].push_back(extent_id);
     }
 
     std::vector<uint64_t>
-    ExtentMapper::forward_map(uint64_t target_xid,
-                              uint64_t old_eid)
+    TableExtentMapper::forward_map(uint64_t target_xid,
+                                   uint64_t extent_id)
     {
-        boost::unique_lock flock(_forward_mutex);
+        boost::unique_lock lock(_mutex);
 
         // find the extent ID to see if there are changes to it prior to the target XID
-        auto it = _forward_map.find(old_eid);
+        auto it = _forward_map.find(extent_id);
         if (it == _forward_map.end()) {
             // no changes at all, return empty vector
             return {};
@@ -72,34 +77,63 @@ namespace springtail::gc {
     }
 
     std::vector<uint64_t>
-    ExtentMapper::reverse_map(uint64_t access_xid,
-                              uint64_t target_xid,
-                              uint64_t extent_id)
+    TableExtentMapper::reverse_map(uint64_t access_xid,
+                                   uint64_t target_xid,
+                                   uint64_t extent_id) 
     {
-        boost::unique_lock rlock(_reverse_mutex);
+        boost::unique_lock lock(_mutex);
 
-        // find earlier versions of this extent
+        std::vector<uint64_t> cache_eids;
+
+        // find earlier versions of the extent that were used for lookup in this XID range
         auto it = _reverse_map.find(extent_id);
-        if (it == _reverse_map.end()) {
-            return {}; // no known earlier version of the extent ID
+        if (it != _reverse_map.end()) {
+            // note: updates are performed during add_mapping() and expire() to keep this set as a
+            //       superset of all potential extent IDs
+            for (auto eid : it->second) {
+                auto lookup_i = _lookup_map.find(eid);
+                if (lookup_i != _lookup_map.end()
+                    && lookup_i->second.latest_xid > access_xid
+                    && lookup_i->second.start_xid <= target_xid) {
+                    cache_eids.push_back(eid);
+                }
+            }
         }
 
-        // return the set of known historic extent IDs
-        // note: updates are performed during add_mapping() and expire() to keep this set accurate and minimized
-        return it->second;
+        // check if there are future versions of this extent that were used for lookups
+        auto f_it = _forward_map.find(extent_id);
+        if (f_it != _forward_map.end()) {
+            // go through all of the known mappings and see if they could exist in the write cache
+            for (auto &entry : f_it->second) {
+                if (entry.xid < target_xid) {
+                    for (auto &eid : entry.eids) {
+                        auto l = _lookup_map.find(eid);
+                        if (l != _lookup_map.end()
+                            && l->second.latest_xid > access_xid
+                            && l->second.start_xid <= target_xid) {
+                            cache_eids.push_back(eid);
+                        }
+                    }
+                }
+            }
+        }
+
+        return cache_eids;
     }
 
-    void
-    ExtentMapper::expire(uint64_t commit_xid)
+    bool
+    TableExtentMapper::expire(uint64_t commit_xid)
     {
         // note: always lock lookup before forward, before reverse to avoid deadlock
-        boost::unique_lock lock(_lookup_mutex);
-        boost::unique_lock flock(_forward_mutex);
-        boost::unique_lock rlock(_reverse_mutex);
+        boost::unique_lock lock(_mutex);
+
+        SPDLOG_DEBUG("Expire {}", commit_xid);
 
         // remove any metadata prior to the provided commit XID
         auto it = _xid_map.begin();
         while (it != _xid_map.end()) {
+            SPDLOG_DEBUG("Check xid@{}", it->first);
+
             // stop once we go past the commit XID
             if (commit_xid < it->first) {
                 break;
@@ -107,12 +141,16 @@ namespace springtail::gc {
             auto xid = it->first;
 
             for (auto eid : it->second) {
+                SPDLOG_DEBUG("Cleanup {}", eid);
+
                 // cleanup the lookup map
                 auto l = _lookup_map.find(eid);
                 assert(l != _lookup_map.end());
 
                 // check if this extent ID has more references past this XID
-                if (l->second <= xid) {
+                if (l->second.latest_xid <= xid) {
+                    SPDLOG_DEBUG("Clear from lookup {}", l->first);
+
                     // clear the lookup map
                     _lookup_map.erase(l);
 
@@ -121,27 +159,35 @@ namespace springtail::gc {
                     assert(f != _forward_map.end());
 
                     for (auto &entry : f->second) {
+                        SPDLOG_DEBUG("Try clear reverse xid@{}", entry.xid);
+
                         if (entry.xid > commit_xid) {
                             break; // stop once we are past the commit XID
                         }
 
                         // remove the extent ID from each of the reverse map entries of new extent IDs
                         for (auto new_eid : entry.eids) {
+                            SPDLOG_DEBUG("Clear reverse entry {}", new_eid);
+
                             // find the reverse map entry
                             auto r = _reverse_map.find(new_eid);
                             assert(r != _reverse_map.end());
                             
                             // remove from the historical list
+                            SPDLOG_DEBUG("Erase reverse entry {}", eid);
                             auto i = std::ranges::find(r->second, eid);
                             assert(i != r->second.end());
                             r->second.erase(i);
 
                             // if there are no historical extent IDs now, clear the entry
                             if (r->second.empty()) {
+                                SPDLOG_DEBUG("Clear empty reverse {}", r->first);
                                 _reverse_map.erase(r);
                             }
                         }
                     }
+
+                    SPDLOG_DEBUG("Clear from forward {}", f->first);
 
                     // clear from the forward map
                     _forward_map.erase(f);
@@ -152,5 +198,110 @@ namespace springtail::gc {
             _xid_map.erase(it);
             it = _xid_map.begin();
         }
+
+        return _xid_map.empty();
     }
+
+    void
+    ExtentMapper::add_mapping(uint64_t tid,
+                              uint64_t target_xid,
+                              uint64_t old_eid,
+                              const std::vector<uint64_t> &new_eids)
+    {
+        auto mapper = _get_table(tid, true);
+        mapper->add_mapping(target_xid, old_eid, new_eids);
+        _put_table(tid, false);
+    }
+
+    void
+    ExtentMapper::set_lookup(uint64_t tid,
+                             uint64_t target_xid,
+                             uint64_t extent_id)
+    {
+        auto mapper = _get_table(tid, true);
+        mapper->set_lookup(target_xid, extent_id);
+        _put_table(tid, false);
+    }
+
+    std::vector<uint64_t>
+    ExtentMapper::forward_map(uint64_t tid,
+                              uint64_t target_xid,
+                              uint64_t extent_id)
+    {
+        // note: no need to call _put_table() when not is_write
+        auto mapper = _get_table(tid, false);
+        if (mapper == nullptr) {
+            return {};
+        }
+
+        return mapper->forward_map(target_xid, extent_id);
+    }
+
+    std::vector<uint64_t>
+    ExtentMapper::reverse_map(uint64_t tid,
+                              uint64_t access_xid,
+                              uint64_t target_xid,
+                              uint64_t extent_id)
+    {
+        // note: no need to call _put_table() when not is_write
+        auto mapper = _get_table(tid, false);
+        if (mapper == nullptr) {
+            return {};
+        }
+
+        return mapper->reverse_map(access_xid, target_xid, extent_id);
+    }
+
+    void
+    ExtentMapper::expire(uint64_t tid,
+                         uint64_t commit_xid)
+    {
+        auto mapper = _get_table(tid, true);
+        bool is_empty = mapper->expire(commit_xid);
+
+        // note: we mark it as is_expire only when we want to try and clear it
+        _put_table(tid, is_empty);
+    }
+
+    void
+    ExtentMapper::_put_table(uint64_t tid, bool is_expire)
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto table_i = _table_map.find(tid);
+        assert(table_i != _table_map.end());
+
+        // note: should only be called when is_write = true on _get_table()
+        --table_i->second.first;
+
+        if (is_expire && table_i->second.first == 0) {
+            _table_map.erase(table_i);
+        }
+    }
+
+    std::shared_ptr<TableExtentMapper>
+    ExtentMapper::_get_table(uint64_t tid, bool is_write)
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto table_i = _table_map.find(tid);
+        if (table_i == _table_map.end()) {
+            if (!is_write) {
+                return nullptr;
+            }
+
+            auto result = _table_map.insert({ tid, TableEntry() });
+            assert(result.second);
+
+            table_i = result.first;
+            table_i->second.second = std::make_shared<TableExtentMapper>();
+        }
+
+        if (is_write) {
+            ++table_i->second.first;
+        }
+
+        return table_i->second.second;
+    }
+
 }
