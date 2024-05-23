@@ -66,7 +66,7 @@ namespace springtail::gc {
         };
 
         // note: always lock lookup before forward, before reverse to avoid deadlock
-        boost::mutex _mutex;
+        boost::shared_mutex _mutex;
 
         /** Map from referenced EID -> latest XID. */
         std::map<uint64_t, LookupEntry> _lookup_map;
@@ -126,9 +126,53 @@ namespace springtail::gc {
         /**
          * Updates the writer count on the table, potentially removing it from the map.
          */
-        void _put_table(uint64_t tid, bool is_expire);
+        void _put_table(uint64_t tid, bool is_expire) noexcept;
 
     private:
+        /**
+         * RAII wrapper that calls _get_table() and _put_table() accordingly.
+         */
+        class Mapper {
+        public:
+            Mapper(ExtentMapper *mapper, uint64_t tid, bool is_write = false)
+                : _mapper(mapper),
+                  _tid(tid),
+                  _is_write(is_write),
+                  _try_evict(false)
+            {
+                _table = _mapper->_get_table(_tid, _is_write);
+            }
+
+            ~Mapper()
+            {
+                if (_is_write) {
+                    _mapper->_put_table(_tid, _try_evict);
+                }
+            }
+
+            void try_evict() {
+                _try_evict = true;
+            }
+
+            bool is_null() const {
+                return (_table == nullptr);
+            }
+
+            TableExtentMapper &operator*() {
+                return *_table;
+            }
+
+            TableExtentMapper *operator->() {
+                return _table.get();
+            }
+
+        private:
+            ExtentMapper *_mapper;
+            uint64_t _tid;
+            bool _is_write, _try_evict;
+            std::shared_ptr<TableExtentMapper> _table;
+        };
+
         using TableEntry = std::pair<int, std::shared_ptr<TableExtentMapper>>;
 
         boost::mutex _mutex;

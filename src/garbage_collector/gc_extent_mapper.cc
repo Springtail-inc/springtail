@@ -57,7 +57,7 @@ namespace springtail::gc {
     TableExtentMapper::forward_map(uint64_t target_xid,
                                    uint64_t extent_id)
     {
-        boost::unique_lock lock(_mutex);
+        boost::shared_lock lock(_mutex);
 
         // find the extent ID to see if there are changes to it prior to the target XID
         auto it = _forward_map.find(extent_id);
@@ -81,7 +81,7 @@ namespace springtail::gc {
                                    uint64_t target_xid,
                                    uint64_t extent_id) 
     {
-        boost::unique_lock lock(_mutex);
+        boost::shared_lock lock(_mutex);
 
         std::vector<uint64_t> cache_eids;
 
@@ -208,9 +208,8 @@ namespace springtail::gc {
                               uint64_t old_eid,
                               const std::vector<uint64_t> &new_eids)
     {
-        auto mapper = _get_table(tid, true);
+        Mapper mapper(this, tid, true);
         mapper->add_mapping(target_xid, old_eid, new_eids);
-        _put_table(tid, false);
     }
 
     void
@@ -218,9 +217,8 @@ namespace springtail::gc {
                              uint64_t target_xid,
                              uint64_t extent_id)
     {
-        auto mapper = _get_table(tid, true);
+        Mapper mapper(this, tid, true);
         mapper->set_lookup(target_xid, extent_id);
-        _put_table(tid, false);
     }
 
     std::vector<uint64_t>
@@ -229,8 +227,8 @@ namespace springtail::gc {
                               uint64_t extent_id)
     {
         // note: no need to call _put_table() when not is_write
-        auto mapper = _get_table(tid, false);
-        if (mapper == nullptr) {
+        Mapper mapper(this, tid);
+        if (mapper.is_null()) {
             return {};
         }
 
@@ -244,8 +242,8 @@ namespace springtail::gc {
                               uint64_t extent_id)
     {
         // note: no need to call _put_table() when not is_write
-        auto mapper = _get_table(tid, false);
-        if (mapper == nullptr) {
+        Mapper mapper(this, tid);
+        if (mapper.is_null()) {
             return {};
         }
 
@@ -256,26 +254,12 @@ namespace springtail::gc {
     ExtentMapper::expire(uint64_t tid,
                          uint64_t commit_xid)
     {
-        auto mapper = _get_table(tid, true);
+        Mapper mapper(this, tid, true);
         bool is_empty = mapper->expire(commit_xid);
 
-        // note: we mark it as is_expire only when we want to try and clear it
-        _put_table(tid, is_empty);
-    }
-
-    void
-    ExtentMapper::_put_table(uint64_t tid, bool is_expire)
-    {
-        boost::unique_lock lock(_mutex);
-
-        auto table_i = _table_map.find(tid);
-        assert(table_i != _table_map.end());
-
-        // note: should only be called when is_write = true on _get_table()
-        --table_i->second.first;
-
-        if (is_expire && table_i->second.first == 0) {
-            _table_map.erase(table_i);
+        // if the mapping is empty, attempt to evict
+        if (is_empty) {
+            mapper.try_evict();
         }
     }
 
@@ -304,4 +288,19 @@ namespace springtail::gc {
         return table_i->second.second;
     }
 
+    void
+    ExtentMapper::_put_table(uint64_t tid, bool is_expire) noexcept
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto table_i = _table_map.find(tid);
+        assert(table_i != _table_map.end());
+
+        // note: should only be called when is_write = true on _get_table()
+        --table_i->second.first;
+
+        if (is_expire && table_i->second.first == 0) {
+            _table_map.erase(table_i);
+        }
+    }
 }
