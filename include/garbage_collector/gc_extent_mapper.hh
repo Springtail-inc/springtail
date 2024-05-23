@@ -137,8 +137,7 @@ namespace springtail::gc {
             Mapper(ExtentMapper *mapper, uint64_t tid, bool is_write = false)
                 : _mapper(mapper),
                   _tid(tid),
-                  _is_write(is_write),
-                  _try_evict(false)
+                  _is_write(is_write)
             {
                 _table = _mapper->_get_table(_tid, _is_write);
             }
@@ -169,7 +168,8 @@ namespace springtail::gc {
         private:
             ExtentMapper *_mapper;
             uint64_t _tid;
-            bool _is_write, _try_evict;
+            bool _is_write;
+            bool _try_evict = false;
             std::shared_ptr<TableExtentMapper> _table;
         };
 
