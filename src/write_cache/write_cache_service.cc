@@ -244,8 +244,8 @@ namespace springtail {
     }
 
     void
-    ThriftWriteCacheService::expire(thrift::Status &_return,
-                                    const thrift::ExpireRequest &request)
+    ThriftWriteCacheService::expire_map(thrift::Status &_return,
+                                        const thrift::ExpireMapRequest &request)
     {
         ExtentMapper *mapper = ExtentMapper::get_instance();
         mapper->expire(request.table_id, request.commit_xid);

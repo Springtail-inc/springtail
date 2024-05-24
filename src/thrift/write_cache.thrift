@@ -156,7 +156,7 @@ struct ReverseMapRequest {
     4: i64 extent_id
 }
 
-struct ExpireRequest {
+struct ExpireMapRequest {
     1: i64 table_id,
     2: i64 commit_xid
 }
@@ -192,5 +192,5 @@ service ThriftWriteCache {
     Status set_lookup(1: SetLookupRequest request),
     ExtentMapResponse forward_map(1: ForwardMapRequest request),
     ExtentMapResponse reverse_map(1: ReverseMapRequest request),
-    Status expire(1: ExpireRequest request)
+    Status expire_map(1: ExpireMapRequest request)
 }

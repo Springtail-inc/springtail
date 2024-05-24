@@ -253,7 +253,6 @@ namespace springtail {
                               uint64_t target_xid,
                               uint64_t extent_id)
     {
-        // note: no need to call _put_table() when not is_write
         Mapper mapper(this, tid);
         if (mapper.is_null()) {
             return {};
@@ -268,7 +267,6 @@ namespace springtail {
                               uint64_t target_xid,
                               uint64_t extent_id)
     {
-        // note: no need to call _put_table() when not is_write
         Mapper mapper(this, tid);
         if (mapper.is_null()) {
             return {};
