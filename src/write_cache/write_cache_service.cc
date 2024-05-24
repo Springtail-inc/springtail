@@ -4,6 +4,8 @@
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_table_set.hh>
 
+#include <write_cache/extent_mapper.hh>
+
 namespace springtail {
 
     void
@@ -191,6 +193,62 @@ namespace springtail {
         std::shared_ptr<WriteCacheIndex> index = server->get_index();
 
         index->reset_clean_flag(request.table_id, request.start_xid, request.end_xid);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
+
+    void
+    ThriftWriteCacheService::add_mapping(thrift::Status &_return,
+                                         const thrift::AddMappingRequest &request)
+    {
+        ExtentMapper *mapper = ExtentMapper::get_instance();
+
+        // note: unfortunately need to copy the data to shift to uin64_t type
+        std::vector<uint64_t> new_eids(request.new_eids.begin(), request.new_eids.end());
+        mapper->add_mapping(request.table_id, request.target_xid,
+                            request.old_eid, new_eids);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
+
+    void
+    ThriftWriteCacheService::set_lookup(thrift::Status &_return,
+                                        const thrift::SetLookupRequest &request)
+    {
+        ExtentMapper *mapper = ExtentMapper::get_instance();
+        mapper->set_lookup(request.table_id, request.target_xid, request.extent_id);
+
+        _return.__set_status(thrift::StatusCode::SUCCESS);
+    }
+
+    void
+    ThriftWriteCacheService::forward_map(thrift::ExtentMapResponse &_return,
+                                         const thrift::ForwardMapRequest &request)
+    {
+        ExtentMapper *mapper = ExtentMapper::get_instance();
+        auto &&response = mapper->forward_map(request.table_id,
+                                              request.target_xid, request.extent_id);
+
+        _return.extent_ids.insert(_return.extent_ids.end(), response.begin(), response.end());
+    }
+
+    void
+    ThriftWriteCacheService::reverse_map(thrift::ExtentMapResponse &_return,
+                                         const thrift::ReverseMapRequest &request)
+    {
+        ExtentMapper *mapper = ExtentMapper::get_instance();
+        auto &&response = mapper->reverse_map(request.table_id, request.access_xid,
+                                              request.target_xid, request.extent_id);
+
+        _return.extent_ids.insert(_return.extent_ids.end(), response.begin(), response.end());
+    }
+
+    void
+    ThriftWriteCacheService::expire(thrift::Status &_return,
+                                    const thrift::ExpireRequest &request)
+    {
+        ExtentMapper *mapper = ExtentMapper::get_instance();
+        mapper->expire(request.table_id, request.commit_xid);
 
         _return.__set_status(thrift::StatusCode::SUCCESS);
     }

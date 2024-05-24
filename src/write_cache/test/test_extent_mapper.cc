@@ -2,20 +2,20 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
-#include <garbage_collector/gc_extent_mapper.hh>
+#include <write_cache/extent_mapper.hh>
 
 using namespace springtail;
 
 namespace {
 
     /**
-     * Framework for testing the gc::ExtentMapper.
+     * Framework for testing the ExtentMapper.
      */
     class ExtentMapper_Test : public testing::Test {
     protected:
         void SetUp() override {
             springtail_init();
-            _extent_mapper = std::make_shared<gc::ExtentMapper>();
+            _extent_mapper = ExtentMapper::get_instance();
 
             _gc1_xid = 1;
             _gc2_xid = 1;
@@ -27,7 +27,7 @@ namespace {
 
         }
 
-        std::shared_ptr<gc::ExtentMapper> _extent_mapper;
+        ExtentMapper *_extent_mapper;
         uint64_t _lookup_eid;
 
         boost::mutex _write_cache_mutex;

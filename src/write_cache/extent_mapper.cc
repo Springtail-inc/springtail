@@ -1,9 +1,9 @@
 #include <cassert>
 
 #include <common/logging.hh>
-#include <garbage_collector/gc_extent_mapper.hh>
+#include <write_cache/extent_mapper.hh>
 
-namespace springtail::gc {
+namespace springtail {
     void
     TableExtentMapper::add_mapping(uint64_t target_xid,
                                    uint64_t old_eid,
@@ -200,6 +200,33 @@ namespace springtail::gc {
         }
 
         return _xid_map.empty();
+    }
+
+    /* static member initialization must happen outside of class */
+    ExtentMapper* ExtentMapper::_instance = {nullptr};
+    boost::mutex ExtentMapper::_instance_mutex;
+
+    ExtentMapper *
+    ExtentMapper::get_instance()
+    {
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new ExtentMapper();
+        }
+
+        return _instance;
+    }
+
+    void
+    ExtentMapper::shutdown()
+    {
+        boost::unique_lock lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
     }
 
     void

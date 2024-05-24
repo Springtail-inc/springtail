@@ -128,14 +128,53 @@ struct ResetCleanFlagRequest {
     3: i64 end_xid
 }
 
+// ExtentMapper request structures
+
+struct AddMappingRequest {
+    1: i64 table_id,
+    2: i64 target_xid,
+    3: i64 old_eid,
+    4: list<i64> new_eids
+}
+
+struct SetLookupRequest {
+    1: i64 table_id,
+    2: i64 target_xid,
+    3: i64 extent_id
+}
+
+struct ForwardMapRequest {
+    1: i64 table_id,
+    2: i64 target_xid,
+    3: i64 extent_id
+}
+
+struct ReverseMapRequest {
+    1: i64 table_id,
+    2: i64 access_xid,
+    3: i64 target_xid,
+    4: i64 extent_id
+}
+
+struct ExpireRequest {
+    1: i64 table_id,
+    2: i64 commit_xid
+}
+
+struct ExtentMapResponse {
+    1: list<i64> extent_ids
+}
+
 // status code and optional message
 struct Status {
     1: StatusCode status,
     2: optional string message
 }
 
+
 // list of rpc requests and responses
 service ThriftWriteCache {
+    // core write cache functions
     Status ping(),
     Status add_rows(1: AddRowsRequest request),
     ListExtentsResponse list_extents(1: ListExtentsRequest request),
@@ -146,5 +185,12 @@ service ThriftWriteCache {
     ListTablesResponse list_tables(1: ListTablesRequest request),
     Status evict_table_changes(1: EvictTableChangesRequest request),
     Status set_clean_flag(1: SetCleanFlagRequest request),
-    Status reset_clean_flag(1: ResetCleanFlagRequest request)
+    Status reset_clean_flag(1: ResetCleanFlagRequest request),
+
+    // extent mapper functions
+    Status add_mapping(1: AddMappingRequest request),
+    Status set_lookup(1: SetLookupRequest request),
+    ExtentMapResponse forward_map(1: ForwardMapRequest request),
+    ExtentMapResponse reverse_map(1: ReverseMapRequest request),
+    Status expire(1: ExpireRequest request)
 }

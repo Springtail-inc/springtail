@@ -7,7 +7,7 @@
 
 #include <boost/thread.hpp>
 
-namespace springtail::gc {
+namespace springtail {
     /**
      * Tracks the actions of GC-1 and GC-2 to coordinate the rollforward and to allow query nodes to
      * perform individual extent rollforward as needed from the write cache.  See additional details
@@ -82,6 +82,25 @@ namespace springtail::gc {
     };
 
     class ExtentMapper {
+    public:
+        /**
+         * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
+         * @return instance of StorageCache
+         */
+        static ExtentMapper *get_instance();
+
+        /**
+         * @brief Shutdown the StorageCache singleton.
+         */
+        static void shutdown();
+
+    private:
+        static ExtentMapper *_instance; ///< static instance (singleton)
+        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
+
+        /** private constructor */
+        ExtentMapper() = default;
+
     public:
         /**
          * When the GC-2 updates an extent (or one of the query nodes performs a hurry-up), the
