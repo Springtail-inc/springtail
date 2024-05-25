@@ -34,7 +34,7 @@ namespace springtail {
         void set_lookup(thrift::Status &_return, const thrift::SetLookupRequest &request) override;
         void forward_map(thrift::ExtentMapResponse &_return, const thrift::ForwardMapRequest &request) override;
         void reverse_map(thrift::ExtentMapResponse &_return, const thrift::ReverseMapRequest &request) override;
-        void expire(thrift::Status &_return, const thrift::ExpireRequest &request) override;
+        void expire_map(thrift::Status &_return, const thrift::ExpireMapRequest &request) override;
     };
 
 
