@@ -29,6 +29,12 @@ namespace springtail {
         void evict_table_changes(thrift::Status& _return, const thrift::EvictTableChangesRequest& request) override;
         void set_clean_flag(thrift::Status& _return, const thrift::SetCleanFlagRequest& request) override;
         void reset_clean_flag(thrift::Status& _return, const thrift::ResetCleanFlagRequest& request) override;
+
+        void add_mapping(thrift::Status &_return, const thrift::AddMappingRequest &request) override;
+        void set_lookup(thrift::Status &_return, const thrift::SetLookupRequest &request) override;
+        void forward_map(thrift::ExtentMapResponse &_return, const thrift::ForwardMapRequest &request) override;
+        void reverse_map(thrift::ExtentMapResponse &_return, const thrift::ReverseMapRequest &request) override;
+        void expire(thrift::Status &_return, const thrift::ExpireRequest &request) override;
     };
 
 
