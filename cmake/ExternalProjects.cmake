@@ -5,7 +5,7 @@ include(FetchContent)
 # a CMakeLists.txt to more easily integrate with current source code
 FetchContent_Declare(
      libpg_query
-     GIT_REPOSITORY git@github.com:Springtail-inc/libpg_query.git
+     GIT_REPOSITORY https://github.com/Springtail-inc/libpg_query.git #git@github.com:Springtail-inc/libpg_query.git
      GIT_TAG 16-latest
      SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libpg_query
 )

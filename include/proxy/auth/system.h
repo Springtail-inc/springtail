@@ -6,6 +6,11 @@
 #include <limits.h>
 #include <string.h>
 
+#ifdef LINUX
+#include <bsd/stdlib.h>
+#include <bsd/string.h>
+#endif
+
 #ifndef _SYSTEM_H_
 #define _SYSTEM_H_
 

@@ -5,6 +5,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     set(LINUX TRUE)
     message(STATUS "Detected Linux build env")
     # Set linux specific build flags
+    add_compile_definitions(LINUX)
 else()
     set(LINUX FALSE)
 endif()

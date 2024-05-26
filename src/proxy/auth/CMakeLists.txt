@@ -18,7 +18,12 @@ set(SOURCES
 # Create the library target
 add_library(auth STATIC ${SOURCES})
 
+if (LINUX)
+  set(LINUX_LIBS "bsd")
+else()
+endif()
+
 target_include_directories(auth
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
-target_link_libraries(auth PRIVATE fmt::fmt-header-only)
+target_link_libraries(auth PRIVATE fmt::fmt-header-only ${LINUX_LIBS})
