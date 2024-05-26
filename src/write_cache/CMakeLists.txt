@@ -32,7 +32,7 @@ target_link_libraries(test_threaded
 add_executable(test_extent_mapper test/test_extent_mapper.cc)
 target_include_directories(test_extent_mapper PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_extent_mapper
-  PUBLIC springtail_common springtail_write_cache
+  PUBLIC springtail_write_cache springtail_common 
   PRIVATE GTest::gtest_main
 )
 

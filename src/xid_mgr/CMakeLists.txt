@@ -11,6 +11,7 @@ set(XID_MGR_SOURCES
 add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
 target_include_directories(springtail_xid_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_xid_mgr
+    PUBLIC springtail_common
     PRIVATE thrift_xid_mgr nlohmann_json::nlohmann_json
 )
 
