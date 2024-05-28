@@ -10,10 +10,10 @@
 #include <common/logging.hh>
 #include <common/concurrent_queue.hh>
 
+#include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/user_mgr.hh>
-#include <proxy/buffer_pool.hh>
 #include <proxy/session_msg.hh>
 
 namespace springtail {

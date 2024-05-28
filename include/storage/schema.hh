@@ -8,8 +8,6 @@
 #include <storage/exception.hh>
 #include <storage/schema_type.hh>
 
-// #include <storage/schema_column.hh>
-
 namespace springtail {
     // pre-declare field classes
     class Field;
@@ -40,6 +38,7 @@ namespace springtail {
         SchemaType type;
         bool exists;
         bool nullable;
+        std::optional<uint32_t> pkey_position;
         std::optional<std::string> default_value;
         SchemaUpdateType update_type;
 
@@ -47,11 +46,12 @@ namespace springtail {
 
         SchemaColumn(uint64_t xid,
                      uint64_t lsn,
-                     const std::string &name,
+                     const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
                      bool exists,
                      bool nullable,
+                     std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
             : xid(xid),
               lsn(lsn),
@@ -60,13 +60,15 @@ namespace springtail {
               type(type),
               exists(exists),
               nullable(nullable),
+              pkey_position(pkey_position),
               default_value(default_value)
         { }
 
-        SchemaColumn(const std::string &name,
+        SchemaColumn(const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
                      bool nullable,
+                     std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
             : xid(0),
               lsn(0),
@@ -74,6 +76,7 @@ namespace springtail {
               position(position),
               type(type),
               nullable(nullable),
+              pkey_position(pkey_position),
               default_value(default_value)
         { }
 
@@ -119,6 +122,12 @@ namespace springtail {
         /** The order of the columns. */
         std::vector<std::string> _column_order;
 
+        /** The sort columns of the schema. */
+        std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
+
+        /** The sort column names of the schema. */
+        std::vector<std::string> _sort_keys;
+
     protected:
         /**
          * Construct the set of column fields based on the column definitions.
@@ -131,7 +140,7 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        ExtentSchema(const std::vector<SchemaColumn> &columns) {
+        explicit ExtentSchema(const std::vector<SchemaColumn> &columns) {
             std::map<uint32_t, SchemaColumn> column_map;
             for (auto &&column : columns) {
                 column_map.insert({column.position, column});
@@ -145,13 +154,10 @@ namespace springtail {
          * Constructor.
          * @param columns Map from column position to the SchemaColumn definition.
          */
-        ExtentSchema(const std::map<uint32_t, SchemaColumn> columns)
+        explicit ExtentSchema(const std::map<uint32_t, SchemaColumn> columns)
         {
             _populate(columns);
         }
-
-        /** Copy constructor. */
-        ExtentSchema(const ExtentSchema &schema) = default;
 
         /** Returns the fixed width for a single row. */
         uint32_t row_size() const {
@@ -194,8 +200,9 @@ namespace springtail {
          * additional provided columns.  Used in the creation of schemas for BTree indexes.
          */
         std::shared_ptr<ExtentSchema>
-        create_schema(const std::vector<std::string> &columns,
-                      const std::vector<SchemaColumn> &new_columns) const;
+        create_schema(const std::vector<std::string> &old_columns,
+                      const std::vector<SchemaColumn> &new_columns,
+                      const std::vector<std::string> &sort_columns) const;
 
         /**
          * Generate a list of all of the fields in the schema.
@@ -206,6 +213,20 @@ namespace springtail {
          * Generate a list of all of the fields in the schema.
          */
         std::shared_ptr<std::vector<MutableFieldPtr>> get_mutable_fields() const;
+
+        /**
+         * Return a list of fields that form the sort columns of this schema.
+         */
+        std::shared_ptr<std::vector<FieldPtr>> get_sort_fields() const {
+            return _sort_fields;
+        }
+
+        /**
+         * Return a list of field names that form the sort columns of this schema.
+         */
+        const std::vector<std::string> &get_sort_keys() const {
+            return _sort_keys;
+        }
 
         /**
          * Generate a list of fields based on an ordered list of columns.
@@ -223,6 +244,9 @@ namespace springtail {
          */
         std::shared_ptr<Tuple> tuple_subset(std::shared_ptr<Tuple> tuple,
                                             const std::vector<std::string> &columns) const;
+        std::shared_ptr<std::vector<std::shared_ptr<Field>>>
+        fieldarray_subset(std::shared_ptr<Tuple> tuple,
+                          const std::vector<std::string> &columns) const;
 
         /**
          * Return the order of the columns in the schema.

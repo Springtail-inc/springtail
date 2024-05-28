@@ -20,7 +20,7 @@ namespace springtail {
     }
 
     uint32_t
-    Lz4Compressor::compress_raw(std::shared_ptr<std::vector<char>> src, 
+    Lz4Compressor::compress_raw(std::shared_ptr<std::vector<char>> src,
                                 std::vector<char> &dst)
     {
         // determine the max compression size
@@ -29,7 +29,7 @@ namespace springtail {
         dst.resize(target_size);
 
         // compress the data -- internally resets the stream
-        int32_t dst_size = LZ4_compress_fast_extState(_lz4_stream, src->data(), 
+        int32_t dst_size = LZ4_compress_fast_extState(_lz4_stream, src->data(),
                                                       dst.data(), src->size(), target_size, 1);
 
         if (dst_size <= 0) {
@@ -94,15 +94,15 @@ namespace springtail {
     }
 
     uint32_t
-    Lz4Decompressor::decompress_raw(const std::vector<char> &src, 
-                                    std::shared_ptr<std::vector<char>> dst, 
+    Lz4Decompressor::decompress_raw(const std::vector<char> &src,
+                                    std::shared_ptr<std::vector<char>> dst,
                                     int offset)
     {
         // decompress the block -- internally resets the stream
-        int32_t size = LZ4_decompress_safe(src.data(), dst->data() + offset, 
+        int32_t size = LZ4_decompress_safe(src.data(), dst->data() + offset,
                                            src.size(), dst->size() - offset);
 
-        if (size <= 0) {
+        if (size < 0) {
             std::cerr << "Error decompressing: err=" << size << std::endl;
             throw ValidationError("Error decompressing data");
         }

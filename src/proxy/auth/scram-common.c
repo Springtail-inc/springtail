@@ -21,9 +21,6 @@
 #define HMAC_IPAD 0x36
 #define HMAC_OPAD 0x5C
 
-#ifndef pg_hton32
-#define pg_hton32(x) htonl(x)
-#endif
 /*
  * Calculate HMAC per RFC2104.
  *

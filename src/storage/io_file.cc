@@ -243,7 +243,7 @@ namespace springtail {
 
         for (int i=0; i < count; i++) {
             uint64_t hash = XXH64(data[i]->data(), data[i]->size(), 0);
-            std::copy_n(reinterpret_cast<char *>(&hash), sizeof(uint32_t), &hashes[i*8]);
+            std::copy_n(reinterpret_cast<char *>(&hash), sizeof(uint64_t), &hashes[i*8]);
         }
 
         return XXH64(hashes, 8 * count, 0);
@@ -395,8 +395,9 @@ namespace springtail {
         // verify data hash; compute hash over response compare to hash in header
         uint64_t computed_hash = _compute_hash(response->data);
         if (computed_hash != hash) {
-            request->complete(response, IOStatus::ERR_CKSUM);
-            return;
+	    SPDLOG_ERROR("Checksum hash computation mismatch");
+	    request->complete(response, IOStatus::ERR_CKSUM);
+	    return;
         }
 
         SPDLOG_DEBUG_MODULE(LOG_STORAGE, "Read {} vectors", response->data.size());

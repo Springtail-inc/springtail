@@ -2,6 +2,7 @@
 
 #include <boost/thread.hpp>
 
+#include <storage/cache.hh>
 #include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io.hh>
@@ -27,9 +28,6 @@ namespace springtail {
      * are complete, they must be flushed to disk using finalize(), which also returns the offset of
      * the new root of the tree.  After this operation, no further modifications can be made at the
      * current XID.
-     *
-     * The MutableBTree also provides O(log n) interfaces for find(), lower_bound(), and
-     * upper_bound(), which all return forward iterators.
      *
      * Because all modifications are done copy-on-write, it is safe to have (potentially multiple)
      * read-only BTree objects constructed against the same underlying file being used concurrently
@@ -72,19 +70,12 @@ namespace springtail {
             boost::shared_mutex mutex;
 
         public:
-            PageCache(uint64_t max_size)
+            explicit PageCache(uint64_t max_size = 512)
                 : size(0),
                   max_size(max_size)
             { }
         };
         typedef std::shared_ptr<PageCache> PageCachePtr;
-
-        /**
-         * Function for creating a page cache that can be shared among btrees.
-         */
-        static PageCachePtr create_cache(uint64_t size) {
-            return std::make_shared<PageCache>(size);
-        }
 
     public:
         /**
@@ -97,8 +88,8 @@ namespace springtail {
          */
         MutableBTree(const std::filesystem::path &file,
                      const std::vector<std::string> &keys,
-                     PageCachePtr cache,
-                     ExtentSchemaPtr schema);
+                     ExtentSchemaPtr schema,
+                     uint64_t xid);
 
         /**
          * Initialize an empty tree.
@@ -109,13 +100,6 @@ namespace springtail {
          * Initialize a tree with a given root offset.
          */
         void init(uint64_t root_offset);
-
-        /**
-         * Mark the BTree as making modifications for a given target XID.
-         *
-         * @param xid The target XID for the mutations we are about to apply.
-         */
-        void set_xid(uint64_t xid);
 
         /**
          * Inserts a new entry into the tree.
@@ -166,56 +150,7 @@ namespace springtail {
          */
         class Page {
         public:
-            /**
-             * An iterator object for traversing a Page.
-             */
-            class Iterator {
-                friend Page;
-
-            private:
-                const Page *_page; ///< A pointer to the page this iterator is associated with.
-                std::vector<ExtentPtr>::iterator _extent_i; ///< A pointer into the list of extents in this page.
-                Extent::Iterator _row_i; ///< A pointer into the extent referenced by this iterator.
-
-            private:
-                Iterator(const Page *p, std::vector<ExtentPtr>::iterator e, Extent::Iterator r)
-                    : _page(p), _extent_i(e), _row_i(r)
-                { }
-
-            public:
-                using iterator_category = std::forward_iterator_tag;
-                using difference_type   = std::ptrdiff_t;
-                using value_type        = const Extent::Row;
-                using pointer           = const Extent::Row *;  // or also value_type*
-                using reference         = const Extent::Row &;  // or also value_type&
-
-                reference operator*() const { return *(_row_i); }
-                pointer operator->() { return &(*(_row_i)); }
-
-                Iterator& operator++() {
-                    ++_row_i;
-                    if (_row_i == (*_extent_i)->end()) {
-                        // if at the end of the last extent, done iterating
-                        if (*_extent_i == _page->_extents.back()) {
-                            return *this;
-                        }
-
-                        // otherwise, move to the start of the next extent
-                        ++_extent_i;
-                        _row_i = (*_extent_i)->begin();
-                    }
-
-                    return *this;
-                }
-
-                Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-                friend bool operator==(const Iterator& a, const Iterator& b) {
-                    return (a._extent_i == b._extent_i && a._row_i == b._row_i);
-                }
-
-                friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
-            };
+            using Iterator = StorageCache::Page::Iterator;
 
         private:
             /**
@@ -229,18 +164,18 @@ namespace springtail {
         public:
             /** For constructing an empty root. */
             Page(std::shared_ptr<MutableBTree> btree,
-                 ExtentPtr extent,
-                 MutableFieldArrayPtr key_fields)
+                 StorageCache::PagePtr cache_page,
+                 ExtentSchemaPtr schema)
                 : extent_id(constant::UNKNOWN_EXTENT),
                   type(false, true),
                   flushed(false),
                   _btree(btree),
                   _dirty(false),
-                  _key_fields(key_fields),
+                  _schema(schema),
+                  _cache_page(cache_page),
                   _parent(nullptr)
             {
-                _extents.push_back(extent);
-                size = extent->byte_count();
+                _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
             }
 
             Page(std::shared_ptr<MutableBTree> btree,
@@ -254,35 +189,35 @@ namespace springtail {
             Page(std::shared_ptr<MutableBTree> btree,
                  uint64_t extent_id,
                  ValueTuplePtr v,
-                 ExtentPtr e,
-                 MutableFieldArrayPtr key_fields)
+                 StorageCache::PagePtr cache_page,
+                 ExtentSchemaPtr schema)
                 : extent_id(extent_id),
-                  type(e->type()),
                   prev_key(v),
                   flushed(false),
                   _btree(btree),
                   _dirty(false),
-                  _key_fields(key_fields)
+                  _schema(schema),
+                  _cache_page(cache_page)
             {
-                _extents.push_back(e);
-                size = e->byte_count();
+                type = cache_page->header().type;
+                _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
             }
 
             /** Returns an iterator to the first row in the Page. */
             Iterator begin() {
-                return Iterator(this, _extents.begin(), _extents.front()->begin());
+                return _cache_page->begin();
             }
 
             /** Returns an iterator that indicates that the Page has been fully traversed. */
             Iterator end() {
-                return Iterator(this, (++_extents.rbegin()).base(), _extents.back()->end());
+                return _cache_page->end();
             }
 
             /**
              * Returns a reference to the last row in the page.
              */
             Extent::Row back() const {
-                return _extents.back()->back();
+                return *(_cache_page->last());
             }
 
             /**
@@ -358,7 +293,7 @@ namespace springtail {
              * @param extent The contents of the page.
              * @param key_fields The fields that represent the key within this page.
              */
-            void set_extent(ExtentPtr extent, MutableFieldArrayPtr key_fields);
+            void set_cache_page(StorageCache::PagePtr cache_page, ExtentSchemaPtr schema);
 
             PageCache::LookupID
             get_lookup_id()
@@ -437,14 +372,14 @@ namespace springtail {
              * Check if the page should be flushed based on the number of extents it contains.
              */
             bool check_flush() const {
-                return (_extents.size() > MAX_EXTENT_COUNT);
+                return (_cache_page->extent_count() > MAX_EXTENT_COUNT);
             }
 
             /**
              * Check if the page is empty; i.e., it has a single extent with no rows in it.
              */
             bool empty() const {
-                return (_extents.size() == 1 && _extents.front()->empty());
+                return _cache_page->empty();
             }
 
             /**
@@ -458,7 +393,7 @@ namespace springtail {
              * Returns the on-disk XID of the page.
              */
             uint64_t xid() const {
-                return _extents.front()->header().xid;
+                return _cache_page->header().xid;
             }
 
         public:
@@ -467,7 +402,6 @@ namespace springtail {
             ValueTuplePtr prev_key; ///< The key in the parent of the previous extent this page is based on.  Won't change once the page is fully constructed.
 
             bool flushed; ///< This page has already been flushed to disk and replaced with a new page.
-            std::atomic<uint32_t> size; ///< The size of the page.  Can be atomically accessed by different threads without holding the mutex.
 
             mutable boost::shared_mutex disk_mutex; ///< A shared mutex that acts as a barrier for disk reads / writes.
             mutable boost::shared_mutex mutex; ///< A shared mutex for access to the in-memory data.
@@ -477,7 +411,9 @@ namespace springtail {
             std::shared_ptr<MutableBTree> _btree; ///< The btree this page is associated with.
             bool _dirty; ///< Flag indicating if data has been modified since the last write.
             MutableFieldArrayPtr _key_fields; ///< The fields representing the key in the btree.
-            std::vector<ExtentPtr> _extents; ///< A list of extents that will be written out when this page is flushed.
+
+            ExtentSchemaPtr _schema; ///< The schema of the page.
+            StorageCache::PagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
             mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.

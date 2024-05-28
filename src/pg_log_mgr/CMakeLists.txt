@@ -17,7 +17,7 @@ target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/src/xid_mgr/gen-cpp # for thrift headers
 )
 target_link_libraries(springtail_pglog
-    PUBLIC springtail_pg springtail_common springtail_xid_mgr
+    PUBLIC springtail_pg springtail_common springtail_xid_mgr springtail_storage
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt)
 
@@ -39,7 +39,7 @@ target_include_directories(test_log_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(test_xact_log test/test_xact_log.cc)
 target_link_libraries(test_xact_log
-    PUBLIC springtail_pglog
+    PUBLIC springtail_pglog springtail_common springtail_storage
     PRIVATE GTest::gtest_main)
 target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 

@@ -127,6 +127,11 @@ namespace springtail {
                     _handle_query_response();
                     return;
                 }
+                if (_state == DEPENDENCIES) {
+                    // we are in dependency checking state, continue with dependencies
+                    _handle_dependency_response(false);
+                    return;
+                }
                 assert (_state != EXTENDED_ERROR);
 
                 // fall through
@@ -138,12 +143,7 @@ namespace springtail {
             case 'W': // Copy both response
             case 'D': // Data row
             case 'N': // Notice response
-                if (_state == DEPENDENCIES) {
-                    // we are in dependency checking state, continue with dependencies
-                    _handle_dependency_response(false);
-                    return;
-                }
-
+            case 'A': // Notification response
                 _stream_to_remote_session(code, msg_length);
                 return;
         }

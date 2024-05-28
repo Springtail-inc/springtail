@@ -25,7 +25,7 @@ namespace springtail {
 
         // scan latest replication log and extract ending LSN
         // XXX if we find an empty log then remove file and go to previous log
-        std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path);
+        std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
         if (!latest_log.empty()) {
             lsn = PgMsgStreamReader::scan_log(latest_log, true);
         }
@@ -158,7 +158,7 @@ namespace springtail {
     PgLogWriterPtr
     PgLogMgr::_create_repl_logger()
     {
-        std::filesystem::path file = fs::find_latest_modified_file(_repl_log_path);
+        std::filesystem::path file = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
         if (file.empty()) {
             file = _repl_log_path / fmt::format("{}{:04d}{}", LOG_PREFIX_REPL, 0, LOG_SUFFIX);
         } else {
@@ -172,7 +172,7 @@ namespace springtail {
     PgXactLogWriterPtr
     PgLogMgr::_create_xact_logger()
     {
-        std::filesystem::path file = fs::find_latest_modified_file(_xact_log_path);
+        std::filesystem::path file = fs::find_latest_modified_file(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX);
         if (file.empty()) {
             file = _xact_log_path / fmt::format("{}{:04d}{}", LOG_PREFIX_XACT, 0, LOG_SUFFIX);
         } else {

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.25)
 
 ## Need to set top level include for conan, must be before project
 # disable for now
@@ -28,7 +28,7 @@ include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 ## CXX options
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wno-sign-compare -std=c++20")
 set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 
 ## add checks for thread data races: https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual
@@ -62,6 +62,7 @@ add_definitions( -D CXX_BYTE_ORDER=${CMAKE_CXX_BYTE_ORDER} )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
+  set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
 endif()
@@ -83,12 +84,11 @@ add_subdirectory(src/proxy)
 
 
 ## Messages keep at end of file
-message(STATUS "xxhash: " ${xxhash_DIR})
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
+message(STATUS "System name: " ${CMAKE_SYSTEM_NAME})
 message(STATUS "Compiler: " ${CMAKE_CXX_COMPILER})
 message(STATUS "Compiler flags: " ${CMAKE_CXX_COMPILE_FLAGS})
 message(STATUS "Compiler cxx debug flags: " ${CMAKE_CXX_FLAGS_DEBUG})
 message(STATUS "Compiler cxx release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 message(STATUS "Compiler cxx flags:" ${CMAKE_CXX_FLAGS})
 message(STATUS "Byte order for target: " ${CMAKE_CXX_BYTE_ORDER})
-

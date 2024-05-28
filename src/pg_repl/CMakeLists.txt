@@ -96,14 +96,18 @@ gtest_discover_tests(test_msg_stream
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
 
-#if (${MACOSX})
-#    add_custom_command(TARGET pg_wal_dump POST_BUILD
-#        COMMAND ${PROJECT_SOURCE_DIR}/build_scripts/mac_enable_core.sh pg_wal_dump
-#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#        COMMENT "Enabling core dumps...pg_wal_dump")
-#
-#    add_custom_command(TARGET pg_wal_decode POST_BUILD
-#        COMMAND ${PROJECT_SOURCE_DIR}/build_scripts/mac_enable_core.sh pg_wal_dump
-#        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#        COMMENT "Enabling core dumps...pg_wal_decode")
-#endif()
+# copy table test
+add_executable(test_pgcopy test/test_pgcopy.cc)
+
+target_include_directories(test_pgcopy
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_pgcopy
+    PUBLIC springtail_storage springtail_pg
+    PRIVATE GTest::gtest_main
+)
+
+gtest_discover_tests(test_pgcopy
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+)

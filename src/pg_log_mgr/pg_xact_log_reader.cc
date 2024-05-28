@@ -67,7 +67,7 @@ namespace springtail {
     PgXactLogReader::scan_all_files(uint64_t committed_xid)
     {
         // find first file
-        std::filesystem::path file = fs::find_earliest_modified_file(_base_dir);
+        std::filesystem::path file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
         if (file.empty()) {
             return;
         }

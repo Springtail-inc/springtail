@@ -34,7 +34,7 @@ namespace springtail {
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t xid);
+        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Create a new table.
@@ -61,11 +61,6 @@ namespace springtail {
         TableMgr();
 
         /**
-         * @brief Destroy the TableMgr object
-         */
-        ~TableMgr(){};
-
-        /**
          * Construct a system table.
          */
         TablePtr _get_system_table(uint64_t table_id, uint64_t xid);
@@ -73,7 +68,7 @@ namespace springtail {
         /**
          * Construct a mutable system table.
          */
-        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t xid);
+        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
         /**
          * Retrieve the namespace and name of the table at a given xid/lsn.
@@ -90,15 +85,7 @@ namespace springtail {
         TableMgr(const TableMgr &) = delete;
         void operator=(const TableMgr &) = delete;
 
-        boost::shared_mutex _mutex;
-        std::map<uint64_t, TablePtr> _system_tables;
-        std::map<uint64_t, MutableTablePtr> _mutable_system_tables;
-        std::shared_ptr<ObjectCache<uint64_t, Table>> _table_cache;
-        std::shared_ptr<IOHandle> _handle;
-
-        ExtentCachePtr _read_cache;
-        DataCachePtr _data_cache;
-        MutableBTree::PageCachePtr _write_cache;
-        std::filesystem::path _table_base;
+        boost::shared_mutex _mutex; ///< Protects access to the table manager.
+        std::filesystem::path _table_base; ///< The base directory for individual table directories.
     };
 }

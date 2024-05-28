@@ -1,9 +1,7 @@
 #pragma once
 
-#include <common/object_cache.hh>
-
 #include <storage/btree.hh>
-#include <storage/data_cache.hh>
+#include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 #include <storage/schema_mgr.hh>
 
@@ -15,48 +13,29 @@ namespace springtail {
      */
     class Table : public std::enable_shared_from_this<Table> {
     public:
+        /**
+         * A forward iterator over the rows of a Table object.
+         */
         class Iterator {
+            friend Table;
+
         public:
-            /** Specifically for the end() iterator. */
-            Iterator(const Table *table, BTreePtr btree)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree->end()),
-                  _extent(nullptr)
-            { }
-
-            Iterator(const Table *table,
-                     BTreePtr btree, const BTree::Iterator &btree_i,
-                     ExtentPtr extent, const Extent::Iterator &extent_i)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree_i),
-                  _extent(extent),
-                  _extent_i(extent_i)
-            { }
-
-            Iterator(const Iterator &i)
-                : _table(i._table),
-                  _btree(i._btree),
-                  _btree_i(i._btree_i),
-                  _extent(i._extent),
-                  _extent_i(i._extent_i)
-            { }
-                  
-
             using iterator_category = std::forward_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() const { return *(_extent_i); }
-            pointer operator->() { return &(*(_extent_i)); }
+            reference operator*() const { return *(_page_i); }
+            pointer operator->() { return &(*(_page_i)); }
 
+            /**
+             * Move the iterator forward to the next row.
+             */
             Iterator& operator++() {
                 // move to the next row in the data extent
-                ++_extent_i;
-                if (_extent_i != _extent->end()) {
+                ++_page_i;
+                if (_page_i != _page->end()) {
                     return *this;
                 }
 
@@ -67,40 +46,72 @@ namespace springtail {
                 }
                 
                 // retrieve the data extent
-                _extent = _table->_read_extent_via_primary(_btree_i);
-                _extent_i = _extent->begin();
+                _page = _table->_read_page_via_primary(_btree_i);
+                _page_i = _page->begin();
 
                 return *this;
             }
 
+            /**
+             * Returns a new iterator at the next row.
+             */
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
+            /**
+             * Compares two iterators for equality.
+             */
             friend bool operator==(const Iterator& a, const Iterator& b) {
                 return (a._btree_i == b._btree_i &&
-                        (a._btree_i == a._btree->end() || a._extent_i == b._extent_i));
+                        (a._btree_i == a._btree->end() || a._page_i == b._page_i));
             }
 
+            /**
+             * Compares two iterators for inequality.
+             */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
         private:
-            const Table *_table;
+            /** Specifically for the end() iterator. */
+            Iterator(const Table *table, BTreePtr btree)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree->end()),
+                  _page(nullptr)
+            { }
 
-            BTreePtr _btree;
-            BTree::Iterator _btree_i;
+            /** For constructing an Iterator from the Table functions. */
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     StorageCache::PagePtr page,
+                     const StorageCache::Page::Iterator &page_i)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree_i),
+                  _page(page),
+                  _page_i(page_i)
+            { }
 
-            ExtentPtr _extent;
-            Extent::Iterator _extent_i;
+        private:
+            const Table *_table; ///< A pointer to the Table object this iterator is for.
+
+            BTreePtr _btree; ///< A pointer to the BTree of the primary index.
+            BTree::Iterator _btree_i; ///< An iterator into the BTree.
+
+            StorageCache::PagePtr _page; ///< A pointer to the data page currently being processed.
+            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
         };
 
     public:
+        /**
+         * Table constructor.
+         */
         Table(uint64_t table_id,
               uint64_t xid,
               const std::filesystem::path &table_dir,
               const std::vector<std::string> &primary_key,
               const std::vector<std::vector<std::string>> &secondary_keys,
               std::vector<uint64_t> root_offsets,
-              ExtentSchemaPtr schema,
-              ExtentCachePtr cache);
+              ExtentSchemaPtr schema);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -149,40 +160,60 @@ namespace springtail {
             return Iterator(this, _primary_index);
         }
 
-        BTreePtr secondary(uint32_t idx) {
-            return _secondary_indexes[idx];
+        /**
+         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @return A BTree object of the requested index.
+         */
+        BTreePtr index(uint32_t idx) {
+            if (idx == 0) {
+                return _primary_index;
+            }
+            return _secondary_indexes[idx - 1];
         }
 
-        ExtentPtr read_extent(uint64_t extent_id) const;
+        /**
+         * Reads an extent from the tree and returns it.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::PagePtr read_page(uint64_t extent_id) const;
 
     protected:
-        ExtentPtr _read_extent_via_primary(BTree::Iterator &pos) const;
+        /**
+         * Reads a data extent using the provided iterator position within the primary index.
+         * @param pos The primary index btree iterator.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::PagePtr _read_page_via_primary(BTree::Iterator &pos) const;
 
-        ExtentPtr _read_extent(uint64_t extent_id) const;
+        /**
+         * Reads an extent from the tree and returns it.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::PagePtr _read_page(uint64_t extent_id) const;
 
     private:
         /** The ID of the table. */
         uint64_t _id;
 
-        uint64_t _xid;
-        std::filesystem::path _table_dir;
-        std::vector<std::string> _primary_key;
-        std::vector<std::vector<std::string>> _secondary_keys;
-        ExtentSchemaPtr _schema;
-        ExtentCachePtr _cache;
+        uint64_t _xid; ///< The XID at which this table is being accessed.
+        std::filesystem::path _table_dir; ///< The directory holding the table data.
+        std::vector<std::string> _primary_key; ///< The primary index key columns.
+        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns for each secondary index.
+        ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
 
-        FieldArrayPtr _pkey_fields;
-        FieldPtr _primary_extent_id_f;
-
-        std::shared_ptr<IOHandle> _handle;
+        FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
+        FieldPtr _primary_extent_id_f; ///< The field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
         BTreePtr _primary_index;
 
-        std::vector<BTreePtr> _secondary_indexes;
+        std::vector<BTreePtr> _secondary_indexes; ///< The secondary indexes of the table.
 
-        ExtentSchemaPtr _roots_schema;
-        FieldPtr _roots_root_f;
+        ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
+        FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -191,21 +222,28 @@ namespace springtail {
      */
     class MutableTable : public std::enable_shared_from_this<MutableTable> {
     public:
+        /**
+         * Mutable table constructor.
+         */
         MutableTable(uint64_t id,
+                     uint64_t access_xid,
                      uint64_t target_xid,
                      std::vector<uint64_t> root_offsets,
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
-                     ExtentSchemaPtr schema,
-                     DataCachePtr cache,
-                     MutableBTree::PageCachePtr page_cache,
-                     ExtentCachePtr read_cache);
+                     ExtentSchemaPtr schema);
 
+        /**
+         * Returns the file of the raw data associated with the table.
+         */
         std::filesystem::path data_file() const {
             return _data_file;
         }
 
+        /**
+         * Returns the target XID of this table.
+         */
         uint64_t target_xid() const {
             return _target_xid;
         }
@@ -240,15 +278,8 @@ namespace springtail {
          */
         void update(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
-        /**
-         * Remove the entries into the extent from the primary and secondary indexes.
-         */
-        void invalidate_indexes(uint64_t extent_id, ExtentPtr extent);
 
-        /**
-         * Add the entries in the extent into the primary and secondary indexes.
-         */
-        void populate_indexes(uint64_t extent_id, ExtentPtr extent);
+        void evict_handler(StorageCache::PagePtr page);
 
         /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
@@ -256,6 +287,9 @@ namespace springtail {
          */
         std::vector<uint64_t> finalize();
 
+        /**
+         * Returns the schema of the table.
+         */
         ExtentSchemaPtr schema() const {
             return _schema;
         }
@@ -266,55 +300,134 @@ namespace springtail {
             return _primary_key;
         }
 
+        /**
+         * Returns the table ID of this table.
+         */
         uint64_t id() const {
             return _id;
         }
 
     private:
+        /**
+         * Page callback on evict() / flush_file() that will perform an _invalidate_indexes() and
+         * _flush_and_populate_indexes() on the provided page.
+         */
+        bool _flush_handler(StorageCache::PagePtr page);
+
+        /**
+         * Remove the rows in the page from the primary and secondary indexes.
+         */
+        void _invalidate_indexes(StorageCache::PagePtr page);
+
+        /**
+         * Flush the page and add it's rows into the primary and secondary indexes.
+         */
+        void _flush_and_populate_indexes(StorageCache::PagePtr page);
+
+
+        /**
+         * Inserts a tuple directly into the provided extent at the given XID.
+         */
         void _insert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Inserts a tuple into the "empty" Page object.  Used when the Table started empty.
+         */
+        void _insert_empty(TuplePtr value, uint64_t xid);
+
+        /**
+         * Inserts a tuple at the end of the last extent of the table at the given XID.
+         */
         void _insert_append(TuplePtr value, uint64_t xid);
 
+        /**
+         * Inserts a tuple at the given XID into the extent returned by a primary key lookup using
+         * the tuple.
+         */
         void _insert_by_lookup(TuplePtr value, uint64_t xid);
 
+        /**
+         * Either inserts a tuple directly into the provided extent at the given XID, or updates an
+         * existing row with the same primary key value.
+         */
         void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Upserts a tuple into the "empty" Page object.  Used when the Table started empty.
+         */
+        void _upsert_empty(TuplePtr value, uint64_t xid);
+
+        /**
+         * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
+         * value, using a primary key lookup to find the containing extent.
+         */
         void _upsert_by_lookup(TuplePtr value, uint64_t xid);
 
+        /**
+         * Removes a tuple from the provided extent at the given XID that has the same primary key
+         * value.
+         */
         void _remove_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Removes a row from the "empty" Page object.  Used when the Table started empty.
+         */
+        void _remove_empty(TuplePtr value, uint64_t xid);
+
+        /**
+         * Removes a tuple at the given XID that has the same primary key value by using a primary
+         * key lookup to find the containing extent.
+         */
         void _remove_by_lookup(TuplePtr key, uint64_t xid);
 
+        /**
+         * Removes a tuple at the given XID that has the same primary key value by using a table
+         * scan to find the containing extent.
+         */
         void _remove_by_scan(TuplePtr value, uint64_t xid);
 
+        /**
+         * Updates an existing row with the matching primary key value in the provided extent at the
+         * given XID.
+         */
         void _update_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Updates a row in the "empty" Page object.  Used when the Table started empty.
+         */
+        void _update_empty(TuplePtr value, uint64_t xid);
+
+        /**
+         * Updates an existing row with the matching primary key value at the given XID, using a
+         * primary key lookup to find the containing extent.
+         */
         void _update_by_lookup(TuplePtr key, uint64_t xid);
 
     private:
         /** The ID of the table. */
         uint64_t _id;
 
-        uint64_t _target_xid;
-        std::filesystem::path _table_dir;
-        std::filesystem::path _data_file;
+        uint64_t _access_xid; ///< The access XID for this set of mutations.
+        uint64_t _target_xid; ///< The final target XID for this set of mutations.
+        std::filesystem::path _table_dir; ///< The directory containing the table data.
+        std::filesystem::path _data_file; ///< The file containing the table data extents.
 
-        std::vector<std::string> _primary_key;
-        std::vector<std::vector<std::string>> _secondary_keys;
+        std::vector<std::string> _primary_key; ///< The key columns of the primary index.
+        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns of each secondary index.
 
         /** A lookup version of the primary index.  Pinned to the most recent XID. */
         BTreePtr _primary_lookup;
-        FieldPtr _primary_extent_id_f;
+        FieldPtr _primary_extent_id_f; ///< A field accessor for the extent ID within the primary index extents.
 
         /** The primary index of the table. */
-        MutableBTreePtr _primary_index;
-        std::vector<MutableBTreePtr> _secondary_indexes;
-        ExtentSchemaPtr _schema;
+        MutableBTreePtr _primary_index; ///< The mutable primary index btree.
+        std::vector<MutableBTreePtr> _secondary_indexes; ///< The mutable secondary index btrees.
+        ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
 
-        DataCachePtr _cache;
+        ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
+        MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
-        ExtentSchemaPtr _roots_schema;
-        MutableFieldPtr _roots_root_f;
+        StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

@@ -140,14 +140,14 @@ namespace springtail {
          * @param callback optional callback for eviction, return true/false if eviction ok
          */
         LruObjectCache(uint64_t max, std::function<bool(std::shared_ptr<EntryType>)> callback)
-            : _cache_max(max), _callback(callback)
+            : _cache_size(0), _cache_max(max), _callback(callback)
         { }
 
         /**
          * @brief Construct a new Lru Object Cache object
          * @param max max size of cache, size is based on entry size at insert
          */
-        LruObjectCache(uint64_t max) : _cache_max(max)
+        LruObjectCache(uint64_t max) : _cache_size(0), _cache_max(max)
         { }
 
         /**

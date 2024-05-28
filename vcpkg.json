@@ -1,6 +1,5 @@
 {
     "dependencies": [
-        "minio-cpp",
         "libpq",
         "boost-program-options",
         "boost-container-hash",

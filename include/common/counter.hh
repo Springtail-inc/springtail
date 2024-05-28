@@ -21,7 +21,7 @@ namespace springtail {
         Counter(Counter &&c) = delete;
 
         /** Constructor with initial counter value. */
-        Counter(uint64_t count)
+        explicit Counter(uint64_t count)
             : _count(count)
         { }
 

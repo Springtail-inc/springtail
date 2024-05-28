@@ -16,8 +16,8 @@
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 
-#include <proxy/server.hh>
 #include <proxy/client_session.hh>
+#include <proxy/server.hh>
 
 namespace springtail {
     /**
