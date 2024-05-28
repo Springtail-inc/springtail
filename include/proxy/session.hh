@@ -49,6 +49,8 @@ namespace springtail {
             AUTH_DONE=4,      ///< auth complete
             READY=5,          ///< ready for query
             DEPENDENCIES=6,   ///< waiting on dependencies
+            QUERY=7,          ///< query in progress
+            EXTENDED_ERROR=8, ///< extended message error state
             ERROR=99          ///< fatal error state
         };
 

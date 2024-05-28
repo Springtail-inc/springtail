@@ -8,9 +8,9 @@
 #include <common/logging.hh>
 
 namespace springtail {
-    /** 
+    /**
      * @brief LRU object cache
-     * @details The template interface for a cache of object pointers that ensures size 
+     * @details The template interface for a cache of object pointers that ensures size
      *          limit based on provided object sizes.
      */
     template <class IdType, class EntryType>
@@ -50,7 +50,7 @@ namespace springtail {
     };
 
 
-    /** 
+    /**
      * @brief A least-recently-used policy object cache.
      */
     template <class IdType, class EntryType, class Hash=boost::hash<IdType>>
@@ -103,13 +103,13 @@ namespace springtail {
 
             // with callback, we need to check if entry is evictable
             // reverse iterate through until we find an evictable entry
-            // this is O(n) which isn't great since the lock is held           
+            // this is O(n) which isn't great since the lock is held
             for (auto current = _cache.rbegin(); current != _cache.rend(); current++) {
                 CacheEntry &entry = *current;
                 if (_callback(std::get<1>(entry)) == true) {
                     // callback returned true so we can evict item
                     // reverse iterator is pointing behind of where we want it
-                    _cache.erase(std::next(current).base()); 
+                    _cache.erase(std::next(current).base());
                     _remove_entry(entry);
                     return true;
                 }
@@ -162,7 +162,7 @@ namespace springtail {
         }
 
         /**
-         * @brief Resize the cache, doesn't evict if too many entries exist (if cache oversize) 
+         * @brief Resize the cache, doesn't evict if too many entries exist (if cache oversize)
          *        Eviction will happen on next insert.
          * @param size new max size of cache
          */
@@ -265,6 +265,25 @@ namespace springtail {
 
             // evict until the cache is the correct size
             _check_and_evict();
+        }
+
+        /**
+         * @brief Clear the cache.
+         * @param do_evict if true, evict all entries from the cache calling callback;
+         *                 otherwise just clear without callback
+         */
+        void
+        clear(bool do_evict=false)
+        {
+            if (do_evict && _callback) {
+                while (!_cache.empty()) {
+                    _evict_next();
+                }
+            } else {
+                _cache.clear();
+                _lookup.clear();
+                _cache_size = 0;
+            }
         }
     };
 }

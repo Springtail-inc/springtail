@@ -8,6 +8,19 @@
 namespace springtail {
     class ClientSession; ///< forward declaration
 
+    struct QueryStatus {
+        int query_count = 0;
+        int query_complete_count = 0;
+        int dependency_count = 0;
+        int dependency_complete_count = 0;
+        SessionMsgPtr msg;
+
+        QueryStatus(SessionMsgPtr msg)
+            : msg(msg)
+        {}
+    };
+    using QueryStatusPtr = std::shared_ptr<QueryStatus>;
+
     /**
      * @brief Server session object.
      * This object represents a session with a remote database.
@@ -53,11 +66,13 @@ namespace springtail {
         bool _is_pinned = false;
         std::weak_ptr<ClientSession> _client_session; ///< client session
 
-        DatabaseInstancePtr _instance;       ///< database instance
+        DatabaseInstancePtr _instance;             ///< database instance
 
-        SessionMsgPtr _current_msg;          ///< current message being processed
+        // message state for current client query
+        SessionMsgPtr _current_msg;                ///< current message being processed
+        std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
-        std::set<std::string> _stmts;        ///< issued prepared statement ids
+        std::set<std::string> _stmts;              ///< completed prepared statement ids
 
         /** Send startup message */
         void _send_startup_msg();
@@ -71,9 +86,10 @@ namespace springtail {
         /**
          * Send required statements to fulfil dependency
          * @param dependency dependency to fulfil
-         * @return true if dependency was sent; false if not sent
          */
-        bool _send_dependency(const QueryStmtPtr dependency);
+        void _send_dependency(const QueryStmtPtr dependency);
+
+        void _send_server_msg(QueryStatusPtr query_status);
 
         /** Handle SSL handshake */
         void _handle_ssl_handshake();
@@ -108,8 +124,17 @@ namespace springtail {
         /** Handle forwarded message, first replay dependencies */
         void _handle_msg_to_server(SessionMsgPtr msg);
 
-        /** Handle response to dependency */
-        void _handle_dependency_response();
+        /** Handle dependency response; true if error */
+        void _handle_dependency_response(bool error);
+
+        /** Handle query response */
+        void _handle_query_response();
+
+        /** Handle query error */
+        void _handle_query_error();
+
+        /** Handle ready for query message from server */
+        void _handle_ready_for_query_response(char xact_status);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
 }

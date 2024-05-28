@@ -112,39 +112,44 @@ namespace springtail {
 
         // first handle messages where we just need to forward to client
         switch(code) {
-             // just stream to client
-            case 'X':
-                // Terminate
-                SPDLOG_DEBUG("Terminate");
-                _state = ERROR;
-            // fall through
-            case '1': // Parse complete - response to parse
-            case 's': // Portal suspended
+            // responses to extended query protocol
+            case '1': // Parse complete (parse)
+            case '2': // Bind complete (bind)
+            case '3': // Close complete (close)
+            case 's': // Portal suspended (execute)
+            case 'I': // Empty query response (execute)
+            case 'C': // Command complete (execute, simple query)
+            case 'n': // No data - response to (describe)
+            case 'T': // Row description (describe)
+            case 't': // Parameter description (describe)
+                if (_state == QUERY) {
+                    // we are in query state, continue with query responses
+                    _handle_query_response();
+                    return;
+                }
+                assert (_state != EXTENDED_ERROR);
+
+                // fall through
+
             case 'f': // Copy fail
             case 'c': // Copy done
-            case 't': // Parameter description
-            case 'n': // No data - response to describe
-            case '2': // Bind complete - response to bind
             case 'G': // Copy in response
             case 'H': // Copy out response
             case 'W': // Copy both response
-            case 'I': // Empty query response
-            case 'C': // Command complete
-            case 'T': // Row description
             case 'D': // Data row
             case 'N': // Notice response
                 if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
-                    _handle_dependency_response();
+                    _handle_dependency_response(false);
                     return;
                 }
+
                 _stream_to_remote_session(code, msg_length);
                 return;
         }
 
         // if not handled above then read in full message
         // get a bufffer from the buffer pool
-        // XXX wrap buffer...
         BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
         ssize_t n = _connection->read(buffer->data(), msg_length);
         assert(n == msg_length);
@@ -200,7 +205,22 @@ namespace springtail {
 
             case 'E':
                 // Error response
+                // handle the error code, this determines if error is fatal
+                // it also sends the error response to the client
                 _handle_error_code(buffer);
+                if (_state == ERROR) {
+                    return;
+                }
+
+                // non-fatal error
+                if (_state == QUERY) {
+                    // error during query
+                    _handle_query_error();
+                } else if (_state == DEPENDENCIES) {
+                    // error during dependency checking, shouldn't happen
+                    _handle_dependency_response(true);
+                }
+
                 break;
 
             case 'Z': {
@@ -221,16 +241,18 @@ namespace springtail {
                     break;
                 } else if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
-                    _handle_dependency_response();
+                    _handle_dependency_response(status == 'E');
                     break;
                 }
 
                 // send ready for query to client
                 _send_to_remote_session(code, 1, &status);
 
-                // queue msg for client session that we are ready for query
-                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, status);
-                queue_msg(msg);
+                if (_state == QUERY || _state == EXTENDED_ERROR) {
+                    // we are in query state, and we have received ready for query
+                    // this means the query is complete
+                    _handle_ready_for_query_response(status);
+                }
 
                 break;
             }
@@ -592,79 +614,182 @@ namespace springtail {
     }
 
     void
-    ServerSession::_handle_dependency_response()
+    ServerSession::_handle_dependency_response(bool error)
     {
+        // response to dependency
         // reset state to ready
         assert (_state == DEPENDENCIES);
-        _state = READY;
+        assert (!error);
 
-        // add dependency to appropriate set
-        auto dep = _current_msg->peek_dependency();
-        _stmts.insert(dep->get_hash());
+        QueryStatusPtr query_status = _pending_queue.front();
 
-        // remove this dependency
-        _current_msg->pop_dependency();
+        // add dependency to cache
+        auto dep = query_status->msg->get_dependency(query_status->dependency_complete_count);
+        assert (dep->type == QueryStmt::Type::PREPARE);
+        _stmts.insert(dep->get_hashed_name());
 
-        // check for additional dependencies and issue to server
-        _handle_msg_to_server(_current_msg);
+        query_status->dependency_complete_count++;
+
+        if (query_status->dependency_complete_count == query_status->dependency_count) {
+            // all dependencies complete
+            _state = QUERY;
+        }
+    }
+
+    void
+    ServerSession::_handle_query_error()
+    {
+        QueryStatusPtr query_status = _pending_queue.front();
+        // pop the query from the queue, and issue response
+        _pending_queue.pop();
+        query_status->msg->set_msg_response(false, query_status->query_complete_count);
+        queue_msg(query_status->msg);
+
+        // if we are in extended error state, we need to wait for
+        // sync message and won't get any responses until then
+        if (query_status->msg->data()->is_extended()) {
+            _state = EXTENDED_ERROR;
+
+            // iterate through all pending messages and set them to error
+            while (!_pending_queue.empty()) {
+                query_status = _pending_queue.front();
+                if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
+                    // wait for query ready
+                    return;
+                }
+
+                // pop the query from the queue, and issue response
+                _pending_queue.pop();
+                query_status->msg->set_msg_response(false, query_status->query_complete_count);
+                queue_msg(query_status->msg);
+            }
+        }
+    }
+
+    void
+    ServerSession::_handle_ready_for_query_response(char xact_status)
+    {
+        SessionMsg::MsgStatus msg_status = {xact_status};
+
+        // check if current message is a sync message
+        QueryStatusPtr query_status = _pending_queue.front();
+        if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
+            _pending_queue.pop();
+            query_status->msg->set_status_ready(msg_status);
+            queue_msg(query_status->msg);
+        } else {
+            // if last message was a simple query then we would have returned earlier
+            // create a new message to send to client
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, msg_status);
+            queue_msg(msg);
+        }
+
+        // if all queries complete, set state to ready
+        if (_pending_queue.empty()) {
+            _state = READY;
+        }
+    }
+
+    void
+    ServerSession::_handle_query_response()
+    {
+        assert (_state == QUERY);
+
+        // no error, mark query as complete
+        QueryStatusPtr query_status = _pending_queue.front();
+        query_status->query_complete_count++;
+        if (query_status->query_complete_count == query_status->query_count) {
+            // this query is complete, send response to client session
+            _pending_queue.pop();
+            query_status->msg->set_msg_response(true, query_status->query_complete_count);
+            queue_msg(query_status->msg);
+        }
+
+        // if all queries complete, set state to ready
+        if (_pending_queue.empty()) {
+            _state = READY;
+        }
     }
 
     void
     ServerSession::_handle_msg_to_server(SessionMsgPtr msg)
     {
-        _state = READY;
-        _current_msg = msg;
+        // entry point for client session message to server
+        // we send all dependencies and then the server msg
+        // NOTE: this may be called multiple times before
+        // receiving a response from the server (if client
+        // is pipelining queries)
 
-        // get set of dependencies and issue them to the server
-        auto dep = msg->peek_dependency();
-        while (dep != nullptr) {
-            // look at the next dependency
-            if (_send_dependency(dep)) {
+        // track the query status
+        QueryStatusPtr query_status = std::make_shared<QueryStatus>(msg);
+        _pending_queue.push(query_status);
+
+        // get dependencies and issue them to server
+        int num_dependencies = msg->num_dependencies();
+        if (_state == READY && num_dependencies > 0) {
+            _state = DEPENDENCIES;
+        }
+
+        for (int i = 0; i < num_dependencies; i++) {
+            auto dep = msg->get_dependency(i);
+            assert (dep->type == QueryStmt::Type::PREPARE);
+            std::string hashed_name = dep->get_hashed_name();
+            if (_stmts.contains(hashed_name)) {
+                // already prepared, no need to send to server
+                continue;
+            }
+            query_status->dependency_count++;
+            _send_dependency(dep);
+        }
+
+        // send the message to server
+        _send_server_msg(query_status);
+    }
+
+    void
+    ServerSession::_send_server_msg(QueryStatusPtr query_status)
+    {
+        SessionMsgPtr msg = query_status->msg;
+        // queue server message
+        if (_state == READY) {
+            _state = QUERY;
+        }
+
+        QueryStmtPtr qs = msg->data();
+
+        if (qs->data_type == QueryStmt::DataType::SIMPLE) {
+            _handle_simple_query(qs->query());
+        } else {
+            assert (qs->data_type == QueryStmt::DataType::PACKET);
+            BufferPtr buffer = qs->buffer();
+            ssize_t n = _connection->write(buffer->data(), buffer->size());
+            assert(n == buffer->size());
+        }
+    }
+
+    void
+    ServerSession::_send_dependency(const QueryStmtPtr query_stmt)
+    {
+        // check if we have a buffer to send or a simple query to send
+        switch (query_stmt->data_type) {
+            case QueryStmt::DataType::SIMPLE:
+                // send the simple query
+                _state = DEPENDENCIES;
+                _handle_simple_query(query_stmt->query());
+                return;
+
+            case QueryStmt::DataType::PACKET: {
+                // send the packet
+                _state = DEPENDENCIES;
+                BufferPtr buffer = query_stmt->buffer();
+                ssize_t n = _connection->write(buffer->data(), buffer->size());
+                assert(n == buffer->size());
                 return;
             }
 
-            // remove dependency it no msg send necessary;
-            // otherwise dep is removed in _handle_dependency_response
-            msg->pop_dependency();
-        }
-
-        // no more dependencies, send the message to server
-        BufferPtr buffer = msg->get_buffer();
-        ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
-    }
-
-    bool
-    ServerSession::_send_dependency(const QueryStmtPtr query_stmt)
-    {
-        _state = DEPENDENCIES;
-
-        // check if we have a buffer to send or a simple query
-        // send the query
-
-        switch (query_stmt->type()) {
-            case QueryStmt::Type::SIMPLE:
-                // send the simple query
-                _handle_simple_query(query_stmt->get_query());
-                return true;
-
-            case QueryStmt::Type::PACKET: {
-                // send the packet
-                BufferPtr buffer = query_stmt->get_buf();
-                ssize_t n = _connection->write(buffer->data(), buffer->size());
-                assert(n == buffer->size());
-                return true;
-            }
-
-            case QueryStmt::Type::NOT_CACHED:
-                SPDLOG_WARN("Query not cached");
-                // nothing to do, it should reside on the primary
-                // continue to next dependency
-
-                // fall through
             default:
-                _state = READY;
-                return false;
+                SPDLOG_WARN("Query not cached");
+                assert(0); // shouldn't be set as a dependency it should reside on the primary
         }
     }
 

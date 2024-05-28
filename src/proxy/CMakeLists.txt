@@ -16,6 +16,7 @@ set(PROXY_SOURCES
     user_mgr.cc
     parser.cc
     buffer_pool.cc
+    history_cache.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})

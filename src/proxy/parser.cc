@@ -29,7 +29,10 @@ namespace springtail {
         {Parser::StmtContext::PREPARE_STMT, "PREPARE_STMT"},
         {Parser::StmtContext::EXECUTE_STMT, "EXECUTE_STMT"},
         {Parser::StmtContext::TRANSACTION_BEGIN_STMT, "TRANSACTION_BEGIN_STMT"},
-        {Parser::StmtContext::TRANSACTION_OTHER_STMT, "TRANSACTION_OTHER_STMT"},
+        {Parser::StmtContext::TRANSACTION_COMMIT_STMT, "TRANSACTION_COMMIT_STMT"},
+        {Parser::StmtContext::TRANSACTION_ROLLBACK_STMT, "TRANSACTION_ROLLBACK_STMT"},
+        {Parser::StmtContext::TRANSACTION_PREPARE_STMT, "TRANSACTION_PREPARE_STMT"},
+        {Parser::StmtContext::TRANSACTION_PREPARE_END_STMT, "TRANSACTION_PREPARE_END_STMT"},
         {Parser::StmtContext::DEALLOCATE_STMT, "DEALLOCATE_STMT"},
         {Parser::StmtContext::DISCARD_STMT, "DISCARD_STMT"},
         {Parser::StmtContext::DISCARD_ALL_STMT, "DISCARD_ALL_STMT"},
@@ -50,7 +53,9 @@ namespace springtail {
         Parser::StmtContext::UNSUPPORTED_STMT,
         Parser::StmtContext::LISTEN_STMT,
         Parser::StmtContext::UNLISTEN_STMT,
-        Parser::StmtContext::VAR_SET_TRANSACTION_SNAPSHOT_STMT
+        Parser::StmtContext::VAR_SET_TRANSACTION_SNAPSHOT_STMT,
+        Parser::StmtContext::TRANSACTION_PREPARE_STMT,
+        Parser::StmtContext::TRANSACTION_PREPARE_END_STMT,
     };
 
     void
@@ -438,11 +443,17 @@ namespace springtail {
                     _set_string(stmt->savepoint_name, context->name);
                     break;
                 case TRANS_STMT_COMMIT:
+                    context->type = StmtContext::TRANSACTION_COMMIT_STMT;
+                    break;
                 case TRANS_STMT_ROLLBACK:
+                    context->type = StmtContext::TRANSACTION_ROLLBACK_STMT;
+                    break;
                 case TRANS_STMT_PREPARE:
+                    context->type = StmtContext::TRANSACTION_PREPARE_STMT;
+                    break;
                 case TRANS_STMT_COMMIT_PREPARED:
                 case TRANS_STMT_ROLLBACK_PREPARED:
-                    context->type = StmtContext::TRANSACTION_OTHER_STMT;
+                    context->type = StmtContext::TRANSACTION_PREPARE_END_STMT;
                     break;
             }
 
@@ -556,6 +567,11 @@ namespace springtail {
 
             break;
         }
+
+        case T_ParamRef:
+            SPDLOG_DEBUG("Parser node: paramref");
+            context->has_param_ref = true;
+            break;
 
         default:
             SPDLOG_DEBUG("Parser node: node {}", (int)nodeTag(node));

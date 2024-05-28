@@ -5,11 +5,13 @@
 #include <utility>
 
 #include <proxy/session.hh>
+#include <proxy/server_session.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
-#include <proxy/query_stmt_cache.hh>
+#include <proxy/history_cache.hh>
+#include <proxy/parser.hh>
 
 namespace springtail {
     class ProxyServer;
@@ -52,8 +54,9 @@ namespace springtail {
 
     private:
         /** prepared statement/portal stmt cache; name to query stmt/packet */
-        QueryStmtCache _stmt_cache;
-        /** portal name to prepared name map */
+        StatementCache _stmt_cache;
+
+        /** portal name to prepared name map for bind */
         std::map<std::string, std::string> _portal_map;
 
         std::weak_ptr<ServerSession> _primary_session; ///< primary server session
@@ -90,11 +93,24 @@ namespace springtail {
         /** Does primary server pool exist */
         bool _primary_pool_exists();
 
-        /** Parse a query and return type of server session that can handle it */
-        Type _parse_query(const std::string_view query, SessionMsgPtr msg);
+        /**
+         * @brief Parse a simple query and return type of server session that can handle it
+         * @param buffer buffer holding original query
+         * @param query query to parse (multiple queries separated by ';')
+         * @param dependencies vector of query statements that need to be fulfilled
+         * @return query statement that holds the parsed query stmts as children
+         */
+        QueryStmtPtr _parse_simple_query(const BufferPtr buffer, const std::string_view query, std::vector<QueryStmtPtr> &dependencies);
+
+        /**
+         * @brief Remap a parse type from the parser context to a QueryStmt::Type
+         * @param context parser context
+         * @return QueryStmt::Type remapped type
+         */
+        QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context) const;
 
         /** Select a server session based on type */
-        ServerSessionPtr _select_session_and_notify(Type type, SessionMsgPtr msg);
+        ServerSessionPtr _select_session(Type type);
 
         /** Release server session back to session pool */
         void _release_server_session();

@@ -32,7 +32,10 @@ namespace springtail {
                 PREPARE_STMT,
                 EXECUTE_STMT,
                 TRANSACTION_BEGIN_STMT,
-                TRANSACTION_OTHER_STMT,
+                TRANSACTION_COMMIT_STMT,
+                TRANSACTION_ROLLBACK_STMT,
+                TRANSACTION_PREPARE_STMT,
+                TRANSACTION_PREPARE_END_STMT,
                 DEALLOCATE_STMT,
                 DISCARD_STMT,
                 DISCARD_ALL_STMT,
@@ -48,12 +51,13 @@ namespace springtail {
             } type = INVALID;
 
             // clauses
-            bool has_select_query=false;
-            bool has_unsupported_query=false;
-            bool has_locking=false;
-            bool has_into=false;
-            bool has_declare_hold=false;
+            bool has_select_query=false;      ///< has a select query embedded (e.g., a PREPARE with select)
+            bool has_unsupported_query=false; ///< has an unsupported query embedded
+            bool has_locking=false;           ///< has a locking clause (e.g., FOR UPDATE)
+            bool has_into=false;              ///< has an INTO clause
+            bool has_declare_hold=false;      ///< has a WITH HOLD clause (for cursors)
             bool has_is_local=false;
+            bool has_param_ref=false;
 
             // state
             bool has_error=false;
