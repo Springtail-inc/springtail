@@ -140,6 +140,10 @@ namespace springtail {
             return _associated_session;
         }
 
+        Session::Type associated_session_type() const {
+            return _associated_session->_type;
+        }
+
         /** Is this session blocked waiting for another session to complete */
         bool is_waiting_on_session() const {
             return _waiting_on_session;
@@ -191,11 +195,19 @@ namespace springtail {
             remote_session->_msg_queue.push(msg);
         }
 
+        /**
+         * @brief Queue message on associated session
+         * @param msg Message to queue
+         */
         void queue_msg(SessionMsgPtr msg) {
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
         }
 
+        /**
+         * @brief Check if message queue is empty
+         * @return true if empty
+         */
         bool is_msg_queue_empty() {
             return _msg_queue.empty();
         }

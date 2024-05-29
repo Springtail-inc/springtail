@@ -50,8 +50,18 @@ namespace springtail {
         case SessionMsg::MSG_CLIENT_SERVER_BIND:
         case SessionMsg::MSG_CLIENT_SERVER_DESCRIBE:
         case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
+        case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
+        case SessionMsg::MSG_CLIENT_SERVER_SYNC:
             _handle_msg_to_server(msg);
             break;
+
+        case SessionMsg::MSG_CLIENT_SERVER_FORWARD: {
+            // forward the message to the server
+            BufferPtr buffer = msg->buffer();
+            ssize_t n = _connection->write(buffer->data(), buffer->size());
+            assert(n == buffer->size());
+            break;
+        }
 
         default:
             SPDLOG_WARN("Unknown message: {:d}", (int8_t)msg->type());
@@ -143,7 +153,7 @@ namespace springtail {
             case 'W': // Copy both response
             case 'D': // Data row
             case 'N': // Notice response
-            case 'A': // Notification response
+            case 'A': // Notification response (async from a listen)
                 _stream_to_remote_session(code, msg_length);
                 return;
         }
@@ -182,15 +192,20 @@ namespace springtail {
             }
 
             case 'S': {
-                // parameter status
-                assert(_state == AUTH_DONE);
+                // parameter status: either during authentication or as a result of a SET
 
                 // Parameter status
                 std::string_view key = buffer->get_string();
                 std::string_view value = buffer->get_string();
 
-                // may want to store this to give back to client
                 SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
+
+                if (_state > AUTH_DONE) {
+                    // still in auth negotiation state
+                    // may want to send these to client
+                    break;
+                }
+                _send_to_remote_session(code, msg_length, buffer->data());
 
                 break;
             }
@@ -673,7 +688,7 @@ namespace springtail {
 
         // check if current message is a sync message
         QueryStatusPtr query_status = _pending_queue.front();
-        if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
+        if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
             _pending_queue.pop();
             query_status->msg->set_status_ready(msg_status);
             queue_msg(query_status->msg);

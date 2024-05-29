@@ -29,6 +29,8 @@ namespace springtail {
             MSG_CLIENT_SERVER_DESCRIBE=4,     ///< describe packet; data buffer
             MSG_CLIENT_SERVER_EXECUTE=5,      ///< execute packet; data buffer
             MSG_CLIENT_SERVER_CLOSE=6,        ///< close packet; data buffer
+            MSG_CLIENT_SERVER_SYNC=7,         ///< sync packet; data buffer
+            MSG_CLIENT_SERVER_FORWARD=8,      ///< forward packet; data buffer
 
             ///// server to client messages
             MSG_SERVER_CLIENT_AUTH_DONE=50,   ///< auth complete; no data
@@ -48,6 +50,10 @@ namespace springtail {
             : _type(type), _status(status)
         {}
 
+        SessionMsg(Type type, BufferPtr buffer)
+            : _type(type), _buffer(buffer)
+        {}
+
         /** Constructor without data */
         SessionMsg(Type type)
             : _type(type)
@@ -63,6 +69,10 @@ namespace springtail {
         /** Get status */
         const MsgStatus &status() const {
             return _status;
+        }
+
+        const BufferPtr buffer() const {
+            return _buffer;
         }
 
         /** Get query statement ptr from dependency queue; otherwise nullptr if none */
@@ -122,9 +132,14 @@ namespace springtail {
             return std::make_shared<SessionMsg>(type, data);
         }
 
+        static std::shared_ptr<SessionMsg> create(Type type, BufferPtr data) {
+            return std::make_shared<SessionMsg>(type, data);
+        }
+
     private:
         Type _type;                              ///< message type
         QueryStmtPtr _data=nullptr;              ///< message data
+        BufferPtr _buffer;                       ///< buffer for message data
         MsgStatus _status;                       ///< message status
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements

@@ -669,17 +669,58 @@ namespace springtail {
                 _handle_simple_query(buffer);
                 break;
 
-            case 'X': {
+            case 'X':
                 // terminate
                 SPDLOG_DEBUG("Terminate request");
                 _state = ERROR;
                 return;
-            }
+
+            case 'F': // function call
+                _handle_function_call(buffer);
+                break;
+
+            case 'S': // sync
+                _handle_sync(buffer);
+                break;
+
+            case 'H': // flush
+            case 'f': // copy fail
+            case 'c': // copy done
+            case 'd': // copy data
+                // forward to server, should have associated server session
+                _forward_to_server(buffer);
+                break;
+
             default:
                 SPDLOG_ERROR("Unsupported request code: {}", code);
                 throw ProxyMessageError();
             }
         }
+    }
+
+    void
+    ClientSession::_forward_to_server(BufferPtr buffer)
+    {
+        // forward the message to the server session
+        if (get_associated_session() == nullptr) {
+            SPDLOG_ERROR("No associated server session");
+            assert(0); // doesn't make sense to forward without a server session
+        }
+
+        // create a message and queue it
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer);
+        queue_msg(msg);
+    }
+
+    void
+    ClientSession::_handle_function_call(BufferPtr buffer)
+    {
+        // doc's state that this should really be deprecated and not used
+        // instead clients should use a prepared statement
+
+        // send to primary server session
+        _select_session(PRIMARY);
+        queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer));
     }
 
     void
@@ -895,6 +936,22 @@ namespace springtail {
         // notify server session
         _select_session(qs->is_read_safe ? REPLICA : PRIMARY);
         queue_msg(msg);
+    }
+
+    void
+    ClientSession::_handle_sync(BufferPtr buffer)
+    {
+        SPDLOG_DEBUG("Sync request");
+        if (get_associated_session() == nullptr) {
+            // this is a weird case as it doesn't make sense to issue
+            // a sync without a set of other extended queries preceeding it
+            // but we'll handle it anyway, just issue a sync to the server
+            _select_session(REPLICA);
+        }
+
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer,
+            associated_session_type() == REPLICA);
+        queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs));
     }
 
     void

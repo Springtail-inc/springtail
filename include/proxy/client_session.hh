@@ -53,11 +53,8 @@ namespace springtail {
         void _process_msg(SessionMsgPtr msg) override;
 
     private:
-        /** prepared statement/portal stmt cache; name to query stmt/packet */
+        /** cache of statements, transaction history and session history */
         StatementCache _stmt_cache;
-
-        /** portal name to prepared name map for bind */
-        std::map<std::string, std::string> _portal_map;
 
         std::weak_ptr<ServerSession> _primary_session; ///< primary server session
         std::weak_ptr<ServerSession> _replica_session; ///< replica server session
@@ -84,6 +81,10 @@ namespace springtail {
         void _handle_describe(BufferPtr buffer);
         void _handle_execute(BufferPtr buffer);
         void _handle_close(BufferPtr buffer);
+        void _handle_sync(BufferPtr buffer);
+        void _handle_function_call(BufferPtr buffer);
+
+        void _forward_to_server(BufferPtr buffer);
 
         void _send_auth_req();
         void _send_auth_done();
