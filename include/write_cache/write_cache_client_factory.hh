@@ -15,7 +15,7 @@ namespace springtail {
     /**
      * @brief Object pool factory for thrift cache client objects
      */
-    class ThriftObjectFactory : public ObjectPoolFactory<thrift::ThriftWriteCacheClient>
+    class ThriftObjectFactory : public ObjectPoolFactory<thrift::write_cache::ThriftWriteCacheClient>
     {
     public:
         ThriftObjectFactory(const std::string &server, int port)
@@ -26,7 +26,7 @@ namespace springtail {
          * @brief Allocate a new client; transport is not connected
          * @return std::shared_ptr<thrift::ThriftWriteCacheClient>
          */
-        std::shared_ptr<thrift::ThriftWriteCacheClient> allocate() override
+        std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> allocate() override
         {
             std::shared_ptr<apache::thrift::transport::TSocket> socket =
                 std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
@@ -39,8 +39,8 @@ namespace springtail {
                 std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol =
                 std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
-            std::shared_ptr<thrift::ThriftWriteCacheClient> client =
-                std::make_shared<thrift::ThriftWriteCacheClient>(protocol);
+            std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client =
+                std::make_shared<thrift::write_cache::ThriftWriteCacheClient>(protocol);
 
             return client;
         }
@@ -50,7 +50,7 @@ namespace springtail {
          *        before returning.
          * @param client
          */
-        void get_cb(std::shared_ptr<thrift::ThriftWriteCacheClient> client) override
+        void get_cb(std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client) override
         {
             // validate that the transport is connected
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();

@@ -27,21 +27,22 @@ find_program(
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
 # set variables for thrift schema .thrift file and generated .h
-file(GLOB THRIFT_FILES "*.thrift")
+# file(GLOB THRIFT_FILES "*.thrift")
+set(THRIFT_FILES write_cache.thrift xid_mgr.thrift)
 
 # iterate over all thrift files; generate the cpp and h files and link them into libraries
 foreach(THRIFT_FILE ${THRIFT_FILES})
-    MESSAGE(STATUS "Processing thrift file: ${THRIFT_FILE_PATH}")
-
     # extract thrift base file name and set the paths
     get_filename_component(THRIFT_FILE_NAME ${THRIFT_FILE} NAME_WE)
     set(THRIFT_FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/${THRIFT_FILE_NAME}.thrift)
     set(THRIFT_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/${THRIFT_FILE_NAME})
     set(THRIFT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include/thrift/${THRIFT_FILE_NAME})
 
+    MESSAGE(STATUS "Processing thrift file: ${THRIFT_FILE_PATH}")
+
     set(EXTRACTED_SERVICE_NAME "")  # Initialize variable to store the extracted service name
 
-    # Execute process with capture to exract service name from thrift file
+    # Execute process with capture to extract service name from thrift file
     execute_process(
         COMMAND ${GREP_COMMAND} service ${THRIFT_FILE_PATH}
         OUTPUT_VARIABLE EXTRACTED_SERVICE_NAME  # Capture output in variable
@@ -65,7 +66,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
         OUTPUT ${THRIFT_GEN_FILES}
         COMMAND mkdir -p ${THRIFT_GEN_DIR}
         COMMAND mkdir -p ${THRIFT_INCLUDE_DIR}
-        COMMAND ${THRIFT_COMPILER} --gen cpp:no_skeleton,pure_enums,moveable_types -out ${THRIFT_GEN_DIR} ${THRIFT_FILE_PATH}
+        COMMAND ${THRIFT_COMPILER} -I ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types -out ${THRIFT_GEN_DIR} ${THRIFT_FILE_PATH}
         COMMAND ${CP_COMMAND} ${THRIFT_GEN_DIR}/*.h ${THRIFT_INCLUDE_DIR}
         DEPENDS ${THRIFT_FILE_PATH}
         COMMENT "Generating thrift files for ${THRIFT_FILE} into ${THRIFT_GEN_DIR}"

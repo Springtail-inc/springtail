@@ -51,7 +51,12 @@ namespace springtail {
          */
         void drop_table(uint64_t xid, uint64_t lsn, const PgMsgDropTable &msg);
 
-    protected:
+        /**
+         * Update the roots of a table.
+         */
+        void update_roots(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const std::vector<uint64_t> &roots);
+
+    private:
         static TableMgr *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
@@ -79,6 +84,11 @@ namespace springtail {
          * Converts a Postgres type to a Springtail type.
          */
         SchemaType _convert_pg_type(const std::string &pg_type);
+
+        /**
+         * Find the roots of a given table from the TableRoots system table.
+         */
+        std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);
 
     private:
         // singleton; delete copy constructor
