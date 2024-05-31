@@ -57,7 +57,7 @@ namespace springtail {
         // construct the thrift client pool.
         // First argument is a factory object that constructs a thrift clients
         // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::ThriftXidMgrClient>>(
+        _thrift_client_pool = std::make_shared<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>>(
             std::make_shared<ThriftObjectFactory>(server, port),
             max_connections/2,
             max_connections
@@ -70,7 +70,7 @@ namespace springtail {
     XidMgrClient::ping()
     {
         ThriftClient c = _get_client();
-        thrift::Status result;
+        thrift::xid_mgr::Status result;
 
         c.client->ping(result);
 
@@ -82,7 +82,7 @@ namespace springtail {
     XidMgrClient::commit_xid(uint64_t xid)
     {
         ThriftClient c = _get_client();
-        thrift::Status result;
+        thrift::xid_mgr::Status result;
 
         c.client->commit_xid(result, xid);
 
@@ -93,7 +93,7 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::xid_t xid = c.client->get_committed_xid();
+        thrift::xid_mgr::xid_t xid = c.client->get_committed_xid();
 
         return xid;
     }

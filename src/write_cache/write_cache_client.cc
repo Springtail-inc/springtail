@@ -67,7 +67,7 @@ namespace springtail {
         // construct the thrift client pool.
         // First argument is a factory object that constructs a thrift clients
         // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::ThriftWriteCacheClient>>(
+        _thrift_client_pool = std::make_shared<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>>(
             std::make_shared<ThriftObjectFactory>(server, port),
             max_connections/2,
             max_connections
@@ -91,7 +91,7 @@ namespace springtail {
     WriteCacheClient::ping()
     {
         ThriftClient c = _get_client();
-        thrift::Status result;
+        thrift::write_cache::Status result;
 
         c.client->ping(result);
 
@@ -103,21 +103,21 @@ namespace springtail {
     WriteCacheClient::add_table_change(uint64_t tid, TableChange &change)
     {
         ThriftClient c = _get_client();
-        thrift::Status result;
+        thrift::write_cache::Status result;
 
-        thrift::TableChange request;
+        thrift::write_cache::TableChange request;
         request.table_id = tid;
         request.xid = change.xid;
         request.xid_seq = change.xid_seq;
         if (change.op == TableOp::TRUNCATE) {
-            request.op = thrift::TableChangeOpType::TRUNCATE_TABLE;
+            request.op = thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE;
         } else if (change.op == TableOp::SCHEMA_CHANGE) {
-            request.op = thrift::TableChangeOpType::SCHEMA_CHANGE;
+            request.op = thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE;
         }
 
         c.client->add_table_change(result, request);
 
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 
@@ -129,15 +129,15 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::AddRowsRequest request;
-        thrift::Status result;
+        thrift::write_cache::AddRowsRequest request;
+        thrift::write_cache::Status result;
 
         request.table_id = tid;
         request.extent_id = eid;
 
         // marshall up rows
         for (auto &&r: rows) {
-            thrift::Row row;
+            thrift::write_cache::Row row;
             row.xid = r.xid;
             row.xid_seq = r.xid_seq;
             row.primary_key = std::move(r.pkey);
@@ -149,12 +149,12 @@ namespace springtail {
                 row.__isset.data = true;
 
                 if (r.op == RowOp::INSERT) {
-                    row.op = thrift::RowOpType::INSERT;
+                    row.op = thrift::write_cache::RowOpType::INSERT;
                 } else {
-                    row.op = thrift::RowOpType::UPDATE;
+                    row.op = thrift::write_cache::RowOpType::UPDATE;
                 }
             } else {
-                row.op = thrift::RowOpType::DELETE;
+                row.op = thrift::write_cache::RowOpType::DELETE;
             }
 
             request.rows.push_back(std::move(row));
@@ -162,7 +162,7 @@ namespace springtail {
 
         c.client->add_rows(result, request);
 
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 
@@ -174,8 +174,8 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::GetTableChangeRequest request;
-        thrift::GetTableChangeResponse response;
+        thrift::write_cache::GetTableChangeRequest request;
+        thrift::write_cache::GetTableChangeResponse response;
 
         request.table_id = tid;
         request.start_xid = start_xid;
@@ -191,9 +191,9 @@ namespace springtail {
             TableChange change;
             change.xid = chg.xid;
             change.xid_seq = chg.xid_seq;
-            if (chg.op == thrift::TableChangeOpType::TRUNCATE_TABLE) {
+            if (chg.op == thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE) {
                 change.op = TableOp::TRUNCATE;
-            } else if (chg.op == thrift::TableChangeOpType::SCHEMA_CHANGE) {
+            } else if (chg.op == thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE) {
                 change.op = TableOp::SCHEMA_CHANGE;
             }
             changes.push_back(std::move(change));
@@ -207,8 +207,8 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::ListTablesRequest request;
-        thrift::ListTablesResponse response;
+        thrift::write_cache::ListTablesRequest request;
+        thrift::write_cache::ListTablesResponse response;
 
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -229,8 +229,8 @@ namespace springtail {
         ThriftClient c = _get_client();
         std::vector<uint64_t> extents;
 
-        thrift::ListExtentsRequest request;
-        thrift::ListExtentsResponse response;
+        thrift::write_cache::ListExtentsRequest request;
+        thrift::write_cache::ListExtentsResponse response;
 
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -252,8 +252,8 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::GetRowsRequest request;
-        thrift::GetRowsResponse response;
+        thrift::write_cache::GetRowsRequest request;
+        thrift::write_cache::GetRowsResponse response;
 
         request.table_id = tid;
         request.extent_id = eid;
@@ -274,11 +274,11 @@ namespace springtail {
             row.xid_seq = r.xid_seq;
             row.pkey = std::move(r.primary_key);
             row.data = std::move(r.data);
-            if (r.op == thrift::RowOpType::UPDATE) {
+            if (r.op == thrift::write_cache::RowOpType::UPDATE) {
                 row.op = RowOp::UPDATE;
-            } else if (r.op == thrift::RowOpType::INSERT) {
+            } else if (r.op == thrift::write_cache::RowOpType::INSERT) {
                 row.op = RowOp::INSERT;
-            } else if (r.op == thrift::RowOpType::DELETE) {
+            } else if (r.op == thrift::write_cache::RowOpType::DELETE) {
                 row.op = RowOp::DELETE;
             }
 
@@ -293,15 +293,15 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::EvictTableRequest request;
-        thrift::Status result;
+        thrift::write_cache::EvictTableRequest request;
+        thrift::write_cache::Status result;
 
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
 
         c.client->evict_table(result, request);
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 
@@ -313,15 +313,15 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::EvictTableChangesRequest request;
-        thrift::Status result;
+        thrift::write_cache::EvictTableChangesRequest request;
+        thrift::write_cache::Status result;
 
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
 
         c.client->evict_table_changes(result, request);
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 
@@ -333,8 +333,8 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::SetCleanFlagRequest request;
-        thrift::Status result;
+        thrift::write_cache::SetCleanFlagRequest request;
+        thrift::write_cache::Status result;
 
         request.table_id = tid;
         request.extent_id = eid;
@@ -342,7 +342,7 @@ namespace springtail {
         request.end_xid = end_xid;
 
         c.client->set_clean_flag(result, request);
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 
@@ -354,15 +354,15 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::ResetCleanFlagRequest request;
-        thrift::Status result;
+        thrift::write_cache::ResetCleanFlagRequest request;
+        thrift::write_cache::Status result;
 
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
 
         c.client->reset_clean_flag(result, request);
-        if (result.status != thrift::StatusCode::SUCCESS) {
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
 

@@ -18,7 +18,7 @@
 
 #include <write_cache/write_cache_client.hh>
 
-namespace springtail {
+namespace springtail::gc {
 
     /**
      * Class to handle parsing the log and creating entries for the write cache.
@@ -29,7 +29,7 @@ namespace springtail {
      *   3. Generate write cache entries from the log entries by looking up the affected extent_id for each entry
      *   4. Send the data to the write cache
      *
-     * The work of the GCLogParser is performed in two phases.  In the first phase, a Reader accepts
+     * The work of the LogParser is performed in two phases.  In the first phase, a Reader accepts
      * a message about a complete XID from the log manager, which scans the logs for mutations which
      * as passed individually to the second phase.  In the second phase, a Parser accepts mutations
      * from the Reader, performs a lookup for the affected extent IDs, and submits the mutations to
@@ -38,10 +38,10 @@ namespace springtail {
      * which can cause XID processing to be blocked until those mutations are found and processed
      * within the log.
      */
-    class GCLogParser {
+    class LogParser {
     public:
-        GCLogParser(uint32_t reader_count,
-                    uint32_t parser_count)
+        LogParser(uint32_t reader_count,
+                  uint32_t parser_count)
             : _readers(reader_count),
               _parsers(parser_count)
         {

@@ -15,7 +15,7 @@ namespace springtail {
     /**
      * @brief Object pool factory for thrift cache client objects
      */
-    class ThriftObjectFactory : public ObjectPoolFactory<thrift::ThriftXidMgrClient>
+    class ThriftObjectFactory : public ObjectPoolFactory<thrift::xid_mgr::ThriftXidMgrClient>
     {
     public:
         ThriftObjectFactory(const std::string &server, int port)
@@ -24,9 +24,9 @@ namespace springtail {
 
         /**
          * @brief Allocate a new client; transport is not connected
-         * @return std::shared_ptr<thrift::ThriftWriteCacheClient>
+         * @return std::shared_ptr<thrift::xid_mgr::ThriftWriteCacheClient>
          */
-        std::shared_ptr<thrift::ThriftXidMgrClient> allocate() override
+        std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> allocate() override
         {
             std::shared_ptr<apache::thrift::transport::TSocket> socket =
                 std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
@@ -39,8 +39,8 @@ namespace springtail {
                 std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol =
                 std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
-            std::shared_ptr<thrift::ThriftXidMgrClient> client =
-                std::make_shared<thrift::ThriftXidMgrClient>(protocol);
+            std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client =
+                std::make_shared<thrift::xid_mgr::ThriftXidMgrClient>(protocol);
 
             return client;
         }
@@ -50,7 +50,7 @@ namespace springtail {
          *        before returning.
          * @param client
          */
-        void get_cb(std::shared_ptr<thrift::ThriftXidMgrClient> client) override
+        void get_cb(std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client) override
         {
             // validate that the transport is connected
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();

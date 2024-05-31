@@ -1,24 +1,24 @@
 #include <common/filesystem.hh>
 
-#include <garbage_collector/gc_log_parser.hh>
+#include <garbage_collector/log_parser.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 
 #include <storage/constants.hh>
 #include <storage/table_mgr.hh>
 
-namespace springtail {
+namespace springtail::gc {
 
     bool
-    GCLogParser::Backlog::empty() const
+    LogParser::Backlog::empty() const
     {
         boost::shared_lock lock(_mutex);
         return _backlog.empty();
     }
 
     bool
-    GCLogParser::Backlog::check(uint64_t xid,
-                                uint64_t oid)
+    LogParser::Backlog::check(uint64_t xid,
+                              uint64_t oid)
     {
         boost::shared_lock lock(_mutex);
 
@@ -37,9 +37,9 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Backlog::push(uint64_t xid,
-                               uint64_t oid,
-                               std::shared_ptr<State> entry)
+    LogParser::Backlog::push(uint64_t xid,
+                             uint64_t oid,
+                             std::shared_ptr<State> entry)
     {
         boost::unique_lock lock(_mutex);
 
@@ -57,8 +57,8 @@ namespace springtail {
         _oid_backlog[oid].insert(xid);
     }
 
-    GCLogParser::StatePtr
-    GCLogParser::Backlog::pop()
+    LogParser::StatePtr
+    LogParser::Backlog::pop()
     {
         boost::unique_lock lock(_mutex);
 
@@ -73,7 +73,7 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Backlog::update_deps()
+    LogParser::Backlog::update_deps()
     {
         boost::unique_lock lock(_mutex);
 
@@ -91,7 +91,7 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Backlog::clear_dep(uint64_t xid)
+    LogParser::Backlog::clear_dep(uint64_t xid)
     {
         boost::unique_lock lock(_mutex);
 
@@ -147,7 +147,7 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Reader::run()
+    LogParser::Reader::run()
     {
         // loop until we are asked to shutdown; on shutdown drain the backlog
         while (!_shutdown || !_backlog->empty()) {
@@ -385,6 +385,8 @@ namespace springtail {
                 // wait for the parsers to complete the work for this XID
                 _state->mutation_count->wait();
 
+                // XXX notify the ExtentMapper that the XID has been fully processed
+
                 // clear the dependencies and commit the entry in the Redis queue
                 _backlog->clear_dep(_state->entry->xid);
                 _pg_queue.commit(_worker_id);
@@ -393,13 +395,13 @@ namespace springtail {
     }
 
     void
-    GCLogParser::Reader::shutdown()
+    LogParser::Reader::shutdown()
     {
         _shutdown = true;
     }
 
     bool
-    GCLogParser::Reader::_check_xid(uint64_t pg_xid)
+    LogParser::Reader::_check_xid(uint64_t pg_xid)
     {
         if (_state->entry->pg_xid == pg_xid) {
             return true;
@@ -413,10 +415,10 @@ namespace springtail {
     }
 
     bool
-    GCLogParser::Reader::_check_backlog(uint64_t xid,
-                                        uint64_t oid,
-                                        const std::filesystem::path &file,
-                                        uint64_t offset)
+    LogParser::Reader::_check_backlog(uint64_t xid,
+                                      uint64_t oid,
+                                      const std::filesystem::path &file,
+                                      uint64_t offset)
     {
         // if the mutation involves a table with a schema change in an earlier XID, then we
         // place this XID into the backlog to be picked back up later after the schema
@@ -434,12 +436,12 @@ namespace springtail {
     }
 
     bool
-    GCLogParser::Reader::_process_mutation(uint64_t pg_xid,
-                                           uint64_t xid,
-                                           uint64_t rel_id,
-                                           PgMsgPtr msg,
-                                           const std::filesystem::path &file,
-                                           uint64_t offset)
+    LogParser::Reader::_process_mutation(uint64_t pg_xid,
+                                         uint64_t xid,
+                                         uint64_t rel_id,
+                                         PgMsgPtr msg,
+                                         const std::filesystem::path &file,
+                                         uint64_t offset)
     {
         // check if we should skip processing this message
         if (_state->process_as_stream && !_check_xid(pg_xid)) {
@@ -459,12 +461,12 @@ namespace springtail {
         return false;
     }
 
-    const std::vector<char> GCLogParser::Reader::START_FILTER = {
+    const std::vector<char> LogParser::Reader::START_FILTER = {
         pg_msg::MSG_BEGIN,
         pg_msg::MSG_STREAM_START
     };
 
-    const std::vector<char> GCLogParser::Reader::BEGIN_FILTER = {
+    const std::vector<char> LogParser::Reader::BEGIN_FILTER = {
         pg_msg::MSG_COMMIT,
         pg_msg::MSG_INSERT,
         pg_msg::MSG_UPDATE,
@@ -473,7 +475,7 @@ namespace springtail {
         pg_msg::MSG_MESSAGE
     };
 
-    const std::vector<char> GCLogParser::Reader::STREAM_START_FILTER = {
+    const std::vector<char> LogParser::Reader::STREAM_START_FILTER = {
         pg_msg::MSG_STREAM_STOP,
         pg_msg::MSG_INSERT,
         pg_msg::MSG_UPDATE,
@@ -482,13 +484,13 @@ namespace springtail {
         pg_msg::MSG_MESSAGE
     };
 
-    const std::vector<char> GCLogParser::Reader::STREAM_STOP_FILTER = {
+    const std::vector<char> LogParser::Reader::STREAM_STOP_FILTER = {
         pg_msg::MSG_STREAM_START,
         pg_msg::MSG_STREAM_COMMIT
     };
 
     void
-    GCLogParser::Parser::run()
+    LogParser::Parser::run()
     {
         while (true) {
             // wait for a work item
@@ -714,9 +716,9 @@ namespace springtail {
     }
 
     std::shared_ptr<MutableTuple>
-    GCLogParser::Parser::_pack_extent(ExtentPtr extent,
-                                      const PgMsgTupleData &data,
-                                      ExtentSchemaPtr schema)
+    LogParser::Parser::_pack_extent(ExtentPtr extent,
+                                    const PgMsgTupleData &data,
+                                    ExtentSchemaPtr schema)
     {
         auto fields = schema->get_mutable_fields();
 

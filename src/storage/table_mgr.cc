@@ -57,6 +57,20 @@ namespace springtail {
             return table;
         }
 
+        // retrieve the roots of the table
+        auto &&roots = _find_roots(table_id, xid);
+
+        // construct the table and return it
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
+        return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
+                                       schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
+                                       roots, schema);
+    }
+
+    std::vector<uint64_t>
+    TableMgr::_find_roots(uint64_t table_id,
+                          uint64_t xid)
+    {
         std::vector<uint64_t> roots;
 
         // get the root of the table's primary index
@@ -66,20 +80,15 @@ namespace springtail {
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
         auto it = roots_t->lower_bound(search_key);
         if (it == roots_t->end() || !FieldTuple(roots_key_fields, *it).equal(*search_key)) {
-            // no roots?  maybe in roots file?
+            // no roots?  try to find it in the roots file
             roots.push_back(constant::UNKNOWN_EXTENT);
-            // throw StorageError();
         } else {
             // retrieve the root extent ID of the primary
             auto eid_f = roots_t->extent_schema()->get_field("extent_id");
             roots.push_back(eid_f->get_uint64(*it));
         }
 
-        // construct the table and return it
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
-        return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
-                                       schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
-                                       roots, schema);
+        return roots;
     }
 
     MutableTablePtr
@@ -95,7 +104,16 @@ namespace springtail {
             return table;
         }
 
-        throw StorageError();
+        // retrieve the roots of the table
+        auto &&roots = _find_roots(table_id, access_xid);
+
+        // construct the mutable table and return it
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, access_xid);
+        return std::make_shared<MutableTable>(table_id, access_xid, target_xid, roots,
+                                              _table_base / fmt::format("{}", table_id),
+                                              schema->get_sort_keys(),
+                                              std::vector<std::vector<std::string>>{},
+                                              schema);
     }
 
     void
@@ -310,6 +328,26 @@ namespace springtail {
             return nullptr;
         }
     }
+
+    void
+    TableMgr::update_roots(uint64_t table_id,
+                           uint64_t access_xid,
+                           uint64_t target_xid,
+                           const std::vector<uint64_t> &roots)
+    {
+        // modify the table_roots table
+        auto roots_t = get_mutable_table(sys_tbl::TableRoots::ID, access_xid, target_xid);
+        for (uint64_t idx = 0; idx < roots.size(); ++idx) {
+            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, idx, target_xid, roots[idx]);
+            roots_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
+
+            SPDLOG_DEBUG("Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
+        }
+
+        // finalize the changes to disk
+        roots_t->finalize();
+    }
+
 
     MutableTablePtr
     TableMgr::_get_mutable_system_table(uint64_t table_id,

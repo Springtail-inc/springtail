@@ -1,4 +1,4 @@
-namespace cpp springtail.thrift
+namespace cpp springtail.thrift.xid_mgr
 
 typedef i64 xid_t
 

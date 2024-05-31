@@ -1,4 +1,4 @@
-namespace cpp springtail.thrift
+namespace cpp springtail.thrift.write_cache
 
 // table change operation type
 enum TableChangeOpType {
