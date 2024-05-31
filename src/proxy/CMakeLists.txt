@@ -78,15 +78,6 @@ target_link_libraries(daemon
     PRIVATE Boost::program_options
 )
 
-# test parser executable
-add_executable(test_exceptions test/test_exceptions.cc)
-target_include_directories(test_exceptions
-    PRIVATE ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(test_exceptions
-    PUBLIC springtail_proxy springtail_common
-)
-
 # test client executable -- boost::asio test, not used
 #add_executable(client test/client.cc)
 #target_include_directories(client
