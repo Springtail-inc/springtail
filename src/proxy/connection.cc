@@ -23,6 +23,10 @@ namespace springtail {
     ssize_t
     ProxyConnection::write(const char *buffer, int size, bool more)
     {
+        if (closed()) {
+            throw ProxyIOError();
+        }
+
         if (_ssl != nullptr) {
             return _ssl_write(buffer, size);
         } else {

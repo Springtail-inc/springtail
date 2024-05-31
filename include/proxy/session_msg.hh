@@ -103,11 +103,6 @@ namespace springtail {
             _dependencies = std::move(dependencies);
         }
 
-        /** Get query stmt from data */
-        QueryStmtPtr query_stmt() const {
-            return _data;
-        }
-
         /** Set message status */
         void set_status_ready(MsgStatus &status) {
             _status = status;

@@ -8,12 +8,18 @@
 namespace springtail {
     class ClientSession; ///< forward declaration
 
+    /**
+     * @brief Internal state for a query that is being processed.
+     * A query may have multiple dependencies, and may have multiple
+     * simple queries. This object tracks the completion state of the query.
+     */
     struct QueryStatus {
-        int query_count = 0;
-        int query_complete_count = 0;
-        int dependency_count = 0;
-        int dependency_complete_count = 0;
-        SessionMsgPtr msg;
+        int query_count = 0;               ///< number of (simple) queries
+        int query_complete_count = 0;      ///< number of (simple) queries completed
+        int dependency_count = 0;          ///< number of dependencies
+        int dependency_complete_count = 0; ///< number of dependencies completed
+        bool simple_query_dependency = false; ///< at least one simple query dependency
+        SessionMsgPtr msg;                 ///< parent message being processed
 
         QueryStatus(SessionMsgPtr msg)
             : msg(msg)
@@ -135,6 +141,9 @@ namespace springtail {
 
         /** Handle ready for query message from server */
         void _handle_ready_for_query_response(char xact_status);
+
+        /** Discard message data */
+        void _discard_msg(int32_t msg_length);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
 }

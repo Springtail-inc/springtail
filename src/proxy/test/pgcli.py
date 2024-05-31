@@ -1,6 +1,8 @@
 import socket
 import hashlib
 import time
+import argparse
+import json
 
 def send_startup(conn):
     bytes = bytearray()
@@ -153,25 +155,58 @@ def send_close_message(conn, close_type: str, name: str):
 
     conn.send(buf)
 
+def read_connection(conn):
+    try:
+        bytes = conn.recv(2048)
+    except Exception as e:
+        print ("Error reading response from server: ", e)
+        return bytearray()
+
+    return bytes
+
+
 def read_response(conn):
-    bytes = conn.recv(1000)
-    print ("Read response: {} bytes".format(len(bytes)))
+    """
+       Reads a response from the server and processes it.
+       Returns a flag indicating ready for query was received and a
+       flag indicating an error was received.
+    """
+    bytes = read_connection(conn)
+
+    read_len = len(bytes)
+    print ("Read response: {} bytes".format(read_len))
+
+    if read_len == 0:
+        # Connection closed, return error
+        return (False, True)
+
     pos = 0
 
-    while pos < len(bytes):
+    ready_for_query = False
+
+    while pos < read_len:
         code = bytes[pos:pos+1].decode("utf-8")
         length = int.from_bytes(bytes[pos+1:pos+5], 'big')
+
+        if (length > read_len - pos):
+            # read more data
+            print("Reading more data")
+            bytes += read_connection(conn)
+            read_len = len(bytes)
 
         # handle different codes
         if code == 'C':
             print('Command complete')
         elif code == 'T':
             print('Row description')
+            decode_row_description(bytes[pos:])
         elif code == 'D':
             print('Data row')
+            decode_data_row(bytes[pos:])
         elif code == 'Z':
             status = bytes[pos+5:pos+6].decode("utf-8")
             print('Ready for query: status={}'.format(status))
+            ready_for_query = True
         elif code == 'E':
             print('Error response')
         elif code == 't':
@@ -185,7 +220,7 @@ def read_response(conn):
 
         pos += length+1
 
-    return
+    return (ready_for_query, False)
 
 def send_simple_query(conn, query: str):
     buf = bytearray()
@@ -202,54 +237,224 @@ def send_simple_query(conn, query: str):
 
     conn.send(buf)
 
+def decode_row_description(message):
+    offset = 0
 
-host = '127.0.0.1'
-port = 5432
-conn = socket.socket()
-conn.connect((host,port))
+    # Convert message to bytearray for easier manipulation
+    message = bytearray(message)
 
-send_startup(conn)
-code, length, salt = read_startup(conn)
-send_md5(conn, 'test_md5', 'test', salt)
-ready_status = read_auth_response(conn)
+    # Read the message type and length
+    message_type = chr(message[offset])
+    offset += 1
+    message_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+    offset += 4
 
+    if message_type != 'T':
+        raise ValueError(f"Unexpected message type: {message_type}")
 
-send_parse_message(conn, 'test', 'SELECT 1')
-send_bind_message(conn, 'portal_test', 'test')
-send_execute_message(conn, 'portal_test')
-#send_parse_message(conn, 'test1', 'INSERT into test values(1)')
-#send_bind_message(conn, 'portal1', 'test1')
-#send_execute_message(conn, 'portal1')
-#send_simple_query(conn, 'SELECT 1/0')
+    # Read the number of fields
+    num_fields = int.from_bytes(message[offset:offset+2], byteorder='big')
+    offset += 2
 
-# send_simple_query(conn, 'FETCH ALL from portal_test')
-#send_close_message(conn, 'P', 'portal_test')
+    print(f"Number of fields: {num_fields}")
 
-print ("Connected")
-print("Enter your commands (press Ctrl-D to quit):")
-while True:
-    try:
-        user_input = input("> ")  # Prompt user for input
-        data = user_input.split()
-        if data[0] == 'parse' and len(data) > 2:
-            send_parse_message(conn, data[1], ' '.join(data[2:]))
-            read_response(conn)
-        elif data[0] == 'bind' and len(data) > 2:
-            send_bind_message(conn, data[1], data[2])
-            send_sync_message(conn)
-            read_response(conn)
-        elif data[0] == 'exec' and len(data) > 1:
-            send_execute_message(conn, data[1])
-            read_response(conn)
-        elif data[0] == 'sync':
-            send_sync_message(conn)
-            read_response(conn)
+    fields = []
+
+    for _ in range(num_fields):
+        # Read the field name (null-terminated string)
+        end = message.find(b'\x00', offset)
+        field_name = message[offset:end].decode('utf-8')
+        offset = end + 1
+
+        table_oid = int.from_bytes(message[offset:offset+4], byteorder='big')
+        offset += 4
+        column_attr_num = int.from_bytes(message[offset:offset+2], byteorder='big')
+        offset += 2
+        data_type_oid = int.from_bytes(message[offset:offset+4], byteorder='big')
+        offset += 4
+        data_type_size = int.from_bytes(message[offset:offset+2], byteorder='big')
+        offset += 2
+        type_modifier = int.from_bytes(message[offset:offset+4], byteorder='big')
+        offset += 4
+        format_code = int.from_bytes(message[offset:offset+2], byteorder='big')
+        offset += 2
+
+        fields.append({
+            'field_name': field_name,
+            'table_oid': table_oid,
+            'column_attr_num': column_attr_num,
+            'data_type_oid': data_type_oid,
+            'data_type_size': data_type_size,
+            'type_modifier': type_modifier,
+            'format_code': format_code
+        })
+
+    for field in fields:
+        print(f"Field name: {field['field_name']}")
+        print(f"  Table OID: {field['table_oid']}")
+        print(f"  Column Attribute Number: {field['column_attr_num']}")
+        print(f"  Data Type OID: {field['data_type_oid']}")
+        print(f"  Data Type Size: {field['data_type_size']}")
+        print(f"  Type Modifier: {field['type_modifier']}")
+        print(f"  Format Code: {field['format_code']}")
+
+def decode_data_row(message):
+    offset = 0
+
+    # Convert message to bytearray for easier manipulation
+    message = bytearray(message)
+
+    # Read the message type and length
+    message_type = chr(message[offset])
+    offset += 1
+    message_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+    offset += 4
+
+    if message_type != 'D':
+        raise ValueError(f"Unexpected message type: {message_type}")
+
+    # Read the number of columns
+    num_columns = int.from_bytes(message[offset:offset+2], byteorder='big')
+    offset += 2
+
+    print(f"Number of columns: {num_columns}")
+
+    columns = []
+
+    for _ in range(num_columns):
+        # Read the length of the column value
+        column_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+        offset += 4
+
+        if column_length == -1:
+            column_value = None
         else:
-            send_simple_query(conn, user_input)
-            print ("Sending simple query: ", user_input)
-            read_response(conn)
-    except EOFError:
-        print("\nExiting...")
-        break
+            column_value = message[offset:offset+column_length].decode('utf-8')
+            offset += column_length
 
-conn.close()
+        columns.append(column_value)
+
+    for i, column in enumerate(columns):
+        print(f"Column {i + 1}: {column}")
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Parse database connection parameters.")
+
+    parser.add_argument('--hostname', type=str, default='127.0.0.1', help="The hostname of the database server")
+    parser.add_argument('--port', type=int, default=5432, help="The port number on which the database server is listening")
+    parser.add_argument('--username', type=str, default='test', required=True, help="The username for connecting to the database")
+    parser.add_argument('--password', type=str, required=True, help="The password for connecting to the database")
+    parser.add_argument('--requires_ssl', action='store_true', help="Flag to indicate if SSL is required")
+    parser.add_argument('--filename', type=str, help="The name of the file containing the SQL commands to execute")
+
+    args = parser.parse_args()
+    return args
+
+# read set of commands from a json file
+def read_commands_from_json(file_path):
+    json_objects = []
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                line = line.strip()  # Remove any leading/trailing whitespace
+                if line and not line.startswith('#'):  # Ensure the line is not empty
+                    json_object = json.loads(line)
+                    json_objects.append(json_object)
+    except Exception as e:
+        print(f"Error reading or parsing file: {e}")
+        return None
+
+    return json_objects
+
+def connect_to_postgres(host, port, username, password, requires_ssl):
+    conn = socket.socket()
+    conn.connect((host, port))
+
+    send_startup(conn)
+    code, length, salt = read_startup(conn)
+    send_md5(conn, username, password, salt)
+    ready_status = read_auth_response(conn)
+
+    return conn
+
+def main():
+    # Parse command line arguments
+    args = parse_arguments()
+    # Connect to the PostgreSQL server
+    conn = connect_to_postgres(args.hostname, args.port, args.username, args.password, args.requires_ssl)
+    # Read commands from json file
+    commands = read_commands_from_json(args.filename);
+
+    # Process each command
+    for command in commands:
+        command_name = command['name']
+        command_args = command['args']
+
+        # Process the command and its arguments here
+        # Example:
+        if command_name == 'parse' and len(command_args) == 2:
+            statement_name = command_args[0]
+            query = command_args[1]
+            send_parse_message(conn, statement_name, query)
+
+        elif command_name == 'bind' and len(command_args) == 2:
+            portal_name = command_args[0]
+            statement_name = command_args[1]
+            send_bind_message(conn, portal_name, statement_name)
+
+        elif command_name == 'execute' and len(command_args) == 1:
+            portal_name = command_args[0]
+            send_execute_message(conn, portal_name)
+
+        elif command_name == 'sync':
+            send_sync_message(conn)
+
+        elif command_name == 'query' and len(command_args) == 1:
+            query = command_args[0]
+            send_simple_query(conn, query)
+
+        else:
+            print (f"Unknown command or invalid args: {command_name}")
+
+        # Wait for response and process it
+        if command_name == 'sync' or command_name == 'query':
+             ready_for_query = False
+             while not ready_for_query:
+                (ready_for_query, error) = read_response(conn)
+                if error:
+                    print("Error reading response from server")
+                    conn.close()
+                    return
+
+    # Close the connection
+    conn.close()
+
+def cli(conn):
+    print("Enter your commands (press Ctrl-D to quit):")
+    while True:
+        try:
+            user_input = input("> ")  # Prompt user for input
+            data = user_input.split()
+            if data[0] == 'parse' and len(data) > 2:
+                send_parse_message(conn, data[1], ' '.join(data[2:]))
+                read_response(conn)
+            elif data[0] == 'bind' and len(data) > 2:
+                send_bind_message(conn, data[1], data[2])
+                send_sync_message(conn)
+                read_response(conn)
+            elif data[0] == 'exec' and len(data) > 1:
+                send_execute_message(conn, data[1])
+                read_response(conn)
+            elif data[0] == 'sync':
+                send_sync_message(conn)
+                read_response(conn)
+            else:
+                send_simple_query(conn, user_input)
+                print ("Sending simple query: ", user_input)
+                read_response(conn)
+        except EOFError:
+            print("\nExiting...")
+            break
+
+if __name__ == '__main__':
+    main()

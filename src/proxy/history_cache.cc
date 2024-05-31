@@ -117,28 +117,30 @@ namespace springtail {
         }
     }
 
-    QueryStmtPtr
+    std::pair<QueryStmtPtr, bool>
     StatementCache::_lookup(const std::string &name, QueryStmt::Type type)
     {
         // check statement history first
         QueryStmtPtr qs = _statement_history.lookup(name, type);
         if (qs) {
-            return qs;
+            return {qs, true};
         }
         // then check transaction history
         qs = _transaction_history.lookup(name, type);
         if (qs) {
-            return qs;
+            return {qs, true};
         }
 
         // then check the caches
         if (type == QueryStmt::PREPARE) {
-            return _prepared_cache.get(name);
+            qs = _prepared_cache.get(name);
+            return {qs, false};
         } else {
-            return _session_history.lookup(name, type);
+            qs = _session_history.lookup(name, type);
+            return {qs, false};
         }
 
-        return nullptr;
+        return {nullptr, false};
     }
 
     void
@@ -231,6 +233,9 @@ namespace springtail {
             // not all statements are completed
             _in_error = true;
         }
+
+        // simple query removes unamed prepared statement from cache
+        _prepared_cache.evict("");
     }
 
     void
@@ -241,8 +246,8 @@ namespace springtail {
                 // prepared statements don't get rolled back
 
                 // technically, an unnamed prepared statement is valid until the next
-                // unnamed prepare, or PARSE message or simple query, however we cache
-                // it anyway as it doesn't hurt and that logic is complicated...
+                // unnamed prepare / PARSE message or simple query
+                // we clear unamed prepared statements at the end of a simple query
 
                 // add to session level prepared stmt cache
                 _prepared_cache.add(entry->name, entry);

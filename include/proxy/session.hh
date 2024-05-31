@@ -144,6 +144,10 @@ namespace springtail {
             return _associated_session->_type;
         }
 
+        void set_waiting_on_session(bool waiting) {
+            _waiting_on_session = waiting;
+        }
+
         /** Is this session blocked waiting for another session to complete */
         bool is_waiting_on_session() const {
             return _waiting_on_session;
@@ -202,6 +206,9 @@ namespace springtail {
         void queue_msg(SessionMsgPtr msg) {
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
+            if (_type == Type::CLIENT) {
+                assert (_waiting_on_session == true);
+            }
         }
 
         /**

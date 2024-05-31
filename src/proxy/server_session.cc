@@ -86,10 +86,14 @@ namespace springtail {
         case AUTH:
         case AUTH_DONE:
         case READY:
+        case QUERY:
+        case DEPENDENCIES:
+        case EXTENDED_ERROR:
             // ready for query, handle requests
             _handle_message_from_server();
             break;
         default:
+            SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
             _state = ERROR;
             break;
         }
@@ -135,12 +139,10 @@ namespace springtail {
                 if (_state == QUERY) {
                     // we are in query state, continue with query responses
                     _handle_query_response();
-                    return;
                 }
                 if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
                     _handle_dependency_response(false);
-                    return;
                 }
                 assert (_state != EXTENDED_ERROR);
 
@@ -200,9 +202,9 @@ namespace springtail {
 
                 SPDLOG_DEBUG("Parameter status from server: {}={}", key, value);
 
-                if (_state > AUTH_DONE) {
+                if (_state <= AUTH_DONE) {
                     // still in auth negotiation state
-                    // may want to send these to client
+                    // XXX may want to send these to client
                     break;
                 }
                 _send_to_remote_session(code, msg_length, buffer->data());
@@ -240,10 +242,9 @@ namespace springtail {
 
             case 'Z': {
                 // Ready for query
-                SPDLOG_DEBUG("Ready for query");
-
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
+                SPDLOG_DEBUG("Server session: Ready for query, status={}", status);
 
                 if (_state == AUTH_DONE) {
                     assert (status == 'I');
@@ -254,20 +255,16 @@ namespace springtail {
                     SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
                     queue_msg(msg);
                     break;
-                } else if (_state == DEPENDENCIES) {
-                    // we are in dependency checking state, continue with dependencies
-                    _handle_dependency_response(status == 'E');
-                    break;
                 }
 
-                // send ready for query to client
-                _send_to_remote_session(code, 1, &status);
-
-                if (_state == QUERY || _state == EXTENDED_ERROR) {
-                    // we are in query state, and we have received ready for query
-                    // this means the query is complete
-                    _handle_ready_for_query_response(status);
+                if (_state != DEPENDENCIES) {
+                    // send ready for query to client
+                    _send_to_remote_session(code, 1, &status);
                 }
+
+                // handle the ready for query response
+                // regardless of state
+                _handle_ready_for_query_response(status);
 
                 break;
             }
@@ -278,6 +275,18 @@ namespace springtail {
         }
 
         SPDLOG_DEBUG("Done msg handling");
+    }
+
+    void
+    ServerSession::_discard_msg(int32_t msg_length)
+    {
+        // discard message data
+        char buffer[1024];
+        while (msg_length > 0) {
+            int n = _connection->read(buffer, std::min(msg_length, 1024));
+            assert (n == std::min(msg_length, 1024));
+            msg_length -= n;
+        }
     }
 
     void
@@ -621,6 +630,7 @@ namespace springtail {
         // depending on error, behavior is different
         // if text is "FATAL" or "PANIC" we should stop, sever connection
         if (text == "FATAL" || text == "PANIC") {
+            SPDLOG_ERROR("Got fatal error from server: {}", message);
             _state = ERROR;
         }
 
@@ -632,7 +642,6 @@ namespace springtail {
     ServerSession::_handle_dependency_response(bool error)
     {
         // response to dependency
-        // reset state to ready
         assert (_state == DEPENDENCIES);
         assert (!error);
 
@@ -640,13 +649,29 @@ namespace springtail {
 
         // add dependency to cache
         auto dep = query_status->msg->get_dependency(query_status->dependency_complete_count);
-        assert (dep->type == QueryStmt::Type::PREPARE);
-        _stmts.insert(dep->get_hashed_name());
+        if (dep->type == QueryStmt::Type::PREPARE) {
+            // add prepared statement to cache
+            _stmts.insert(dep->get_hashed_name());
+        }
 
+        // check if all dependencies are complete
         query_status->dependency_complete_count++;
+        assert (query_status->dependency_complete_count <= query_status->dependency_count);
 
-        if (query_status->dependency_complete_count == query_status->dependency_count) {
-            // all dependencies complete
+        SPDLOG_DEBUG("Query dependency complete, count: {:d}/{:d}",
+                     query_status->dependency_complete_count,
+                     query_status->dependency_count);
+
+        if (query_status->dependency_complete_count < query_status->dependency_count) {
+            return;
+        }
+
+        // all dependencies are complete
+
+        // we need to know if we are expecting a ready for query
+        // message from the server (for simple query dependency)
+        // if so we shouldn't set the _state to QUERY
+        if (!query_status->simple_query_dependency) {
             _state = QUERY;
         }
     }
@@ -684,16 +709,33 @@ namespace springtail {
     void
     ServerSession::_handle_ready_for_query_response(char xact_status)
     {
+        QueryStatusPtr query_status = _pending_queue.front();
+
+        if (_state == DEPENDENCIES) {
+            // we are in dependency checking state,
+            // this shouldn't generate message back to client
+            // check if have more messages in queue;
+            // if so, check next message for more dependencies
+            assert (!_pending_queue.empty());
+            assert (query_status != nullptr);
+
+            if (query_status->dependency_count == 0) {
+                // we have dependencies, set state to handle them
+                _state = QUERY;
+            }
+            return;
+        }
+
         SessionMsg::MsgStatus msg_status = {xact_status};
 
         // check if current message is a sync message
-        QueryStatusPtr query_status = _pending_queue.front();
         if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
             _pending_queue.pop();
             query_status->msg->set_status_ready(msg_status);
             queue_msg(query_status->msg);
         } else {
-            // if last message was a simple query then we would have returned earlier
+            // if previous message was a simple query then we would
+            // have returned earlier when last simple query completed
             // create a new message to send to client
             SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, msg_status);
             queue_msg(msg);
@@ -713,23 +755,57 @@ namespace springtail {
         // no error, mark query as complete
         QueryStatusPtr query_status = _pending_queue.front();
         query_status->query_complete_count++;
-        if (query_status->query_complete_count == query_status->query_count) {
-            // this query is complete, send response to client session
-            _pending_queue.pop();
-            query_status->msg->set_msg_response(true, query_status->query_complete_count);
-            queue_msg(query_status->msg);
+
+        SPDLOG_DEBUG("Query complete, count: {:d}/{:d}, query_stmt: {}",
+                     query_status->query_complete_count,
+                     query_status->query_count,
+                     (int8_t)query_status->msg->data()->type);
+
+        assert (query_status->query_complete_count <= query_status->query_count);
+
+        // check if this was a prepare that completed
+        QueryStmtPtr qs = query_status->msg->data();
+        if (qs->type == QueryStmt::Type::PREPARE) {
+            // add prepared statement to cache
+            _stmts.insert(qs->get_hashed_name());
+        } else if (qs->type == QueryStmt::Type::SIMPLE_QUERY) {
+            assert (qs->children.size() >= query_status->query_complete_count);
+            qs = qs->children[query_status->query_complete_count-1];
+            if (qs->type == QueryStmt::Type::PREPARE) {
+                // add prepared statement to cache
+                _stmts.insert(qs->get_hashed_name());
+            }
         }
+
+        // check if not done with parent query, if not then return now
+        if (query_status->query_complete_count < query_status->query_count) {
+            return;
+        }
+
+        // this query is complete; send response to client session
+        _pending_queue.pop();
+        query_status->msg->set_msg_response(true, query_status->query_complete_count);
+        queue_msg(query_status->msg);
 
         // if all queries complete, set state to ready
         if (_pending_queue.empty()) {
             _state = READY;
+            return;
+        }
+
+        // have more messages in queue; look at next message
+        // see if there are more dependencies
+        query_status = _pending_queue.front();
+        if (query_status->dependency_count > 0) {
+            // we have dependencies, set state to handle them
+            _state = DEPENDENCIES;
         }
     }
 
     void
     ServerSession::_handle_msg_to_server(SessionMsgPtr msg)
     {
-        // entry point for client session message to server
+        // Entry point for client session message to server
         // we send all dependencies and then the server msg
         // NOTE: this may be called multiple times before
         // receiving a response from the server (if client
@@ -737,14 +813,18 @@ namespace springtail {
 
         // track the query status
         QueryStatusPtr query_status = std::make_shared<QueryStatus>(msg);
+        // set query count
+        if (msg->data()->children.size() > 0) {
+            query_status->query_count = msg->data()->children.size();
+        } else {
+            query_status->query_count = 1;
+        }
+
+        _state = QUERY;
         _pending_queue.push(query_status);
 
         // get dependencies and issue them to server
         int num_dependencies = msg->num_dependencies();
-        if (_state == READY && num_dependencies > 0) {
-            _state = DEPENDENCIES;
-        }
-
         for (int i = 0; i < num_dependencies; i++) {
             auto dep = msg->get_dependency(i);
             assert (dep->type == QueryStmt::Type::PREPARE);
@@ -789,13 +869,11 @@ namespace springtail {
         switch (query_stmt->data_type) {
             case QueryStmt::DataType::SIMPLE:
                 // send the simple query
-                _state = DEPENDENCIES;
                 _handle_simple_query(query_stmt->query());
                 return;
 
             case QueryStmt::DataType::PACKET: {
                 // send the packet
-                _state = DEPENDENCIES;
                 BufferPtr buffer = query_stmt->buffer();
                 ssize_t n = _connection->write(buffer->data(), buffer->size());
                 assert(n == buffer->size());

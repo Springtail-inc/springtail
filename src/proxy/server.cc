@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -90,6 +91,9 @@ namespace springtail {
             close(_pipe[1]);
             exit(1);
         }
+
+        // ignore SIGPIPE signals
+        ::signal(SIGPIPE, SIG_IGN);
 
         SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
     }
@@ -271,6 +275,10 @@ namespace springtail {
             int n = poll(fds, i, -1);
             if (n == -1) {
                 std::cerr << "Error polling sockets: " << strerror(errno) << std::endl;
+                if (errno == EINTR || errno == EAGAIN) {
+                    // if interrupted or no data, continue
+                    continue;
+                }
                 break;
             }
             SPDLOG_DEBUG("Poll returned: {}", n);

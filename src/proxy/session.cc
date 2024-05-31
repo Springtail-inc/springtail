@@ -95,7 +95,7 @@ namespace springtail {
         } while (has_data);
 
         // signal server to wait on this connection
-        SPDLOG_DEBUG("Adding connection to server poll list: {}", _connection->get_socket());
+        SPDLOG_DEBUG("Adding connection to server poll list: session_id={}, socket={}", _id, _connection->get_socket());
         _server->signal(_connection);
     }
 

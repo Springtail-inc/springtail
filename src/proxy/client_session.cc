@@ -93,20 +93,22 @@ namespace springtail {
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
+                SPDLOG_DEBUG("Client session got fatal error from server session");
                 throw ProxyServerError();
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_SUCCESS:
                 // message complete
-                _stmt_cache.commit_statement(msg->query_stmt(), msg->completed());
+                _stmt_cache.commit_statement(msg->data(), msg->completed());
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_ERROR:
                 // message error
-                _stmt_cache.commit_statement(msg->query_stmt(), msg->completed());
+                _stmt_cache.commit_statement(msg->data(), msg->completed());
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
-                SPDLOG_DEBUG("Client session got ready from server session");
+                SPDLOG_DEBUG("Client session got ready from server session: status={}",
+                             msg->status().transaction_status);
 
                 // check if we are in/still in a transaction
                 SessionMsg::MsgStatus status = msg->status();
@@ -117,6 +119,13 @@ namespace springtail {
                     // could track transaction error state and avoid server round trips
                     // until we get a rollback...
                     _in_transaction = true;
+
+                    // no longer waiting on associated session, but
+                    // we still want to keep the same session until the transaction
+                    // is complete
+                    if (is_msg_queue_empty()) {
+                        set_waiting_on_session(false);
+                    }
                 }
 
                 _stmt_cache.sync_transaction(status.transaction_status);
@@ -143,7 +152,7 @@ namespace springtail {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        SPDLOG_DEBUG("Processing client session: state={:d}", (int8_t)_state);
+        SPDLOG_DEBUG("Processing packet, client session: state={:d}", (int8_t)_state);
 
         // main entry point for thread processing
         // resume from where we left off
@@ -206,7 +215,7 @@ namespace springtail {
                 break;
 
             case MSG_STARTUP_V2:
-                SPDLOG_WARN("Startup message version 2.0, not supported");
+                SPDLOG_ERROR("Startup message version 2.0, not supported");
                 // not supported
                 _state = ERROR;
                 break;
@@ -671,7 +680,7 @@ namespace springtail {
 
             case 'X':
                 // terminate
-                SPDLOG_DEBUG("Terminate request");
+                SPDLOG_ERROR("Terminate request");
                 _state = ERROR;
                 return;
 
@@ -773,7 +782,8 @@ namespace springtail {
         SPDLOG_DEBUG("Bind: prepared={}, portal={}", stmt, portal);
 
         // get the prepared statement from the cache
-        QueryStmtPtr prepared_stmt = _stmt_cache.lookup_prepared(stmt);
+        std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_prepared(stmt);
+        QueryStmtPtr prepared_stmt = lookup_result.first;
         if (prepared_stmt == nullptr) {
             SPDLOG_ERROR("Prepared statement not found: {}", stmt);
             throw ProxyMessagePreparedError();
@@ -790,7 +800,10 @@ namespace springtail {
 
         // create message with dependencies/provides
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, qs);
-        msg->add_dependency(prepared_stmt);
+        if (!lookup_result.second) {
+            // add dependency if not in current transaction
+            msg->add_dependency(prepared_stmt);
+        }
 
         // queue message to server session
         _select_session(prepared_stmt->is_read_safe ? REPLICA : PRIMARY);
@@ -810,14 +823,15 @@ namespace springtail {
         SPDLOG_DEBUG("Describe request: type={}, name={}", stmt_type, name);
 
         // get the statement from the cache
-        QueryStmtPtr query_stmt = nullptr;
+        std::pair<QueryStmtPtr, bool> lookup_result;
         if (stmt_type == 'S') {
-            query_stmt = _stmt_cache.lookup_prepared(name);
+            lookup_result = _stmt_cache.lookup_prepared(name);
         } else {
             // get the statement from the cache
-            query_stmt = _stmt_cache.lookup_portal(name);
+            lookup_result = _stmt_cache.lookup_portal(name);
         }
 
+        QueryStmtPtr query_stmt = lookup_result.first;
         if (query_stmt == nullptr) {
             SPDLOG_ERROR("Statement not found: {}", name);
             throw ProxyMessagePreparedError();
@@ -835,8 +849,10 @@ namespace springtail {
 
         // create message with dependencies/provides
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE, qs);
-        msg->add_dependency(query_stmt);
-
+        if (!lookup_result.second) {
+            // add dependency if not in current transaction
+            msg->add_dependency(query_stmt);
+        }
 
         // queue message to server session
         _select_session(query_stmt->is_read_safe ? REPLICA : PRIMARY);
@@ -855,7 +871,8 @@ namespace springtail {
         // find the dependency
         QueryStmt::Type qs_type = QueryStmt::ANONYMOUS;
 
-        QueryStmtPtr query_stmt = _stmt_cache.lookup_portal(name);
+        std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_portal(name);
+        QueryStmtPtr query_stmt = lookup_result.first;
         if (query_stmt != nullptr) {
             // found the portal statement, trace it back looking
             // for a prepare (PARSE) statement to determine the
@@ -913,7 +930,7 @@ namespace springtail {
         QueryStmtPtr qs;
 
         if (stmt_type == 'S') {
-            dep_stmt = _stmt_cache.lookup_prepared(name);
+            std::tie(dep_stmt, std::ignore) = _stmt_cache.lookup_prepared(name);
 
             if (dep_stmt == nullptr) {
                 SPDLOG_ERROR("Statement not found: {}", name);
@@ -922,7 +939,7 @@ namespace springtail {
 
             qs = _stmt_cache.add(QueryStmt::DEALLOCATE, buffer, dep_stmt->is_read_safe, name.data());
         } else {
-            dep_stmt = _stmt_cache.lookup_portal(name);
+            std::tie(dep_stmt, std::ignore) = _stmt_cache.lookup_portal(name);
             qs = _stmt_cache.add(QueryStmt::CLOSE, buffer, dep_stmt->is_read_safe, name.data());
         }
 
@@ -986,7 +1003,7 @@ namespace springtail {
     ServerSessionPtr
     ClientSession::_select_session(Session::Type type)
     {
-        SPDLOG_DEBUG("Selecting server session: type={}", (int8_t)type);
+        SPDLOG_DEBUG("Selecting server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
 
         // if we have an associated session use it (typically in a transaction)
         if (get_associated_session() != nullptr) {
@@ -1012,8 +1029,11 @@ namespace springtail {
         }
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
+        SPDLOG_DEBUG("Creating new server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
         session = _create_server_session(type);
         assert (session != nullptr);
+        SPDLOG_DEBUG("Created new server session: id={}", session->id());
+
         set_associated_session(session);
 
         return session;
@@ -1050,7 +1070,6 @@ namespace springtail {
             _replica_session = session;
         }
         session->pin_client_session(shared_from_this());
-
 
         if (session->is_ready()) {
             // session is ready, we can use it
@@ -1171,7 +1190,7 @@ namespace springtail {
         // iterate through the parse contexts (one per query within multi-statement block)
         for (auto &context : parse_contexts) {
             QueryStmt::Type stmt_type = _remap_parse_type(context);
-            QueryStmtPtr dep_query_stmt = nullptr;
+            std::pair<QueryStmtPtr, bool> lookup_result = {nullptr, false};
 
             switch(stmt_type) {
                     case QueryStmt::DEALLOCATE:
@@ -1179,11 +1198,11 @@ namespace springtail {
                         // XXX optimize this in future, since it is silly to execute
                         // a prepared statement to deallocate it, but deallocate will
                         // fail if the prepared statement is not found
-                        dep_query_stmt = _stmt_cache.lookup_prepared(context->name);
+                        lookup_result = _stmt_cache.lookup_prepared(context->name);
                     break;
 
                 case QueryStmt::EXECUTE:
-                    dep_query_stmt = _stmt_cache.lookup_prepared(context->name);
+                    lookup_result = _stmt_cache.lookup_prepared(context->name);
                     break;
 
                 // those that have no affect on session history and no dependencies
@@ -1199,9 +1218,15 @@ namespace springtail {
             // add to parent
             qs->children.push_back(stmt);
 
-            // if there is a dependency add it; only prepared stmts
-            if (dep_query_stmt != nullptr) {
-                dependencies.push_back(dep_query_stmt);
+            // if there is a dependency add it; only prepared stmts; only add if not in current transaction
+            if (lookup_result.first != nullptr) {
+                if (lookup_result.second == false) {
+                    dependencies.push_back(lookup_result.first);
+                }
+                // if dependency is not read safe, then this query is not read safe
+                if (!lookup_result.first->is_read_safe) {
+                    is_read_safe = false;
+                }
             }
 
             // set readonly flag

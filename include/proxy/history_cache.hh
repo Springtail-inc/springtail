@@ -29,11 +29,11 @@ namespace springtail {
             SET = 1,            ///< set variable name
             SET_LOCAL = 2,      ///< set local variable name (transaction scope)
             RESET = 3,          ///< reset variable name or ALL if name empty
-            PREPARE = 4,        ///< prepared statement name only (unamed if empty name)
+            PREPARE = 4,        ///< prepared/parse statement name (unamed if empty name)
             DEALLOCATE = 5,     ///< deallocate name (unamed if empty name)
             DEALLOCATE_ALL = 6, ///< deallocate all prepared statements
             DECLARE_HOLD = 7,   ///< open cursor with hold cursor name
-            DECLARE = 8,        ///< open cursor/portal name only (unamed if empty name)
+            DECLARE = 8,        ///< open (bind) cursor/portal name only (unamed if empty name)
             CLOSE = 9,          ///< close cursor/portal name (unamed if empty name)
             CLOSE_ALL = 10,     ///< close all portals
             FETCH = 11,         ///< fetch cursor/portal name (NOTE: MOVE mapped to FETCH by parser)
@@ -47,12 +47,10 @@ namespace springtail {
             BEGIN = 19,         ///< begin transaction
             COMMIT = 20,        ///< commit transaction
             ROLLBACK = 21,      ///< rollback transaction
-            PARSE = 22,         ///< parse statement
-            BIND = 23,          ///< bind statement
             EXECUTE = 24,       ///< execute statement
             SYNC = 25,          ///< sync for extended query
             DESCRIBE = 26,      ///< describe statement
-            SIMPLE_QUERY = 27,  ///< simple query statement (not cached)
+            SIMPLE_QUERY = 27,  ///< simple query statement parent (not cached)
             ANONYMOUS = 28,     ///< anonymous statement (no name)
         };
 
@@ -112,15 +110,11 @@ namespace springtail {
         }
 
         bool is_extended() const {
-            switch (type) {
-                case PARSE:
-                case BIND:
-                case EXECUTE:
-                case DESCRIBE:
-                    return true;
-                default:
-                    return false;
+            if (type == SIMPLE_QUERY || data_type == SIMPLE) {
+                assert (extended_type == NONE);
+                return false;
             }
+            return true;
         }
 
         Type         type;          ///< type of query string
@@ -276,8 +270,10 @@ namespace springtail {
          * @brief Lookup a prepared statement in the cache.
          * @param name The name of the prepared statement.
          * @return A pointer to the QueryStmt object if found, nullptr otherwise;
+         *         and a boolean indicating if the statement was found in the current transaction (true)
+         *         or in the session history (false).
          */
-        QueryStmtPtr lookup_prepared(const std::string_view name) {
+        std::pair<QueryStmtPtr,bool> lookup_prepared(const std::string_view name) {
             return _lookup(name.size() == 0 ? std::string() : name.data(), QueryStmt::PREPARE);
         }
 
@@ -285,8 +281,10 @@ namespace springtail {
          * @brief Lookup a portal statement in the cache.
          * @param name The name of the prepared statement.
          * @return A pointer to the QueryStmt object if found, nullptr otherwise;
+         *         and a boolean indicating if the statement was found in the current transaction (true)
+         *         or in the session history (false).
          */
-        QueryStmtPtr lookup_portal(const std::string_view name) {
+        std::pair<QueryStmtPtr,bool> lookup_portal(const std::string_view name) {
             return _lookup(name.size() == 0 ? std::string() : name.data(), QueryStmt::DECLARE);
         }
 
@@ -324,9 +322,11 @@ namespace springtail {
          * @brief Lookup a statement in the cache.
          * @param name The name of the statement.
          * @param type The type of the statement (only prepare supported for now)
-         * @return A pointer to the QueryStmt object if found, nullptr otherwise.
+         * @return A pointer to the QueryStmt object if found, nullptr otherwise,
+         *         and a boolean indicating if the statement was found in the current transaction (true)
+         *         or in the session history (false).
          */
-        QueryStmtPtr _lookup(const std::string &name, QueryStmt::Type type);
+        std::pair<QueryStmtPtr, bool> _lookup(const std::string &name, QueryStmt::Type type);
 
         /**
          * @brief Commit a single statement to the transaction history if no error occurred.
