@@ -187,12 +187,12 @@ namespace springtail {
         // we wrap the client in a struct whose deallocator will release it back to the pool
 
         /** Thrift client object pool */
-        std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> _thrift_client_pool;
+        std::shared_ptr<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>> _thrift_client_pool;
 
         /** Struct to wrap the client pool and client object to ensure it gets release back */
         struct ThriftClient {
-            std::shared_ptr<ObjectPool<thrift::ThriftWriteCacheClient>> pool;
-            std::shared_ptr<thrift::ThriftWriteCacheClient> client;
+            std::shared_ptr<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>> pool;
+            std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client;
             ~ThriftClient() {
                 pool->put(client);
             }
@@ -204,7 +204,7 @@ namespace springtail {
          */
         inline ThriftClient _get_client()
         {
-            std::shared_ptr<thrift::ThriftWriteCacheClient> client = _thrift_client_pool->get();
+            std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client = _thrift_client_pool->get();
             ThriftClient c = { _thrift_client_pool, client };
             return c;
         }

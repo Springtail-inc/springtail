@@ -724,14 +724,7 @@ namespace springtail
         auto roots = table->finalize();
 
         // store the roots into the system table
-        auto table_roots_t = TableMgr::get_instance()->get_mutable_table(sys_tbl::TableRoots::ID, xid - 1, xid);
-        for (uint64_t idx = 0; idx < roots.size(); ++idx) {
-            auto tuple = sys_tbl::TableRoots::Data::tuple(_schema.table_oid, idx, xid, roots[idx]);
-            table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
-            SPDLOG_INFO("Updated root {} {} - {}", _schema.table_oid, idx, roots[idx]);
-        }
-        table_roots_t->finalize();
-
+        TableMgr::get_instance()->update_roots(_schema.table_oid, access_xid, xid, roots);
 
         return _schema.table_oid;
     }

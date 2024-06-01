@@ -63,7 +63,7 @@ namespace springtail {
         threadManager->start();
 
         apache::thrift::server::TThreadPoolServer server(
-            std::make_shared<thrift::ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
+            std::make_shared<thrift::write_cache::ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
             std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),

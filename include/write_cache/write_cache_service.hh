@@ -13,28 +13,28 @@ namespace springtail {
      *        from the .thrift file.  It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftWriteCacheService : public thrift::ThriftWriteCacheIf
+    class ThriftWriteCacheService : public thrift::write_cache::ThriftWriteCacheIf
     {
     public:
         ThriftWriteCacheService() = default;
 
-        void ping(thrift::Status& _return) override;
-        void add_rows(thrift::Status& _return, const thrift::AddRowsRequest& request) override;
-        void list_extents(thrift::ListExtentsResponse& _return, const thrift::ListExtentsRequest& request) override;
-        void get_rows(thrift::GetRowsResponse& _return, const thrift::GetRowsRequest& request) override;
-        void evict_table(thrift::Status& _return, const thrift::EvictTableRequest& request) override;
-        void add_table_change(thrift::Status& _return, const thrift::TableChange &change) override;
-        void get_table_changes(thrift::GetTableChangeResponse& _return, const thrift::GetTableChangeRequest& request) override;
-        void list_tables(thrift::ListTablesResponse& _return, const thrift::ListTablesRequest& request) override;
-        void evict_table_changes(thrift::Status& _return, const thrift::EvictTableChangesRequest& request) override;
-        void set_clean_flag(thrift::Status& _return, const thrift::SetCleanFlagRequest& request) override;
-        void reset_clean_flag(thrift::Status& _return, const thrift::ResetCleanFlagRequest& request) override;
+        void ping(thrift::write_cache::Status& _return) override;
+        void add_rows(thrift::write_cache::Status& _return, const thrift::write_cache::AddRowsRequest& request) override;
+        void list_extents(thrift::write_cache::ListExtentsResponse& _return, const thrift::write_cache::ListExtentsRequest& request) override;
+        void get_rows(thrift::write_cache::GetRowsResponse& _return, const thrift::write_cache::GetRowsRequest& request) override;
+        void evict_table(thrift::write_cache::Status& _return, const thrift::write_cache::EvictTableRequest& request) override;
+        void add_table_change(thrift::write_cache::Status& _return, const thrift::write_cache::TableChange &change) override;
+        void get_table_changes(thrift::write_cache::GetTableChangeResponse& _return, const thrift::write_cache::GetTableChangeRequest& request) override;
+        void list_tables(thrift::write_cache::ListTablesResponse& _return, const thrift::write_cache::ListTablesRequest& request) override;
+        void evict_table_changes(thrift::write_cache::Status& _return, const thrift::write_cache::EvictTableChangesRequest& request) override;
+        void set_clean_flag(thrift::write_cache::Status& _return, const thrift::write_cache::SetCleanFlagRequest& request) override;
+        void reset_clean_flag(thrift::write_cache::Status& _return, const thrift::write_cache::ResetCleanFlagRequest& request) override;
 
-        void add_mapping(thrift::Status &_return, const thrift::AddMappingRequest &request) override;
-        void set_lookup(thrift::Status &_return, const thrift::SetLookupRequest &request) override;
-        void forward_map(thrift::ExtentMapResponse &_return, const thrift::ForwardMapRequest &request) override;
-        void reverse_map(thrift::ExtentMapResponse &_return, const thrift::ReverseMapRequest &request) override;
-        void expire_map(thrift::Status &_return, const thrift::ExpireMapRequest &request) override;
+        void add_mapping(thrift::write_cache::Status &_return, const thrift::write_cache::AddMappingRequest &request) override;
+        void set_lookup(thrift::write_cache::Status &_return, const thrift::write_cache::SetLookupRequest &request) override;
+        void forward_map(thrift::write_cache::ExtentMapResponse &_return, const thrift::write_cache::ForwardMapRequest &request) override;
+        void reverse_map(thrift::write_cache::ExtentMapResponse &_return, const thrift::write_cache::ReverseMapRequest &request) override;
+        void expire_map(thrift::write_cache::Status &_return, const thrift::write_cache::ExpireMapRequest &request) override;
     };
 
 
@@ -42,16 +42,16 @@ namespace springtail {
      * @brief Private helper class to override handler creation;
      *        can be used to store per connection state or log incoming connections
      */
-    class ThriftWriteCacheCloneFactory : virtual public thrift::ThriftWriteCacheIfFactory {
+    class ThriftWriteCacheCloneFactory : virtual public thrift::write_cache::ThriftWriteCacheIfFactory {
         public:
             ~ThriftWriteCacheCloneFactory() override = default;
 
             /**
              * @brief Override the thrift getHandler call, allows for logging
              * @param connInfo Thrift connection info object
-             * @return thrift::ThriftWriteCacheIf*
+             * @return thrift::write_cache::ThriftWriteCacheIf*
              */
-            thrift::ThriftWriteCacheIf*
+            thrift::write_cache::ThriftWriteCacheIf*
             getHandler(const apache::thrift::TConnectionInfo &connInfo) override
             {
                 std::shared_ptr<apache::thrift::transport::TSocket> sock =
@@ -67,7 +67,7 @@ namespace springtail {
             }
 
             void
-            releaseHandler(thrift::ThriftWriteCacheIf *handler) override {
+            releaseHandler(thrift::write_cache::ThriftWriteCacheIf *handler) override {
                 delete handler;
             }
     };

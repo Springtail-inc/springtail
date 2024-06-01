@@ -1,0 +1,228 @@
+#include <garbage_collector/committer.hh>
+#include <storage/table_mgr.hh>
+
+namespace springtail::gc {
+
+    void
+    Committer::run()
+    {
+        // initiate the worker threads
+        for (int i = 0; i < _worker_count; i++) {
+            _worker_threads.push_back(std::thread(&Committer::_run_worker, this));
+        }
+
+        // get the most recent committed XID
+        _committed_xid = _xid_mgr->get_committed_xid();
+
+        // enter a loop polling for data from the write cache
+        // XXX we are currently processing XIDs one at a time, but we should bundle together XID
+        //     ranges whenever possible.
+        while (!_shutdown) {
+            // figure out if there's an XID to process
+            // note: this is a blocking call that will timeout after 60s
+            uint64_t xid = _redis.pop(_worker_id, 60)->xid();
+            if (xid == constant::LATEST_XID) {
+                // timed out, try again
+                continue;
+            }
+
+            // find every table associated with this XID
+            uint64_t table_cursor = 0;
+            bool tid_done = false;
+            while (!tid_done) {
+                // query the write cache for the tables modified in this XID
+                auto table_list = _write_cache->list_tables(xid, xid, 100, table_cursor);
+
+                // check if we are done processing this XID
+                if (table_list.empty()) {
+                    tid_done = true;
+                    break;
+                }
+
+                uint64_t extent_cursor = 0;
+                for (auto tid : table_list) {
+                    // construct the mutable table object
+                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid);
+
+                    boost::unique_lock lock(_mutex);
+                    _table_map[tid] = table;
+                    lock.unlock();
+
+                    bool eid_done = false;
+                    while (!eid_done) {
+                        // request the extents modified in each table
+                        auto extent_list = _write_cache->list_extents(tid, xid, xid, 100, extent_cursor);
+
+                        // check if we are done processing this table
+                        if (extent_list.empty()) {
+                            eid_done = true;
+                            break;
+                        }
+
+                        // pass each extent to the worker queue
+                        for (auto eid : extent_list) {
+                            // increment the number of in-flight extents for this table
+                            lock.lock();
+                            ++_tid_count[tid];
+                            lock.unlock();
+
+                            auto entry = std::make_shared<WorkerEntry>(table, eid, xid);
+                            _worker_queue.push(entry);
+                        }
+                    }
+                }
+            }
+
+            // wait for tables to complete their processing
+            // XXX ideally we could start working on the next XID while these finalize() operations
+            //     are being completed.
+            boost::unique_lock lock(_mutex);
+            while (!_tid_count.empty()) {
+                // check if any tables have completed processing
+                std::vector<uint64_t> completed;
+                for (auto &count : _tid_count) {
+                    if (count.second == 0) {
+                        // issue a finalize request to a worker
+                        auto table = _table_map[count.first];
+                        auto entry = std::make_shared<WorkerEntry>(table, xid, true);
+                        _worker_queue.push(entry);
+                    } else if (count.second == -1) {
+                        // mark the table to be cleared
+                        completed.push_back(count.first);
+                    }
+                }
+
+                // clear any completed tables
+                for (auto &tid : completed) {
+                    _tid_count.erase(tid);
+                    _table_map.erase(tid);
+                }
+
+                // if there are still outstanding tables, wait for one or more to complete
+                if (!_tid_count.empty()) {
+                    _cv.wait(lock);
+                }
+            }
+            lock.unlock();
+
+            // commit the completed XID
+            _xid_mgr->commit_xid(xid);
+            _committed_xid = xid;
+
+            // mark the XID as complete in the redis queue
+            _redis.commit(_worker_id);
+        }
+
+        // join all of the worker threads
+        for (auto &thread : _worker_threads) {
+            thread.join();
+        }
+    }
+
+    void
+    Committer::shutdown()
+    {
+        _shutdown = true;
+        // XXX close the redis connection to speed up the shutdown?
+    }
+
+    void
+    Committer::_run_worker()
+    {
+        // note: also wait on an empty queue to ensure it is drained before shutdown
+        while (!_shutdown || !_worker_queue.empty()) {
+            // wait for work on the queue
+            auto entry = _worker_queue.pop();
+            if (entry == nullptr) {
+                // note: this should only happen when the queue is shutdown
+                break;
+            }
+
+            if (entry->do_finalize) {
+                _process_finalize(entry->table, entry->xid);
+            } else {
+                _process_rows(entry->table, entry->extent_id, entry->xid);
+            }
+
+            // reduce the number of outstanding extents for this table
+            boost::unique_lock lock(_mutex);
+            int64_t outstanding = --_tid_count[entry->table->id()];
+            lock.unlock();
+
+            // if no more outstanding, notify the main loop
+            if (outstanding < 1) {
+                _cv.notify_one();
+            }
+        }
+    }
+
+    void
+    Committer::_process_finalize(MutableTablePtr table,
+                                 uint64_t xid)
+    {
+        // finalize the table
+        auto roots = table->finalize();
+
+        // record the new roots into the system table
+        TableMgr::get_instance()->update_roots(table->id(), _committed_xid, xid, roots);
+    }
+
+    void
+    Committer::_process_rows(MutableTablePtr table,
+                             uint64_t extent_id,
+                             uint64_t xid)
+    {
+        // save the schema
+        auto schema = table->schema();
+
+        uint64_t cursor = 0;
+        bool done = false;
+        while (!done) {
+            // request rows from the write cache for the provided extent ID
+            auto rows = _write_cache->fetch_rows(table->id(), extent_id, xid, xid, 100, cursor);
+            if (rows.empty()) {
+                done = true;
+                break;
+            }
+
+            // apply the changes to the extent
+            // XXX It would be more efficient to retrieve the page and apply all of the changes
+            //     at once rather than looking it up every time.  This would require changes to
+            //     the MutableTable interfaces.
+            auto row_fields = schema->get_fields();
+            auto key_fields = schema->get_fields(schema->get_sort_keys());
+
+            for (const auto &row : rows) {
+                // construct a tuple from the row data
+                // XXX seems like we've got more copies here than strictly necessary... we could
+                //     instead construct a read-only extent via pointers into the existing data
+                //     object
+                ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                Extent extent(header);
+                extent.deserialize(row.data);
+
+                // pass that tuple into the appropriate table mutation
+                switch (row.op) {
+                case (WriteCacheClient::RowOp::INSERT):
+                    {
+                        auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                        table->insert(value, xid, extent_id);
+                        break;
+                    }
+                case (WriteCacheClient::RowOp::UPDATE):
+                    {
+                        auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                        table->update(value, xid, extent_id);
+                        break;
+                    }
+                case (WriteCacheClient::RowOp::DELETE):
+                    {
+                        auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
+                        table->remove(key, xid, extent_id);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
