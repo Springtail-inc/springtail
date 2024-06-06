@@ -82,6 +82,7 @@ dump_tables_in_schema(const PostgresConnection &conn,
     pg_conn.disconnect();
 
     for (const auto &table_name : table_names) {
+        SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
         dump_table(base_dir, schema_name, table_name, conn);
     }
 }
@@ -155,6 +156,7 @@ gen_fdw_table(const std::string &schema,
     }
     create += fmt::format(") SERVER {} OPTIONS oid '{}';",
                           SERVER_NAME, tid);
+
     fmt::print("{}\n", create);
 }
 
@@ -180,6 +182,7 @@ gen_fdw_schema()
 
         // check if table already exists in the map
         if (exists) {
+            SPDLOG_DEBUG("Found table {}.{} tid={}, xid={}\n", schema_name, table_name, tid, xid);
             // if so update the xid if it is newer
             auto entry = table_map[schema_name].insert({table_name, {tid, xid}});
             if (entry.second == false) {
