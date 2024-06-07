@@ -176,8 +176,8 @@ gen_fdw_schema()
     for (auto row : (*table)) {
         std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
         std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
-        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_int64(row);
-        uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_int64(row);
+        uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
+        uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
 
         // check if table already exists in the map
@@ -219,7 +219,7 @@ gen_fdw_schema()
     // iterate through it
     fields = table->extent_schema()->get_fields();
     for (auto row : (*table)) {
-        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_int64(row);
+        uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
 
         // check if we have moved to next tid
         if (tid != current_tid && columns.size() > 0) {
@@ -246,7 +246,7 @@ gen_fdw_schema()
         if (exists) {
             // add column if it exists
             std::string column_name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
-            uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_int8(row);
+            uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             std::optional<std::string> default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
 
