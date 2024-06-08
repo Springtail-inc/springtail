@@ -21,13 +21,16 @@ if(${LINUX})
 else()
     target_link_options(springtail_pg_fdw
         PRIVATE -Wl,-undefined,dynamic_lookup
+        PRIVATE -Wl,-bundle
+        #PRIVATE -Wl,-all_load
     )
 endif()
 
 target_link_libraries(springtail_pg_fdw
-    PUBLIC springtail_common
-    PUBLIC springtail_storage
-    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+    PRIVATE springtail_xid_mgr
+    #PRIVATE PostgreSQL::PostgreSQL
 )
 
 add_executable(gen_schema_sql test/gen_schema_sql.cc)
