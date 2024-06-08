@@ -42,6 +42,8 @@ void dump_table(const std::filesystem::path &base_dir,
                 const std::string &table_name,
                 const PostgresConnection &conn)
 {
+    SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
+
     auto source = std::make_shared<PgCopyTable>(conn.database, schema_name, table_name, "");
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
@@ -164,8 +166,8 @@ void
 gen_fdw_schema()
 {
     auto table = TableMgr::get_instance()->get_table(sys_tbl::TableNames::ID,
-                                                        constant::LATEST_XID,
-                                                        constant::MAX_LSN);
+                                                     constant::LATEST_XID,
+                                                     constant::MAX_LSN);
     // get field array
     auto fields = table->extent_schema()->get_fields();
 

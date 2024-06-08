@@ -1,9 +1,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <pg_fdw/pg_fdw.h>
 
 #include "postgres.h"
 #include "access/htup_details.h"
@@ -30,13 +28,8 @@ extern "C" {
 
 PG_MODULE_MAGIC;
 
-typedef struct SpringtailFdwEState {
-    uint64_t xid;
-    uint64_t oid;
-} SpringtailFdwState;
-
 typedef struct SpringtailFdwTableOptions {
-    uint64_t oid;
+    uint64_t tid;
 } SpringtailFdwTableOptions;
 
 /*
@@ -83,13 +76,17 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
 
 
 // Split function definition
-void split_uint64(uint64_t input, uint32_t *low, uint32_t *high) {
+void
+split_uint64(uint64_t input, uint32_t *low, uint32_t *high)
+{
     *low = (uint32_t)(input & 0xFFFFFFFF);          // Extract the lower 32 bits
     *high = (uint32_t)((input >> 32) & 0xFFFFFFFF); // Extract the upper 32 bits
 }
 
 // Combine function definition
-uint64_t combine_uint32(uint32_t low, uint32_t high) {
+uint64_t
+combine_uint32(uint32_t low, uint32_t high)
+{
     return ((uint64_t)high << 32) | low; // Combine the upper 32 bits and lower 32 bits
 }
 
@@ -161,14 +158,15 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 */
 
     // Can store options on create table and access them here
-    // store the oid in the fdw_private field of the baserel
     ForeignTable *ft = GetForeignTable(foreigntableid);
     ListCell *cell;
-    int64_t oid = -1;
+    int64_t tid = -1; // XXX is there an invalid TID?
+
+    // look through the options (provided during CREATE FOREIGN TABLE)
     foreach(cell, ft->options) {
         DefElem *def = lfirst_node(DefElem, cell);
-        if (strcmp("oid", def->defname) == 0) {
-            oid = defGetInt64(def);
+        if (strcmp("tid", def->defname) == 0) {
+            tid = defGetInt64(def);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
@@ -177,15 +175,16 @@ springtail_GetForeignRelSize(PlannerInfo *root,
         }
     }
 
-    if (oid == -1) {
+    if (tid == -1) {
         ereport(ERROR,
                 (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
                             errmsg("invalid option \"oid\""),
                             errhint("Invalid oid for table from table options")));
     }
 
+    // store the tid in the fdw_private field of the baserel
     SpringtailFdwTableOptions *opts = (SpringtailFdwTableOptions *)palloc(sizeof(SpringtailFdwTableOptions));
-    opts->oid = oid;
+    opts->tid = tid;
     baserel->fdw_private = opts;
 }
 
@@ -241,7 +240,7 @@ springtail_GetForeignPlan(PlannerInfo *root,
 
     // postgres only supports integer value for lists, so to be safe we split the oid
     uint32_t low, high;
-    split_uint64(opts->oid, &low, &high);
+    split_uint64(opts->tid, &low, &high);
     List *fdw_private = list_make2(makeInteger(low), makeInteger(high));
 
     /* build a List * of the clause field of the passed in scan_clauses,
@@ -266,16 +265,15 @@ springtail_GetForeignPlan(PlannerInfo *root,
 void
 springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
-    // allocate and initialize state
-    SpringtailFdwState *state = (SpringtailFdwState *)palloc0(sizeof(SpringtailFdwState));
-    node->fdw_state = state;
-
-    // extract oid from fdw_private
+    // extract tid from fdw_private
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
     uint32_t low = intVal(linitial(fs->fdw_private));
     uint32_t high = intVal(lsecond(fs->fdw_private));
+    uint64_t tid = combine_uint32(low, high);
 
-    state->oid = combine_uint32(low, high);
+    // allocate and initialize state
+    struct PgFdwMgr *mgr = get_fdw_mgr();
+    node->fdw_state = fdw_begin_scan(mgr, tid);
 
     /* Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
@@ -296,18 +294,16 @@ springtail_IterateForeignScan(ForeignScanState *node)
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
     ExecClearTuple(slot);
 
-    // SpringtailFdwState *state = (SpringtailFdwState *)node->fdw_state;
+    void *state = node->fdw_state;
+    struct PgFdwMgr *mgr = get_fdw_mgr();
 
-    // slot->tts-isnull[i] = false/true
-    // slot->tts_values[i] = Datum (Int32GetDatum())
+    // get next row, if true it was filled in successfully
+    // if false we return the empty slot
+    if (!fdw_iterate_scan(mgr, state, slot->tts_values, slot->tts_isnull)) {
+        return slot;
+    }
 
-    /* E.g
-        slot->tts_isnull[0] = false;
-        slot->tts_values[0] = Int32GetDatum(state->current);
-        ExecStoreVirtualTuple(slot);
-        incr state
-    */
-
+    ExecStoreVirtualTuple(slot);
     return slot;
 }
 
@@ -318,8 +314,10 @@ springtail_IterateForeignScan(ForeignScanState *node)
 void
 springtail_ReScanForeignScan(ForeignScanState *node)
 {
-    //SpringtailFdwState *state = (SpringtailFdwState*)node->fdw_state;
     // reset state to beginning of table
+    struct PgFdwMgr *mgr = get_fdw_mgr();
+    void *state = node->fdw_state;
+    fdw_reset_scan(mgr, state);
 }
 
 /**
@@ -329,7 +327,11 @@ springtail_ReScanForeignScan(ForeignScanState *node)
 void
 springtail_EndForeignScan(ForeignScanState *node)
 {
-
+    // cleanup fdw_state
+    struct PgFdwMgr *mgr = get_fdw_mgr();
+    void *state = node->fdw_state;
+    fdw_end_scan(mgr, state);
+    node->fdw_state = NULL;
 }
 
 void
@@ -345,7 +347,3 @@ springtail_AnalyzeForeignTable(Relation relation,
 {
     return false;
 }
-
-#ifdef __cplusplus
-}
-#endif

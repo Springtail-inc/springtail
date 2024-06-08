@@ -3,8 +3,9 @@ enable_language(C)
 find_package(PostgreSQL REQUIRED)
 
 set(PG_FDW_SOURCES
-    pg_fdw.cc
+    pg_fdw.c
     pg_fdw_mgr.cc
+    pg_fdw_mgr_wrap.cc
 )
 
 add_library(springtail_pg_fdw SHARED ${PG_FDW_SOURCES})
