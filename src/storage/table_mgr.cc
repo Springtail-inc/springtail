@@ -124,6 +124,8 @@ namespace springtail {
         // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
         uint64_t access_xid = xid - 1;
 
+        SPDLOG_DEBUG("Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
+
         // 1) add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
         auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);

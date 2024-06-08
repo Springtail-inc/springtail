@@ -197,6 +197,11 @@ namespace springtail
                                     column.default_value.value_or("NULL"), column.is_pkey);
 
                 _schema.columns[i] = column;
+
+                // add the key to the list of pkeys
+                if (column.is_pkey) {
+                    _schema.pkeys.push_back(column.name);
+                }
             }
         } catch (...) {
             _connection.clear();
@@ -630,6 +635,8 @@ namespace springtail
                     // TODO: we assume false since we don't support generated fields right now
                     false  // is_generated
                 });
+
+            SPDLOG_DEBUG("PKEY? {} {}", columns.back().is_pkey, columns.back().pk_position);
         }
         return columns;
     }
@@ -664,8 +671,8 @@ namespace springtail
                               _schema.table_name,
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
-        // note: we create the system metadata at XID 1
-        uint64_t access_xid = 1;
+        // note: we create the system metadata at XID 2
+        uint64_t access_xid = 2;
         TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
 
         auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
