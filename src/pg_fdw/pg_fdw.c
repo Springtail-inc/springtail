@@ -33,15 +33,6 @@ typedef struct SpringtailFdwTableOptions {
 } SpringtailFdwTableOptions;
 
 /*
- * SQL functions
- */
-extern Datum springtail_fdw_handler(PG_FUNCTION_ARGS);
-extern Datum springtail_fdw_validator(PG_FUNCTION_ARGS);
-
-PG_FUNCTION_INFO_V1(springtail_fdw_handler);
-PG_FUNCTION_INFO_V1(springtail_fdw_validator);
-
-/*
  * FDW callback routines
  */
 static void springtail_GetForeignRelSize(PlannerInfo *root,
@@ -92,7 +83,9 @@ combine_uint32(uint32_t low, uint32_t high)
 
 /*
  * Foreign-data wrapper handler function
+ * Exported function to create the FDW handler
  */
+PG_FUNCTION_INFO_V1(springtail_fdw_handler);
 Datum
 springtail_fdw_handler(PG_FUNCTION_ARGS)
 {
@@ -115,14 +108,23 @@ springtail_fdw_handler(PG_FUNCTION_ARGS)
 }
 
 /*
- * Validate the generic options given to a FOREIGN DATA WRAPPER, SERVER
- * USER MAPPING or FOREIGN TABLE that uses springtail_fdw.
+ * Validate the generic options given to a FOREIGN DATA WRAPPER
+ * Exported function to validate the options
  */
+PG_FUNCTION_INFO_V1(springtail_fdw_validator);
 Datum
 springtail_fdw_validator(PG_FUNCTION_ARGS)
 {
     /* no-op */
-     PG_RETURN_VOID();
+    ArrayType  *options;
+    Oid         catalog = InvalidOid;
+
+    if (PG_NARGS() == 2)
+    {
+        options = PG_GETARG_ARRAYTYPE_P(0);
+        catalog = PG_GETARG_OID(1);
+    }
+    PG_RETURN_VOID();
 }
 
 /**
