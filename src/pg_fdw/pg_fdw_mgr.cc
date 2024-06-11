@@ -1,3 +1,6 @@
+#include <common/common.hh>
+#include <common/logging.hh>
+
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 extern "C" {
@@ -14,6 +17,7 @@ namespace springtail {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
+        springtail_init();
         _instance = new PgFdwMgr();
         return _instance;
     }
@@ -24,8 +28,25 @@ namespace springtail {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid();
         TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
 
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
+
         PgFdwState *state = new PgFdwState{table, tid, xid, table->begin()};
         return state;
+    }
+
+    void
+    PgFdwMgr::fdw_end(PgFdwState *state)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}", state->tid);
+        delete state;
+    }
+
+    void
+    PgFdwMgr::fdw_reset_scan(PgFdwState *state)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
+        state->iter.reset();
+        state->iter.emplace(Table::Iterator(state->table->begin()));
     }
 
     bool
@@ -40,6 +61,8 @@ namespace springtail {
         if (*state->iter == state->table->end()) {
             return false;
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // get current row
         Extent::Row row = *(*state->iter);

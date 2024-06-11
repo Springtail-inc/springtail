@@ -86,6 +86,7 @@ dump_tables_in_schema(const PostgresConnection &conn,
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
         dump_table(base_dir, schema_name, table_name, conn);
+        break;
     }
 }
 
@@ -156,10 +157,44 @@ gen_fdw_table(const std::string &schema,
         }
         create += column + ",\n";
     }
-    create += fmt::format(") SERVER {} OPTIONS oid '{}';",
+    create += fmt::format(") SERVER {} OPTIONS (oid '{}');",
                           SERVER_NAME, tid);
 
     fmt::print("{}\n", create);
+}
+
+void
+gen_fdw_system_tables()
+{
+    // column description: name, type, nullable, default
+    std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
+    std::string schema_name = "pg_catalog";
+
+    // TableNames
+    std::string table_name = "__pg_springtail_table_names";
+    uint64_t tid = sys_tbl::TableNames::ID;
+    for (const auto &column : sys_tbl::TableNames::Data::SCHEMA) {
+        columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
+    }
+    gen_fdw_table(schema_name, table_name, tid, columns);
+
+    // TableRoots
+    table_name = "__pg_springtail_table_roots";
+    tid = sys_tbl::TableRoots::ID;
+    columns.clear();
+    for (const auto &column : sys_tbl::TableRoots::Data::SCHEMA) {
+        columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
+    }
+    gen_fdw_table(schema_name, table_name, tid, columns);
+
+    // Schemas
+    table_name = "__pg_springtail_schemas";
+    tid = sys_tbl::Schemas::ID;
+    columns.clear();
+    for (const auto &column : sys_tbl::Schemas::Data::SCHEMA) {
+        columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
+    }
+    gen_fdw_table(schema_name, table_name, tid, columns);
 }
 
 void
@@ -279,4 +314,5 @@ main(int argc,
     dump_tables_in_schema(conn, "public");
 
     gen_fdw_schema();
+    gen_fdw_system_tables();
 }

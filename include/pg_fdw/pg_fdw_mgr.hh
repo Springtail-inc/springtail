@@ -52,14 +52,9 @@ namespace springtail  {
 
         bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);
 
-        void fdw_end(PgFdwState *state) {
-            delete state;
-        }
+        void fdw_end(PgFdwState *state);
 
-        void fdw_reset_scan(PgFdwState *state) {
-            state->iter.reset();
-            state->iter.emplace(Table::Iterator(state->table->begin()));
-        }
+        void fdw_reset_scan(PgFdwState *state);
 
     private:
         PgFdwMgr() {}
