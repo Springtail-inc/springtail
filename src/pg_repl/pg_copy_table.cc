@@ -692,15 +692,15 @@ namespace springtail
         prepare_copy();
 
         // get a chunk of data
-        auto data = get_next_data();        
+        auto data = get_next_data();
         if (!data) {
             throw PgIOError();
         }
-        
+
         // verify the header before processing the rows
         int32_t ext_length = verify_copy_header(data->substr(0, 19));
         size_t pos = 19 + ext_length;
-        
+
         // scan the rows and populate the table
         while (true) {
             if (data->size() == pos) {
@@ -964,7 +964,7 @@ namespace springtail
                     fields->push_back(std::make_shared<ConstNullField>(SchemaType::INT64));
                 } else {
                     assert(length == 8);
-                    fields->push_back(std::make_shared<ConstTypeField<int32_t>>(recvint64(row.data() + pos)));
+                    fields->push_back(std::make_shared<ConstTypeField<int64_t>>(recvint64(row.data() + pos)));
                     pos += length;
                 }
             }
@@ -973,7 +973,7 @@ namespace springtail
                     fields->push_back(std::make_shared<ConstNullField>(SchemaType::BOOLEAN));
                 } else {
                     assert(length == 1);
-                    fields->push_back(std::make_shared<ConstTypeField<int32_t>>(*(row.data() + pos) == 1));
+                    fields->push_back(std::make_shared<ConstTypeField<bool>>(*(row.data() + pos) == 1));
                     ++pos;
                 }
             }

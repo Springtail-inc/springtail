@@ -40,7 +40,8 @@ static constexpr char SERVER_NAME[] = "springtail";
 void dump_table(const std::filesystem::path &base_dir,
                 const std::string &schema_name,
                 const std::string &table_name,
-                const PostgresConnection &conn)
+                const PostgresConnection &conn,
+                uint64_t xid=2)
 {
     SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
 
@@ -48,7 +49,6 @@ void dump_table(const std::filesystem::path &base_dir,
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
     // perform the table copy
-    uint64_t xid = 2;
     source->copy_to_springtail(base_dir, xid);
 }
 
@@ -83,11 +83,12 @@ dump_tables_in_schema(const PostgresConnection &conn,
     pg_conn.clear();
     pg_conn.disconnect();
 
+    uint64_t xid = 2;
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn);
-        break;
-    }
+        dump_table(base_dir, schema_name, table_name, conn, xid);
+        xid += 2;
+     }
 }
 
 void
