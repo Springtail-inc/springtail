@@ -22,7 +22,6 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
-//#include "optimizer/var.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 

@@ -17,12 +17,31 @@
 using namespace springtail;
 
 extern "C" {
+    #include "varatt.h"
+    #include "utils/builtins.h"
+
     /** Dummy function so that we can link with pg_fdw_mgr.cc */
     text *
     cstring_to_text(const char *s)
     {
         int len = strlen(s);
         text *result = (text *) palloc(VARHDRSZ + len + 1);
+        SET_VARSIZE(result, VARHDRSZ + len);
+        memcpy(VARDATA(result), s, len);
+
+        return result;
+    }
+
+    char *
+    text_to_cstring(const text *t)
+    {
+        int len;
+        char *result;
+
+        len = VARSIZE_ANY_EXHDR(t);
+        result = (char *) palloc(len + 1);
+        memcpy(result, VARDATA_ANY(t), len);
+        result[len] = '\0';
         return result;
     }
 }
@@ -103,7 +122,8 @@ dump_datum(Datum value, SchemaType type)
         case SchemaType::FLOAT64:
             return fmt::format("{}", DatumGetFloat8(value));
         case SchemaType::TEXT:
-            return fmt::format("{}", DatumGetCString(value));
+            //return fmt::format("{}", DatumGetCString(value));
+            return fmt::format("{}", TextDatumGetCString(value));
         case SchemaType::TIMESTAMP:
             return fmt::format("{}", DatumGetUInt64(value));
         case SchemaType::DATE:
