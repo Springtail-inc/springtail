@@ -452,11 +452,15 @@ namespace springtail {
 
                 // copy causes the use count to be incremented
                 SafeExtent(const SafeExtent &other) {
-                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    if (other._extent != nullptr) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
                     _extent = other._extent;
                 }
                 SafeExtent &operator=(const SafeExtent &other) {
-                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    if (other._extent != nullptr) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
                     _extent = other._extent;
                     return *this;
                 }

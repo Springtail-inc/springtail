@@ -62,18 +62,19 @@ lookup_table(const std::string &schema_name, const std::string &table_name, uint
     auto fields = table->extent_schema()->get_fields();
 
     // iterate over the table names table
+    uint64_t found_tid = -1;
     for (auto row : (*table)) {
-        std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+        std::string ns = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
+        std::string name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
         uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
         uint64_t t_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
 
-        if (schema_name == schema_name && table_name == table_name && xid == t_xid) {
-            return tid;
+        if (schema_name == ns && table_name == name && t_xid <= xid) {
+            found_tid = tid;
         }
     }
 
-    return -1;
+    return found_tid;
 }
 
 std::string
