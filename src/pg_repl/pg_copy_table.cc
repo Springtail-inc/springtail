@@ -671,8 +671,8 @@ namespace springtail
                               _schema.table_name,
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
-        // note: we create the system metadata at XID 2
-        uint64_t access_xid = 2;
+        // note: we create the system metadata at the previous XID
+        uint64_t access_xid = xid - 1;
         TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
 
         auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
