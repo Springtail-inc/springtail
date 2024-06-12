@@ -8,7 +8,7 @@ To install FDW:
 
 3. Copy springtail_fdw.control to share/extension dir
 
-4. Build and copy libspringtail_fdw.dylib to lib dir
+4. Build and copy libspringtail_fdw.dylib to lib dir as springtail_fdw.dylib
   e.g., /opt/homebrew/opt/postgresql@16/lib/postgresql/
 
 5. In psql execute:

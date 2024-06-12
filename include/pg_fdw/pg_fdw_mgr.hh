@@ -48,7 +48,7 @@ namespace springtail  {
             return _instance;
         }
 
-        PgFdwState *fdw_begin(uint64_t tid);
+        PgFdwState *fdw_begin(uint64_t tid, uint64_t xid=0);
 
         bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);
 

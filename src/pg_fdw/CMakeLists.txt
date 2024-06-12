@@ -1,6 +1,7 @@
 enable_language(C)
 
 find_package(PostgreSQL REQUIRED)
+find_package(Boost COMPONENTS program_options REQUIRED)
 
 set(PG_FDW_SOURCES
     pg_fdw.c
@@ -41,4 +42,17 @@ target_link_libraries(gen_schema_sql
     PUBLIC springtail_common
     PUBLIC springtail_storage
     PUBLIC springtail_pg
+)
+
+add_executable(dump_table test/dump_table.cc pg_fdw_mgr.cc)
+target_include_directories(dump_table
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+target_link_libraries(dump_table
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+    PRIVATE springtail_xid_mgr
+    PRIVATE Boost::program_options
+    PRIVATE PostgreSQL::PostgreSQL
 )

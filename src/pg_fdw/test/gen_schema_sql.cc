@@ -35,7 +35,8 @@ static constexpr char SCHEMA_TABLES_QUERY[] =
     "AND table_type = 'BASE TABLE' "
     "AND table_schema NOT IN ('pg_catalog', 'information_schema'); ";
 
-static constexpr char SERVER_NAME[] = "springtail";
+static constexpr char SERVER_NAME[] = "springtail_fdw_server";
+static constexpr char SPRINGTAIL_CATALOG_SCHEMA[] = "__springtail_catalog";
 
 void dump_table(const std::filesystem::path &base_dir,
                 const std::string &schema_name,
@@ -88,7 +89,7 @@ dump_tables_in_schema(const PostgresConnection &conn,
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
         dump_table(base_dir, schema_name, table_name, conn, xid);
         xid += 2;
-     }
+    }
 }
 
 void
@@ -100,8 +101,10 @@ gen_fdw_table(const std::string &schema,
     std::string create = fmt::format("CREATE FOREIGN TABLE \"{}\".\"{}\" (\n", schema, table);
 
     // iterate over the columns, adding each to the create statement
-    for (const auto &[column_name, type, nullable, default_value] : columns) {
+    for (int i = 0; i < columns.size(); i++) {
+        const auto &[column_name, type, nullable, default_value] = columns[i];
         std::string column = fmt::format(" \"{}\" ", column_name);
+
         switch (static_cast<SchemaType>(type)) {
             case SchemaType::UINT8: // XXX not sure what this is
             case SchemaType::INT8:
@@ -153,12 +156,16 @@ gen_fdw_table(const std::string &schema,
             column += " NOT NULL";
         }
 
-        if (default_value.has_value()) {
+        if (default_value.has_value() && !default_value.value().empty()) {
             column += fmt::format(" DEFAULT {}", default_value.value());
         }
-        create += column + ",\n";
+
+        if (i < columns.size() - 1) {
+            column += ",";
+        }
+        create += column + "\n";
     }
-    create += fmt::format(") SERVER {} OPTIONS (oid '{}');",
+    create += fmt::format(") SERVER {} OPTIONS (tid '{}');",
                           SERVER_NAME, tid);
 
     fmt::print("{}\n", create);
@@ -169,10 +176,10 @@ gen_fdw_system_tables()
 {
     // column description: name, type, nullable, default
     std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
-    std::string schema_name = "pg_catalog";
+    std::string schema_name = SPRINGTAIL_CATALOG_SCHEMA;
 
     // TableNames
-    std::string table_name = "__pg_springtail_table_names";
+    std::string table_name = "table_names";
     uint64_t tid = sys_tbl::TableNames::ID;
     for (const auto &column : sys_tbl::TableNames::Data::SCHEMA) {
         columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
@@ -180,7 +187,7 @@ gen_fdw_system_tables()
     gen_fdw_table(schema_name, table_name, tid, columns);
 
     // TableRoots
-    table_name = "__pg_springtail_table_roots";
+    table_name = "table_roots";
     tid = sys_tbl::TableRoots::ID;
     columns.clear();
     for (const auto &column : sys_tbl::TableRoots::Data::SCHEMA) {
@@ -189,7 +196,7 @@ gen_fdw_system_tables()
     gen_fdw_table(schema_name, table_name, tid, columns);
 
     // Schemas
-    table_name = "__pg_springtail_schemas";
+    table_name = "schemas";
     tid = sys_tbl::Schemas::ID;
     columns.clear();
     for (const auto &column : sys_tbl::Schemas::Data::SCHEMA) {
@@ -286,8 +293,10 @@ gen_fdw_schema()
             std::string column_name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
             uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
-            std::optional<std::string> default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
-
+            std::optional<std::string> default_value{};
+            if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
+                default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
+            }
             columns.push_back({column_name, type, nullable, default_value});
         }
     }

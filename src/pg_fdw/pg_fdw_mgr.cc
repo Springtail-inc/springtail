@@ -23,13 +23,15 @@ namespace springtail {
     }
 
     PgFdwState *
-    PgFdwMgr::fdw_begin(uint64_t tid)
+    PgFdwMgr::fdw_begin(uint64_t tid, uint64_t xid)
     {
-        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid();
-        TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
+        if (xid == 0) {
+            xid = XidMgrClient::get_instance()->get_committed_xid();
+        }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
 
+        TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
         PgFdwState *state = new PgFdwState{table, tid, xid, table->begin()};
         return state;
     }

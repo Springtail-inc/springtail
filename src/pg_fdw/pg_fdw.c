@@ -168,7 +168,8 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     foreach(cell, ft->options) {
         DefElem *def = lfirst_node(DefElem, cell);
         if (strcmp("tid", def->defname) == 0) {
-            tid = defGetInt64(def);
+            char *tidstr = defGetString(def);
+            tid = atoll(tidstr);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
@@ -275,6 +276,8 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 
     // allocate and initialize state
     struct PgFdwMgr *mgr = get_fdw_mgr();
+
+    // allocate and initialize state
     node->fdw_state = fdw_begin_scan(mgr, tid);
 
     /* Do nothing in EXPLAIN */
