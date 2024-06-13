@@ -20,6 +20,13 @@ extern "C" {
     #include "varatt.h"
     #include "utils/builtins.h"
 
+    // These files are not being linked in, from libpq
+    // so we define them here
+
+    int pg_fprintf(FILE *stream, const char *fmt, ...) {
+        return 0;
+    }
+
     /** Dummy function so that we can link with pg_fdw_mgr.cc */
     text *
     cstring_to_text(const char *s)
@@ -46,6 +53,7 @@ extern "C" {
     }
 }
 
+/** List all tables from TableNames system table */
 void
 list_tables()
 {
@@ -70,6 +78,7 @@ list_tables()
     }
 }
 
+/** Lookup table ID from TableNames system table */
 uint64_t
 lookup_table(const std::string &schema_name, const std::string &table_name, uint64_t xid)
 {
@@ -96,6 +105,7 @@ lookup_table(const std::string &schema_name, const std::string &table_name, uint
     return found_tid;
 }
 
+/** Convert datum to string based on schema type */
 std::string
 dump_datum(Datum value, SchemaType type)
 {
@@ -135,6 +145,7 @@ dump_datum(Datum value, SchemaType type)
     }
 }
 
+/** Dump a table by table ID and xid */
 void
 dump_table(uint64_t tid, uint64_t xid)
 {
@@ -164,6 +175,7 @@ dump_table(uint64_t tid, uint64_t xid)
     mgr->fdw_end(state);
 }
 
+/** Dump a table by schema, table name and xid */
 void
 dump_table(const std::string &schema_name, const std::string &table_name, uint64_t xid)
 {

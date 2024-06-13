@@ -24,7 +24,7 @@ extern "C" {
 
 namespace springtail  {
 
-    /** Internall state used to track table scan */
+    /** Internal state used to track table scan */
     struct PgFdwState {
         TablePtr table;
         uint64_t tid;
@@ -32,6 +32,7 @@ namespace springtail  {
         FieldArrayPtr fields;
         std::optional<Table::Iterator> iter;
 
+        /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid, Table::Iterator iter)
             : table(table), tid(tid), xid(xid), iter(iter)
         {
@@ -43,28 +44,35 @@ namespace springtail  {
     /** Singleton manager for handling table scan operations */
     class PgFdwMgr {
     public:
+        /** Get singleton instance */
         static PgFdwMgr* get_instance() {
             std::call_once(_init_flag, _init);
             return _instance;
         }
 
+        /** Begin scan */
         PgFdwState *fdw_begin(uint64_t tid, uint64_t xid=0);
 
+        /** Iterate scan -- get next row */
         bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);
 
+        /** End scan -- free state */
         void fdw_end(PgFdwState *state);
 
+        /** Reset scan -- set iterator to beginning */
         void fdw_reset_scan(PgFdwState *state);
 
     private:
+        /** Delete constructor */
         PgFdwMgr() {}
         PgFdwMgr(const PgFdwMgr&) = delete;
         PgFdwMgr& operator=(const PgFdwMgr&) = delete;
 
-        static PgFdwMgr* _instance;
-        static std::once_flag _init_flag;
-        static PgFdwMgr* _init();
+        static PgFdwMgr* _instance;        ///< Singleton instance
+        static std::once_flag _init_flag;  ///< Initialization flag
+        static PgFdwMgr* _init();          ///< Initialize singleton
 
+        /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field, const Extent::Row &row);
     };
 }

@@ -7,11 +7,13 @@ using namespace springtail;
 extern "C" {
     #include <postgres.h>
 
+    /** Get PgFdwMgr singleton */
     PgFdwMgr *
     get_fdw_mgr() {
         return PgFdwMgr::get_instance();
     }
 
+    /** Begin scan wrapper */
     void *
     fdw_begin_scan(PgFdwMgr *instance, uint64_t tid) {
         if (instance) {
@@ -20,6 +22,7 @@ extern "C" {
         return nullptr;
     }
 
+    /** Iterate scan wrapper */
     bool
     fdw_iterate_scan(PgFdwMgr *instance, void *state, Datum *values, bool *nulls) {
         if (instance && state) {
@@ -28,6 +31,7 @@ extern "C" {
         return false;
     }
 
+    /** End scan wrapper */
     void
     fdw_end_scan(PgFdwMgr *instance, void *state) {
         if (instance && state) {
@@ -35,6 +39,7 @@ extern "C" {
         }
     }
 
+    /** Reset scan wrapper */
     void
     fdw_reset_scan(PgFdwMgr *instance, void *state) {
         if (instance && state) {
