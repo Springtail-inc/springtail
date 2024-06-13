@@ -90,7 +90,7 @@ springtail_fdw_handler(PG_FUNCTION_ARGS)
 {
     FdwRoutine *fdwroutine = makeNode(FdwRoutine);
 
-	/* Functions for scanning foreign tables */
+    /* Functions for scanning foreign tables */
     fdwroutine->GetForeignRelSize = springtail_GetForeignRelSize;
     fdwroutine->GetForeignPaths = springtail_GetForeignPaths;
     fdwroutine->GetForeignPlan = springtail_GetForeignPlan;
@@ -99,7 +99,7 @@ springtail_fdw_handler(PG_FUNCTION_ARGS)
     fdwroutine->ReScanForeignScan = springtail_ReScanForeignScan;
     fdwroutine->EndForeignScan = springtail_EndForeignScan;
 
-	/* Support functions for EXPLAIN/ANALYZE */
+    /* Support functions for EXPLAIN/ANALYZE */
     fdwroutine->ExplainForeignScan = springtail_ExplainForeignScan;
     fdwroutine->AnalyzeForeignTable = springtail_AnalyzeForeignTable;
 
