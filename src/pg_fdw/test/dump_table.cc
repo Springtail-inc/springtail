@@ -223,6 +223,9 @@ int main(int argc, char *argv[])
         }
         std::cout << "Dump table: " << tid << " XID: " << xid << std::endl;
         dump_table(tid, xid);
+    } else {
+        std::cerr << "List flag, Table name or ID must be specified" << std::endl;
+        return -1;
     }
 
     return 0;

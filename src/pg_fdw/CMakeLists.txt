@@ -39,9 +39,10 @@ target_include_directories(gen_schema_sql
     PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
 target_link_libraries(gen_schema_sql
-    PUBLIC springtail_common
-    PUBLIC springtail_storage
-    PUBLIC springtail_pg
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+    PRIVATE springtail_pg
+    PRIVATE Boost::program_options
 )
 
 add_executable(dump_table test/dump_table.cc pg_fdw_mgr.cc)

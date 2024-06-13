@@ -72,10 +72,15 @@ namespace springtail {
         for (size_t i = 0; i < state->fields->size(); i++) {
             // get field
             FieldPtr field = state->fields->at(i);
-            // set value
-            values[i] = _get_datum_from_field(field, row);
             // set null
             nulls[i] = field->is_null(row);
+
+            // set value
+            if (!nulls[i]) {
+                values[i] = _get_datum_from_field(field, row);
+            } else {
+                values[i] = 0;
+            }
         }
 
         // increment iterator

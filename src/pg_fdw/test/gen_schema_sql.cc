@@ -2,6 +2,7 @@
 #include <map>
 
 #include <fmt/format.h>
+#include <boost/program_options.hpp>
 
 #include <common/common.hh>
 #include <common/logging.hh>
@@ -106,9 +107,9 @@ gen_fdw_table(const std::string &schema,
         std::string column = fmt::format(" \"{}\" ", column_name);
 
         switch (static_cast<SchemaType>(type)) {
-            case SchemaType::UINT8: // XXX not sure what this is
+            case SchemaType::UINT8: // XXX no good mapping
             case SchemaType::INT8:
-                column += "CHAR";
+                column += "SMALLINT";
                 break;
             case SchemaType::UINT32:
             case SchemaType::INT32:
@@ -308,10 +309,28 @@ gen_fdw_schema()
 }
 
 int
-main(int argc,
-     char *argv[])
+main(int argc, char *argv[])
 {
+    bool copy = false;
+
     springtail_init();
+
+    // parse the arguments
+    boost::program_options::options_description desc("Allowed options");
+    desc.add_options()
+        ("help,h", "Help message.")
+        ("copy,c", boost::program_options::bool_switch(&copy)->default_value(false), "Copy tables from Postgres");
+
+    boost::program_options::variables_map vm;
+    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+    boost::program_options::notify(vm);
+
+    // check if we need to print the help message
+    if (vm.count("help")) {
+        std::cout << desc << std::endl;
+        return 0;
+    }
+
 
     PostgresConnection conn{
         .host = "localhost",
@@ -321,7 +340,9 @@ main(int argc,
         .port = 5432
     };
 
-    dump_tables_in_schema(conn, "public");
+    if (copy) {
+        dump_tables_in_schema(conn, "public");
+    }
 
     gen_fdw_schema();
     gen_fdw_system_tables();
