@@ -34,10 +34,10 @@ namespace springtail {
         // initialize the backtrace infrastructure
         backward::sh.loaded();
 
-        // initialize the logging infrastructure
-        init_logging(logging_mask);
-
         // init system properties
         init_system_properties();
+
+        // initialize the logging infrastructure
+        init_logging(logging_mask);
     }
 }

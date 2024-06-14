@@ -137,13 +137,12 @@ namespace springtail {
 
     std::string
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
-                                 const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
                                  std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns)
     {
-        // XXX check if we need to quote schema since that is not from user input
-        std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n", schema, quote_identifier(table.c_str()));
+        // no schema name needed
+        std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
@@ -215,12 +214,13 @@ namespace springtail {
 
         create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", quote_identifier(server_name.c_str()), tid);
 
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Generated SQL: {}", create);
+
         return create;
     }
 
     std::string
     PgFdwMgr::_gen_fdw_system_table(const std::string &server,
-                                    const std::string &schema_name,
                                     const std::string &table_name,
                                     uint64_t tid,
                                     const std::vector<SchemaColumn> &column_schema)
@@ -232,12 +232,11 @@ namespace springtail {
             columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
         }
 
-        return _gen_fdw_table_sql(server, schema_name, table_name, tid, columns);
+        return _gen_fdw_table_sql(server, table_name, tid, columns);
     }
 
     List *
     PgFdwMgr::_import_springtail_catalog(const std::string &server,
-                                         const std::string &schema,
                                          const std::set<std::string> table_set,
                                          bool exclude, bool limit)
     {
@@ -247,25 +246,25 @@ namespace springtail {
         // go through system tables, make sure that they are not excluded and add them to the list
         if (!((exclude && table_set.contains(CATALOG_TABLE_NAMES)) ||
               (limit && !table_set.contains(CATALOG_TABLE_NAMES)))) {
-            sql = _gen_fdw_system_table(server, schema, CATALOG_TABLE_NAMES, sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_NAMES, sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_ROOTS)) ||
               (limit && !table_set.contains(CATALOG_TABLE_ROOTS)))) {
-            sql = _gen_fdw_system_table(server, schema, CATALOG_TABLE_ROOTS, sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_ROOTS, sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_INDEXES)) ||
               (limit && !table_set.contains(CATALOG_TABLE_INDEXES)))) {
-            sql = _gen_fdw_system_table(server, schema, CATALOG_TABLE_INDEXES, sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_INDEXES, sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_SCHEMAS)) ||
               (limit && !table_set.contains(CATALOG_TABLE_SCHEMAS)))) {
-            sql = _gen_fdw_system_table(server, schema, CATALOG_TABLE_SCHEMAS, sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_SCHEMAS, sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
@@ -283,17 +282,16 @@ namespace springtail {
 
         // construct list of either excluded or limited tables
         if (exclude || limit) {
-            ListCell   *lc;
+            ListCell *lc;
             foreach(lc, table_list) {
-                RangeVar   *rv = (RangeVar *) lfirst(lc);
-
+                RangeVar *rv = (RangeVar *)lfirst(lc);
                 table_set.insert(rv->relname);
             }
         }
 
         // if we are importing the catalog schema, handle it separately
         if (schema == CATALOG_SCHEMA_NAME) {
-            return _import_springtail_catalog(server, schema, table_set, exclude, limit);
+            return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
         // get the table names table to iterate over
@@ -318,11 +316,13 @@ namespace springtail {
             std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema_name, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema_name, table_name);
                 continue;
             }
 
@@ -334,11 +334,11 @@ namespace springtail {
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}\n", schema_name, table_name, tid, xid);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema_name, table_name, tid, xid);
             // if so update the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}\n", table_name, schema_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema_name);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
@@ -377,28 +377,31 @@ namespace springtail {
         for (auto row : (*table)) {
             uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
 
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table in schemas table: {}", tid);
+
             // check if we have moved to next tid
             if (tid != current_tid) {
 
                 if (!current_table.empty()) {
                     // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, schema, current_table, current_tid, columns);
+                    std::string sql = _gen_fdw_table_sql(server, current_table, current_tid, columns);
                     commands = lappend(commands, pstrdup(sql.c_str()));
                 }
 
                 // reset state
                 columns.clear();
-                current_tid = tid;
+                current_table = "";
 
                 // do lookup of new tid in map
                 auto it = tid_map.find(tid);
                 if (it == tid_map.end()) {
-                    // not found, not sure why, but skip it
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} not found in schemas table\n", tid);
+                    // not found skip it
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} not found in table map, skipping", tid);
                     continue;
                 }
 
                 // update current vars based on this tid and info from tid_map
+                current_tid = tid;
                 current_table = std::get<1>(it->second);
             }
 
@@ -423,7 +426,7 @@ namespace springtail {
         // process last table
         if (columns.size() > 0) {
             // dump this table
-            std::string sql = _gen_fdw_table_sql(server, schema, current_table, current_tid, columns);
+            std::string sql = _gen_fdw_table_sql(server, current_table, current_tid, columns);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
