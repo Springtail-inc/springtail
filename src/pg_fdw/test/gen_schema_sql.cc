@@ -99,6 +99,7 @@ gen_fdw_table(const std::string &schema,
               uint64_t tid,
               const std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns)
 {
+    // XXX note: schema, table, column not quoted well...e.g., if they contain double quotes
     std::string create = fmt::format("CREATE FOREIGN TABLE \"{}\".\"{}\" (\n", schema, table);
 
     // iterate over the columns, adding each to the create statement

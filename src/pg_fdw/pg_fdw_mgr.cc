@@ -142,7 +142,8 @@ namespace springtail {
                                  uint64_t tid,
                                  std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns)
     {
-        std::string create = fmt::format("CREATE FOREIGN TABLE \"{}\".\"{}\" (\n", schema, table);
+        // XXX check if we need to quote schema since that is not from user input
+        std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n", schema, quote_identifier(table.c_str()));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
