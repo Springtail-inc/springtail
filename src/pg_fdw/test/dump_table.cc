@@ -23,6 +23,17 @@ extern "C" {
     // These files are not being linked in, from libpq
     // so we define them here
 
+    /** Dummy function so that we can link with pg_fdw_mgr.cc */
+    const char *quote_identifier(const char *ident) {
+        return ident;
+    }
+
+    /** Dummy lappend, does nothing */
+    List *lappend(List *list, void *datum) {
+        return list;
+    }
+
+    /** Dummy pg_fprintf, does nothing */
     int pg_fprintf(FILE *stream, const char *fmt, ...) {
         return 0;
     }

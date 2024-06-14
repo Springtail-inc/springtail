@@ -271,7 +271,7 @@ gen_fdw_schema()
 
     // Move on to iterating through the schemas table
 
-    // column map: column_id -> name, type, nullable, default
+    // column list: name, type, nullable, default
     std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
 
     uint64_t current_tid=0;

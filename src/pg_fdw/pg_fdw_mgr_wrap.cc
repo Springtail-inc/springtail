@@ -46,4 +46,10 @@ extern "C" {
             instance->fdw_reset_scan(static_cast<PgFdwState*>(state));
         }
     }
+
+    /** Import foreign schema wrapper */
+    List *
+    fdw_import_foreign_schema(PgFdwMgr *instance, const char *server, const char *schema, const List *table_list, bool exclude, bool limit) {
+        return instance->fdw_import_foreign_schema(server, schema, table_list, exclude, limit);
+    }
 }

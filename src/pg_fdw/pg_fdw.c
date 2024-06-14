@@ -64,6 +64,8 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
                                      AcquireSampleRowsFunc *func,
                                      BlockNumber *totalpages);
 
+static List *springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
+
 
 // Split function definition
 void
@@ -98,6 +100,8 @@ springtail_fdw_handler(PG_FUNCTION_ARGS)
     fdwroutine->IterateForeignScan = springtail_IterateForeignScan;
     fdwroutine->ReScanForeignScan = springtail_ReScanForeignScan;
     fdwroutine->EndForeignScan = springtail_EndForeignScan;
+
+    fdwroutine->ImportForeignSchema = springtail_ImportForeignSchema;
 
     /* Support functions for EXPLAIN/ANALYZE */
     fdwroutine->ExplainForeignScan = springtail_ExplainForeignScan;
@@ -134,7 +138,7 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
  * @param baserel
  * @param foreigntableid
  */
-void
+static void
 springtail_GetForeignRelSize(PlannerInfo *root,
                              RelOptInfo *baserel,
                              Oid foreigntableid)
@@ -199,7 +203,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
  * @param baserel
  * @param foreigntableid
  */
-void
+static void
 springtail_GetForeignPaths(PlannerInfo *root,
                            RelOptInfo *baserel,
                            Oid foreigntableid)
@@ -229,7 +233,7 @@ springtail_GetForeignPaths(PlannerInfo *root,
  * @param outer_plan
  * @return ForeignScan*
  */
-ForeignScan *
+static ForeignScan *
 springtail_GetForeignPlan(PlannerInfo *root,
                           RelOptInfo *baserel,
                           Oid foreigntableid,
@@ -264,7 +268,7 @@ springtail_GetForeignPlan(PlannerInfo *root,
  * @param node
  * @param eflags
  */
-void
+static void
 springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
     // extract tid from fdw_private
@@ -292,7 +296,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
  * @param node
  * @return TupleTableSlot*
  */
-TupleTableSlot *
+static TupleTableSlot *
 springtail_IterateForeignScan(ForeignScanState *node)
 {
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
@@ -315,7 +319,7 @@ springtail_IterateForeignScan(ForeignScanState *node)
  * @brief Restart scan from beginning
  * @param node
  */
-void
+static void
 springtail_ReScanForeignScan(ForeignScanState *node)
 {
     // reset state to beginning of table
@@ -328,7 +332,7 @@ springtail_ReScanForeignScan(ForeignScanState *node)
  * @brief End scan, cleanup state
  * @param node
  */
-void
+static void
 springtail_EndForeignScan(ForeignScanState *node)
 {
     // cleanup fdw_state
@@ -338,16 +342,40 @@ springtail_EndForeignScan(ForeignScanState *node)
     node->fdw_state = NULL;
 }
 
-void
+static void
 springtail_ExplainForeignScan(ForeignScanState *node, ExplainState *es)
 {
 
 }
 
-bool
+static bool
 springtail_AnalyzeForeignTable(Relation relation,
                                AcquireSampleRowsFunc *func,
                                BlockNumber *totalpages)
 {
     return false;
+}
+
+
+static List *
+springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
+{
+    ForeignServer *server = GetForeignServer(serverOid);
+    List      *commands = NIL;
+    List      *table_list = NIL;
+    bool       limit_to_list = false;
+    bool       except_list = false;
+
+    PgFdwMgr *mgr = get_fdw_mgr();
+
+    /* Apply restrictions for LIMIT TO and EXCEPT */
+	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO) {
+        limit_to_list = true;
+        table_list = stmt->table_list;
+    } else if (stmt->list_type == FDW_IMPORT_SCHEMA_EXCEPT) {
+        except_list = true;
+        table_list = stmt->table_list;
+    }
+
+    return fdw_import_foreign_schema(mgr, server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
 }
