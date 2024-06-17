@@ -78,10 +78,11 @@ namespace springtail {
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
 
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
+
+        // XXX this won't work... need to find the inverse_lower_bound()
         auto it = roots_t->lower_bound(search_key);
         if (it == roots_t->end() || !FieldTuple(roots_key_fields, *it).equal(*search_key)) {
-            // no roots?  try to find it in the roots file
-            roots.push_back(constant::UNKNOWN_EXTENT);
+            // no roots?  try to find it in the roots file by returning empty roots
         } else {
             // retrieve the root extent ID of the primary
             auto eid_f = roots_t->extent_schema()->get_field("extent_id");
@@ -123,6 +124,8 @@ namespace springtail {
     {
         // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
         uint64_t access_xid = xid - 1;
+
+        SPDLOG_DEBUG("Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
 
         // 1) add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);

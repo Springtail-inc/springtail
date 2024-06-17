@@ -41,15 +41,20 @@ namespace springtail {
         nlohmann::json server_json;
 
         if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
-            throw Error("Write cache server settings not found");
+            throw Error("Xid Manager configuration missing server section");
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
 
         Json::get_to<int>(server_json, "port", _port, 55051);
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
 
         std::string base_path;
-        Json::get_to<std::string>(json, "base_path", base_path, "/xid_mgr");
+        Json::get_to<std::string>(server_json, "base_path", base_path, "/xid_mgr");
         _base_path = std::filesystem::path(base_path);
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
+
         if (!std::filesystem::exists(_base_path)) {
             std::filesystem::create_directories(_base_path);
         }
@@ -103,6 +108,9 @@ namespace springtail {
         _committed_xid = xid;
         lseek(_fd, 0, SEEK_SET);
         write(_fd, &xid, sizeof(xid));
+        fsync(_fd);
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: write committed xid: {}", xid);
     }
 
     uint64_t
@@ -114,6 +122,7 @@ namespace springtail {
         if (res == 0) {
             _committed_xid = 0;
         }
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: read committed xid: {}", _committed_xid);
         return _committed_xid;
     }
 

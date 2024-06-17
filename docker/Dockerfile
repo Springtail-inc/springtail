@@ -9,7 +9,7 @@ RUN ./debug.sh -j 4
 FROM ubuntu:jammy
 
 RUN apt-get update && apt-get install -y \
-    libdw-dev libelf-dev \
+    libdw-dev libelf-dev libbsd-dev \
     && apt-get clean autoclean \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/{apt,cache,log,dpkg}

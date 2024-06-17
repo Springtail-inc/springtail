@@ -8,6 +8,10 @@ int main(int argc, char *argv[]) {
 
     XidMgrServer *server = XidMgrServer::get_instance();
 
+    if (argc > 1) {
+        server->commit_xid(std::stoull(argv[1]));
+    }
+
     server->startup();
 
     return 0;

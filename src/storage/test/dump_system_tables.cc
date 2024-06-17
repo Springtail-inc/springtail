@@ -14,7 +14,7 @@ main(int argc,
     springtail_init();
 
     // go through each system table and print it out
-    
+
     for (auto table_id : { sys_tbl::TableNames::ID,
                            sys_tbl::TableRoots::ID,
                            sys_tbl::Indexes::ID,
@@ -24,7 +24,7 @@ main(int argc,
                                                          constant::MAX_LSN);
         auto fields = table->extent_schema()->get_fields();
 
-        std::cout << fmt::format("TABLE: {}", table_id);
+        std::cout << fmt::format("TABLE: {}", table_id) << std::endl;
         for (auto row : (*table)) {
             std::cout << FieldTuple(fields, row).to_string() << std::endl;
         }

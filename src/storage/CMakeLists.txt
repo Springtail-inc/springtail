@@ -29,6 +29,10 @@ add_executable(dump_system_tables test/dump_system_tables.cc)
 target_include_directories(dump_system_tables PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(dump_system_tables PUBLIC springtail_common springtail_storage)
 
+add_executable(dump_headers test/dump_headers.cc)
+target_include_directories(dump_headers PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(dump_headers PUBLIC springtail_common springtail_storage)
+
 ## tests
 
 if(LINUX)

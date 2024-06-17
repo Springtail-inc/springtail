@@ -38,7 +38,7 @@ namespace springtail {
             : _type(type)
         { }
 
-        ExtentType(bool branch, bool root=false)
+        explicit ExtentType(bool branch, bool root=false)
             : _type(((branch) ? BRANCH : LEAF) | ((root) ? ROOT_MASK : 0))
         { }
 
@@ -79,7 +79,7 @@ namespace springtail {
         /** Constructor that deserializes the header. */
         ExtentHeader(std::shared_ptr<std::vector<char>> data)
         {
-            type = recvint8(data->data());
+            type = ExtentType(static_cast<uint8_t>(recvint8(data->data())));
             xid = recvint64(data->data() + 1);
             row_size = recvint32(data->data() + 9);
             prev_offset = recvint64(data->data() + 13);

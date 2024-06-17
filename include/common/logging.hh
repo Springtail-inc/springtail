@@ -30,6 +30,7 @@ namespace springtail {
         LOG_XID_MGR = 0x20,
         LOG_COMMON = 0x40,
         LOG_PROXY = 0x80,
+        LOG_FDW = 0x100,
         LOG_ALL = 0xFFFFFFFF
     };
 

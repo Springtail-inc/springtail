@@ -197,6 +197,11 @@ namespace springtail
                                     column.default_value.value_or("NULL"), column.is_pkey);
 
                 _schema.columns[i] = column;
+
+                // add the key to the list of pkeys
+                if (column.is_pkey) {
+                    _schema.pkeys.push_back(column.name);
+                }
             }
         } catch (...) {
             _connection.clear();
@@ -630,6 +635,8 @@ namespace springtail
                     // TODO: we assume false since we don't support generated fields right now
                     false  // is_generated
                 });
+
+            SPDLOG_DEBUG("PKEY? {} {}", columns.back().is_pkey, columns.back().pk_position);
         }
         return columns;
     }
@@ -664,8 +671,8 @@ namespace springtail
                               _schema.table_name,
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
-        // note: we create the system metadata at XID 1
-        uint64_t access_xid = 1;
+        // note: we create the system metadata at the previous XID
+        uint64_t access_xid = xid - 1;
         TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
 
         auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
@@ -685,15 +692,15 @@ namespace springtail
         prepare_copy();
 
         // get a chunk of data
-        auto data = get_next_data();        
+        auto data = get_next_data();
         if (!data) {
             throw PgIOError();
         }
-        
+
         // verify the header before processing the rows
         int32_t ext_length = verify_copy_header(data->substr(0, 19));
         size_t pos = 19 + ext_length;
-        
+
         // scan the rows and populate the table
         while (true) {
             if (data->size() == pos) {
@@ -957,7 +964,7 @@ namespace springtail
                     fields->push_back(std::make_shared<ConstNullField>(SchemaType::INT64));
                 } else {
                     assert(length == 8);
-                    fields->push_back(std::make_shared<ConstTypeField<int32_t>>(recvint64(row.data() + pos)));
+                    fields->push_back(std::make_shared<ConstTypeField<int64_t>>(recvint64(row.data() + pos)));
                     pos += length;
                 }
             }
@@ -966,7 +973,7 @@ namespace springtail
                     fields->push_back(std::make_shared<ConstNullField>(SchemaType::BOOLEAN));
                 } else {
                     assert(length == 1);
-                    fields->push_back(std::make_shared<ConstTypeField<int32_t>>(*(row.data() + pos) == 1));
+                    fields->push_back(std::make_shared<ConstTypeField<bool>>(*(row.data() + pos) == 1));
                     ++pos;
                 }
             }
