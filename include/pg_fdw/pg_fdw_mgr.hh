@@ -13,7 +13,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
-/* These are defined by Thrift imported from xid_mgr_client.h */
+/* These are defined by Thrift imported from xid_mgr_client.h and
+ * must be undefined before including postgres.h */
 #undef PACKAGE_STRING
 #undef PACKAGE_VERSION
 #undef UINT64CONST

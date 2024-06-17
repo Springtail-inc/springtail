@@ -32,11 +32,11 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_xid_mgr
 )
 
-add_executable(gen_schema_sql test/gen_schema_sql.cc)
-target_include_directories(gen_schema_sql
+add_executable(copy_schema test/copy_schema.cc)
+target_include_directories(copy_schema
     PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
-target_link_libraries(gen_schema_sql
+target_link_libraries(copy_schema
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_pg

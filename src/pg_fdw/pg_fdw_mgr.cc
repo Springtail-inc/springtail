@@ -88,7 +88,7 @@ namespace springtail {
         }
 
         // increment iterator
-        (*state->iter)++;
+        ++(*state->iter);
 
         return true;
     }
@@ -279,6 +279,7 @@ namespace springtail {
     {
         List                 *commands = NIL;
         std::set<std::string> table_set;
+        uint64_t max_xid=0;
 
         // construct list of either excluded or limited tables
         if (exclude || limit) {
@@ -326,16 +327,26 @@ namespace springtail {
                 continue;
             }
 
+            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
+            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
+            max_xid = std::max(max_xid, xid);
+
             bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
             if (!exists) {
+                // find table and compare xids, remove if this xid is >= to the one in the map
+                auto entry = table_map.find(table_name);
+                if (entry != table_map.end()) {
+                    if (xid >= entry->second.second) {
+                        // remove this table entry
+                        table_map.erase(entry);
+                    }
+                }
                 continue;
             }
 
-            uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
-            uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
-
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema_name, table_name, tid, xid);
-            // if so update the xid if it is newer
+
+            // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema_name);
@@ -369,7 +380,6 @@ namespace springtail {
                                                             constant::LATEST_XID,
                                                             constant::MAX_LSN);
 
-        Table::Iterator idx_iter = idx_table->begin();
         auto idx_fields = idx_table->extent_schema()->get_fields();
 
         // iterate through it

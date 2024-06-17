@@ -27,6 +27,9 @@
 
 PG_MODULE_MAGIC;
 
+// define from storage/constants.hh
+#define INVALID_TABLE 0
+
 typedef struct SpringtailFdwTableOptions {
     uint64_t tid;
 } SpringtailFdwTableOptions;
@@ -165,7 +168,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     // Can store options on create table and access them here
     ForeignTable *ft = GetForeignTable(foreigntableid);
     ListCell *cell;
-    int64_t tid = -1; // XXX is there an invalid TID?
+    int64_t tid = INVALID_TABLE;
 
     // look through the options (provided during CREATE FOREIGN TABLE)
     foreach(cell, ft->options) {
@@ -181,7 +184,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
         }
     }
 
-    if (tid == -1) {
+    if (tid == INVALID_TABLE) {
         ereport(ERROR,
                 (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
                             errmsg("invalid option \"oid\""),
