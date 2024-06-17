@@ -279,7 +279,6 @@ namespace springtail {
     {
         List                 *commands = NIL;
         std::set<std::string> table_set;
-        uint64_t max_xid=0;
 
         // construct list of either excluded or limited tables
         if (exclude || limit) {
@@ -329,7 +328,6 @@ namespace springtail {
 
             uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
             uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
-            max_xid = std::max(max_xid, xid);
 
             bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
             if (!exists) {
