@@ -4,12 +4,14 @@
 #include <memory>
 #include <optional>
 
+#include <storage/constants.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 #include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
+#include <storage/schema_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -24,6 +26,8 @@ extern "C" {
     #include <nodes/pg_list.h>
 }
 
+#include <pg_fdw/pg_fdw_common.h>
+
 namespace springtail  {
 
     /** Internal state used to track table scan */
@@ -33,12 +37,29 @@ namespace springtail  {
         uint64_t xid;
         FieldArrayPtr fields;
         std::optional<Table::Iterator> iter;
+        std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
+        std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid, Table::Iterator iter)
             : table(table), tid(tid), xid(xid), iter(iter)
         {
+            // fetch the fields for the table
             fields = table->extent_schema()->get_fields();
+
+            // fetch the columns and column IDs for the table
+            columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+
+            // populate pkey column ids
+            int num_pkeys = 0;
+            pkey_column_ids.resize(columns.size());
+            for (const auto &col : columns) {
+                if (col.second.exists && col.second.pkey_position.has_value()) {
+                    pkey_column_ids[col.second.pkey_position.value()] = col.first;
+                    num_pkeys++;
+                }
+            }
+            pkey_column_ids.resize(num_pkeys);
         }
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
@@ -73,6 +94,23 @@ namespace springtail  {
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
         List *fdw_import_foreign_schema(const std::string &server, const std::string &schema,
                                         const List *table_list, bool exclude, bool limit);
+
+        /** Helper return true if table is sortable by sort group
+         *  Called from get_foreign_paths
+         * @param state Plan state
+         * @param sortgroup List of DeparsedSortGroup
+         */
+        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
+
+        /** Get list of path keys -- indexes */
+        List *fdw_get_path_keys(SpringtailPlanState *state);
+
+        /** Get estimate of row width/number of rows
+         * @param planstate Plan state
+         * @param target_list List of target columns (String or Value)
+         * @param qual_list List of predicate clauses (BaseQual)
+         */
+        void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width);
 
     private:
         /** Delete constructor */

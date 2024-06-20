@@ -93,6 +93,28 @@ namespace springtail {
         return true;
     }
 
+    List *
+    PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
+    {
+        // XXX not implemented
+        return NIL;
+    }
+
+    List *
+    PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *state)
+    {
+        // XXX not implemented
+        return NIL;
+    }
+
+    void
+    PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
+    {
+        // XXX not implemented
+        *rows = 0;
+        *width = 0;
+    }
+
     Datum
     PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row)
     {

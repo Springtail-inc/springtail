@@ -30,9 +30,18 @@ PG_MODULE_MAGIC;
 // define from storage/constants.hh
 #define INVALID_TABLE 0
 
-typedef struct SpringtailFdwTableOptions {
-    uint64_t tid;
-} SpringtailFdwTableOptions;
+// exposed from and defined in path_util.c
+extern List *
+get_foreign_paths(PlannerInfo *root,
+                  RelOptInfo *baserel,
+                  Oid foreigntableid,
+                  SpringtailPlanState *planstate);
+
+extern void
+get_rel_size(PlannerInfo *root,
+             RelOptInfo *baserel,
+             Oid foreigntableid,
+             SpringtailPlanState *planstate);
 
 /*
  * FDW callback routines
@@ -70,16 +79,16 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
 static List *springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
 
 
-// Split function definition
-void
+/** Split uint64 into 2 uint32s function definition */
+static void
 split_uint64(uint64_t input, uint32_t *low, uint32_t *high)
 {
     *low = (uint32_t)(input & 0xFFFFFFFF);          // Extract the lower 32 bits
     *high = (uint32_t)((input >> 32) & 0xFFFFFFFF); // Extract the upper 32 bits
 }
 
-// Combine function definition
-uint64_t
+/** Combine 2 uint32s into a uint64 function definition */
+static uint64_t
 combine_uint32(uint32_t low, uint32_t high)
 {
     return ((uint64_t)high << 32) | low; // Combine the upper 32 bits and lower 32 bits
@@ -134,7 +143,7 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
 }
 
 /**
- * @brief Update baserel->rows, and possibly baserel->width and
+ * @brief Update baserel->rows, and possibly baserel->reltarget->width and
  *        baserel->tuples, with an estimated result set size for a
  *        scan of baserel
  * @param root
@@ -163,7 +172,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
        table_close(rel, NoLock);
 
        baserel->fdw_private = opts; // can store private data here
-*/
+    */
 
     // Can store options on create table and access them here
     ForeignTable *ft = GetForeignTable(foreigntableid);
@@ -192,9 +201,12 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     }
 
     // store the tid in the fdw_private field of the baserel
-    SpringtailFdwTableOptions *opts = (SpringtailFdwTableOptions *)palloc(sizeof(SpringtailFdwTableOptions));
-    opts->tid = tid;
-    baserel->fdw_private = opts;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)palloc(sizeof(SpringtailPlanState));
+    planstate->tid = tid;
+    baserel->fdw_private = planstate;
+
+    // get the estimate of the number of rows and width of the table
+    get_rel_size(root, baserel, foreigntableid, planstate);
 }
 
 /**
@@ -245,11 +257,11 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    SpringtailFdwTableOptions *opts = (SpringtailFdwTableOptions *)baserel->fdw_private;
+    SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
 
     // postgres only supports integer value for lists, so to be safe we split the oid
     uint32_t low, high;
-    split_uint64(opts->tid, &low, &high);
+    split_uint64(state->tid, &low, &high);
     List *fdw_private = list_make2(makeInteger(low), makeInteger(high));
 
     /* build a List * of the clause field of the passed in scan_clauses,
@@ -281,10 +293,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     uint64_t tid = combine_uint32(low, high);
 
     // allocate and initialize state
-    struct PgFdwMgr *mgr = get_fdw_mgr();
-
-    // allocate and initialize state
-    node->fdw_state = fdw_begin_scan(mgr, tid);
+    node->fdw_state = fdw_begin_scan(tid);
 
     /* Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
@@ -306,11 +315,10 @@ springtail_IterateForeignScan(ForeignScanState *node)
     ExecClearTuple(slot);
 
     void *state = node->fdw_state;
-    struct PgFdwMgr *mgr = get_fdw_mgr();
 
     // get next row, if true it was filled in successfully
     // if false we return the empty slot
-    if (!fdw_iterate_scan(mgr, state, slot->tts_values, slot->tts_isnull)) {
+    if (!fdw_iterate_scan(state, slot->tts_values, slot->tts_isnull)) {
         return slot;
     }
 
@@ -326,9 +334,8 @@ static void
 springtail_ReScanForeignScan(ForeignScanState *node)
 {
     // reset state to beginning of table
-    struct PgFdwMgr *mgr = get_fdw_mgr();
     void *state = node->fdw_state;
-    fdw_reset_scan(mgr, state);
+    fdw_reset_scan(state);
 }
 
 /**
@@ -339,9 +346,8 @@ static void
 springtail_EndForeignScan(ForeignScanState *node)
 {
     // cleanup fdw_state
-    struct PgFdwMgr *mgr = get_fdw_mgr();
     void *state = node->fdw_state;
-    fdw_end_scan(mgr, state);
+    fdw_end_scan(state);
     node->fdw_state = NULL;
 }
 
@@ -369,10 +375,8 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
     bool       limit_to_list = false;
     bool       except_list = false;
 
-    PgFdwMgr *mgr = get_fdw_mgr();
-
     /* Apply restrictions for LIMIT TO and EXCEPT */
-	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO) {
+    if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO) {
         limit_to_list = true;
         table_list = stmt->table_list;
     } else if (stmt->list_type == FDW_IMPORT_SCHEMA_EXCEPT) {
@@ -380,5 +384,5 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
         table_list = stmt->table_list;
     }
 
-    return fdw_import_foreign_schema(mgr, server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
+    return fdw_import_foreign_schema(server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
 }

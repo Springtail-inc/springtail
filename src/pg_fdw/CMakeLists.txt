@@ -5,6 +5,7 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 
 set(PG_FDW_SOURCES
     pg_fdw.c
+    path_util.c
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
 )
