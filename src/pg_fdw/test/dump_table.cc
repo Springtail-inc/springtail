@@ -62,6 +62,17 @@ extern "C" {
         result[len] = '\0';
         return result;
     }
+
+    Const *makeConst(Oid consttype,
+                     int32 consttypmod,
+                     Oid constcollid,
+                     int constlen,
+                     Datum constvalue,
+                     bool constisnull,
+                     bool constbyval)
+    {
+        return nullptr;
+    }
 }
 
 /** List all tables from TableNames system table */
@@ -166,7 +177,8 @@ dump_table(uint64_t tid, uint64_t xid)
 
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
-    PgFdwState *state = mgr->fdw_begin(tid, xid);
+    PgFdwState *state = mgr->fdw_create_state(tid, xid);
+    mgr->fdw_begin_scan(state);
 
     Datum values[fields->size()];
     bool nulls[fields->size()];
@@ -183,7 +195,7 @@ dump_table(uint64_t tid, uint64_t xid)
         std::cout << std::endl;
     }
 
-    mgr->fdw_end(state);
+    mgr->fdw_end_scan(state);
 }
 
 /** Dump a table by schema, table name and xid */

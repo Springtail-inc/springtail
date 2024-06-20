@@ -13,10 +13,18 @@ extern "C" {
         return PgFdwMgr::get_instance();
     }
 
-    /** Begin scan wrapper */
+    /** Create state for this table and transaction */
     void *
-    fdw_begin_scan(uint64_t tid) {
-        return get_fdw_mgr()->fdw_begin(tid);
+    fdw_create_state(uint64_t tid, uint64_t pg_xid) {
+        return get_fdw_mgr()->fdw_create_state(tid, pg_xid);
+    }
+
+    /** Begin scan wrapper */
+    void
+    fdw_begin_scan(void *state) {
+        if (state) {
+            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state));
+        }
     }
 
     /** Iterate scan wrapper */
@@ -32,7 +40,7 @@ extern "C" {
     void
     fdw_end_scan(void *state) {
         if (state) {
-            get_fdw_mgr()->fdw_end(static_cast<PgFdwState*>(state));
+            get_fdw_mgr()->fdw_end_scan(static_cast<PgFdwState*>(state));
         }
     }
 
@@ -68,5 +76,11 @@ extern "C" {
     fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
     {
         get_fdw_mgr()->fdw_get_rel_size(planstate, target_list, qual_list, rows, width);
+    }
+
+    void
+    fdw_commit_rollback(uint64_t pg_xid, bool commit)
+    {
+        get_fdw_mgr()->fdw_commit_rollback(pg_xid, commit);
     }
 }

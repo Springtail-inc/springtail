@@ -16,8 +16,14 @@ typedef struct PgFdwMgr PgFdwMgr;
 /** Get fdw mgr singleton instance */
 PgFdwMgr* get_fdw_mgr();
 
+/** Init call, pass in config file path */
+void fdw_init(const char *config_file);
+
+/** Create state */
+void *fdw_create_state(uint64_t tid, uint64_t pg_xid);
+
 /** Begin scan */
-void *fdw_begin_scan(uint64_t tid);
+void *fdw_begin_scan(void *state);
 
 /** End scan -- cleanup state */
 void fdw_end_scan(void *state);
@@ -31,6 +37,9 @@ void fdw_reset_scan(void *state);
 /** Import foreign schema */
 List *fdw_import_foreign_schema(const char *server, const char *schema,
                                 const List *table_list, bool exclude, bool limit);
+
+/** Commit or rollback a transaction, remove the XID mappings */
+void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
 
 //// Called from path_util.c

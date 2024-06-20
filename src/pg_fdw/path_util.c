@@ -815,6 +815,7 @@ get_foreign_paths(PlannerInfo *root,
     List				*deparsed_pathkeys = NULL;
 
     /* Extract a friendly version of the pathkeys. */
+    /* Returns a List of a Lists<attnum, rows> */
     List	            *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
 
     /* Try to find parameterized paths */

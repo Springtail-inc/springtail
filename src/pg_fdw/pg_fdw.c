@@ -7,6 +7,7 @@
 #include "access/htup_details.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
+#include "access/xact.h"
 #include "catalog/pg_foreign_table.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -24,6 +25,7 @@
 #include "optimizer/restrictinfo.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/guc.h"
 
 PG_MODULE_MAGIC;
 
@@ -92,6 +94,57 @@ static uint64_t
 combine_uint32(uint32_t low, uint32_t high)
 {
     return ((uint64_t)high << 32) | low; // Combine the upper 32 bits and lower 32 bits
+}
+
+
+/** Transaction commit/abort callback */
+static void
+fdw_xact_callback(XactEvent event, void *arg)
+{
+    FullTransactionId pg_xid = GetCurrentFullTransactionIdIfAny();
+    if (!FullTransactionIdIsValid(pg_xid)) {
+        return;
+    }
+
+    switch (event)
+    {
+        case XACT_EVENT_COMMIT:
+            elog(INFO, "Transaction committed: %lu", pg_xid);
+            fdw_commit_rollback(pg_xid.value, true);
+            break;
+        case XACT_EVENT_ABORT:
+            elog(INFO, "Transaction aborted: %lu", pg_xid);
+            fdw_commit_rollback(pg_xid.value, false);
+            break;
+        default:
+            break;
+    }
+}
+
+/* Register the transaction callback */
+void
+_PG_init(void)
+{
+    // Register the transaction commit/rollback callback
+    RegisterXactCallback(fdw_xact_callback, NULL);
+
+    // Define the configuration file path
+    char *fdw_config_file_path = NULL;
+    DefineCustomStringVariable(
+        "springtail_fdw.config_file_path",
+        "Path to the FDW configuration file",
+        NULL,
+        &fdw_config_file_path,
+        "/tmp/system.json",
+        PGC_SUSET,
+        0,
+        NULL,
+        NULL,
+        NULL
+    );
+
+    // Initialize the FDW; springtail_init()
+    fdw_init(fdw_config_file_path);
 }
 
 /*
@@ -200,9 +253,15 @@ springtail_GetForeignRelSize(PlannerInfo *root,
                             errhint("Invalid oid for table from table options")));
     }
 
-    // store the tid in the fdw_private field of the baserel
+    // create the plan state
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc(sizeof(SpringtailPlanState));
     planstate->tid = tid;
+
+    // Get the postgres transaction id, and create the internal state
+    FullTransactionId pg_xid = GetCurrentFullTransactionId();
+    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value);
+
+    // store the plan state in the baserel
     baserel->fdw_private = planstate;
 
     // get the estimate of the number of rows and width of the table
@@ -223,6 +282,9 @@ springtail_GetForeignPaths(PlannerInfo *root,
                            RelOptInfo *baserel,
                            Oid foreigntableid)
 {
+    SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
+    List *fdw_private = list_make1((void *)state);
+
     Path *path = (Path *)create_foreignscan_path(root, baserel,
         NULL,              /* default pathtarget */
         baserel->rows,     /* rows */
@@ -231,7 +293,7 @@ springtail_GetForeignPaths(PlannerInfo *root,
         NIL,               /* no pathkeys */
         NULL,              /* no required outer relids */
         NULL,              /* no fdw_outerpath */
-        NIL);              /* no fdw_private */
+        fdw_private);      /* fdw_private */
     add_path(baserel, path);
 }
 
@@ -262,7 +324,7 @@ springtail_GetForeignPlan(PlannerInfo *root,
     // postgres only supports integer value for lists, so to be safe we split the oid
     uint32_t low, high;
     split_uint64(state->tid, &low, &high);
-    List *fdw_private = list_make2(makeInteger(low), makeInteger(high));
+    List *fdw_private = best_path->fdw_private;
 
     /* build a List * of the clause field of the passed in scan_clauses,
        which are a list of RestrictInfo * nodes. */
@@ -288,12 +350,13 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
     // extract tid from fdw_private
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
-    uint32_t low = intVal(linitial(fs->fdw_private));
-    uint32_t high = intVal(lsecond(fs->fdw_private));
-    uint64_t tid = combine_uint32(low, high);
+    List *fdw_private = fs->fdw_private;
+    SpringtailPlanState *state = (SpringtailPlanState *)linitial(fdw_private);
+    uint64_t tid = state->tid;
 
     // allocate and initialize state
-    node->fdw_state = fdw_begin_scan(tid);
+    node->fdw_state = state->pg_fdw_state;
+    fdw_begin_scan(state->pg_fdw_state);
 
     /* Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {

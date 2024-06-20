@@ -18,6 +18,12 @@ extern "C" {
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 
+/** Plan state created in get rel size */
+typedef struct SpringtailPlanState {
+    uint64_t tid;
+    void    *pg_fdw_state;
+} SpringtailPlanState;
+
 /** Sort group */
 typedef struct DeparsedSortGroup
 {
@@ -62,10 +68,6 @@ typedef struct ParamQual
 	Expr	   *expr;
 }	ParamQual;
 
-/** Plan state created in get rel size */
-typedef struct SpringtailPlanState {
-    uint64_t tid;
-} SpringtailPlanState;
 
 #ifdef __cplusplus
 }

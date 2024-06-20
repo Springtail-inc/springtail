@@ -21,27 +21,50 @@ namespace springtail {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        springtail_init();
         _instance = new PgFdwMgr();
         return _instance;
     }
 
-    PgFdwState *
-    PgFdwMgr::fdw_begin(uint64_t tid, uint64_t xid)
+    void
+    PgFdwMgr::fdw_init(const char *config_file)
     {
-        if (xid == 0) {
+        springtail_init(LOG_ALL, config_file);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing, config file: {}", config_file);
+    }
+
+    PgFdwState *
+    PgFdwMgr::fdw_create_state(uint64_t tid, uint64_t pg_xid)
+    {
+        uint64_t xid; // springtail xid
+
+        // lookup pg_xid in xid_map;
+        // if doesn't exist, get a new xid from xid_mgr and add to map
+        auto it = _xid_map.find(pg_xid);
+        if (it == _xid_map.end()) {
             xid = XidMgrClient::get_instance()->get_committed_xid();
+            _xid_map[pg_xid] = xid;
+        } else {
+            xid = it->second;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: tid: {}, xid: {}, pg_xid: {}",
+                            tid, xid, pg_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
-        PgFdwState *state = new PgFdwState{table, tid, xid, table->begin()};
+        PgFdwState *state = new PgFdwState{table, tid, xid};
+
         return state;
     }
 
     void
-    PgFdwMgr::fdw_end(PgFdwState *state)
+    PgFdwMgr::fdw_begin_scan(PgFdwState *state)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
+        state->iter.emplace(Table::Iterator(state->table->begin()));
+    }
+
+    void
+    PgFdwMgr::fdw_end_scan(PgFdwState *state)
     {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}", state->tid);
         delete state;
@@ -103,16 +126,34 @@ namespace springtail {
     List *
     PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *state)
     {
-        // XXX not implemented
-        return NIL;
+        List      *result = NULL;
+        List      *attnums = NULL;
+        List      *item = NULL;
+
+        double rows = 0;
+
+        item = lappend(item, attnums);
+		item = lappend(item, makeConst(INT4OID,
+                                       -1, InvalidOid, 4, rows, false, true));
+		result = lappend(result, item);
+
+        return result;
     }
 
     void
     PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
     {
         // XXX not implemented
-        *rows = 0;
-        *width = 0;
+        *rows = 1;
+        *width = 16;
+    }
+
+    void
+    PgFdwMgr::fdw_commit_rollback(uint64_t pg_xid, bool commit)
+    {
+        // remove transaction ID mapping
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
+        _xid_map.erase(pg_xid);
     }
 
     Datum
