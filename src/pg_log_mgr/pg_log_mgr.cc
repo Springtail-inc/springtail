@@ -85,13 +85,13 @@ namespace springtail {
         // get the protocol version
         _proto_version = _pg_conn.get_protocol_version();
 
+        // start steaming
+        _pg_conn.start_streaming(lsn);
+
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
         _xact_thread = std::thread(&PgLogMgr::_xact_handler_thread, this);
-
-        // start steaming
-        _pg_conn.start_streaming(lsn);
     }
 
     void

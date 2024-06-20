@@ -54,6 +54,11 @@ int main(int argc, char *argv[])
     }
     boost::program_options::notify(vm);
 
+    // daemonize the process
+    if (vm.count("daemonize")) {
+        common::daemonize("/tmp/write_cache.pid");
+    }
+
     springtail::springtail_init();
 
     log_mgr = std::make_shared<springtail::PgLogMgr>(repl_log_path, xact_log_path, host,

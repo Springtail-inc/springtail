@@ -38,8 +38,12 @@ namespace springtail {
             auto item = _json;
             std::string_view key, val;
             std::size_t start = pos;
+            std::string next_token = ".=";
             do {
-                std::size_t token = props.find_first_of(".=;", start);
+                std::size_t token = props.find_first_of(next_token, start);
+                if (token == std::string_view::npos) {
+                    token = props.size();
+                }
 
                 if (token == props.size() || props[token] == ';') {
                     assert(key.size());
@@ -50,6 +54,7 @@ namespace springtail {
                     item[key] = val;
                 } else if (props[token] == '=') {
                     key = props.substr(start, token - start);
+                    next_token = ";";
                 } else {
                     assert(props[token] == '.');
                     key = props.substr(start, token - start);

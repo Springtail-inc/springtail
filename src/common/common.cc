@@ -46,7 +46,7 @@ namespace springtail {
     {
         int pid = fork();
         if (pid < 0) {
-            throw Error(fmt::format("Failed to fork: {}", pid));
+            throw Error(fmt::format("Failed to fork: {}", errno));
         }
 
         if (pid == 0) {
@@ -54,6 +54,12 @@ namespace springtail {
             std::fclose(stdin);
             std::fclose(stdout);
             std::fclose(stderr);
+
+            // make this process the session group leader
+            int sid = setsid();
+            if (sid < 0) {
+                throw Error(fmt::format("Error calling setsid(): {}", errno));
+            }
 
             // ignore hang-up
             std::signal(SIGHUP, SIG_IGN);
