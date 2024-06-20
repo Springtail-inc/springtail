@@ -26,6 +26,7 @@ namespace springtail {
     XidMgrServer* XidMgrServer::_instance {nullptr};
 
     std::once_flag XidMgrServer::_init_flag;
+    std::once_flag XidMgrServer::_shutdown_flag;
 
     XidMgrServer *
     XidMgrServer::_init()
@@ -66,10 +67,10 @@ namespace springtail {
     }
 
     /**
-     * Startup thrift threaded server
+     * Startup thrift threaded server; called by the static startup().
      */
     void
-    XidMgrServer::startup()
+    XidMgrServer::_startup()
     {
         // create a thread manager with right number of worker threads
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
@@ -78,7 +79,7 @@ namespace springtail {
         threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
         threadManager->start();
 
-        apache::thrift::server::TThreadPoolServer server(
+        _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
@@ -86,15 +87,17 @@ namespace springtail {
             threadManager
         );
 
-        server.serve();
+        _server->serve();
     }
 
     void
     XidMgrServer::_shutdown()
     {
         if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
+            _instance->_server->stop();
+
+            // delete _instance;
+            // _instance = nullptr;
         }
     }
 

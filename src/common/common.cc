@@ -40,4 +40,30 @@ namespace springtail {
         // initialize the logging infrastructure
         init_logging(logging_mask);
     }
+
+    void
+    common::daemonize(const std::filesystem::path &pid_filename)
+    {
+        int pid = fork();
+        if (pid < 0) {
+            throw Error(fmt::format("Failed to fork: {}", pid));
+        }
+
+        if (pid == 0) {
+            // close the terminal inputs / outputs
+            std::fclose(stdin);
+            std::fclose(stdout);
+            std::fclose(stderr);
+
+            // ignore hang-up
+            std::signal(SIGHUP, SIG_IGN);
+        } else {
+            // record the pid of the child into the pid file
+            std::ofstream pid_file(pid_filename);
+            pid_file << pid << std::endl;
+
+            // exit cleanly
+            std::exit(0);
+        }
+    }
 }

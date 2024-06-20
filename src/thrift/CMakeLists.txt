@@ -69,7 +69,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
         COMMAND ${THRIFT_COMPILER} -I ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types -out ${THRIFT_GEN_DIR} ${THRIFT_FILE_PATH}
         COMMAND ${CP_COMMAND} ${THRIFT_GEN_DIR}/*.h ${THRIFT_INCLUDE_DIR}
         DEPENDS ${THRIFT_FILE_PATH}
-        COMMENT "Generating thrift files for ${THRIFT_FILE} into ${THRIFT_GEN_DIR}"
+        COMMENT "Generating thrift files for ${THRIFT_FILE_PATH} into ${THRIFT_GEN_DIR}"
     )
 
     # target to ensure that all files are built prior to start of compilation
