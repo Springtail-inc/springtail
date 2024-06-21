@@ -133,9 +133,9 @@ namespace springtail {
         double rows = 0;
 
         item = lappend(item, attnums);
-		item = lappend(item, makeConst(INT4OID,
+        item = lappend(item, makeConst(INT4OID,
                                        -1, InvalidOid, 4, rows, false, true));
-		result = lappend(result, item);
+        result = lappend(result, item);
 
         return result;
     }

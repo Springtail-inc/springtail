@@ -51,22 +51,22 @@
 static bool
 isAttrInRestrictInfo(Index relid, AttrNumber attno, RestrictInfo *restrictinfo)
 {
-	List	   *vars = pull_var_clause((Node *) restrictinfo->clause,
-										PVC_RECURSE_AGGREGATES|
-										PVC_RECURSE_PLACEHOLDERS);
-	ListCell   *lc;
+    List	   *vars = pull_var_clause((Node *) restrictinfo->clause,
+                                        PVC_RECURSE_AGGREGATES|
+                                        PVC_RECURSE_PLACEHOLDERS);
+    ListCell   *lc;
 
-	foreach(lc, vars)
-	{
-		Var		   *var = (Var *) lfirst(lc);
+    foreach(lc, vars)
+    {
+        Var		   *var = (Var *) lfirst(lc);
 
-		if (var->varno == relid && var->varattno == attno)
-		{
-			return true;
-		}
+        if (var->varno == relid && var->varattno == attno)
+        {
+            return true;
+        }
 
-	}
-	return false;
+    }
+    return false;
 }
 
 static List *
@@ -348,17 +348,17 @@ computeDeparsedSortGroup(List *deparsed,
 static String *
 colnameFromVar(Var *var, PlannerInfo *root)
 {
-	RangeTblEntry *rte = rte = planner_rt_fetch(var->varno, root);
-	char	   *attname = get_attname(rte->relid, var->varattno, true);
+    RangeTblEntry *rte = rte = planner_rt_fetch(var->varno, root);
+    char	   *attname = get_attname(rte->relid, var->varattno, true);
 
-	if (attname == NULL)
-	{
-		return NULL;
-	}
-	else
-	{
-		return makeString(attname);
-	}
+    if (attname == NULL)
+    {
+        return NULL;
+    }
+    else
+    {
+        return makeString(attname);
+    }
 }
 
 /*
@@ -366,55 +366,55 @@ colnameFromVar(Var *var, PlannerInfo *root)
  */
 static BaseQual *
 makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
-		 bool useOr)
+         bool useOr)
 {
-	BaseQual *qual;
+    BaseQual *qual;
 
-	elog(DEBUG3, "begin makeQual() opname '%s': type '%d'", opname, value->type);
-	switch (value->type)
-	{
-		case T_Const:
-	                elog(DEBUG3, "T_Const");
-			qual = palloc0(sizeof(ConstQual));
-			qual->right_type = T_Const;
-			qual->typeoid = ((Const *) value)->consttype;
-			((ConstQual *) qual)->value = ((Const *) value)->constvalue;
-			((ConstQual *) qual)->isnull = ((Const *) value)->constisnull;
-			break;
-		case T_Var:
-	                elog(DEBUG3, "T_Var");
-			qual = palloc0(sizeof(VarQual));
-			qual->right_type = T_Var;
-			((VarQual *) qual)->rightvarattno = ((Var *) value)->varattno;
-			break;
-		default:
-	                elog(DEBUG3, "default");
-			qual = palloc0(sizeof(ParamQual));
-			qual->right_type = T_Param;
-			((ParamQual *) qual)->expr = value;
-			qual->typeoid = InvalidOid;
-			break;
-	}
-	qual->varattno = varattno;
-	qual->opname = opname;
-	qual->isArray = isarray;
-	qual->useOr = useOr;
-	elog(DEBUG3, "makeQual() opname '%s': right_type '%d'", opname, qual->right_type);
-	return qual;
+    elog(DEBUG3, "begin makeQual() opname '%s': type '%d'", opname, value->type);
+    switch (value->type)
+    {
+        case T_Const:
+                    elog(DEBUG3, "T_Const");
+            qual = palloc0(sizeof(ConstQual));
+            qual->right_type = T_Const;
+            qual->typeoid = ((Const *) value)->consttype;
+            ((ConstQual *) qual)->value = ((Const *) value)->constvalue;
+            ((ConstQual *) qual)->isnull = ((Const *) value)->constisnull;
+            break;
+        case T_Var:
+                    elog(DEBUG3, "T_Var");
+            qual = palloc0(sizeof(VarQual));
+            qual->right_type = T_Var;
+            ((VarQual *) qual)->rightvarattno = ((Var *) value)->varattno;
+            break;
+        default:
+                    elog(DEBUG3, "default");
+            qual = palloc0(sizeof(ParamQual));
+            qual->right_type = T_Param;
+            ((ParamQual *) qual)->expr = value;
+            qual->typeoid = InvalidOid;
+            break;
+    }
+    qual->varattno = varattno;
+    qual->opname = opname;
+    qual->isArray = isarray;
+    qual->useOr = useOr;
+    elog(DEBUG3, "makeQual() opname '%s': right_type '%d'", opname, qual->right_type);
+    return qual;
 }
 
 static char *
 getOperatorString(Oid opoid)
 {
-	HeapTuple	tp;
-	Form_pg_operator operator;
+    HeapTuple	tp;
+    Form_pg_operator operator;
 
-	tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(opoid));
-	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "cache lookup failed for operator %u", opoid);
-	operator = (Form_pg_operator) GETSTRUCT(tp);
-	ReleaseSysCache(tp);
-	return NameStr(operator->oprname);
+    tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(opoid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for operator %u", opoid);
+    operator = (Form_pg_operator) GETSTRUCT(tp);
+    ReleaseSysCache(tp);
+    return NameStr(operator->oprname);
 }
 
 /*
@@ -423,15 +423,15 @@ getOperatorString(Oid opoid)
 static Node *
 unnestClause(Node *node)
 {
-	switch (node->type)
-	{
-		case T_RelabelType:
-			return (Node *) ((RelabelType *) node)->arg;
-		case T_ArrayCoerceExpr:
-			return (Node *) ((ArrayCoerceExpr *) node)->arg;
-		default:
-			return node;
-	}
+    switch (node->type)
+    {
+        case T_RelabelType:
+            return (Node *) ((RelabelType *) node)->arg;
+        case T_ArrayCoerceExpr:
+            return (Node *) ((ArrayCoerceExpr *) node)->arg;
+        default:
+            return node;
+    }
 }
 
 /*
@@ -443,80 +443,80 @@ unnestClause(Node *node)
  */
 static ScalarArrayOpExpr *
 canonicalScalarArrayOpExpr(ScalarArrayOpExpr *opExpr,
-						   Relids base_relids)
+                           Relids base_relids)
 {
-	Oid			operatorid = opExpr->opno;
-	Node	   *l,
-			   *r;
-	ScalarArrayOpExpr *result = NULL;
-	HeapTuple	tp;
-	Form_pg_operator op;
+    Oid			operatorid = opExpr->opno;
+    Node	   *l,
+               *r;
+    ScalarArrayOpExpr *result = NULL;
+    HeapTuple	tp;
+    Form_pg_operator op;
 
-	/* Only treat binary operators for now. */
-	if (list_length(opExpr->args) == 2)
-	{
-		l = unnestClause(list_nth(opExpr->args, 0));
-		r = unnestClause(list_nth(opExpr->args, 1));
-		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(operatorid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "cache lookup failed for operator %u", operatorid);
-		op = (Form_pg_operator) GETSTRUCT(tp);
-		ReleaseSysCache(tp);
-		if (IsA(l, Var) &&bms_is_member(((Var *) l)->varno, base_relids)
-			&& ((Var *) l)->varattno >= 1)
-		{
-			result = makeNode(ScalarArrayOpExpr);
-			result->opno = operatorid;
-			result->opfuncid = op->oprcode;
-			result->useOr = opExpr->useOr;
-			result->args = lappend(result->args, l);
-			result->args = lappend(result->args, r);
-			result->location = opExpr->location;
+    /* Only treat binary operators for now. */
+    if (list_length(opExpr->args) == 2)
+    {
+        l = unnestClause(list_nth(opExpr->args, 0));
+        r = unnestClause(list_nth(opExpr->args, 1));
+        tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(operatorid));
+        if (!HeapTupleIsValid(tp))
+            elog(ERROR, "cache lookup failed for operator %u", operatorid);
+        op = (Form_pg_operator) GETSTRUCT(tp);
+        ReleaseSysCache(tp);
+        if (IsA(l, Var) &&bms_is_member(((Var *) l)->varno, base_relids)
+            && ((Var *) l)->varattno >= 1)
+        {
+            result = makeNode(ScalarArrayOpExpr);
+            result->opno = operatorid;
+            result->opfuncid = op->oprcode;
+            result->useOr = opExpr->useOr;
+            result->args = lappend(result->args, l);
+            result->args = lappend(result->args, r);
+            result->location = opExpr->location;
 
-		}
-	}
-	return result;
+        }
+    }
+    return result;
 }
 
 static void
 swapOperandsAsNeeded(Node **left, Node **right, Oid *opoid,
-					 Relids base_relids)
+                     Relids base_relids)
 {
-	HeapTuple	tp;
-	Form_pg_operator op;
-	Node	   *l = *left,
-			   *r = *right;
+    HeapTuple	tp;
+    Form_pg_operator op;
+    Node	   *l = *left,
+               *r = *right;
 
-	tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(*opoid));
-	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "cache lookup failed for operator %u", *opoid);
-	op = (Form_pg_operator) GETSTRUCT(tp);
-	ReleaseSysCache(tp);
-	/* Right is already a var. */
-	/* If "left" is a Var from another rel, and right is a Var from the */
-	/* target rel, swap them. */
-	/* Same thing is left is not a var at all. */
-	/* To swap them, we have to lookup the commutator operator. */
-	if (IsA(r, Var))
-	{
-		Var		   *rvar = (Var *) r;
+    tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(*opoid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for operator %u", *opoid);
+    op = (Form_pg_operator) GETSTRUCT(tp);
+    ReleaseSysCache(tp);
+    /* Right is already a var. */
+    /* If "left" is a Var from another rel, and right is a Var from the */
+    /* target rel, swap them. */
+    /* Same thing is left is not a var at all. */
+    /* To swap them, we have to lookup the commutator operator. */
+    if (IsA(r, Var))
+    {
+        Var		   *rvar = (Var *) r;
 
-		if (!IsA(l, Var) ||
-			(!bms_is_member(((Var *) l)->varno, base_relids) &&
-			 bms_is_member(rvar->varno, base_relids)))
-		{
-			/* If the operator has no commutator operator, */
-			/* bail out. */
-			if (op->oprcom == 0)
-			{
-				return;
-			}
-			{
-				*left = r;
-				*right = l;
-				*opoid = op->oprcom;
-			}
-		}
+        if (!IsA(l, Var) ||
+            (!bms_is_member(((Var *) l)->varno, base_relids) &&
+             bms_is_member(rvar->varno, base_relids)))
+        {
+            /* If the operator has no commutator operator, */
+            /* bail out. */
+            if (op->oprcom == 0)
+            {
+                return;
+            }
+            {
+                *left = r;
+                *right = l;
+                *opoid = op->oprcom;
+            }
+        }
     }
 }
 
@@ -531,29 +531,29 @@ swapOperandsAsNeeded(Node **left, Node **right, Oid *opoid,
 static OpExpr *
 canonicalOpExpr(OpExpr *opExpr, Relids base_relids)
 {
-	Oid			operatorid = opExpr->opno;
-	Node	   *l,
-			   *r;
-	OpExpr	   *result = NULL;
+    Oid			operatorid = opExpr->opno;
+    Node	   *l,
+               *r;
+    OpExpr	   *result = NULL;
 
-	/* Only treat binary operators for now. */
-	if (list_length(opExpr->args) == 2)
-	{
-		l = unnestClause(list_nth(opExpr->args, 0));
-		r = unnestClause(list_nth(opExpr->args, 1));
-		swapOperandsAsNeeded(&l, &r, &operatorid, base_relids);
-		if (IsA(l, Var) &&bms_is_member(((Var *) l)->varno, base_relids)
-			&& ((Var *) l)->varattno >= 1)
-		{
-			result = (OpExpr *) make_opclause(operatorid,
-											  opExpr->opresulttype,
-											  opExpr->opretset,
-											  (Expr *) l, (Expr *) r,
-											  opExpr->opcollid,
-											  opExpr->inputcollid);
-		}
-	}
-	return result;
+    /* Only treat binary operators for now. */
+    if (list_length(opExpr->args) == 2)
+    {
+        l = unnestClause(list_nth(opExpr->args, 0));
+        r = unnestClause(list_nth(opExpr->args, 1));
+        swapOperandsAsNeeded(&l, &r, &operatorid, base_relids);
+        if (IsA(l, Var) &&bms_is_member(((Var *) l)->varno, base_relids)
+            && ((Var *) l)->varattno >= 1)
+        {
+            result = (OpExpr *) make_opclause(operatorid,
+                                              opExpr->opresulttype,
+                                              opExpr->opretset,
+                                              (Expr *) l, (Expr *) r,
+                                              opExpr->opcollid,
+                                              opExpr->inputcollid);
+        }
+    }
+    return result;
 }
 
 /*
@@ -569,54 +569,54 @@ canonicalOpExpr(OpExpr *opExpr, Relids base_relids)
 static void
 extractClauseFromOpExpr(PlannerInfo *root,
                         Relids base_relids,
-						OpExpr *op,
-						List **quals)
+                        OpExpr *op,
+                        List **quals)
 {
-	Var		   *left;
-	Expr	   *right;
+    Var		   *left;
+    Expr	   *right;
 
-	/* Use a "canonical" version of the op expression, to ensure that the */
-	/* left operand is a Var on our relation. */
-	op = canonicalOpExpr(op, base_relids);
-	if (op)
-	{
-		left = list_nth(op->args, 0);
-		right = list_nth(op->args, 1);
-		/* Do not add it if it either contains a mutable function, or makes */
-		/* self references in the right hand side. */
-		if (!(contain_volatile_functions((Node *) right) ||
-			  bms_is_subset(base_relids, pull_varnos(root, (Node *) right))))
-		{
-			*quals = lappend(*quals, makeQual(left->varattno,
-											  getOperatorString(op->opno),
-											  right, false, false));
-		}
-	}
+    /* Use a "canonical" version of the op expression, to ensure that the */
+    /* left operand is a Var on our relation. */
+    op = canonicalOpExpr(op, base_relids);
+    if (op)
+    {
+        left = list_nth(op->args, 0);
+        right = list_nth(op->args, 1);
+        /* Do not add it if it either contains a mutable function, or makes */
+        /* self references in the right hand side. */
+        if (!(contain_volatile_functions((Node *) right) ||
+              bms_is_subset(base_relids, pull_varnos(root, (Node *) right))))
+        {
+            *quals = lappend(*quals, makeQual(left->varattno,
+                                              getOperatorString(op->opno),
+                                              right, false, false));
+        }
+    }
 }
 
 static void
 extractClauseFromScalarArrayOpExpr(PlannerInfo *root,
                                    Relids base_relids,
-								   ScalarArrayOpExpr *op,
-								   List **quals)
+                                   ScalarArrayOpExpr *op,
+                                   List **quals)
 {
-	Var		   *left;
-	Expr	   *right;
+    Var		   *left;
+    Expr	   *right;
 
-	op = canonicalScalarArrayOpExpr(op, base_relids);
-	if (op)
-	{
-		left = list_nth(op->args, 0);
-		right = list_nth(op->args, 1);
-		if (!(contain_volatile_functions((Node *) right) ||
-			  bms_is_subset(base_relids, pull_varnos(root, (Node *) right)))) // XXX planner info missing
-		{
-			*quals = lappend(*quals, makeQual(left->varattno,
-											  getOperatorString(op->opno),
-											  right, true,
-											  op->useOr));
-		}
-	}
+    op = canonicalScalarArrayOpExpr(op, base_relids);
+    if (op)
+    {
+        left = list_nth(op->args, 0);
+        right = list_nth(op->args, 1);
+        if (!(contain_volatile_functions((Node *) right) ||
+              bms_is_subset(base_relids, pull_varnos(root, (Node *) right)))) // XXX planner info missing
+        {
+            *quals = lappend(*quals, makeQual(left->varattno,
+                                              getOperatorString(op->opno),
+                                              right, true,
+                                              op->useOr));
+        }
+    }
 }
 
 /*
@@ -626,33 +626,33 @@ extractClauseFromScalarArrayOpExpr(PlannerInfo *root,
 static void
 extractClauseFromNullTest(PlannerInfo *root,
                           Relids base_relids,
-						  NullTest *node,
-						  List **quals)
+                          NullTest *node,
+                          List **quals)
 {
-	if (IsA(node->arg, Var))
-	{
-		Var		   *var = (Var *) node->arg;
-		BaseQual *result;
-		char	   *opname = NULL;
+    if (IsA(node->arg, Var))
+    {
+        Var		   *var = (Var *) node->arg;
+        BaseQual *result;
+        char	   *opname = NULL;
 
-		if (var->varattno < 1)
-		{
-			return;
-		}
-		if (node->nulltesttype == IS_NULL)
-		{
-			opname = "=";
-		}
-		else
-		{
-			opname = "<>";
-		}
-		result = makeQual(var->varattno, opname,
-						  (Expr *) makeNullConst(INT4OID, -1, InvalidOid),
-						  false,
-						  false);
-		*quals = lappend(*quals, result);
-	}
+        if (var->varattno < 1)
+        {
+            return;
+        }
+        if (node->nulltesttype == IS_NULL)
+        {
+            opname = "=";
+        }
+        else
+        {
+            opname = "<>";
+        }
+        result = makeQual(var->varattno, opname,
+                          (Expr *) makeNullConst(INT4OID, -1, InvalidOid),
+                          false,
+                          false);
+        *quals = lappend(*quals, result);
+    }
 }
 
 
@@ -663,33 +663,33 @@ extractClauseFromNullTest(PlannerInfo *root,
 static void
 extractRestrictions(PlannerInfo *root,
                     Relids base_relids,
-					Expr *node,
-					List **quals)
+                    Expr *node,
+                    List **quals)
 {
-	switch (nodeTag(node))
-	{
-		case T_OpExpr:
-			extractClauseFromOpExpr(root, base_relids,
-									(OpExpr *) node, quals);
-			break;
-		case T_NullTest:
-			extractClauseFromNullTest(root, base_relids,
-									  (NullTest *) node, quals);
-			break;
-		case T_ScalarArrayOpExpr:
-			extractClauseFromScalarArrayOpExpr(root, base_relids,
-											   (ScalarArrayOpExpr *) node,
-											   quals);
-			break;
-		default:
-			{
-				ereport(WARNING,
-						(errmsg("unsupported expression for "
-								"extractClauseFrom"),
-						 errdetail("%s", nodeToString(node))));
-			}
-			break;
-	}
+    switch (nodeTag(node))
+    {
+        case T_OpExpr:
+            extractClauseFromOpExpr(root, base_relids,
+                                    (OpExpr *) node, quals);
+            break;
+        case T_NullTest:
+            extractClauseFromNullTest(root, base_relids,
+                                      (NullTest *) node, quals);
+            break;
+        case T_ScalarArrayOpExpr:
+            extractClauseFromScalarArrayOpExpr(root, base_relids,
+                                               (ScalarArrayOpExpr *) node,
+                                               quals);
+            break;
+        default:
+            {
+                ereport(WARNING,
+                        (errmsg("unsupported expression for "
+                                "extractClauseFrom"),
+                         errdetail("%s", nodeToString(node))));
+            }
+            break;
+    }
 }
 
 /*
@@ -701,28 +701,28 @@ extractRestrictions(PlannerInfo *root,
 static List *
 extractColumns(List *reltargetlist, List *restrictinfolist)
 {
-	ListCell   *lc;
-	List	   *columns = NULL;
-	int			i = 0;
+    ListCell   *lc;
+    List	   *columns = NULL;
+    int			i = 0;
 
-	foreach(lc, reltargetlist)
-	{
-		List	   *targetcolumns;
-		Node	   *node = (Node *) lfirst(lc);
+    foreach(lc, reltargetlist)
+    {
+        List	   *targetcolumns;
+        Node	   *node = (Node *) lfirst(lc);
 
-		targetcolumns = pull_var_clause(node, PVC_RECURSE_AGGREGATES| PVC_RECURSE_PLACEHOLDERS);
-		columns = list_union(columns, targetcolumns);
-		i++;
-	}
-	foreach(lc, restrictinfolist)
-	{
-		List	   *targetcolumns;
-		RestrictInfo *node = (RestrictInfo *) lfirst(lc);
+        targetcolumns = pull_var_clause(node, PVC_RECURSE_AGGREGATES| PVC_RECURSE_PLACEHOLDERS);
+        columns = list_union(columns, targetcolumns);
+        i++;
+    }
+    foreach(lc, restrictinfolist)
+    {
+        List	   *targetcolumns;
+        RestrictInfo *node = (RestrictInfo *) lfirst(lc);
 
-		targetcolumns = pull_var_clause((Node *) node->clause, PVC_RECURSE_AGGREGATES| PVC_RECURSE_PLACEHOLDERS);
-		columns = list_union(columns, targetcolumns);
-	}
-	return columns;
+        targetcolumns = pull_var_clause((Node *) node->clause, PVC_RECURSE_AGGREGATES| PVC_RECURSE_PLACEHOLDERS);
+        columns = list_union(columns, targetcolumns);
+    }
+    return columns;
 }
 
 void
@@ -735,65 +735,65 @@ get_rel_size(PlannerInfo *root,
     int width;
 
     ForeignTable *ftable = GetForeignTable(foreigntableid);
-	ListCell   *lc;
-	bool		needWholeRow = false;
+    ListCell   *lc;
+    bool		needWholeRow = false;
     TupleDesc	desc;
     List       *target_list = NIL;
     List       *qual_list = NIL;
 
     /* Initialize the conversion info array */
-	{
-		Relation	rel = RelationIdGetRelation(ftable->relid);
+    {
+        Relation	rel = RelationIdGetRelation(ftable->relid);
 
-		desc = RelationGetDescr(rel);
-		needWholeRow = rel->trigdesc && rel->trigdesc->trig_insert_after_row;
-		RelationClose(rel);
-	}
+        desc = RelationGetDescr(rel);
+        needWholeRow = rel->trigdesc && rel->trigdesc->trig_insert_after_row;
+        RelationClose(rel);
+    }
 
-	if (needWholeRow)
-	{
-		int			i;
+    if (needWholeRow)
+    {
+        int			i;
 
-		for (i = 0; i < desc->natts; i++)
-		{
-			Form_pg_attribute att = TupleDescAttr(desc, i);
+        for (i = 0; i < desc->natts; i++)
+        {
+            Form_pg_attribute att = TupleDescAttr(desc, i);
 
-			if (!att->attisdropped)
-			{
-				target_list = lappend(target_list, makeString(NameStr(att->attname)));
-			}
-		}
-	}
-	else
-	{
-		/* Pull "var" clauses to build an appropriate target list */
-		foreach(lc, extractColumns(baserel->reltarget->exprs, baserel->baserestrictinfo))
-		{
-			Var		   *var = (Var *) lfirst(lc);
+            if (!att->attisdropped)
+            {
+                target_list = lappend(target_list, makeString(NameStr(att->attname)));
+            }
+        }
+    }
+    else
+    {
+        /* Pull "var" clauses to build an appropriate target list */
+        foreach(lc, extractColumns(baserel->reltarget->exprs, baserel->baserestrictinfo))
+        {
+            Var		   *var = (Var *) lfirst(lc);
 #if PG_VERSION_NUM < 150000
-			Value	   *colname;
+            Value	   *colname;
 #else
-			String	   *colname;
+            String	   *colname;
 #endif
 
-			/*
-			 * Store only a Value node containing the string name of the
-			 * column.
-			 */
-			colname = colnameFromVar(var, root);
-			if (colname != NULL && strVal(colname) != NULL)
-			{
-				target_list = lappend(target_list, colname);
-			}
-		}
-	}
-	/* Extract the restrictions from the plan. */
-	foreach(lc, baserel->baserestrictinfo)
-	{
-		extractRestrictions(root, baserel->relids,
+            /*
+             * Store only a Value node containing the string name of the
+             * column.
+             */
+            colname = colnameFromVar(var, root);
+            if (colname != NULL && strVal(colname) != NULL)
+            {
+                target_list = lappend(target_list, colname);
+            }
+        }
+    }
+    /* Extract the restrictions from the plan. */
+    foreach(lc, baserel->baserestrictinfo)
+    {
+        extractRestrictions(root, baserel->relids,
                             ((RestrictInfo *) lfirst(lc))->clause,
-							&qual_list);
-	}
+                            &qual_list);
+    }
 
     fdw_get_rel_size(planstate, target_list, qual_list, &rows, &width);
 

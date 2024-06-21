@@ -38,7 +38,7 @@
         "server" : {
             "port" : 55052,
             "worker_threads": 8,
-            "base_path": "/tmp/xid_mgr"
+            "base_path": "/tmp/springtail/xid_mgr"
         },
         "client": {
             "connections": 8,
