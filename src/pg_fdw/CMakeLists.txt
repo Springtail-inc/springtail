@@ -39,8 +39,8 @@ target_include_directories(copy_schema
 )
 target_link_libraries(copy_schema
     PRIVATE springtail_common
-    PRIVATE springtail_storage
     PRIVATE springtail_pg
+    PRIVATE springtail_storage
     PRIVATE Boost::program_options
 )
 
