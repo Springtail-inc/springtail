@@ -79,15 +79,16 @@ namespace springtail::gc {
 
         // pull the dependencies from redis
         auto &&values = _oid_set.get_by_score(_last_requested_xid + 1);
+        if (!values.empty()) {
+            // update the dependency mappings
+            for (auto const &value : values) {
+                _table_deps[value.oid].insert(value.xid);
+                _xid_map[value.xid].insert(value.oid);
+            }
 
-        // update the dependency mappings
-        for (auto const &value : values) {
-            _table_deps[value.oid].insert(value.xid);
-            _xid_map[value.xid].insert(value.oid);
+            // save that we pulled data through the last seen XID
+            _last_requested_xid = values.back().xid;
         }
-
-        // save that we pulled data through the last seen XID
-        _last_requested_xid = values.back().xid;
     }
 
     void

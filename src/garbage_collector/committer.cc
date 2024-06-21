@@ -20,11 +20,11 @@ namespace springtail::gc {
         while (!_shutdown) {
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after 60s
-            uint64_t xid = _redis.pop(_worker_id, 60)->xid();
-            if (xid == constant::LATEST_XID) {
-                // timed out, try again
-                continue;
+            auto result = _redis.pop(_worker_id, 60);
+            if (result == nullptr) {
+                continue; // got a timeout, try again
             }
+            uint64_t xid = result->xid();
 
             // find every table associated with this XID
             uint64_t table_cursor = 0;
