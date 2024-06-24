@@ -119,8 +119,42 @@ namespace springtail {
     List *
     PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
     {
-        // XXX not implemented
-        return NIL;
+        List       *result = NULL;
+        ListCell   *lc;
+
+        PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
+
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
+
+        // XXX only looking at primary keys for now
+        int i = 0;
+        foreach(lc, sortgroup) {
+            // check if there are any more primary keys
+            if (i >= pg_state->pkey_column_ids.size()) {
+                break;
+            }
+
+            // get the next path key and check if it is next in primary key list
+            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+            int attnum = pathkey->attnum;
+
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Checking pathkey attnum: {} against pkey id: {}",
+                                attnum, pg_state->pkey_column_ids[i]);
+
+            // check if this attnum matches next id in primary key id list, and sort order matches
+            if (pathkey->nulls_first || pathkey->reversed ||
+                attnum != pg_state->pkey_column_ids[i]) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
+                break;
+            }
+
+            // add to result
+            result = lappend(result, pathkey);
+
+            i++;
+        }
+
+        return result;
     }
 
     List *
@@ -134,11 +168,14 @@ namespace springtail {
 
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
-        // list of elements, each element is: list of attnums, followed by row count
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_get_path_keys");
+
+        // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
 
         // for now only look at primary key
         for (const auto id: pg_state->pkey_column_ids) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", id);
             attnums = list_append_unique_int(attnums, id);
         }
         item = lappend(item, attnums);

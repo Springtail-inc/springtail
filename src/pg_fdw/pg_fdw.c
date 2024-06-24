@@ -109,11 +109,11 @@ fdw_xact_callback(XactEvent event, void *arg)
     switch (event)
     {
         case XACT_EVENT_COMMIT:
-            elog(INFO, "Transaction committed: %lu", pg_xid);
+            elog(INFO, "Transaction committed: %lu", pg_xid.value);
             fdw_commit_rollback(pg_xid.value, true);
             break;
         case XACT_EVENT_ABORT:
-            elog(INFO, "Transaction aborted: %lu", pg_xid);
+            elog(INFO, "Transaction aborted: %lu", pg_xid.value);
             fdw_commit_rollback(pg_xid.value, false);
             break;
         default:
