@@ -232,6 +232,7 @@ namespace springtail {
         thrift::write_cache::ListExtentsRequest request;
         thrift::write_cache::ListExtentsResponse response;
 
+        request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
         request.count = count;
@@ -264,7 +265,7 @@ namespace springtail {
 
         c.client->get_rows(response, request);
 
-        cursor = request.cursor;
+        cursor = response.cursor;
 
         std::vector<RowData> rows;
         for (const auto &r: response.rows) {
