@@ -209,6 +209,37 @@ namespace springtail {
             WriteCacheIndexTestRequest::Type::EVICT_TABLE_CHANGE);
     }
 
+    TEST_F(WriteCacheIndexTest, Simple_Test)
+    {
+        WriteCacheIndexTestRequestPtr req = _make_row_request(221423, 0, 11, 0, 1, 2);
+        req->operator()();
+
+        std::vector<int64_t> tids;
+        uint64_t cursor = 0;
+        uint64_t end_offset;
+        int res = _ts->get_tids(10, 11, 10, cursor, end_offset, tids);
+        ASSERT_EQ(res, 1);
+        ASSERT_NO_FATAL_FAILURE(vec_eq(tids, {221423}));
+
+        std::vector<int64_t> eids;
+        cursor = 0;
+        res = _ts->get_eids(221423, 10, 11, 10, cursor, eids);
+        ASSERT_EQ(res, 1);
+        ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {0}));
+
+        WriteCacheIndexRowPtr row = std::make_shared<WriteCacheIndexRow>("data", "data", 0, 11, 0, WriteCacheIndexRow::RowOp::INSERT);
+        WriteCacheIndex idx{};
+        idx.add_rows(221423, 0, {row});
+        cursor = 0;
+        tids = idx.get_tids(10, 11, 10, cursor);
+        ASSERT_NO_FATAL_FAILURE(vec_eq(tids, {221423}));
+
+        cursor = 0;
+        eids = idx.get_eids(221423, 10, 11, 10, cursor);
+        ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {0}));
+    }
+
+
     TEST_F(WriteCacheIndexTest, Threaded_Test)
     {
         // create a phased test
