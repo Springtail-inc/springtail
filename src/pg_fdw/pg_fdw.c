@@ -283,18 +283,9 @@ springtail_GetForeignPaths(PlannerInfo *root,
                            Oid foreigntableid)
 {
     SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
-    List *fdw_private = list_make1((void *)state);
 
-    Path *path = (Path *)create_foreignscan_path(root, baserel,
-        NULL,              /* default pathtarget */
-        baserel->rows,     /* rows */
-        1,                 /* startup cost */
-        1 + baserel->rows, /* total cost */
-        NIL,               /* no pathkeys */
-        NULL,              /* no required outer relids */
-        NULL,              /* no fdw_outerpath */
-        fdw_private);      /* fdw_private */
-    add_path(baserel, path);
+    // get the foreign paths -- call helper to set them up
+    get_foreign_paths(root, baserel, foreigntableid, state);
 }
 
 /**

@@ -71,8 +71,13 @@ extern "C" {
                      bool constisnull,
                      bool constbyval)
     {
-        return nullptr;
+        return nullptr; // XXX not impl
     }
+
+    List *list_append_unique_int(List *list, int datum) {
+        return list; // XXX not impl
+    }
+
 }
 
 /** List all tables from TableNames system table */

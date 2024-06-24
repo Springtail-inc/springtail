@@ -814,6 +814,8 @@ get_foreign_paths(PlannerInfo *root,
     List				*apply_pathkeys = NULL;
     List				*deparsed_pathkeys = NULL;
 
+    List *fdw_private = list_make1((void *)planstate);
+
     /* Extract a friendly version of the pathkeys. */
     /* Returns a List of a Lists<attnum, rows> */
     List	            *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
@@ -831,7 +833,7 @@ get_foreign_paths(PlannerInfo *root,
         NIL,		/* no pathkeys */
         NULL,
         NULL,
-        NULL));
+        fdw_private));
 
 
     /* Handle sort pushdown */
@@ -844,6 +846,8 @@ get_foreign_paths(PlannerInfo *root,
             /* Update the sort_*_pathkeys lists if needed */
             computeDeparsedSortGroup(deparsed, planstate, &apply_pathkeys,
                     &deparsed_pathkeys);
+
+            planstate->deparsed_pathkeys = deparsed_pathkeys;
         }
     }
     /* Add each ForeignPath previously found */
@@ -865,7 +869,7 @@ get_foreign_paths(PlannerInfo *root,
                 path->path.startup_cost, path->path.total_cost,
                 apply_pathkeys, NULL,
                 NULL,
-                (void *) deparsed_pathkeys);
+                fdw_private);
 
             newpath->path.param_info = path->path.param_info;
             add_path(baserel, (Path *) newpath);

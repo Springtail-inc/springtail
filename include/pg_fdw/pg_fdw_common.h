@@ -21,6 +21,7 @@ extern "C" {
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;
+    List    *deparsed_pathkeys;
     void    *pg_fdw_state;
 } SpringtailPlanState;
 

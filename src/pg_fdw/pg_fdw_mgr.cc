@@ -130,8 +130,17 @@ namespace springtail {
         List      *attnums = NULL;
         List      *item = NULL;
 
-        double rows = 0;
+        double rows = 1; // number of rows with unique key
 
+        PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
+
+        // list of elements, each element is: list of attnums, followed by row count
+        // [(('id',),1)]
+
+        // for now only look at primary key
+        for (const auto id: pg_state->pkey_column_ids) {
+            attnums = list_append_unique_int(attnums, id);
+        }
         item = lappend(item, attnums);
         item = lappend(item, makeConst(INT4OID,
                                        -1, InvalidOid, 4, rows, false, true));
@@ -151,7 +160,7 @@ namespace springtail {
     void
     PgFdwMgr::fdw_commit_rollback(uint64_t pg_xid, bool commit)
     {
-        // remove transaction ID mapping
+        // remove transaction ID mapping on a commit or rollback
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
     }
