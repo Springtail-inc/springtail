@@ -226,6 +226,8 @@ int main(int argc, char *argv[])
     uint64_t tid=0;
     bool list = false;
 
+    springtail::springtail_init();
+
     // parse the arguments
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()

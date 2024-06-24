@@ -13,6 +13,12 @@ extern "C" {
         return PgFdwMgr::get_instance();
     }
 
+    /** Init call */
+    void
+    fdw_init(const char *config_file_path) {
+        PgFdwMgr::fdw_init(config_file_path);
+    }
+
     /** Create state for this table and transaction */
     void *
     fdw_create_state(uint64_t tid, uint64_t pg_xid) {
