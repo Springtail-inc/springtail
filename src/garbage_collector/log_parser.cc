@@ -169,6 +169,8 @@ namespace springtail::gc {
                 _state = std::make_shared<State>(entry);
             }
 
+            SPDLOG_INFO("Process XID: {}", _state->entry->xid);
+
             // once we have an XID, scan the individual mutations from the log
             uint64_t begin_offset = _state->entry->begin_offset;
             uint64_t commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
@@ -180,6 +182,8 @@ namespace springtail::gc {
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
+                SPDLOG_DEBUG("Processing {} -- Read file {} {}", _state->entry->xid, _state->entry->begin_path, begin_offset);
+
                 _reader.set_file(_state->entry->begin_path, begin_offset, commit_offset);
 
                 bool end_of_stream = false;
@@ -197,6 +201,8 @@ namespace springtail::gc {
                         end_of_stream = _reader.end_of_stream();
                         continue;
                     }
+
+                    SPDLOG_DEBUG("Processing {} -- Got msg {}", _state->entry->xid, static_cast<uint8_t>(msg->msg_type));
 
                     // handle the message
                     switch(msg->msg_type) {
@@ -365,6 +371,7 @@ namespace springtail::gc {
                 // prepare to scan the next file
                 if (_state->entry->begin_path == _state->entry->commit_path) {
                     // XXX can this ever be hit?  Would it be an error to not have seen a commit?
+                    SPDLOG_WARN("No more files to scan, but didn't see commit");
                     done = true;
                 } else {
                     // XXX how to get the next file?
@@ -383,14 +390,20 @@ namespace springtail::gc {
 
             // if the XID is fully processed, perform cleanup
             if (done) {
+                SPDLOG_DEBUG("Processing {} -- Waiting for completion", _state->entry->xid);
+
                 // wait for the parsers to complete the work for this XID
                 _state->mutation_count->wait();
 
                 // XXX notify the ExtentMapper that the XID has been fully processed
+                // write_cache->set_lookup();
 
                 // clear the dependencies and commit the entry in the Redis queue
                 _backlog->clear_dep(_state->entry->xid);
                 _pg_queue.commit(_worker_id);
+
+                _gc_queue.push(XidReady(_state->entry->xid));
+                SPDLOG_DEBUG("Processing {} -- Complete", _state->entry->xid);
             }
         }
     }
@@ -503,6 +516,8 @@ namespace springtail::gc {
 
             // process the work item
             PgMsgPtr msg = entry->msg;
+
+            SPDLOG_INFO("Parser got work item for: {}", entry->xid);
 
             // get the table information for the mutation
             auto table = TableMgr::get_instance()->get_table(entry->table_id, entry->xid, entry->lsn);

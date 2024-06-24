@@ -56,6 +56,9 @@ namespace springtail {
     void
     WriteCacheServer::_startup()
     {
+        // initialize the index
+        _index = std::make_shared<WriteCacheIndex>();
+
         // create a thread manager with right number of worker threads
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
           apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);

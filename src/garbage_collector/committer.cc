@@ -26,12 +26,16 @@ namespace springtail::gc {
             }
             uint64_t xid = result->xid();
 
+            SPDLOG_INFO("Commit XID: {}", xid);
+
             // find every table associated with this XID
             uint64_t table_cursor = 0;
             bool tid_done = false;
             while (!tid_done) {
-                // query the write cache for the tables modified in this XID
-                auto table_list = _write_cache->list_tables(xid, xid, 100, table_cursor);
+                // query the write cache for the tables modified through this XID
+                auto table_list = _write_cache->list_tables(_committed_xid, xid, 100, table_cursor);
+
+                SPDLOG_DEBUG("Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -51,7 +55,9 @@ namespace springtail::gc {
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(tid, xid, xid, 100, extent_cursor);
+                        auto extent_list = _write_cache->list_extents(tid, _committed_xid, xid, 100, extent_cursor);
+
+                        SPDLOG_DEBUG("Got {} extents for table {}", extent_list.size(), tid);
 
                         // check if we are done processing this table
                         if (extent_list.empty()) {
@@ -74,6 +80,8 @@ namespace springtail::gc {
             }
 
             // wait for tables to complete their processing
+            SPDLOG_DEBUG("Wait for {} tables to complete", _tid_count.size());
+
             // XXX ideally we could start working on the next XID while these finalize() operations
             //     are being completed.
             boost::unique_lock lock(_mutex);
@@ -105,9 +113,13 @@ namespace springtail::gc {
             }
             lock.unlock();
 
+            SPDLOG_DEBUG("All tables to complete for XID {}", xid);
+
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
+
+            SPDLOG_DEBUG("XID committed {}", xid);
 
             // mark the XID as complete in the redis queue
             _redis.commit(_worker_id);

@@ -32,10 +32,12 @@ namespace springtail {
             return; // no overrides, exit
         }
 
+        // note: overrides are in the form <key>=<val>;<key2>=<val2> where keys are a dot-separated
+        //       path within the json configuration
         std::string_view props(var);
         std::size_t pos = 0;
         while (pos < props.size()) {
-            auto item = _json;
+            auto *item = &_json;
             std::string_view key, val;
             std::size_t start = pos;
             std::string next_token = ".=";
@@ -51,14 +53,14 @@ namespace springtail {
 
                     // set the overridden value
                     // note: all override values are stored as strings
-                    item[key] = val;
+                    (*item)[key] = val;
                 } else if (props[token] == '=') {
                     key = props.substr(start, token - start);
                     next_token = ";";
                 } else {
                     assert(props[token] == '.');
                     key = props.substr(start, token - start);
-                    item = item[key];
+                    item = &((*item)[key]);
                 }
 
                 start = token + 1;

@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
 
     // daemonize the process
     if (vm.count("daemonize")) {
-        common::daemonize("/tmp/write_cache.pid");
+        common::daemonize("/var/springtail/write_cache.pid");
     }
 
     // register the SIGINT handler

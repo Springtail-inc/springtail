@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 
     // daemonize the process
     if (vm.count("daemonize")) {
-        springtail::common::daemonize("/tmp/write_cache.pid");
+        springtail::common::daemonize("/var/springtail/write_cache.pid");
     }
 
     springtail::springtail_init();
@@ -68,7 +68,8 @@ int main(int argc, char *argv[])
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
 
-    log_mgr->start_streaming();
+    // log_mgr->start_streaming();
+    log_mgr->startup();
 
     log_mgr->join();
 

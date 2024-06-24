@@ -46,7 +46,7 @@ main(int argc,
 
     // daemonize the process
     if (vm.count("daemonize")) {
-        springtail::common::daemonize("/tmp/gc.pid");
+        springtail::common::daemonize("/var/springtail/gc.pid");
     }
 
     // signal handler for shutdown

@@ -95,9 +95,6 @@ namespace springtail {
     {
         if (_instance != nullptr) {
             _instance->_server->stop();
-
-            // delete _instance;
-            // _instance = nullptr;
         }
     }
 

@@ -64,6 +64,11 @@ namespace springtail {
             // ignore hang-up
             std::signal(SIGHUP, SIG_IGN);
         } else {
+            // ensure the pid directory exists
+            std::filesystem::path pid_dir(pid_filename);
+            pid_dir.remove_filename();
+            std::filesystem::create_directories(pid_dir);
+
             // record the pid of the child into the pid file
             std::ofstream pid_file(pid_filename);
             pid_file << pid << std::endl;

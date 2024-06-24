@@ -58,8 +58,10 @@ namespace springtail {
 
         // if xact log is behind pg log then we need to catchup before starting to stream
         // find last xact from xact_list, and start from there (file + offset)
-        PgTransactionPtr last_xact = xact_list.back();
-        _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
+        if (!xact_list.empty()) {
+            PgTransactionPtr last_xact = xact_list.back();
+            _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
+        }
 
         // XXX notify GC of startup??? notify an external coordinator?
 
