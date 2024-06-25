@@ -57,10 +57,13 @@ namespace springtail {
     }
 
     void
-    PgFdwMgr::fdw_begin_scan(PgFdwState *state)
+    PgFdwMgr::fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup)
     {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
         state->iter.emplace(Table::Iterator(state->table->begin()));
+        state->target_list = target_list;
+        state->qual_list = qual_list;
+        state->sortgroup = sortgroup;
     }
 
     void

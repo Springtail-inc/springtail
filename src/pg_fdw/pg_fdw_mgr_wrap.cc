@@ -6,6 +6,7 @@ using namespace springtail;
 
 extern "C" {
     #include <postgres.h>
+    typedef struct List List;
 
     /** Get PgFdwMgr singleton */
     PgFdwMgr *
@@ -27,9 +28,9 @@ extern "C" {
 
     /** Begin scan wrapper */
     void
-    fdw_begin_scan(void *state) {
+    fdw_begin_scan(void *state, List *target_list, List *qual_list, List *sortgroup) {
         if (state) {
-            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state));
+            return get_fdw_mgr()->fdw_begin_scan(static_cast<PgFdwState*>(state), target_list, qual_list, sortgroup);
         }
     }
 

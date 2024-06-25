@@ -183,7 +183,7 @@ dump_table(uint64_t tid, uint64_t xid)
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     PgFdwState *state = mgr->fdw_create_state(tid, xid);
-    mgr->fdw_begin_scan(state);
+    mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
 
     Datum values[fields->size()];
     bool nulls[fields->size()];

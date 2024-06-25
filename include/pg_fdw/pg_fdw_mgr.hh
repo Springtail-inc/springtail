@@ -40,6 +40,10 @@ namespace springtail  {
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
 
+        List *target_list;  ///< List of target columns (Value or String)
+        List *qual_list;    ///< List of predicate clauses (BaseQual)
+        List *sortgroup;    ///< List of sort group columns (DeparsedSortGroup)
+
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
             : table(table), tid(tid), xid(xid), iter(std::nullopt)
@@ -91,8 +95,13 @@ namespace springtail  {
          */
         PgFdwState *fdw_create_state(uint64_t tid, uint64_t pg_xid);
 
-        /** Begin scan */
-        void fdw_begin_scan(PgFdwState *state);
+        /** Begin scan
+         * @param state PgFdwState
+         * @param target_list List of target columns (Value or String)
+         * @param qual_list List of predicate clauses (BaseQual)
+         * @param sortgroup List of sort group columns (DeparsedSortGroup)
+         */
+        void fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup);
 
         /** Iterate scan -- get next row */
         bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);

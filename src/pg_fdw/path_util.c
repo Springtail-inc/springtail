@@ -660,7 +660,7 @@ extractClauseFromNullTest(PlannerInfo *root,
  * Extract conditions that can be pushed down, as well as the parameters.
  *
  */
-static void
+void
 extractRestrictions(PlannerInfo *root,
                     Relids base_relids,
                     Expr *node,
@@ -738,8 +738,6 @@ get_rel_size(PlannerInfo *root,
     ListCell   *lc;
     bool		needWholeRow = false;
     TupleDesc	desc;
-    List       *target_list = NIL;
-    List       *qual_list = NIL;
 
     /* Initialize the conversion info array */
     {
@@ -760,7 +758,7 @@ get_rel_size(PlannerInfo *root,
 
             if (!att->attisdropped)
             {
-                target_list = lappend(target_list, makeString(NameStr(att->attname)));
+                planstate->target_list = lappend(planstate->target_list, makeString(NameStr(att->attname)));
             }
         }
     }
@@ -783,7 +781,7 @@ get_rel_size(PlannerInfo *root,
             colname = colnameFromVar(var, root);
             if (colname != NULL && strVal(colname) != NULL)
             {
-                target_list = lappend(target_list, colname);
+                planstate->target_list = lappend(planstate->target_list, colname);
             }
         }
     }
@@ -792,10 +790,10 @@ get_rel_size(PlannerInfo *root,
     {
         extractRestrictions(root, baserel->relids,
                             ((RestrictInfo *) lfirst(lc))->clause,
-                            &qual_list);
+                            &planstate->qual_list);
     }
 
-    fdw_get_rel_size(planstate, target_list, qual_list, &rows, &width);
+    fdw_get_rel_size(planstate, planstate->target_list, planstate->qual_list, &rows, &width);
 
     baserel->rows = rows;
     baserel->reltarget->width = width;

@@ -44,7 +44,11 @@ get_rel_size(PlannerInfo *root,
              RelOptInfo *baserel,
              Oid foreigntableid,
              SpringtailPlanState *planstate);
-
+extern void
+extractRestrictions(PlannerInfo *root,
+                    Relids base_relids,
+                    Expr *node,
+                    List **quals);
 /*
  * FDW callback routines
  */
@@ -342,17 +346,46 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     // extract tid from fdw_private
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
     List *fdw_private = fs->fdw_private;
-    SpringtailPlanState *state = (SpringtailPlanState *)linitial(fdw_private);
-    uint64_t tid = state->tid;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)linitial(fdw_private);
+    uint64_t tid = planstate->tid;
 
-    // allocate and initialize state
-    node->fdw_state = state->pg_fdw_state;
-    fdw_begin_scan(state->pg_fdw_state);
+    node->fdw_state = planstate->pg_fdw_state;
 
     /* Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
         return;
     }
+
+    // allocate and initialize state
+  	// extract qual_list
+    ListCell   *lc;
+    List       *qual_list = NULL;
+    foreach(lc, fs->fdw_exprs)
+	{
+		elog(DEBUG3, "looping in beginForeignScan()");
+		extractRestrictions(
+            NULL,
+            bms_make_singleton(fs->scan.scanrelid),
+							((Expr *) lfirst(lc)),
+							&qual_list);
+	}
+
+    /* NOTE from Multicorn multicorn.c */
+    /* Those list must be copied, because their memory context can become */
+	/* invalid during the execution (in particular with the cursor interface) */
+    List *target_list = copyObject(planstate->target_list);
+    List *pathkeys = NULL;
+
+    // copy deparsed path keys
+    foreach(lc, planstate->deparsed_pathkeys)
+    {
+        DeparsedSortGroup *sortgroup = (DeparsedSortGroup *)lfirst(lc);
+        DeparsedSortGroup *newgroup = (DeparsedSortGroup *)palloc(sizeof(DeparsedSortGroup));
+        memcpy(newgroup, sortgroup, sizeof(DeparsedSortGroup));
+        pathkeys = lappend(pathkeys, newgroup);
+    }
+
+    fdw_begin_scan(planstate->pg_fdw_state, target_list, qual_list, pathkeys);
 
     return;
 }
