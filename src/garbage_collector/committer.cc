@@ -219,14 +219,15 @@ namespace springtail::gc {
                 // XXX seems like we've got more copies here than strictly necessary... we could
                 //     instead construct a read-only extent via pointers into the existing data
                 //     object
-                ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
-                Extent extent(header);
-                extent.deserialize(row.data);
 
                 // pass that tuple into the appropriate table mutation
                 switch (row.op) {
                 case (WriteCacheClient::RowOp::INSERT):
                     {
+                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                        Extent extent(header);
+                        extent.deserialize(row.data);
+
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
                         SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
                         table->insert(value, xid, extent_id);
@@ -234,12 +235,21 @@ namespace springtail::gc {
                     }
                 case (WriteCacheClient::RowOp::UPDATE):
                     {
+                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                        Extent extent(header);
+                        extent.deserialize(row.data);
+
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
                         table->update(value, xid, extent_id);
                         break;
                     }
                 case (WriteCacheClient::RowOp::DELETE):
                     {
+                        auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                        ExtentHeader header(ExtentType(), xid, pkey_schema->row_size(), 0);
+                        Extent extent(header);
+
+                        extent.deserialize(row.pkey);
                         auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
                         table->remove(key, xid, extent_id);
                         break;
