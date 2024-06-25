@@ -27,6 +27,7 @@ namespace springtail {
     WriteCacheServer* WriteCacheServer::_instance {nullptr};
 
     std::once_flag WriteCacheServer::_init_flag;
+    std::once_flag WriteCacheServer::_shutdown_flag;
 
     WriteCacheServer *
     WriteCacheServer::_init()
@@ -53,8 +54,11 @@ namespace springtail {
      * Startup thrift threaded server
      */
     void
-    WriteCacheServer::startup()
+    WriteCacheServer::_startup()
     {
+        // initialize the index
+        _index = std::make_shared<WriteCacheIndex>();
+
         // create a thread manager with right number of worker threads
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
           apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
@@ -62,7 +66,7 @@ namespace springtail {
         threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
         threadManager->start();
 
-        apache::thrift::server::TThreadPoolServer server(
+        _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::write_cache::ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
@@ -70,15 +74,14 @@ namespace springtail {
             threadManager
         );
 
-        server.serve();
+        _server->serve();
     }
 
     void
     WriteCacheServer::_shutdown()
     {
         if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
+            _instance->_server->stop();
         }
     }
 }

@@ -37,11 +37,13 @@ namespace springtail {
             std::unique_lock<std::mutex> write_lock{_mutex};
 
             // get the last enqueued entry and see if we can modify it to include this message as well
-            PgLogQueueEntryPtr &entry = _queue.back();
-            if (entry->path == path && entry->end_offset == start_offset) {
-                entry->end_offset = end_offset;
-                entry->num_messages++;
-                return;
+            if (!_queue.empty()) {
+                PgLogQueueEntryPtr &entry = _queue.back();
+                if (entry->path == path && entry->end_offset == start_offset) {
+                    entry->end_offset = end_offset;
+                    entry->num_messages++;
+                    return;
+                }
             }
 
             // otherwise create and add new entry

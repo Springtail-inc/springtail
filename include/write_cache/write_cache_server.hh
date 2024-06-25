@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include <thrift/server/TServer.h>
+
 namespace springtail {
 
     class WriteCacheIndex;
@@ -31,7 +33,14 @@ namespace springtail {
         /**
          * @brief Startup server; does not return
          */
-        void startup();
+        static void startup() {
+            // start the server
+            auto server = get_instance();
+            server->_startup();
+
+            // after shutdown() we delete the instance
+            delete _instance;
+        }
 
         /**
          * @brief Get the write cache index object
@@ -62,6 +71,9 @@ namespace springtail {
         /** shutdown from shutdown(), called once */
         static void _shutdown();
 
+        /** startup from startup(), called once */
+        void _startup();
+
         /** Singleton write cache server instance */
         static WriteCacheServer *_instance;
 
@@ -69,6 +81,9 @@ namespace springtail {
         static std::once_flag _init_flag;
         /** shutdown flag */
         static std::once_flag _shutdown_flag;
+
+        /** The thrift server. */
+        std::shared_ptr<apache::thrift::server::TServer> _server;
 
         /** number of worker threads */
         int _worker_thread_count;

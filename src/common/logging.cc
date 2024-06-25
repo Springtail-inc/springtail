@@ -81,5 +81,6 @@ namespace logging {
         set_level(logger, log_level);
 
         spdlog::set_default_logger(logger);
+        spdlog::flush_every(std::chrono::seconds(3));
     }
 } // namespace springtail

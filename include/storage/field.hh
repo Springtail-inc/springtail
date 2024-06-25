@@ -1393,9 +1393,9 @@ namespace springtail {
         }
 
         bool is_undefined(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
             if (data->tuple_data[_offset].type == 'u') {
                 return true;
             }
@@ -1403,9 +1403,9 @@ namespace springtail {
         }
 
         bool is_null(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
             if (data->tuple_data[_offset].type == 'n') {
                 return true;
             }
@@ -1413,117 +1413,114 @@ namespace springtail {
         }
 
         bool get_bool(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // boolean should 1 byte
-            assert(recvint32(col.data.data()) == 1);
+            assert(col.data.size() == 1);
 
             // read in the binary data and convert to a boolean
-            return (col.data[4] == 1);
+            return (col.data[0] == 1);
         }
 
         int16_t get_int16(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // int16 should be 2 bytes
-            assert(recvint32(col.data.data()) == 2);
+            assert(col.data.size() == 2);
 
             // read in the binary data and convert to a 16-bit int
-            return recvint16(col.data.data() + 4);
+            return recvint16(col.data.data());
         }
 
         int32_t get_int32(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // int32 should be 4 bytes
-            assert(recvint32(col.data.data()) == 4);
+            assert(col.data.size() == 4);
 
             // read in the binary data and convert to a 32-bit int
-            return recvint32(col.data.data() + 4);
+            return recvint32(col.data.data());
         }
 
         int64_t get_int64(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // int64 should be 8 bytes
-            assert(recvint32(col.data.data()) == 8);
+            assert(col.data.size() == 8);
 
             // read in the binary data and convert to a 64-bit int
-            return recvint64(col.data.data() + 4);
+            return recvint64(col.data.data());
         }
 
         float get_float32(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // float should be 4 bytes
-            assert(recvint32(col.data.data()) == 4);
+            assert(col.data.size() == 4);
 
             // read in the binary data and convert to a 32-bit float
-            int32_t value = recvint32(col.data.data() + 4);
+            int32_t value = recvint32(col.data.data());
             return *reinterpret_cast<float *>(&value);
         }
 
         double get_float64(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
             // double should be 8 bytes
-            assert(recvint32(col.data.data()) == 8);
+            assert(col.data.size() == 8);
 
             // read in the binary data and convert to a 64-bit float
-            int64_t value = recvint64(col.data.data() + 4);
+            int64_t value = recvint64(col.data.data());
             return *reinterpret_cast<double *>(&value);
         }
 
         std::string get_text(const std::any &row) const override {
-            assert(row.type() == typeid(PgMsgTupleData *));
+            assert(row.type() == typeid(PgMsgTupleData const *));
 
-            auto &&data = std::any_cast<PgMsgTupleData *>(row);
-            PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
 
             // XXX we only support binary data for native types
             assert(col.type ==  'b');
 
-            // get the length of the string
-            uint32_t length = recvint32(col.data.data());
-
             // read in the binary data as a string
-            return std::string(col.data.data() + 4, length);
+            return std::string(col.data.data(), col.data.size());
         }
 
     private:

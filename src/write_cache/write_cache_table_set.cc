@@ -38,7 +38,7 @@ namespace springtail
     void
     WriteCacheTableSet::_insert_rows(uint64_t tid, uint64_t eid, uint64_t xid)
     {
-        std::cout << fmt::format("Inserting: {}:{}:{}\n", tid, eid, xid);
+        SPDLOG_DEBUG("Inserting: {}:{}:{}\n", tid, eid, xid);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(xid, WriteCacheIndexNode::IndexType::XID);
@@ -111,12 +111,14 @@ namespace springtail
             // fetch xid node for this xid if exists
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
+                SPDLOG_DEBUG("XID not found: {}", xid);
                 continue;
             }
 
             // fetch tid node if exists
             WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
             if (tid_node == nullptr) {
+                SPDLOG_DEBUG("TID not found: {}", xid);
                 continue;
             }
 

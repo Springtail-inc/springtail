@@ -125,13 +125,13 @@ main(int argc, char *argv[])
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
     }
+    boost::program_options::notify(vm);
 
     PostgresConnection conn{
         .host = host_name,
