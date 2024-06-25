@@ -1,3 +1,4 @@
+find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 # source files
@@ -20,4 +21,5 @@ target_include_directories(xid_mgr_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${
 target_link_libraries(xid_mgr_daemon
     PUBLIC springtail_common
            springtail_xid_mgr
+    PRIVATE Boost::program_options
 )

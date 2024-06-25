@@ -1,7 +1,7 @@
 {
     "logging" : {
         "log_level" : "debug",
-        "log_file" : "/tmp/springtail.log",
+        "log_path" : "/tmp/springtail.log",
         "log_file_size" : 1000000,
         "log_file_count" : 10,
         "log_pattern": "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v"

@@ -109,9 +109,9 @@ namespace springtail {
         SPDLOG_DEBUG("Commit: commit_lsn={}, xact_lsn={}\n", commit_msg.commit_lsn, commit_msg.xact_lsn);
 
         PgTransactionPtr xact = _current_xact;
-        if (_current_xact == nullptr || commit_msg.xact_lsn != _current_xact->xact_lsn) {
+        if (_current_xact == nullptr || commit_msg.commit_lsn != _current_xact->xact_lsn) {
             // we don't have the start of the transaction...
-            SPDLOG_WARN("No matching xact for commit: xact_lsn={}\n", commit_msg.xact_lsn);
+            SPDLOG_WARN("No matching xact for commit: commit_lsn={}\n", commit_msg.commit_lsn);
             return;
         }
 

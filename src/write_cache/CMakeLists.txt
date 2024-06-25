@@ -1,3 +1,4 @@
+find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 # source files
@@ -21,7 +22,8 @@ target_link_libraries(springtail_write_cache
 add_executable(write_cache_daemon write_cache_daemon.cc)
 target_include_directories(write_cache_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(write_cache_daemon
-    PUBLIC springtail_write_cache
+  PUBLIC springtail_write_cache
+  PRIVATE Boost::program_options
 )
 
 ## tests

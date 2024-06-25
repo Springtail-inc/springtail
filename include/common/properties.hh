@@ -29,6 +29,9 @@ namespace springtail {
         /** Default properties file, defined by make -D option, or macro above */
         static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;
 
+        /** Environment variable name for property overrides */
+        static inline constexpr char SPRINGTAIL_ENV_VARIABLE[] = "SPRINGTAIL_PROPERTIES";
+
         /**
          * @brief Get JSON object from a key
          * @param key key to lookup
