@@ -286,10 +286,10 @@ namespace springtail {
         // LSN, ts, xid
         _write_uint8(pg_msg::MSG_COMMIT);
         _write_uint8(0);
-        _write_uint64(_lsn);
+        _write_uint64(_begin_lsn);
         // since xacts are matched based on lsn and logging begin occurs before commit,
         // we use the begin lsn as the xact lsn
-        _write_uint64(_begin_lsn);
+        _write_uint64(_lsn);
         _write_uint64(_commit_ts);
 
         _add_end_xact();
