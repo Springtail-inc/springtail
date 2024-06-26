@@ -18,6 +18,8 @@ extern "C" {
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 
+#define SPRINGTAIL_STARTUP_COST 100
+
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;

@@ -32,23 +32,22 @@ PG_MODULE_MAGIC;
 // define from storage/constants.hh
 #define INVALID_TABLE 0
 
-// exposed from and defined in path_util.c
+// exposed from and defined in multicorn_util.c
 extern List *
-get_foreign_paths(PlannerInfo *root,
-                  RelOptInfo *baserel,
-                  Oid foreigntableid,
-                  SpringtailPlanState *planstate);
+multicorn_getForeignPaths(PlannerInfo *root,
+                          RelOptInfo *baserel,
+                          Oid foreigntableid,
+                          SpringtailPlanState *planstate);
 
 extern void
-get_rel_size(PlannerInfo *root,
-             RelOptInfo *baserel,
-             Oid foreigntableid,
-             SpringtailPlanState *planstate);
-extern void
-extractRestrictions(PlannerInfo *root,
-                    Relids base_relids,
-                    Expr *node,
-                    List **quals);
+multicorn_getRelSize(PlannerInfo *root,
+                     RelOptInfo *baserel,
+                     Oid foreigntableid,
+                     SpringtailPlanState *planstate);
+
+extern List *
+multicorn_buildSimpleQualList(ForeignScanState *node);
+
 /*
  * FDW callback routines
  */
@@ -113,11 +112,11 @@ fdw_xact_callback(XactEvent event, void *arg)
     switch (event)
     {
         case XACT_EVENT_COMMIT:
-            elog(INFO, "Transaction committed: %lu", pg_xid.value);
+            elog(DEBUG1, "Transaction committed: %lu", pg_xid.value);
             fdw_commit_rollback(pg_xid.value, true);
             break;
         case XACT_EVENT_ABORT:
-            elog(INFO, "Transaction aborted: %lu", pg_xid.value);
+            elog(DEBUG1, "Transaction aborted: %lu", pg_xid.value);
             fdw_commit_rollback(pg_xid.value, false);
             break;
         default:
@@ -258,7 +257,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     }
 
     // create the plan state
-    SpringtailPlanState *planstate = (SpringtailPlanState *)palloc(sizeof(SpringtailPlanState));
+    SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
     planstate->tid = tid;
 
     // Get the postgres transaction id, and create the internal state
@@ -269,7 +268,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     baserel->fdw_private = planstate;
 
     // get the estimate of the number of rows and width of the table
-    get_rel_size(root, baserel, foreigntableid, planstate);
+   multicorn_getRelSize(root, baserel, foreigntableid, planstate);
 }
 
 /**
@@ -289,7 +288,7 @@ springtail_GetForeignPaths(PlannerInfo *root,
     SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
 
     // get the foreign paths -- call helper to set them up
-    get_foreign_paths(root, baserel, foreigntableid, state);
+    multicorn_getForeignPaths(root, baserel, foreigntableid, state);
 }
 
 /**
@@ -336,56 +335,33 @@ springtail_GetForeignPlan(PlannerInfo *root,
 }
 
 /**
- * @brief Initialize initial state; allocate and init
+ * @brief Initialize initial scan,
  * @param node
  * @param eflags
  */
 static void
 springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
-    // extract tid from fdw_private
+    // extract plan state and set the fdw state on the scan node
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
     List *fdw_private = fs->fdw_private;
     SpringtailPlanState *planstate = (SpringtailPlanState *)linitial(fdw_private);
-    uint64_t tid = planstate->tid;
 
     node->fdw_state = planstate->pg_fdw_state;
 
-    /* Do nothing in EXPLAIN */
+    /* XXX Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
         return;
     }
 
-    // allocate and initialize state
-  	// extract qual_list
-    ListCell   *lc;
-    List       *qual_list = NULL;
-    foreach(lc, fs->fdw_exprs)
-	{
-		elog(DEBUG3, "looping in beginForeignScan()");
-		extractRestrictions(
-            NULL,
-            bms_make_singleton(fs->scan.scanrelid),
-							((Expr *) lfirst(lc)),
-							&qual_list);
-	}
+    // build a simple qual list against constants only
+    List *qual_list = multicorn_buildSimpleQualList(node);
 
     /* NOTE from Multicorn multicorn.c */
     /* Those list must be copied, because their memory context can become */
 	/* invalid during the execution (in particular with the cursor interface) */
-    List *target_list = copyObject(planstate->target_list);
-    List *pathkeys = NULL;
-
-    // copy deparsed path keys
-    foreach(lc, planstate->deparsed_pathkeys)
-    {
-        DeparsedSortGroup *sortgroup = (DeparsedSortGroup *)lfirst(lc);
-        DeparsedSortGroup *newgroup = (DeparsedSortGroup *)palloc(sizeof(DeparsedSortGroup));
-        memcpy(newgroup, sortgroup, sizeof(DeparsedSortGroup));
-        pathkeys = lappend(pathkeys, newgroup);
-    }
-
-    fdw_begin_scan(planstate->pg_fdw_state, target_list, qual_list, pathkeys);
+    /* The copy occurs within the fdw_begin_scan() call */
+    fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->deparsed_pathkeys);
 
     return;
 }

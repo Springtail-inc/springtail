@@ -8,7 +8,7 @@ namespace backward {
 }
 
 namespace springtail {
-    /** 
+    /**
      * Base error class for exceptions.  Uses backward for stack tracing.
      */
     class Error : public std::exception {
@@ -31,7 +31,7 @@ namespace springtail {
         }
 
         /** Prints the backtrace captured by this exception. */
-        void print_trace()
+        void print_trace() const
         {
             backward::Printer printer;
             printer.print(_trace);

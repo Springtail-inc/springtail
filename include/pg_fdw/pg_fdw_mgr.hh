@@ -24,11 +24,30 @@
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
+    #include <c.h>
 }
 
 #include <pg_fdw/pg_fdw_common.h>
 
 namespace springtail  {
+
+    struct PgFdwSortGroup {
+        std::string attname;
+        int attnum;
+        bool reversed;
+        bool nulls_first;
+        std::string collate;
+
+        PgFdwSortGroup(const DeparsedSortGroup *sort_group)
+            : attname(NameStr(*sort_group->attname)),
+              attnum(sort_group->attnum),
+              reversed(sort_group->reversed),
+              nulls_first(sort_group->nulls_first),
+              collate(NameStr(*sort_group->collate))
+        {}
+    };
+    using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
+
 
     /** Internal state used to track table scan */
     struct PgFdwState {
@@ -40,9 +59,10 @@ namespace springtail  {
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
 
-        List *target_list;  ///< List of target columns (Value or String)
+        std::vector<std::string> target_columns;         ///< List of target columns
+        std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
+
         List *qual_list;    ///< List of predicate clauses (BaseQual)
-        List *sortgroup;    ///< List of sort group columns (DeparsedSortGroup)
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
@@ -174,5 +194,7 @@ namespace springtail  {
         static List *_import_springtail_catalog(const std::string &server,
                                                 const std::set<std::string> table_set,
                                                 bool exclude, bool limit);
+
+        static void _handle_exception(const Error &e);
     };
 }

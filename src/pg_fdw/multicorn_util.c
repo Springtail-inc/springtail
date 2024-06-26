@@ -1,6 +1,7 @@
 
 /**
 * Heavily borrowed from Multicorn / multicorn2 FDW wrapper source code.
+* https://github.com/pgsql-io/multicorn2/blob/main/src
 * Original license below:
 *
 * Portions: Copyright (c) 2021-2024, Lussier
@@ -660,7 +661,7 @@ extractClauseFromNullTest(PlannerInfo *root,
  * Extract conditions that can be pushed down, as well as the parameters.
  *
  */
-void
+static void
 extractRestrictions(PlannerInfo *root,
                     Relids base_relids,
                     Expr *node,
@@ -726,10 +727,10 @@ extractColumns(List *reltargetlist, List *restrictinfolist)
 }
 
 void
-get_rel_size(PlannerInfo *root,
-             RelOptInfo *baserel,
-             Oid foreigntableid,
-             SpringtailPlanState *planstate)
+multicorn_getRelSize(PlannerInfo *root,
+                     RelOptInfo *baserel,
+                     Oid foreigntableid,
+                     SpringtailPlanState *planstate)
 {
     double rows;
     int width;
@@ -800,10 +801,10 @@ get_rel_size(PlannerInfo *root,
 }
 
 List *
-get_foreign_paths(PlannerInfo *root,
-                  RelOptInfo *baserel,
-                  Oid foreigntableid,
-                  SpringtailPlanState *planstate)
+multicorn_getForeignPaths(PlannerInfo *root,
+                          RelOptInfo *baserel,
+                          Oid foreigntableid,
+                          SpringtailPlanState *planstate)
 {
     List				*paths; /* List of ForeignPath */
     ListCell		    *lc;
@@ -819,14 +820,14 @@ get_foreign_paths(PlannerInfo *root,
     List	            *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
 
     /* Try to find parameterized paths */
-    paths = findPaths(root, baserel, possiblePaths, 1,
+    paths = findPaths(root, baserel, possiblePaths, SPRINGTAIL_STARTUP_COST,
                       apply_pathkeys, deparsed_pathkeys);
 
     /* Add a simple default path */
     paths = lappend(paths, create_foreignscan_path(root, baserel,
         NULL,  /* default pathtarget */
         baserel->rows,
-        1,
+        SPRINGTAIL_STARTUP_COST,
         baserel->rows * baserel->reltarget->width,
         NIL,		/* no pathkeys */
         NULL,
@@ -873,4 +874,64 @@ get_foreign_paths(PlannerInfo *root,
             add_path(baserel, (Path *) newpath);
         }
     }
+}
+
+List *
+multicorn_buildSimpleQualList(ForeignScanState *node)
+{
+
+    ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
+    ExprContext *econtext = node->ss.ps.ps_ExprContext;
+    List        *result = NIL;
+    List        *qual_list = NIL;
+    ListCell    *lc;
+
+    // Modified from multicorn multicorn.c multicornBeginForeignScan()
+    // extract qual_list
+    foreach(lc, fs->fdw_exprs)
+    {
+        extractRestrictions(
+            NULL,
+            bms_make_singleton(fs->scan.scanrelid),
+                            ((Expr *) lfirst(lc)),
+                            &qual_list);
+    }
+
+    // Modified from multicorn python.c execute()
+    // simplify qual list to those with constants
+    foreach(lc, qual_list)
+	{
+		BaseQual   *qual = lfirst(lc);
+		ConstQual  *newqual = NULL;
+		bool		isNull;
+		ExprState  *expr_state = NULL;
+
+		switch (qual->right_type)
+		{
+			case T_Param:
+				expr_state = ExecInitExpr(((ParamQual *) qual)->expr,
+										  (PlanState *) node);
+				newqual = palloc0(sizeof(ConstQual));
+				newqual->base.right_type = T_Const;
+				newqual->base.varattno = qual->varattno;
+				newqual->base.opname = qual->opname;
+				newqual->base.isArray = qual->isArray;
+				newqual->base.useOr = qual->useOr;
+				newqual->value = ExecEvalExpr(expr_state, econtext, &isNull);
+				newqual->base.typeoid = ((Param*) ((ParamQual *) qual)->expr)->paramtype;
+				newqual->isnull = isNull;
+				break;
+			case T_Const:
+				newqual = (ConstQual *) qual;
+				break;
+			default:
+				break;
+		}
+
+        if (newqual != NULL) {
+            result = lappend(result, newqual);
+        }
+    }
+
+    return result;
 }

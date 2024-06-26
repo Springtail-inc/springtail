@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 
 #include <common/common.hh>
+#include <common/exception.hh>
 #include <common/logging.hh>
 
 #include <pg_fdw/pg_fdw_mgr.hh>
@@ -61,9 +62,36 @@ namespace springtail {
     {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
         state->iter.emplace(Table::Iterator(state->table->begin()));
-        state->target_list = target_list;
         state->qual_list = qual_list;
-        state->sortgroup = sortgroup;
+
+        // copy lists into state structure in a more CPP friendly way
+
+        // init target list vector
+        ListCell *lc;
+        foreach(lc, target_list) {
+#if PG_VERSION_NUM < 150000
+		    Value	   *value = (Value *) lfirst(lc);
+#else
+		    String	   *value = lfirst_node(String, lc);
+#endif
+            state->target_columns.push_back(strVal(value));
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}", strVal(value));
+        }
+
+        // init sort group vector
+        foreach(lc, sortgroup) {
+            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+            PgFdwSortGroupPtr pathkey_ptr = std::make_shared<PgFdwSortGroup>(pathkey);
+            state->sort_columns.push_back(pathkey_ptr);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Sort group column: {}:{}", pathkey_ptr->attnum, pathkey_ptr->attname);
+        }
+
+        // dump out qual list
+        foreach(lc, qual_list) {
+            BaseQual *qual = static_cast<BaseQual *>(lfirst(lc));
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual: varattno: {}, right_type: {}, typeoid: {}, opname: {}, isArray: {}, useOr: {}",
+                                qual->varattno, (int)qual->right_type, qual->typeoid, qual->opname, qual->isArray, qual->useOr);
+        }
     }
 
     void
@@ -145,6 +173,7 @@ namespace springtail {
                                 attnum, pg_state->pkey_column_ids[i]);
 
             // check if this attnum matches next id in primary key id list, and sort order matches
+            // XXX ignore collation for now
             if (pathkey->nulls_first || pathkey->reversed ||
                 attnum != pg_state->pkey_column_ids[i]) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
@@ -193,7 +222,7 @@ namespace springtail {
     PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
     {
         // XXX not implemented
-        *rows = 1;
+        *rows = 10000;
         *width = 16;
     }
 
@@ -203,6 +232,14 @@ namespace springtail {
         // remove transaction ID mapping on a commit or rollback
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_commit_rollback: pg_xid: {}, commit: {}", pg_xid, commit);
         _xid_map.erase(pg_xid);
+    }
+
+    void
+    PgFdwMgr::_handle_exception(const Error &error)
+    {
+        error.print_trace();
+        SPDLOG_ERROR("Exception: {}", error.what());
+        elog(ERROR, "Springtail exception: %s", error.what());
     }
 
     Datum

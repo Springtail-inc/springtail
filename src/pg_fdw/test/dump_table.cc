@@ -78,6 +78,13 @@ extern "C" {
         return list; // XXX not impl
     }
 
+    void errfinish(const char *filename,
+                   int  lineno,
+                   const char *funcname) {}
+
+    int errmsg_internal(const char *fmt, ...) { return 0; }
+
+    bool errstart_cold(int elevel, const char* domain) { return false; }
 }
 
 /** List all tables from TableNames system table */
