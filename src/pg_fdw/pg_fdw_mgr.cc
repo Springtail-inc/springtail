@@ -70,9 +70,9 @@ namespace springtail {
         ListCell *lc;
         foreach(lc, target_list) {
 #if PG_VERSION_NUM < 150000
-		    Value	   *value = (Value *) lfirst(lc);
+            Value  *value = (Value *) lfirst(lc);
 #else
-		    String	   *value = lfirst_node(String, lc);
+            String *value = lfirst_node(String, lc);
 #endif
             state->target_columns.push_back(strVal(value));
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}", strVal(value));

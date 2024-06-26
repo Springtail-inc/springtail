@@ -83,23 +83,6 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
 
 static List *springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
 
-
-/** Split uint64 into 2 uint32s function definition */
-static void
-split_uint64(uint64_t input, uint32_t *low, uint32_t *high)
-{
-    *low = (uint32_t)(input & 0xFFFFFFFF);          // Extract the lower 32 bits
-    *high = (uint32_t)((input >> 32) & 0xFFFFFFFF); // Extract the upper 32 bits
-}
-
-/** Combine 2 uint32s into a uint64 function definition */
-static uint64_t
-combine_uint32(uint32_t low, uint32_t high)
-{
-    return ((uint64_t)high << 32) | low; // Combine the upper 32 bits and lower 32 bits
-}
-
-
 /** Transaction commit/abort callback */
 static void
 fdw_xact_callback(XactEvent event, void *arg)
@@ -313,11 +296,6 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
-
-    // postgres only supports integer value for lists, so to be safe we split the oid
-    uint32_t low, high;
-    split_uint64(state->tid, &low, &high);
     List *fdw_private = best_path->fdw_private;
 
     /* build a List * of the clause field of the passed in scan_clauses,
