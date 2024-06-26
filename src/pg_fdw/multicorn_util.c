@@ -900,33 +900,33 @@ multicorn_buildSimpleQualList(ForeignScanState *node)
     // Modified from multicorn python.c execute()
     // simplify qual list to those with constants
     foreach(lc, qual_list)
-	{
-		BaseQual   *qual = lfirst(lc);
-		ConstQual  *newqual = NULL;
-		bool		isNull;
-		ExprState  *expr_state = NULL;
+    {
+        BaseQual   *qual = lfirst(lc);
+        ConstQual  *newqual = NULL;
+        bool		isNull;
+        ExprState  *expr_state = NULL;
 
-		switch (qual->right_type)
-		{
-			case T_Param:
-				expr_state = ExecInitExpr(((ParamQual *) qual)->expr,
-										  (PlanState *) node);
-				newqual = palloc0(sizeof(ConstQual));
-				newqual->base.right_type = T_Const;
-				newqual->base.varattno = qual->varattno;
-				newqual->base.opname = qual->opname;
-				newqual->base.isArray = qual->isArray;
-				newqual->base.useOr = qual->useOr;
-				newqual->value = ExecEvalExpr(expr_state, econtext, &isNull);
-				newqual->base.typeoid = ((Param*) ((ParamQual *) qual)->expr)->paramtype;
-				newqual->isnull = isNull;
-				break;
-			case T_Const:
-				newqual = (ConstQual *) qual;
-				break;
-			default:
-				break;
-		}
+        switch (qual->right_type)
+        {
+            case T_Param:
+                expr_state = ExecInitExpr(((ParamQual *) qual)->expr,
+                                          (PlanState *) node);
+                newqual = palloc0(sizeof(ConstQual));
+                newqual->base.right_type = T_Const;
+                newqual->base.varattno = qual->varattno;
+                newqual->base.opname = qual->opname;
+                newqual->base.isArray = qual->isArray;
+                newqual->base.useOr = qual->useOr;
+                newqual->value = ExecEvalExpr(expr_state, econtext, &isNull);
+                newqual->base.typeoid = ((Param*) ((ParamQual *) qual)->expr)->paramtype;
+                newqual->isnull = isNull;
+                break;
+            case T_Const:
+                newqual = (ConstQual *) qual;
+                break;
+            default:
+                break;
+        }
 
         if (newqual != NULL) {
             result = lappend(result, newqual);

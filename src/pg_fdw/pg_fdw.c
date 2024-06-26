@@ -359,7 +359,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 
     /* NOTE from Multicorn multicorn.c */
     /* Those list must be copied, because their memory context can become */
-	/* invalid during the execution (in particular with the cursor interface) */
+    /* invalid during the execution (in particular with the cursor interface) */
     /* The copy occurs within the fdw_begin_scan() call */
     fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->deparsed_pathkeys);
 
