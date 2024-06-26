@@ -28,7 +28,7 @@ int main() {
     try {
         error();
     } catch (springtail::Error &e) {
-        e.print_trace();
+        e.log_backtrace();
         SPDLOG_ERROR("Caught an error!");
     }
 

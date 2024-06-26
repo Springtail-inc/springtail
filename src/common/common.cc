@@ -31,8 +31,8 @@ namespace springtail {
     }
 
     void springtail_init(uint32_t logging_mask) {
-        // initialize the backtrace infrastructure
-        backward::sh.loaded();
+        // initialize the backtrace signal handling
+        init_exception();
 
         // init system properties
         init_system_properties();
