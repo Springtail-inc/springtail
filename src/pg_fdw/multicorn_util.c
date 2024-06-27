@@ -21,6 +21,7 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/subselect.h"
+#include "optimizer/planmain.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_operator.h"
@@ -258,7 +259,8 @@ deparse_sortgroup(PlannerInfo *root, Oid foreigntableid, RelOptInfo *rel)
             if (IsA(expr, Var))
             {
                 Var *var = (Var *) expr;
-                md->attname = (Name) strdup(get_attname(foreigntableid, var->varattno, true));
+                 //(Name) strdup(get_attname(foreigntableid, var->varattno, true));
+                md->attname = get_attname(foreigntableid, var->varattno, true);
                 md->attnum = var->varattno;
                 found = true;
             }
@@ -269,11 +271,12 @@ deparse_sortgroup(PlannerInfo *root, Oid foreigntableid, RelOptInfo *rel)
                 Var *var = (Var *)((RelabelType *) expr)->arg;
                 Oid collid = ((RelabelType *) expr)->resultcollid;
 
-                if (collid == DEFAULT_COLLATION_OID)
+                if (collid == DEFAULT_COLLATION_OID) {
                     md->collate = NULL;
-                else
-                    md->collate = (Name) strdup(get_collation_name(collid));
-                md->attname = (Name) strdup(get_attname(foreigntableid, var->varattno, true));
+                } else {
+                    md->collate = get_collation_name(collid); //(Name) strdup(get_collation_name(collid));
+                }
+                md->attname = get_attname(foreigntableid, var->varattno, true); //(Name) strdup(get_attname(foreigntableid, var->varattno, true));
                 md->attnum = var->varattno;
                 found = true;
             }
@@ -375,7 +378,7 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
     switch (value->type)
     {
         case T_Const:
-                    elog(DEBUG3, "T_Const");
+            elog(DEBUG3, "T_Const");
             qual = palloc0(sizeof(ConstQual));
             qual->right_type = T_Const;
             qual->typeoid = ((Const *) value)->consttype;
@@ -383,13 +386,13 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
             ((ConstQual *) qual)->isnull = ((Const *) value)->constisnull;
             break;
         case T_Var:
-                    elog(DEBUG3, "T_Var");
+            elog(DEBUG3, "T_Var");
             qual = palloc0(sizeof(VarQual));
             qual->right_type = T_Var;
             ((VarQual *) qual)->rightvarattno = ((Var *) value)->varattno;
             break;
         default:
-                    elog(DEBUG3, "default");
+            elog(DEBUG3, "default");
             qual = palloc0(sizeof(ParamQual));
             qual->right_type = T_Param;
             ((ParamQual *) qual)->expr = value;
@@ -798,6 +801,7 @@ multicorn_getRelSize(PlannerInfo *root,
 
     baserel->rows = rows;
     baserel->reltarget->width = width;
+    planstate->width = width;
 }
 
 List *
@@ -832,7 +836,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
         NIL,		/* no pathkeys */
         NULL,
         NULL,
-        fdw_private));
+        NULL));
 
 
     /* Handle sort pushdown */
@@ -845,8 +849,6 @@ multicorn_getForeignPaths(PlannerInfo *root,
             /* Update the sort_*_pathkeys lists if needed */
             computeDeparsedSortGroup(deparsed, planstate, &apply_pathkeys,
                     &deparsed_pathkeys);
-
-            planstate->deparsed_pathkeys = deparsed_pathkeys;
         }
     }
     /* Add each ForeignPath previously found */
@@ -868,13 +870,59 @@ multicorn_getForeignPaths(PlannerInfo *root,
                 path->path.startup_cost, path->path.total_cost,
                 apply_pathkeys, NULL,
                 NULL,
-                fdw_private);
+#if PG_VERSION_NUM >= 170000
+                NULL,
+#endif
+                (void *) deparsed_pathkeys);
 
             newpath->path.param_info = path->path.param_info;
             add_path(baserel, (Path *) newpath);
         }
     }
 }
+
+ForeignScan *
+multicorn_getForeignPlan(PlannerInfo *root,
+                         RelOptInfo *baserel,
+                         Oid foreigntableid,
+                         ForeignPath *best_path,
+                         List *tlist,
+                         List *scan_clauses,
+                         Plan *outer_plan,
+                         SpringtailPlanState *planstate)
+{
+    Index		scan_relid = baserel->relid;
+    ListCell   *lc;
+    best_path->path.pathtarget->width = planstate->width;
+    scan_clauses = extract_actual_clauses(scan_clauses, false);
+    /* Extract the quals coming from a parameterized path, if any */
+    if (best_path->path.param_info)
+    {
+
+        foreach(lc, scan_clauses)
+        {
+            extractRestrictions(
+                root,
+                baserel->relids,
+                (Expr *) lfirst(lc),
+                &planstate->qual_list);
+        }
+    }
+    planstate->pathkeys = (List *) best_path->fdw_private;
+
+    List *fdw_private = list_make1((void *)planstate);
+
+    return make_foreignscan(tlist,
+                            scan_clauses,
+                            scan_relid,
+                            scan_clauses,		/* no expressions to evaluate */
+                            fdw_private         /* private data */
+                            , NULL              /* no custom tlist */
+                            , NULL /* All quals are meant to be rechecked */
+                            , NULL
+                            );
+}
+
 
 List *
 multicorn_buildSimpleQualList(ForeignScanState *node)

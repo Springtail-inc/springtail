@@ -39,6 +39,16 @@ multicorn_getForeignPaths(PlannerInfo *root,
                           Oid foreigntableid,
                           SpringtailPlanState *planstate);
 
+extern ForeignScan *
+multicorn_getForeignPlan(PlannerInfo *root,
+                         RelOptInfo *baserel,
+                         Oid foreigntableid,
+                         ForeignPath *best_path,
+                         List *tlist,
+                         List *scan_clauses,
+                         Plan *outer_plan,
+                         SpringtailPlanState *planstate);
+
 extern void
 multicorn_getRelSize(PlannerInfo *root,
                      RelOptInfo *baserel,
@@ -296,20 +306,11 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    List *fdw_private = best_path->fdw_private;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)baserel->fdw_private;
 
-    /* build a List * of the clause field of the passed in scan_clauses,
-       which are a list of RestrictInfo * nodes. */
-    scan_clauses = extract_actual_clauses(scan_clauses, false);
-
-    return make_foreignscan(tlist,
-        scan_clauses,
-        baserel->relid,
-        NIL, /* no expressions we will evaluate */
-        fdw_private, /* private data */
-        NIL, /* no custom tlist; our scan tuple looks like tlist */
-        NIL, /* no quals we will recheck */
-        outer_plan);
+    // call into helper to set the foreign plan
+    return multicorn_getForeignPlan(root, baserel, foreigntableid, best_path,
+                                    tlist, scan_clauses, outer_plan, planstate);
 }
 
 /**
@@ -339,7 +340,7 @@ springtail_BeginForeignScan(ForeignScanState *node, int eflags)
     /* Those list must be copied, because their memory context can become */
     /* invalid during the execution (in particular with the cursor interface) */
     /* The copy occurs within the fdw_begin_scan() call */
-    fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->deparsed_pathkeys);
+    fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->pathkeys);
 
     return;
 }

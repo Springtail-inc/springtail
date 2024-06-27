@@ -39,11 +39,11 @@ namespace springtail  {
         std::string collate;
 
         PgFdwSortGroup(const DeparsedSortGroup *sort_group)
-            : attname(NameStr(*sort_group->attname)),
+            : attname(sort_group->attname == NULL ? "" : sort_group->attname),
               attnum(sort_group->attnum),
               reversed(sort_group->reversed),
               nulls_first(sort_group->nulls_first),
-              collate(NameStr(*sort_group->collate))
+              collate(sort_group->collate == NULL ? "" : sort_group->collate)
         {}
     };
     using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;

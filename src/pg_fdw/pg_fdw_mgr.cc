@@ -158,6 +158,8 @@ namespace springtail {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
 
         // XXX only looking at primary keys for now
+        // build up a list of pathkeys that match the sortgroup from the primary key
+        // in order, stop when no more matches found
         int i = 0;
         foreach(lc, sortgroup) {
             // check if there are any more primary keys

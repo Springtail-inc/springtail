@@ -23,8 +23,9 @@ extern "C" {
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;
+    double   width;
     List    *target_list;       ///< List of target columns (Value or String)
-    List    *deparsed_pathkeys; ///< List of de-parsed path keys (DeparsedSortGroup)
+    List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
     List    *qual_list;         ///< List of predicate clauses (BaseQual)
     void    *pg_fdw_state;
 } SpringtailPlanState;
@@ -32,11 +33,11 @@ typedef struct SpringtailPlanState {
 /** Sort group */
 typedef struct DeparsedSortGroup
 {
-    Name           attname;
+    char          *attname;
     int            attnum;
     bool           reversed;
     bool           nulls_first;
-    Name           collate;
+    char          *collate;
     PathKey       *key;
 } DeparsedSortGroup;
 
