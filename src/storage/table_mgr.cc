@@ -95,7 +95,8 @@ namespace springtail {
     MutableTablePtr
     TableMgr::get_mutable_table(uint64_t table_id,
                                 uint64_t access_xid,
-                                uint64_t target_xid)
+                                uint64_t target_xid,
+                                bool for_gc)
     {
         boost::shared_lock lock(_mutex);
 
@@ -114,7 +115,7 @@ namespace springtail {
                                               _table_base / fmt::format("{}", table_id),
                                               schema->get_sort_keys(),
                                               std::vector<std::vector<std::string>>{},
-                                              schema);
+                                              schema, for_gc);
     }
 
     void

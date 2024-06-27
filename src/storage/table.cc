@@ -1,4 +1,5 @@
 #include <storage/table.hh>
+#include <write_cache/write_cache_client.hh>
 
 namespace springtail {
 
@@ -173,7 +174,8 @@ namespace springtail {
                                const std::filesystem::path &table_dir,
                                const std::vector<std::string> &primary_key,
                                const std::vector<std::vector<std::string>> &secondary_keys,
-                               ExtentSchemaPtr schema)
+                               ExtentSchemaPtr schema,
+                               bool for_gc)
     : _id(id),
       _access_xid(access_xid),
       _target_xid(target_xid),
@@ -181,7 +183,8 @@ namespace springtail {
       _data_file(table_dir / constant::DATA_FILE),
       _primary_key(primary_key),
       _secondary_keys(secondary_keys),
-      _schema(schema)
+      _schema(schema),
+      _for_gc(for_gc)
     {
         // make sure that the table directory exists
         std::filesystem::create_directory(_table_dir);
@@ -386,6 +389,11 @@ namespace springtail {
         // retrieve the extent offsets of the new page
         ExtentHeader header(ExtentType(), _target_xid, _schema->row_size(), old_eid);
         auto &&offsets = page->flush(header);
+
+        // record the mapping into the extent map
+        if (_for_gc) {
+            WriteCacheClient::get_instance()->add_mapping(_id, _target_xid, old_eid, offsets);
+        }
 
         auto value_fields = std::make_shared<FieldArray>(1);
         for (auto extent_id : offsets) {

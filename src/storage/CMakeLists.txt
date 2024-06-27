@@ -13,7 +13,8 @@ add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
-  PUBLIC Boost::thread)
+  PUBLIC Boost::thread
+         springtail_write_cache)
 
 
 ## helpers

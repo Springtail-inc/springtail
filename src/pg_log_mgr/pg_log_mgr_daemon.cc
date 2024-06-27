@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 
     // daemonize the process
     if (vm.count("daemonize")) {
-        springtail::common::daemonize("/var/springtail/write_cache.pid");
+        springtail::common::daemonize("/var/springtail/pg_log_mgr.pid");
     }
 
     springtail::springtail_init();
