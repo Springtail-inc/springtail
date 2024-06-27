@@ -45,8 +45,8 @@ sleep 1
 
 # start the pg log mgr
 # echo Start PG Log Mgr...
-# rm -rdf /tmp/xact_logs /tmp/repl_logs
-# mkdir /tmp/xact_logs /tmp/repl_logs
+rm -rdf /tmp/xact_logs /tmp/repl_logs
+mkdir /tmp/xact_logs /tmp/repl_logs
 # PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"
 # SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --daemon -d springtail -P springtail -b springtail_pub -s springtail_slot -x /tmp/xact_logs -r /tmp/repl_logs
 # sleep 1
