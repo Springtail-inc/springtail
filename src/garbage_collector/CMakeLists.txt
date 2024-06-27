@@ -16,3 +16,4 @@ target_include_directories(gc_daemon
 target_link_libraries(gc_daemon
     PRIVATE springtail_gc Boost::program_options
 )
+add_dsymutil_command(gc_daemon)

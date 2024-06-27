@@ -25,6 +25,9 @@ include(SetSystem)
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
+## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
+include(DSymUtil)
+
 ## CXX options
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

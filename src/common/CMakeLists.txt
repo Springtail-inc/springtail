@@ -16,26 +16,32 @@ target_link_libraries(springtail_common
 add_executable(test_thread test/test_thread.cc)
 target_include_directories(test_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_thread PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_thread)
 
 add_executable(test_queue test/test_queue.cc)
 target_include_directories(test_queue PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_queue PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_queue)
 
 add_executable(test_common test/test_common.cc)
 target_include_directories(test_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_common PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_common)
 
 add_executable(test_filesystem test/test_filesystem.cc)
 target_include_directories(test_filesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_filesystem PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_filesystem)
 
 add_executable(test_counter test/test_counter.cc)
 target_include_directories(test_counter PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_counter PRIVATE springtail_common Boost::thread GTest::gtest_main)
+add_dsymutil_command(test_counter)
 
 add_executable(test_redis test/test_redis.cc)
 target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_redis PRIVATE springtail_common Boost::thread GTest::gtest_main)
+add_dsymutil_command(test_redis)
 
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)

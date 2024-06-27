@@ -7,8 +7,10 @@ namespace {
     void
     backtrace_handler(int signo)
     {
-        // note: may be unsafe -- for known safe method, see cpptrace's signal_demo.cpp
+        // attempt to flush the log before we try to capture the backtrace in case something goes wrong
+        spdlog::default_logger()->flush();
 
+        // note: may be unsafe -- for known safe method, see cpptrace's signal_demo.cpp
         auto trace = cpptrace::generate_trace();
 
         std::stringstream ss;

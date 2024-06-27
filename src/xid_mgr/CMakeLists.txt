@@ -23,3 +23,4 @@ target_link_libraries(xid_mgr_daemon
            springtail_xid_mgr
     PRIVATE Boost::program_options
 )
+add_dsymutil_command(xid_mgr_daemon)
