@@ -126,14 +126,14 @@ namespace springtail {
     {
         assert(extent_id != constant::UNKNOWN_EXTENT);
 
-        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            SPDLOG_DEBUG("Found in cache");
+            SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
             return page;
         }
 
@@ -149,7 +149,7 @@ namespace springtail {
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
                                        uint64_t xid)
     {
-        SPDLOG_DEBUG("{}, {}", file, xid);
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space(1);
@@ -256,7 +256,7 @@ namespace springtail {
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
-        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, xid, offsets.size());
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // make space for the page; evict if we need to make space
         _make_page_space(1);

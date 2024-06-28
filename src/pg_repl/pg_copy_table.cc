@@ -636,7 +636,7 @@ namespace springtail
                     false  // is_generated
                 });
 
-            SPDLOG_DEBUG("PKEY? {} {}", columns.back().is_pkey, columns.back().pk_position);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "PKEY? {} {}", columns.back().is_pkey, columns.back().pk_position);
         }
         return columns;
     }

@@ -15,6 +15,7 @@
 #include <storage/schema.hh>
 
 using namespace springtail;
+using namespace springtail::pg_fdw;
 
 extern "C" {
     #include "varatt.h"
@@ -76,6 +77,10 @@ extern "C" {
 
     List *list_append_unique_int(List *list, int datum) {
         return list; // XXX not impl
+    }
+
+    bool errstart(int elevel, const char *domain) {
+        return false;
     }
 
     void errfinish(const char *filename,

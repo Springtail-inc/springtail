@@ -18,13 +18,13 @@ extern "C" {
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 
-#define SPRINGTAIL_STARTUP_COST 100
+#define SPRINGTAIL_STARTUP_COST 100 ///< Default startup cost is 100, added to tuple cost
 
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;
     double   width;
-    List    *target_list;       ///< List of target columns (Value or String)
+    List    *target_list;       ///< List of target columns (int attno)
     List    *pathkeys;          ///< List of de-parsed path keys (DeparsedSortGroup)
     List    *qual_list;         ///< List of predicate clauses (BaseQual)
     void    *pg_fdw_state;

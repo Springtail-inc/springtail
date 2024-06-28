@@ -15,6 +15,8 @@ extern "C" {
 }
 
 namespace springtail {
+namespace pg_fdw {
+
     PgFdwMgr* PgFdwMgr::_instance {nullptr};
 
     std::once_flag PgFdwMgr::_init_flag;
@@ -68,14 +70,21 @@ namespace springtail {
 
         // init target list vector
         ListCell *lc;
+        std::vector<std::string> target_colnames;
         foreach(lc, target_list) {
-#if PG_VERSION_NUM < 150000
-            Value  *value = (Value *) lfirst(lc);
-#else
-            String *value = lfirst_node(String, lc);
-#endif
-            state->target_columns.push_back(strVal(value));
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}", strVal(value));
+            int attno = intVal(lfirst(lc));
+            target_colnames.push_back(state->columns[attno].name);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}:{}",
+                                attno, state->columns[attno].name);
+        }
+
+        // generate field list
+        if (target_colnames.empty()) {
+            // if no target columns, use all columns
+            state->fields = state->table->extent_schema()->get_fields();
+        } else {
+            // otherwise, use target columns (by name
+            state->fields = state->table->extent_schema()->get_fields(target_colnames);
         }
 
         // init sort group vector
@@ -592,4 +601,5 @@ namespace springtail {
         return commands;
     }
 
-}
+} // namespace pg_fdw
+} // namespace springtail

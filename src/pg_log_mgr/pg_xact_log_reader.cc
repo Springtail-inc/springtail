@@ -42,7 +42,7 @@ namespace springtail {
                    magic[1] == PgXactLogWriter::PG_XLOG_MAGIC[1] &&
                    magic[2] == PgXactLogWriter::PG_XLOG_MAGIC[2]);
 
-            SPDLOG_DEBUG("Scan xact log: hdr msg_len={}, type={}\n", msg_len, (int)type);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Scan xact log: hdr msg_len={}, type={}\n", msg_len, (int)type);
 
             msg_len -= 8; // subtract header length
 

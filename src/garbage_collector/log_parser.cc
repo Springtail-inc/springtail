@@ -182,7 +182,7 @@ namespace springtail::gc {
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
-                SPDLOG_DEBUG("Processing {} -- Read file {} {}", _state->entry->xid, _state->entry->begin_path, begin_offset);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}", _state->entry->xid, _state->entry->begin_path, begin_offset);
 
                 _reader.set_file(_state->entry->begin_path, begin_offset, commit_offset);
 
@@ -202,7 +202,7 @@ namespace springtail::gc {
                         continue;
                     }
 
-                    SPDLOG_DEBUG("Processing {} -- Got msg {}", _state->entry->xid, static_cast<uint8_t>(msg->msg_type));
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Got msg {}", _state->entry->xid, static_cast<uint8_t>(msg->msg_type));
 
                     // handle the message
                     switch(msg->msg_type) {
@@ -390,7 +390,7 @@ namespace springtail::gc {
 
             // if the XID is fully processed, perform cleanup
             if (done) {
-                SPDLOG_DEBUG("Processing {} -- Waiting for completion", _state->entry->xid);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Waiting for completion", _state->entry->xid);
 
                 // wait for the parsers to complete the work for this XID
                 _state->mutation_count->wait();
@@ -403,7 +403,7 @@ namespace springtail::gc {
                 _pg_queue.commit(_worker_id);
 
                 _gc_queue.push(XidReady(_state->entry->xid));
-                SPDLOG_DEBUG("Processing {} -- Complete", _state->entry->xid);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", _state->entry->xid);
             }
         }
     }

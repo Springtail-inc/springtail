@@ -2,7 +2,7 @@
 
 /** Wrapper around PgFdwMgr class for use in C code */
 
-using namespace springtail;
+using namespace springtail::pg_fdw;
 
 extern "C" {
     #include <postgres.h>

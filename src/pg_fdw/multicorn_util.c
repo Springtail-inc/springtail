@@ -347,25 +347,6 @@ computeDeparsedSortGroup(List *deparsed,
 }
 
 /*
- *	Returns a "Value" node containing the string name of the column from a var.
- */
-static String *
-colnameFromVar(Var *var, PlannerInfo *root)
-{
-    RangeTblEntry *rte = rte = planner_rt_fetch(var->varno, root);
-    char	   *attname = get_attname(rte->relid, var->varattno, true);
-
-    if (attname == NULL)
-    {
-        return NULL;
-    }
-    else
-    {
-        return makeString(attname);
-    }
-}
-
-/*
  *	Build an opaque "qual" object.
  */
 static BaseQual *
@@ -762,7 +743,7 @@ multicorn_getRelSize(PlannerInfo *root,
 
             if (!att->attisdropped)
             {
-                planstate->target_list = lappend(planstate->target_list, makeString(NameStr(att->attname)));
+                planstate->target_list = lappend(planstate->target_list, makeInteger(att->attnum));
             }
         }
     }
@@ -771,22 +752,11 @@ multicorn_getRelSize(PlannerInfo *root,
         /* Pull "var" clauses to build an appropriate target list */
         foreach(lc, extractColumns(baserel->reltarget->exprs, baserel->baserestrictinfo))
         {
+            // modified to use attrno instead of name
             Var		   *var = (Var *) lfirst(lc);
-#if PG_VERSION_NUM < 150000
-            Value	   *colname;
-#else
-            String	   *colname;
-#endif
+            int         attnum = var->varattno;
 
-            /*
-             * Store only a Value node containing the string name of the
-             * column.
-             */
-            colname = colnameFromVar(var, root);
-            if (colname != NULL && strVal(colname) != NULL)
-            {
-                planstate->target_list = lappend(planstate->target_list, colname);
-            }
+            planstate->target_list = lappend(planstate->target_list, makeInteger(attnum));
         }
     }
     /* Extract the restrictions from the plan. */
@@ -911,16 +881,43 @@ multicorn_getForeignPlan(PlannerInfo *root,
     planstate->pathkeys = (List *) best_path->fdw_private;
 
     List *fdw_private = list_make1((void *)planstate);
+    List *fdw_scan_tlist = NIL;
+
+    elog(LOG, "multicorn_getForeignPlan()");
+
+    foreach(lc, tlist)
+    {
+        TargetEntry *tle = (TargetEntry *) lfirst(lc);
+        elog(LOG, "tlist attnum: %d", tle->resno);
+    }
+
+    /* Iterate over the target list to build the fdw_scan_tlist */
+    foreach(lc, tlist)
+    {
+        TargetEntry *tle = (TargetEntry *) lfirst(lc);
+
+        ListCell *lc2;
+        foreach(lc2, planstate->target_list)
+        {
+            elog(LOG, "tlist attnum: %d, target attnum: %d", tle->resno, intVal(lfirst(lc2)));
+            if (tle->resno == intVal(lfirst(lc2)))
+            {
+                elog(LOG, "matched!");
+                fdw_scan_tlist = lappend(fdw_scan_tlist, tle);
+                //break;
+            }
+        }
+    }
+
 
     return make_foreignscan(tlist,
                             scan_clauses,
                             scan_relid,
-                            scan_clauses,		/* no expressions to evaluate */
-                            fdw_private         /* private data */
-                            , NULL              /* no custom tlist */
-                            , NULL /* All quals are meant to be rechecked */
-                            , NULL
-                            );
+                            scan_clauses,     /* no expressions to evaluate */
+                            fdw_private,      /* private data */
+                            fdw_scan_tlist,   /* no custom tlist */
+                            NULL,             /* All quals are meant to be rechecked */
+                            NULL);
 }
 
 

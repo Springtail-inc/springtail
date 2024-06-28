@@ -35,7 +35,7 @@ namespace springtail::gc {
                 // query the write cache for the tables modified through this XID
                 auto table_list = _write_cache->list_tables(_committed_xid, xid, 100, table_cursor);
 
-                SPDLOG_DEBUG("Got {} tables from the write cache", table_list.size());
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -57,7 +57,7 @@ namespace springtail::gc {
                         // request the extents modified in each table
                         auto extent_list = _write_cache->list_extents(tid, _committed_xid, xid, 100, extent_cursor);
 
-                        SPDLOG_DEBUG("Got {} extents for table {}", extent_list.size(), tid);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
                         // check if we are done processing this table
                         if (extent_list.empty()) {
@@ -80,7 +80,7 @@ namespace springtail::gc {
             }
 
             // wait for tables to complete their processing
-            SPDLOG_DEBUG("Wait for {} tables to complete", _tid_count.size());
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for {} tables to complete", _tid_count.size());
 
             // XXX ideally we could start working on the next XID while these finalize() operations
             //     are being completed.
@@ -89,10 +89,10 @@ namespace springtail::gc {
                 // check if any tables have completed processing
                 std::vector<uint64_t> completed;
                 for (auto &count : _tid_count) {
-                    SPDLOG_DEBUG("Table {} has count {}", count.first, count.second);
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Table {} has count {}", count.first, count.second);
                     if (count.second == 0) {
                         // issue a finalize request to a worker
-                        SPDLOG_DEBUG("Issue finalize for the table {}@{}", count.first, xid);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue finalize for the table {}@{}", count.first, xid);
                         auto table = _table_map[count.first];
                         auto entry = std::make_shared<WorkerEntry>(table, xid);
                         _worker_queue.push(entry);
@@ -110,19 +110,19 @@ namespace springtail::gc {
 
                 // if there are still outstanding tables, wait for one or more to complete
                 if (!_tid_count.empty()) {
-                    SPDLOG_DEBUG("Wait for outstanding tables");
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for outstanding tables");
                     _cv.wait(lock);
                 }
             }
             lock.unlock();
 
-            SPDLOG_DEBUG("All tables to complete for XID {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
 
-            SPDLOG_DEBUG("XID committed {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);
 
             // mark the XID as complete in the redis queue
             _redis.commit(_worker_id);
@@ -175,7 +175,7 @@ namespace springtail::gc {
     Committer::_process_finalize(MutableTablePtr table,
                                  uint64_t xid)
     {
-        SPDLOG_DEBUG("Finalize table {}@{}", table->id(), xid);
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Finalize table {}@{}", table->id(), xid);
 
         // finalize the table
         auto roots = table->finalize();
@@ -189,7 +189,7 @@ namespace springtail::gc {
                              uint64_t extent_id,
                              uint64_t xid)
     {
-        SPDLOG_DEBUG("Process rows for {}:{}@{}", table->id(), extent_id, xid);
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows for {}:{}@{}", table->id(), extent_id, xid);
 
         // save the schema
         auto schema = table->schema();
@@ -200,12 +200,12 @@ namespace springtail::gc {
             // request rows from the write cache for the provided extent ID
             auto rows = _write_cache->fetch_rows(table->id(), extent_id, _committed_xid, xid, 100, cursor);
             if (rows.empty()) {
-                SPDLOG_DEBUG("No more rows for {}:{}@{}", table->id(), extent_id, xid);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}:{}@{}", table->id(), extent_id, xid);
                 done = true;
                 break;
             }
 
-            SPDLOG_DEBUG("Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
 
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
@@ -229,7 +229,7 @@ namespace springtail::gc {
                         extent.deserialize(row.data);
 
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
                         table->insert(value, xid, extent_id);
                         break;
                     }

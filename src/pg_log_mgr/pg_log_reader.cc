@@ -93,7 +93,7 @@ namespace springtail {
     void
     PgLogReader::_process_begin(const PgMsgBegin &begin_msg)
     {
-        SPDLOG_DEBUG("Begin: xid={}, xact_lsn={}\n", begin_msg.xid, begin_msg.xact_lsn);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Begin: xid={}, xact_lsn={}\n", begin_msg.xid, begin_msg.xact_lsn);
 
         PgTransactionPtr xact = std::make_shared<PgTransaction>();
         xact->begin_path = _current_path;
@@ -106,7 +106,7 @@ namespace springtail {
     void
     PgLogReader::_process_commit(const PgMsgCommit &commit_msg)
     {
-        SPDLOG_DEBUG("Commit: commit_lsn={}, xact_lsn={}\n", commit_msg.commit_lsn, commit_msg.xact_lsn);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Commit: commit_lsn={}, xact_lsn={}\n", commit_msg.commit_lsn, commit_msg.xact_lsn);
 
         PgTransactionPtr xact = _current_xact;
         if (_current_xact == nullptr || commit_msg.commit_lsn != _current_xact->xact_lsn) {
@@ -126,7 +126,7 @@ namespace springtail {
     void
     PgLogReader::_process_stream_start(const PgMsgStreamStart &start_msg)
     {
-        SPDLOG_DEBUG("Stream start: xid={}, first={}\n", start_msg.xid, start_msg.first);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Stream start: xid={}, first={}\n", start_msg.xid, start_msg.first);
 
         if (!start_msg.first) {
             return;
@@ -151,7 +151,7 @@ namespace springtail {
     void
     PgLogReader::_process_stream_commit(const PgMsgStreamCommit &commit_msg)
     {
-        SPDLOG_DEBUG("Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Stream commit: xid={}, xact_lsn={}\n", commit_msg.xid, commit_msg.xact_lsn);
 
         // commit only happens for the top level xid, subxacts under the xid
         // automatically commit unless they were previously aborted
@@ -176,7 +176,7 @@ namespace springtail {
     void
     PgLogReader::_process_stream_abort(const PgMsgStreamAbort &abort_msg)
     {
-        SPDLOG_DEBUG("Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Stream abort: xid={}, sub_xid={}\n", abort_msg.xid, abort_msg.sub_xid);
 
         auto itr = _xact_map.find(abort_msg.xid);
         if (itr == _xact_map.end()) {

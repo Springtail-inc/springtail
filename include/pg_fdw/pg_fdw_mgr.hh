@@ -30,6 +30,7 @@ extern "C" {
 #include <pg_fdw/pg_fdw_common.h>
 
 namespace springtail  {
+namespace pg_fdw {
 
     struct PgFdwSortGroup {
         std::string attname;
@@ -59,7 +60,7 @@ namespace springtail  {
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
 
-        std::vector<std::string> target_columns;         ///< List of target columns
+        std::vector<uint32_t> target_columns;         ///< List of target columns
         std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
 
         List *qual_list;    ///< List of predicate clauses (BaseQual)
@@ -68,9 +69,6 @@ namespace springtail  {
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
             : table(table), tid(tid), xid(xid), iter(std::nullopt)
         {
-            // fetch the fields for the table
-            fields = table->extent_schema()->get_fields();
-
             // fetch the columns and column IDs for the table
             columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
 
@@ -197,4 +195,5 @@ namespace springtail  {
 
         static void _handle_exception(const Error &e);
     };
-}
+} // namespace pg_fdw
+} // namespace springtail
