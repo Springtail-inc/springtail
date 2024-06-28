@@ -221,22 +221,6 @@ namespace springtail::gc {
                 assert(0);
             }
 
-            SPDLOG_DEBUG("Extent remapped from {} to {}", extent_id, mapped_eid);
-
-            // determine if the provided extent_id needs to be forward mapped
-            uint64_t mapped_eid = extent_id;
-            auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
-            if (extent_ids.empty()) {
-                // no mapping, use provided extent_id
-            } else if (extent_ids.size() == 1) {
-                // single extent output, use it
-                mapped_eid = extent_ids.front();
-            } else {
-                // XXX need to create a list of key -> extent_id to figure out which extent a given row
-                // should be applied to
-                assert(0);
-            }
-
             SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
 
             // apply the changes to the extent
