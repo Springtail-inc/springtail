@@ -9,7 +9,7 @@ namespace springtail {
                                    uint64_t old_eid,
                                    const std::vector<uint64_t> &new_eids)
     {
-        SPDLOG_DEBUG("{}, {}, {}", target_xid, old_eid, new_eids.front());
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "{}, {}, {}", target_xid, old_eid, new_eids.front());
 
         std::vector<uint64_t> reverse_eids;
 
