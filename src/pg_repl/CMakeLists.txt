@@ -20,8 +20,13 @@ add_library(springtail_pg ${PG_LIB_SOURCES})
 
 # executables
 add_executable(pg_wal_dump test/pg_wal_dump.cc)
+add_dsymutil_command(pg_wal_dump)
+
 add_executable(pg_wal_decode test/pg_wal_decode.cc)
+add_dsymutil_command(pg_wal_decode)
+
 add_executable(validate_log test/validate_log.cc)
+add_dsymutil_command(validate_log)
 
 target_include_directories(validate_log
     PUBLIC ${PROJECT_SOURCE_DIR}/include
@@ -82,6 +87,7 @@ target_link_libraries(gen_log
 target_include_directories(gen_log
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
+add_dsymutil_command(gen_log)
 
 add_executable(test_msg_stream test/test_msg_stream.cc)
 target_link_libraries(test_msg_stream
@@ -91,6 +97,7 @@ target_link_libraries(test_msg_stream
 target_include_directories(test_msg_stream
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
+add_dsymutil_command(test_msg_stream)
 
 gtest_discover_tests(test_msg_stream
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -98,15 +105,14 @@ gtest_discover_tests(test_msg_stream
 
 # copy table test
 add_executable(test_pgcopy test/test_pgcopy.cc)
-
 target_include_directories(test_pgcopy
     PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
-
 target_link_libraries(test_pgcopy
     PUBLIC springtail_storage springtail_pg
     PRIVATE GTest::gtest_main
 )
+add_dsymutil_command(test_pgcopy)
 
 gtest_discover_tests(test_pgcopy
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test

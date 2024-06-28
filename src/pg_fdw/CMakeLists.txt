@@ -43,6 +43,7 @@ target_link_libraries(copy_schema
     PRIVATE springtail_storage
     PRIVATE Boost::program_options
 )
+add_dsymutil_command(copy_schema)
 
 add_executable(dump_table test/dump_table.cc pg_fdw_mgr.cc)
 target_include_directories(dump_table
@@ -56,3 +57,4 @@ target_link_libraries(dump_table
     PRIVATE Boost::program_options
     PRIVATE PostgreSQL::PostgreSQL
 )
+add_dsymutil_command(dump_table)

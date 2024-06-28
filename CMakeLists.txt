@@ -25,6 +25,9 @@ include(SetSystem)
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
+## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
+include(DSymUtil)
+
 ## CXX options
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,10 +41,7 @@ set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 ## Default location of properties file
 add_compile_definitions(SPRINGTAIL_PROPERTIES="${PROJECT_SOURCE_DIR}/system.json")
 
-find_library(LIB_ELF NAMES elf PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
-find_library(LIB_DWARF NAMES dwarf PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
-
-find_package(Backward CONFIG REQUIRED)
+find_package(cpptrace)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)

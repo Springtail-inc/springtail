@@ -13,25 +13,30 @@ add_library(springtail_storage ${STORAGE_SOURCES})
 target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
-  PUBLIC Boost::thread)
+  PUBLIC Boost::thread
+         springtail_write_cache)
 
 
 ## helpers
 add_executable(read_leaf test/read_leaf.cc)
 target_include_directories(read_leaf PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-target_link_libraries(read_leaf PUBLIC springtail_common springtail_storage)
+target_link_libraries(read_leaf PUBLIC springtail_storage)
+add_dsymutil_command(read_leaf)
 
 add_executable(read_branch test/read_branch.cc)
 target_include_directories(read_branch PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-target_link_libraries(read_branch PUBLIC springtail_common springtail_storage)
+target_link_libraries(read_branch PUBLIC springtail_storage)
+add_dsymutil_command(read_branch)
 
 add_executable(dump_system_tables test/dump_system_tables.cc)
 target_include_directories(dump_system_tables PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(dump_system_tables PUBLIC springtail_common springtail_storage)
+target_link_libraries(dump_system_tables PUBLIC springtail_storage)
+add_dsymutil_command(dump_system_tables)
 
 add_executable(dump_headers test/dump_headers.cc)
 target_include_directories(dump_headers PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(dump_headers PUBLIC springtail_common springtail_storage)
+target_link_libraries(dump_headers PUBLIC springtail_storage)
+add_dsymutil_command(dump_headers)
 
 ## tests
 
@@ -45,50 +50,52 @@ endif()
 add_executable(test_io test/io_test.cc)
 target_include_directories(test_io PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_io
-  PUBLIC springtail_common springtail_storage
+  PUBLIC springtail_storage
   PRIVATE GTest::gtest_main
 )
+add_dsymutil_command(test_io)
 
 # btree test
 add_executable(test_btree test/test_btree.cc)
 target_include_directories(test_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_btree PRIVATE "--coverage")
-
 target_link_libraries(test_btree
-    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
+add_dsymutil_command(test_btree)
 
 # table test
 add_executable(test_table test/test_table.cc)
 target_include_directories(test_table PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_table PRIVATE "--coverage")
-
 target_link_libraries(test_table
-    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
+add_dsymutil_command(test_table)
 
 # table_mgr test
 add_executable(test_table_mgr test/test_table_mgr.cc)
 target_include_directories(test_table_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_table_mgr PRIVATE "--coverage")
-
 target_link_libraries(test_table_mgr
-    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
+add_dsymutil_command(test_table_mgr)
 
 # cache test
 add_executable(test_cache test/test_cache.cc)
 target_include_directories(test_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_cache PRIVATE "--coverage")
-
 target_link_libraries(test_cache
-    PUBLIC springtail_common springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
+add_dsymutil_command(test_cache)
 
 # extent test
 add_executable(test_extent test/test_extent.cc)
 target_include_directories(test_extent PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_extent PUBLIC springtail_common springtail_storage GTest::gtest_main)
+target_link_libraries(test_extent PUBLIC springtail_storage GTest::gtest_main)
+add_dsymutil_command(test_extent)
 
 # hook tests into gtest framework
 gtest_discover_tests(test_extent)

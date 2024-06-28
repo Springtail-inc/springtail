@@ -30,9 +30,10 @@ namespace springtail {
         throw Error("Springtail system.json properties file not found");
     }
 
-    void springtail_init(uint32_t logging_mask, const std::string &properties_path) {
-        // initialize the backtrace infrastructure
-        backward::sh.loaded();
+    void springtail_init(uint32_t logging_mask, const std::string &properties_path)
+    {
+        // initialize the backtrace signal handling
+        init_exception();
 
         // init system properties
         init_system_properties(properties_path);

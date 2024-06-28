@@ -46,7 +46,7 @@ namespace springtail::gc {
                 uint64_t extent_cursor = 0;
                 for (auto tid : table_list) {
                     // construct the mutable table object
-                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid);
+                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid, true);
 
                     boost::unique_lock lock(_mutex);
                     _table_map[tid] = table;
@@ -207,6 +207,22 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
 
+            // determine if the provided extent_id needs to be forward mapped
+            uint64_t mapped_eid = extent_id;
+            auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
+            if (extent_ids.empty()) {
+                // no mapping, use provided extent_id
+            } else if (extent_ids.size() == 1) {
+                // single extent output, use it
+                mapped_eid = extent_ids.front();
+            } else {
+                // XXX need to create a list of key -> extent_id to figure out which extent a given row
+                // should be applied to
+                assert(0);
+            }
+
+            SPDLOG_DEBUG("Extent remapped from {} to {}", extent_id, mapped_eid);
+
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
             //     at once rather than looking it up every time.  This would require changes to
@@ -229,8 +245,8 @@ namespace springtail::gc {
                         extent.deserialize(row.data);
 
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
-                        table->insert(value, xid, extent_id);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
+                        table->insert(value, xid, mapped_eid);
                         break;
                     }
                 case (WriteCacheClient::RowOp::UPDATE):
@@ -240,7 +256,7 @@ namespace springtail::gc {
                         extent.deserialize(row.data);
 
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        table->update(value, xid, extent_id);
+                        table->update(value, xid, mapped_eid);
                         break;
                     }
                 case (WriteCacheClient::RowOp::DELETE):
@@ -251,7 +267,7 @@ namespace springtail::gc {
 
                         extent.deserialize(row.pkey);
                         auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
-                        table->remove(key, xid, extent_id);
+                        table->remove(key, xid, mapped_eid);
                         break;
                     }
                 }

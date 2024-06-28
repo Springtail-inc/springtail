@@ -44,7 +44,7 @@ namespace springtail {
                 if (_btree_i == _btree->end()) {
                     return *this;
                 }
-                
+
                 // retrieve the data extent
                 _page = _table->_read_page_via_primary(_btree_i);
                 _page_i = _page->begin();
@@ -232,7 +232,8 @@ namespace springtail {
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
-                     ExtentSchemaPtr schema);
+                     ExtentSchemaPtr schema,
+                     bool for_gc = false);
 
         /**
          * Returns the file of the raw data associated with the table.
@@ -428,6 +429,8 @@ namespace springtail {
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
         StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
+
+        bool _for_gc; ///< If this table is being used for the ingest pipeline.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 
