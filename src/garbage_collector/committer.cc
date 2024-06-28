@@ -223,6 +223,22 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG("Extent remapped from {} to {}", extent_id, mapped_eid);
 
+            // determine if the provided extent_id needs to be forward mapped
+            uint64_t mapped_eid = extent_id;
+            auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
+            if (extent_ids.empty()) {
+                // no mapping, use provided extent_id
+            } else if (extent_ids.size() == 1) {
+                // single extent output, use it
+                mapped_eid = extent_ids.front();
+            } else {
+                // XXX need to create a list of key -> extent_id to figure out which extent a given row
+                // should be applied to
+                assert(0);
+            }
+
+            SPDLOG_DEBUG("Extent remapped from {} to {}", extent_id, mapped_eid);
+
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
             //     at once rather than looking it up every time.  This would require changes to
@@ -245,7 +261,7 @@ namespace springtail::gc {
                         extent.deserialize(row.data);
 
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
+                        SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
                         table->insert(value, xid, mapped_eid);
                         break;
                     }

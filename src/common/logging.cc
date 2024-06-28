@@ -196,6 +196,7 @@ namespace logging {
         auto logger = std::make_shared<spdlog::logger>("springtail", list);
         logger->set_pattern(pattern);
         set_level(logger, log_level);
+        logger->flush_on(spdlog::level::err);
 
         spdlog::set_default_logger(logger);
         spdlog::flush_every(std::chrono::seconds(3));
