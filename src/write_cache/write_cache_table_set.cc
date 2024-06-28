@@ -38,7 +38,7 @@ namespace springtail
     void
     WriteCacheTableSet::_insert_rows(uint64_t tid, uint64_t eid, uint64_t xid)
     {
-         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: {}:{}:{}\n", tid, eid, xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: {}:{}:{}\n", tid, eid, xid);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(xid, WriteCacheIndexNode::IndexType::XID);
@@ -74,7 +74,7 @@ namespace springtail
 
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid && result_cnt < count; xid++) {
-             SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in xid: {}\n", xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in xid: {}\n", xid);
             // fetch xid node for this xid and read lock it
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
@@ -193,7 +193,7 @@ namespace springtail
             SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for XID: {}\n", xid);
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                 SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
                 continue;
             }
 
