@@ -237,7 +237,7 @@ namespace springtail::gc {
                 assert(0);
             }
 
-            SPDLOG_DEBUG("Extent remapped from {} to {}", extent_id, mapped_eid);
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
 
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
