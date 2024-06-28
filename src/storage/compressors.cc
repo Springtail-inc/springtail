@@ -1,3 +1,6 @@
+#include <algorithm>
+
+#include <common/logging.hh>
 #include <storage/exception.hh>
 #include <storage/compressors.hh>
 
@@ -103,7 +106,7 @@ namespace springtail {
                                            src.size(), dst->size() - offset);
 
         if (size < 0) {
-            std::cerr << "Error decompressing: err=" << size << std::endl;
+            SPDLOG_ERROR("Error decompressing: err={}", size);
             throw ValidationError("Error decompressing data");
         }
 

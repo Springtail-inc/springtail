@@ -1,3 +1,6 @@
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <iostream>
 #include <mutex>
 #include <shared_mutex>
@@ -60,7 +63,7 @@ namespace springtail {
             std::filesystem::create_directories(_base_path);
         }
 
-        _fd = open((_base_path / std::filesystem::path(XID_MGR_COMMIT_FILE)).c_str(), O_RDWR | O_CREAT, 0644);
+        _fd = ::open((_base_path / std::filesystem::path(XID_MGR_COMMIT_FILE)).c_str(), O_RDWR | O_CREAT, 0644);
         if (_fd < 0) {
             throw Error("Failed to open xid_mgr file");
         }

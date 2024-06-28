@@ -548,6 +548,7 @@ namespace springtail::gc {
                     data.op = WriteCacheClient::RowOp::INSERT;
 
                     _write_cache->add_rows(table->id(), extent_id, { data });
+                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::DELETE: {
@@ -575,6 +576,7 @@ namespace springtail::gc {
                     data.op = WriteCacheClient::RowOp::DELETE;
 
                     _write_cache->add_rows(table->id(), extent_id, { data });
+                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::UPDATE: {
@@ -605,6 +607,7 @@ namespace springtail::gc {
                         data.op = WriteCacheClient::RowOp::UPDATE;
 
                         _write_cache->add_rows(table->id(), extent_id, { data });
+                        _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     } else {
                         // generate extents for the delete data and insert data
                         auto schema = table->extent_schema();
@@ -643,6 +646,8 @@ namespace springtail::gc {
 
                         _write_cache->add_rows(table->id(), old_extent_id, { delete_data });
                         _write_cache->add_rows(table->id(), new_extent_id, { insert_data });
+                        _write_cache->set_lookup(table->id(), entry->xid, old_extent_id);
+                        _write_cache->set_lookup(table->id(), entry->xid, new_extent_id);
                     }
                     break;
                 }
@@ -665,6 +670,9 @@ namespace springtail::gc {
                 //       the lookup until we are making the actual mutation, would be better for a
                 //       reader to scan the mutations to see if they impact the query
                 uint64_t extent_id = constant::UNKNOWN_EXTENT;
+
+                // XXX currently not supported
+                assert(0);
 
                 if (msg->msg_type == PgMsgEnum::INSERT) {
                     // get the message details

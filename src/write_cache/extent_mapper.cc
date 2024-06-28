@@ -9,6 +9,8 @@ namespace springtail {
                                    uint64_t old_eid,
                                    const std::vector<uint64_t> &new_eids)
     {
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "{}, {}, {}", target_xid, old_eid, new_eids.front());
+
         std::vector<uint64_t> reverse_eids;
 
         // note: always lock forward before reverse to avoid deadlock
@@ -39,6 +41,8 @@ namespace springtail {
     TableExtentMapper::set_lookup(uint64_t target_xid,
                                   uint64_t extent_id)
     {
+        SPDLOG_DEBUG("{}, {}", target_xid, extent_id);
+
         boost::unique_lock lock(_mutex);
 
         // save the most recent XID that this extent ID was referenced at within the write cache
@@ -57,6 +61,8 @@ namespace springtail {
     TableExtentMapper::forward_map(uint64_t target_xid,
                                    uint64_t extent_id)
     {
+        SPDLOG_DEBUG("{}, {}", target_xid, extent_id);
+
         boost::shared_lock lock(_mutex);
 
         // find the extent ID to see if there are changes to it prior to the target XID
@@ -81,6 +87,8 @@ namespace springtail {
                                    uint64_t target_xid,
                                    uint64_t extent_id) 
     {
+        SPDLOG_DEBUG("{}, {}, {}", access_xid, target_xid, extent_id);
+
         boost::shared_lock lock(_mutex);
 
         std::vector<uint64_t> cache_eids;
@@ -124,6 +132,8 @@ namespace springtail {
     bool
     TableExtentMapper::expire(uint64_t commit_xid)
     {
+        SPDLOG_DEBUG("{}", commit_xid);
+
         // note: always lock lookup before forward, before reverse to avoid deadlock
         boost::unique_lock lock(_mutex);
 

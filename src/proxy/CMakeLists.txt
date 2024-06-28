@@ -45,6 +45,7 @@ target_include_directories(parser
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
 )
 target_link_libraries(parser PRIVATE pg_query)
+add_dsymutil_command(parser)
 
 
 # test server daemon executable
@@ -56,6 +57,7 @@ target_link_libraries(daemon
     PUBLIC springtail_proxy
     PRIVATE Boost::program_options
 )
+add_dsymutil_command(daemon)
 
 # test client executable -- boost::asio test, not used
 #add_executable(client test/client.cc)
