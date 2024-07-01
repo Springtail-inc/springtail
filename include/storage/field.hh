@@ -14,8 +14,9 @@
 namespace springtail {
 
     /**
-     * The Field class defines the interface for a generic column value.  That value may be extracted from
-     * an extent row, it could be a constant, or it could be some operator on top of other fields.
+     * The Field class defines the interface for storing / retrieving column values from an
+     * underlying data row.  That value may be extracted from an extent row, it could be a constant,
+     * or it could be some operator on top of other fields.
      */
     class Field {
     public:
@@ -43,68 +44,55 @@ namespace springtail {
         }
 
         virtual bool get_bool(const std::any &row) const {
-            std::cerr << "Getting bool type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting bool type unsupported for this field.");
         }
 
         virtual int8_t get_int8(const std::any &row) const {
-            std::cerr << "Getting int8 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting int8 type unsupported for this field.");
         }
 
         virtual uint8_t get_uint8(const std::any &row) const {
-            std::cerr << "Getting uint8 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting uint8 type unsupported for this field.");
         }
 
         virtual int16_t get_int16(const std::any &row) const {
-            std::cerr << "Getting int16 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting int16 type unsupported for this field.");
         }
 
         virtual uint16_t get_uint16(const std::any &row) const {
-            std::cerr << "Getting uint16 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting uint16 type unsupported for this field.");
         }
 
         virtual int32_t get_int32(const std::any &row) const {
-            std::cerr << "Getting int32 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting int32 type unsupported for this field.");
         }
 
         virtual uint32_t get_uint32(const std::any &row) const {
-            std::cerr << "Getting uint32 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting uint32 type unsupported for this field.");
         }
 
         virtual int64_t get_int64(const std::any &row) const {
-            std::cerr << "Getting int64 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting int64 type unsupported for this field.");
         }
 
         virtual uint64_t get_uint64(const std::any &row) const {
-            std::cerr << "Getting uint64 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting uint64 type unsupported for this field.");
         }
 
         virtual float get_float32(const std::any &row) const {
-            std::cerr << "Getting float32 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting float32 type unsupported for this field.");
         }
 
         virtual double get_float64(const std::any &row) const {
-            std::cerr << "Getting float64 type unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Getting float64 type unsupported for this field.");
         }
 
-        virtual std::string get_text(const std::any &row) const {
-            std::cerr << "Getting text type unsupported for this field." << std::endl;
-            throw TypeError();
+        virtual std::string_view get_text(const std::any &row) const {
+            throw TypeError("Getting text type unsupported for this field.");
         }
 
-        virtual const std::vector<char> get_binary(const std::any &row) const {
-            std::cerr << "Getting binary type unsupported for this field." << std::endl;
-            throw TypeError();
+        virtual const std::span<const char> get_binary(const std::any &row) const {
+            throw TypeError("Getting binary type unsupported for this field.");
         }
 
         bool
@@ -259,78 +247,63 @@ namespace springtail {
 
         // functions to set values
         virtual void set_undefined(const std::any &row, bool is_undefined) {
-            std::cerr << "Setting undefined unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting undefined unsupported for this field.");
         }
 
         virtual void set_null(const std::any &row, bool is_null) {
-            std::cerr << "Setting null unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting null unsupported for this field.");
         }
 
         virtual void set_bool(const std::any &row, bool value) {
-            std::cerr << "Setting bool unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting bool unsupported for this field.");
         }
 
         virtual void set_int8(const std::any &row, int8_t value) {
-            std::cerr << "Setting int8 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting int8 unsupported for this field.");
         }
 
         virtual void set_uint8(const std::any &row, uint8_t value) {
-            std::cerr << "Setting uint8 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting uint8 unsupported for this field.");
         }
 
         virtual void set_int16(const std::any &row, int16_t value) {
-            std::cerr << "Setting int16 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting int16 unsupported for this field.");
         }
 
         virtual void set_uint16(const std::any &row, uint16_t value) {
-            std::cerr << "Setting uint16 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting uint16 unsupported for this field.");
         }
 
         virtual void set_int32(const std::any &row, int32_t value) {
-            std::cerr << "Setting int32 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting int32 unsupported for this field.");
         }
 
         virtual void set_uint32(const std::any &row, uint32_t value) {
-            std::cerr << "Setting uint32 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting uint32 unsupported for this field.");
         }
 
         virtual void set_int64(const std::any &row, int64_t value) {
-            std::cerr << "Setting int64 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting int64 unsupported for this field.");
         }
 
         virtual void set_uint64(const std::any &row, uint64_t value) {
-            std::cerr << "Setting uint64 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting uint64 unsupported for this field.");
         }
 
         virtual void set_float32(const std::any &row, float value) {
-            std::cerr << "Setting float32 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting float32 unsupported for this field.");
         }
 
         virtual void set_float64(const std::any &row, double value) {
-            std::cerr << "Setting float64 unsupported for this field." << std::endl;
-            throw TypeError();
+            throw TypeError("Setting float64 unsupported for this field.");
         }
 
-        virtual void set_text(const std::any &row, const std::string &value) {
-            std::cerr << "Setting string unsupported for this field." << std::endl;
-            throw TypeError();
+        virtual void set_text(const std::any &row, const std::string_view &value) {
+            throw TypeError("Setting string unsupported for this field.");
         }
 
-        virtual void set_binary(const std::any &row, const std::vector<char> &val) {
-            std::cerr << "Setting binary type unsupported for this field." << std::endl;
-            throw TypeError();
+        virtual void set_binary(const std::any &row, const std::span<const char> &val) {
+            throw TypeError("Setting binary type unsupported for this field.");
         }
 
         // set this field from the value of another field
@@ -410,6 +383,10 @@ namespace springtail {
 
             case SchemaType::TEXT:
                 this->set_text(lhs, field->get_text(rhs));
+                break;
+
+            case SchemaType::BINARY:
+                this->set_binary(lhs, field->get_binary(rhs));
                 break;
 
             default:
@@ -604,13 +581,22 @@ namespace springtail {
             return *reinterpret_cast<double *>(&value);
         }
 
-        std::string get_text(const std::any &row) const override {
+        std::string_view get_text(const std::any &row) const override {
             assert(_type == SchemaType::TEXT);
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
             uint32_t var_off = recvint32(e_row.data() + _offset);
             return e_row.get_text(var_off);
+        }
+
+        const std::span<const char> get_binary(const std::any &row) const override {
+            assert(_type == SchemaType::BINARY);
+            assert(row.type() == typeid(Extent::Row));
+
+            auto &&e_row = std::any_cast<Extent::Row>(row);
+            uint32_t var_off = recvint32(e_row.data() + _offset);
+            return e_row.get_binary(var_off);
         }
 
         void set_null(const std::any &row, bool is_null) override {
@@ -699,7 +685,7 @@ namespace springtail {
             sendint64(cast_val, e_row.data() + _offset);
         }
 
-        void set_text(const std::any &row, const std::string &value) override {
+        void set_text(const std::any &row, const std::string_view &value) override {
             assert(_type == SchemaType::TEXT);
             assert(row.type() == typeid(Extent::Row));
 
@@ -712,6 +698,21 @@ namespace springtail {
             char *fixed = e_row.data() + _offset;
             sendint32(offset, fixed);
         }
+
+        void set_binary(const std::any &row, const std::span<const char> &value) override {
+            assert(_type == SchemaType::BINARY);
+            assert(row.type() == typeid(Extent::Row));
+
+            auto &&e_row = std::any_cast<Extent::Row>(row);
+
+            // store the string into the variable data
+            uint32_t offset = e_row.set_binary(value);
+
+            // store the offset into the fixed data
+            char *fixed = e_row.data() + _offset;
+            sendint32(offset, fixed);
+        }
+
 
     private:
         bool
@@ -775,11 +776,15 @@ namespace springtail {
         T _value;
 
     public:
-        explicit ConstTypeField(T value)
+        explicit ConstTypeField(const T &value)
             : _value(value)
         { }
 
-        virtual SchemaType get_type() const {
+        explicit ConstTypeField(T &&value)
+            : _value(std::move(value))
+        { }
+
+        SchemaType get_type() const override {
             if constexpr(std::is_same_v<T, bool>) {
                 return SchemaType::BOOLEAN;
             } else if constexpr(std::is_same_v<T, uint64_t>) {
@@ -811,7 +816,7 @@ namespace springtail {
             throw TypeError();
         }
 
-        bool get_bool(const std::any &row) const {
+        bool get_bool(const std::any &row) const override {
             if constexpr(std::is_same_v<T, bool>) {
                 return _value;
             } else {
@@ -819,7 +824,7 @@ namespace springtail {
             }
         }
 
-        int8_t get_int8(const std::any &row) const {
+        int8_t get_int8(const std::any &row) const override {
             if constexpr(std::is_same_v<T, int8_t>) {
                 return _value;
             } else {
@@ -827,7 +832,7 @@ namespace springtail {
             }
         }
 
-        uint8_t get_uint8(const std::any &row) const {
+        uint8_t get_uint8(const std::any &row) const override {
             if constexpr(std::is_same_v<T, uint8_t>) {
                 return _value;
             } else {
@@ -835,7 +840,7 @@ namespace springtail {
             }
         }
 
-        int16_t get_int16(const std::any &row) const {
+        int16_t get_int16(const std::any &row) const override {
             if constexpr(std::is_same_v<T, int16_t>) {
                 return _value;
             } else {
@@ -843,7 +848,7 @@ namespace springtail {
             }
         }
 
-        uint16_t get_uint16(const std::any &row) const {
+        uint16_t get_uint16(const std::any &row) const override {
             if constexpr(std::is_same_v<T, uint16_t>) {
                 return _value;
             } else {
@@ -851,7 +856,7 @@ namespace springtail {
             }
         }
 
-        int32_t get_int32(const std::any &row) const {
+        int32_t get_int32(const std::any &row) const override {
             if constexpr(std::is_same_v<T, int32_t>) {
                 return _value;
             } else {
@@ -859,7 +864,7 @@ namespace springtail {
             }
         }
 
-        uint32_t get_uint32(const std::any &row) const {
+        uint32_t get_uint32(const std::any &row) const override {
             if constexpr(std::is_same_v<T, uint32_t>) {
                 return _value;
             } else {
@@ -867,7 +872,7 @@ namespace springtail {
             }
         }
 
-        int64_t get_int64(const std::any &row) const {
+        int64_t get_int64(const std::any &row) const override {
             if constexpr(std::is_same_v<T, int64_t>) {
                 return _value;
             } else {
@@ -875,7 +880,7 @@ namespace springtail {
             }
         }
 
-        uint64_t get_uint64(const std::any &row) const {
+        uint64_t get_uint64(const std::any &row) const override {
             if constexpr(std::is_same_v<T, uint64_t>) {
                 return _value;
             } else {
@@ -883,7 +888,7 @@ namespace springtail {
             }
         }
 
-        float get_float32(const std::any &row) const {
+        float get_float32(const std::any &row) const override {
             if constexpr(std::is_same_v<T, float>) {
                 return _value;
             } else {
@@ -891,7 +896,7 @@ namespace springtail {
             }
         }
 
-        double get_float64(const std::any &row) const {
+        double get_float64(const std::any &row) const override {
             if constexpr(std::is_same_v<T, double>) {
                 return _value;
             } else {
@@ -899,7 +904,7 @@ namespace springtail {
             }
         }
 
-        std::string get_text(const std::any &row) const {
+        std::string_view get_text(const std::any &row) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 return _value;
             } else {
@@ -907,7 +912,7 @@ namespace springtail {
             }
         }
 
-        const std::vector<char> get_binary(const std::any &row) const {
+        const std::span<const char> get_binary(const std::any &row) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 return _value;
             } else {
@@ -1092,7 +1097,7 @@ namespace springtail {
             }
         }
 
-        std::string get_text(const std::any &row) const override {
+        std::string_view get_text(const std::any &row) const override {
             if constexpr(std::is_same_v<T, std::string>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1103,7 +1108,7 @@ namespace springtail {
             }
         }
 
-        const std::vector<char> get_binary(const std::any &row) const override {
+        const std::span<const char> get_binary(const std::any &row) const override {
             if constexpr(std::is_same_v<T, std::vector<char>>) {
                 if (_field->is_null(row)) {
                     return _default;
@@ -1510,7 +1515,7 @@ namespace springtail {
             return *reinterpret_cast<double *>(&value);
         }
 
-        std::string get_text(const std::any &row) const override {
+        std::string_view get_text(const std::any &row) const override {
             assert(row.type() == typeid(PgMsgTupleData const *));
 
             auto &&data = std::any_cast<PgMsgTupleData const *>(row);
@@ -1520,7 +1525,20 @@ namespace springtail {
             assert(col.type ==  'b');
 
             // read in the binary data as a string
-            return std::string(col.data.data(), col.data.size());
+            return std::string_view(col.data.data(), col.data.size());
+        }
+
+        const std::span<const char> get_binary(const std::any &row) const override {
+            assert(row.type() == typeid(PgMsgTupleData const *));
+
+            auto &&data = std::any_cast<PgMsgTupleData const *>(row);
+            const PgMsgTupleDataColumn &col = data->tuple_data[_offset];
+
+            // XXX we only support binary data for native types
+            assert(col.type ==  'b');
+
+            // read in the binary data as a string
+            return std::span<const char>(col.data.begin(), col.data.size());
         }
 
     private:
@@ -1550,7 +1568,11 @@ namespace springtail {
                 } else {
                     switch(tuple->field(i)->get_type()) {
                     case(SchemaType::TEXT):
-                        _fields.push_back(std::make_shared<ConstTypeField<std::string>>(field->get_text(tuple->row())));
+                        {
+                            // note: need to perform a copy here to store the constant string
+                            std::string value(field->get_text(tuple->row()));
+                            _fields.push_back(std::make_shared<ConstTypeField<std::string>>(std::move(value)));
+                        }
                         break;
                     case(SchemaType::UINT64):
                         _fields.push_back(std::make_shared<ConstTypeField<uint64_t>>(field->get_uint64(tuple->row())));
@@ -1586,7 +1608,12 @@ namespace springtail {
                         _fields.push_back(std::make_shared<ConstTypeField<float>>(field->get_float32(tuple->row())));
                         break;
                     case(SchemaType::BINARY):
-                        _fields.push_back(std::make_shared<ConstTypeField<std::vector<char>>>(field->get_binary(tuple->row())));
+                        {
+                            // note: perform a copy here to store the constant value
+                            auto &&tmp = field->get_binary(tuple->row());
+                            std::vector<char> value(tmp.begin(), tmp.end());
+                            _fields.push_back(std::make_shared<ConstTypeField<std::vector<char>>>(std::move(value)));
+                        }
                         break;
                     default:
                         throw TypeError();

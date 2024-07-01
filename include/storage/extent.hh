@@ -127,22 +127,22 @@ namespace springtail {
             { }
 
             /** Retrieve text from the variable data. */
-            std::string get_text(uint32_t offset) {
+            std::string_view get_text(uint32_t offset) {
                 return extent->get_text(offset);
             }
 
             /** Store text into the variable data and return the offset. */
-            uint32_t set_text(const std::string &value) {
-                return extent->add_variable(reinterpret_cast<const char *>(value.data()), value.size());
+            uint32_t set_text(const std::string_view &value) {
+                return extent->add_variable(value.data(), value.size());
             }
 
             /** Retrieve binary data from the variable data. */
-            std::vector<char> get_binary(uint32_t offset) {
+            const std::span<const char> get_binary(uint32_t offset) {
                 return extent->get_binary(offset);
             }
 
             /** Store binary data into the variable data and return the offset. */
-            uint32_t set_binary(const std::vector<char> &value) {
+            uint32_t set_binary(const std::span<const char> &value) {
                 return extent->add_variable(value.data(), value.size());
             }
 
@@ -392,27 +392,26 @@ namespace springtail {
         }
 
         /** Retrieve text from the variable data at a given offset. */
-        std::string get_text(uint32_t offset) const {
+        std::string_view get_text(uint32_t offset) const {
             // first 4 bytes are the length of the string
             uint32_t size;
             std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
                         reinterpret_cast<char *>(&size));
 
             // remainder is the string
-            return std::string(reinterpret_cast<const char *>(_variable_data->data() + offset + 4), size);
+            return std::string_view(reinterpret_cast<const char *>(_variable_data->data() + offset + 4), size);
         }
 
         /** Retrieve binary data from the variable data at a given offset. */
-        std::vector<char> get_binary(uint32_t offset) const {
+        const std::span<const char> get_binary(uint32_t offset) const {
             // first 4 bytes are the length of the data
             uint32_t size;
             std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
                         reinterpret_cast<char *>(&size));
 
             // remainder is the binary data
-            // XXX this performs a copy, can we avoid that?
-            return std::vector<char>(_variable_data->data() + offset + 4,
-                                     _variable_data->data() + offset + 4 + size);
+            return std::span<const char>(_variable_data->data() + offset + 4,
+                                         _variable_data->data() + offset + 4 + size);
         }
 
         /** Add variable-sized data to the extent. */

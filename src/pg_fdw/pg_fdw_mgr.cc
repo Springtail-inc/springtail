@@ -120,15 +120,10 @@ namespace springtail {
             case SchemaType::FLOAT32:
                 return Float4GetDatum(field->get_float32(row));
             case SchemaType::TEXT: {
-                char *duped_str = pstrdup(field->get_text(row).c_str());
+                const std::string_view value(field->get_text(row));
+                char *duped_str = pnstrdup(value.data(), value.size());
                 return CStringGetTextDatum(duped_str);
             }
-
-            // XXX no getters in field for
-            case SchemaType::TIMESTAMP:
-            case SchemaType::DATE:
-            case SchemaType::TIME:
-            case SchemaType::DECIMAL128:
 
             default:
                 return 0;
@@ -139,7 +134,7 @@ namespace springtail {
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns)
+                                 std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
@@ -147,53 +142,13 @@ namespace springtail {
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         for (int i = 0; i < columns.size(); i++) {
-            const auto &[column_name, type, nullable, default_value] = columns[i];
+            const auto &[column_name, sql_type, nullable, default_value] = columns[i];
             std::string column = fmt::format("  {} ", quote_identifier(column_name.c_str()));
 
-            switch (static_cast<SchemaType>(type)) {
-                case SchemaType::UINT8: // XXX no good mapping; use smallint for now
-                case SchemaType::INT8:
-                    column += "SMALLINT";
-                    break;
-                case SchemaType::UINT32:
-                case SchemaType::INT32:
-                    column += "INTEGER";
-                    break;
-                case SchemaType::UINT16:
-                case SchemaType::INT16:
-                    column += "SMALLINT";
-                    break;
-                case SchemaType::UINT64:
-                case SchemaType::INT64:
-                    column += "BIGINT";
-                    break;
-                case SchemaType::FLOAT32:
-                    column += "FLOAT4";
-                    break;
-                case SchemaType::FLOAT64:
-                    column += "FLOAT8";
-                    break;
-                case SchemaType::BOOLEAN:
-                    column += "BOOLEAN";
-                    break;
-                case SchemaType::TEXT:
-                    column += "TEXT";
-                    break;
-                case SchemaType::DATE:
-                    column += "DATE";
-                    break;
-                case SchemaType::TIME:
-                    column += "TIME";
-                    break;
-                case SchemaType::TIMESTAMP:
-                    column += "TIMESTAMP";
-                    break;
-                case SchemaType::BINARY:
-                    column += "BYTEA";
-                    break;
-                default:
-                    SPDLOG_ERROR("Unknown type {}", type);
-                    return "";
+            if (sql_type == "uint8" || sql_type == "uint4" || sql_type == "uint2") {
+                column += sql_type.substr(1);
+            } else {
+                column += sql_type;
             }
 
             // add nullability and default
@@ -225,11 +180,11 @@ namespace springtail {
                                     uint64_t tid,
                                     const std::vector<SchemaColumn> &column_schema)
     {
-        // column description: name, type, nullable, default
-        std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
+        // column description: name, sql_type, nullable, default
+        std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> columns;
 
         for (const auto &column : column_schema) {
-            columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
+            columns.push_back({column.name, column.sql_type, column.nullable, column.default_value});
         }
 
         return _gen_fdw_table_sql(server, table_name, tid, columns);
@@ -306,14 +261,14 @@ namespace springtail {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
+            std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
 
             // check for schema match
             if (schema_name != schema) {
                 continue;
             }
 
-            std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema_name, table_name);
@@ -364,7 +319,7 @@ namespace springtail {
         // Move on to iterating through the schemas table
 
         // column list: name, type, nullable, default
-        std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
+        std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> columns;
 
         uint64_t current_tid=0;
         std::string current_table;
@@ -419,8 +374,8 @@ namespace springtail {
             }
 
             // add column if it exists
-            std::string column_name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
-            uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
+            std::string sql_type(fields->at(sys_tbl::Schemas::Data::SQL_TYPE)->get_text(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             std::optional<std::string> default_value{};
 
@@ -428,7 +383,7 @@ namespace springtail {
                 default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
             }
 
-            columns.push_back({column_name, type, nullable, default_value});
+            columns.push_back({column_name, sql_type, nullable, default_value});
         }
 
         // process last table

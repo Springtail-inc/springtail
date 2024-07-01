@@ -5,7 +5,7 @@ namespace springtail {
 
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
-            { 0, 0, "root", 0, SchemaType::UINT64, true, false }
+            { 0, 0, "root", 0, SchemaType::UINT64, "uint8", true, false }
         };
     }
 
@@ -53,8 +53,8 @@ namespace springtail {
             }
         }
 
-        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, false);
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, "uint8", false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, "uint4", false);
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         _primary_index = std::make_shared<BTree>(table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
@@ -214,8 +214,8 @@ namespace springtail {
         }
 
         // construct the primary index btree
-        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, false);
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, "uint8", false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, "uint4", false);
 
         auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
 

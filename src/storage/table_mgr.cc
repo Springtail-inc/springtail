@@ -154,6 +154,7 @@ namespace springtail {
                                                        true, // exists
                                                        column.column_name,
                                                        static_cast<uint8_t>(_convert_pg_type(column.udt_type)),
+                                                       column.udt_type, // sql_type
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -219,6 +220,7 @@ namespace springtail {
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
                                                          _convert_pg_type(col.udt_type),
+                                                         col.udt_type,
                                                          true, col.is_nullable,
                                                          col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
                                                          col.default_value);
@@ -231,7 +233,7 @@ namespace springtail {
             auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, access_xid, xid);
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, update.position, xid, lsn,
                                                        (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
-                                                       col.name, static_cast<uint8_t>(col.type),
+                                                       col.name, static_cast<uint8_t>(col.type), col.sql_type,
                                                        col.nullable, col.default_value, static_cast<uint8_t>(update.update_type));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
 
@@ -453,9 +455,9 @@ namespace springtail {
         auto page = table_names_t->read_page(extent_id);
         auto row = page->at(row_id);
 
-        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
-        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
-        return { old_namespace, old_name };
+        std::string_view &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
+        std::string_view &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
+        return { std::string(old_namespace), std::string(old_name) };
     }
 
     SchemaType

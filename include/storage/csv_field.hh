@@ -24,59 +24,59 @@ namespace springtail {
                     s.compare("T") == 0);
         }
 
-        virtual int8_t get_int8(const std::any &row) const override {
+        int8_t get_int8(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<int8_t>();
         }
 
-        virtual uint8_t get_uint8(const std::any &row) const override {
+        uint8_t get_uint8(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<uint8_t>();
         }
 
-        virtual int16_t get_int16(const std::any &row) const override {
+        int16_t get_int16(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<int16_t>();
         }
 
-        virtual uint16_t get_uint16(const std::any &row) const override {
+        uint16_t get_uint16(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<uint16_t>();
         }
 
-        virtual int32_t get_int32(const std::any &row) const override {
+        int32_t get_int32(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<int32_t>();
         }
 
-        virtual uint32_t get_uint32(const std::any &row) const override {
+        uint32_t get_uint32(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<uint32_t>();
         }
 
-        virtual int64_t get_int64(const std::any &row) const override {
+        int64_t get_int64(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<int64_t>();
         }
 
-        virtual uint64_t get_uint64(const std::any &row) const override {
+        uint64_t get_uint64(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<uint64_t>();
         }
 
-        virtual float get_float32(const std::any &row) const override {
+        float get_float32(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<float>();
         }
 
-        virtual double get_float64(const std::any &row) const override {
+        double get_float64(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
             return csv_row[_idx].get<double>();
         }
 
-        virtual std::string get_text(const std::any &row) const override {
+        std::string_view get_text(const std::any &row) const override {
             auto &&csv_row = std::any_cast<csv::CSVRow>(row);
-            return csv_row[_idx].get();
+            return csv_row[_idx].get_sv();
         }
 
     private:

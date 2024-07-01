@@ -286,7 +286,7 @@ namespace springtail {
     SchemaMgr::SchemaMgr()
         : _cache(1024*1024)
     {
-        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, "uint8", false);
 
         // TableNames
         _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);

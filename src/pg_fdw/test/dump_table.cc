@@ -76,8 +76,8 @@ list_tables()
 
     // iterate over the table names table
     for (auto row : (*table)) {
-        std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+        std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+        std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
         uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
         uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
@@ -103,8 +103,8 @@ lookup_table(const std::string &schema_name, const std::string &table_name, uint
     // iterate over the table names table
     uint64_t found_tid = -1;
     for (auto row : (*table)) {
-        std::string ns = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        std::string name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+        std::string ns(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+        std::string name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
         uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
         uint64_t t_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
 
@@ -145,12 +145,6 @@ dump_datum(Datum value, SchemaType type)
         case SchemaType::TEXT:
             //return fmt::format("{}", DatumGetCString(value));
             return fmt::format("{}", TextDatumGetCString(value));
-        case SchemaType::TIMESTAMP:
-            return fmt::format("{}", DatumGetUInt64(value));
-        case SchemaType::DATE:
-            return fmt::format("{}", DatumGetUInt32(value));
-        case SchemaType::TIME:
-            return fmt::format("{}", DatumGetUInt64(value));
         default:
             return "UNKNOWN";
     }

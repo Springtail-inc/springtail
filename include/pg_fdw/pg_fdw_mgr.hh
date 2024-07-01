@@ -91,7 +91,7 @@ namespace springtail  {
         static std::string _gen_fdw_table_sql(const std::string &server,
                                               const std::string &table,
                                               uint64_t tid,
-                                              std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns);
+                                              std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
