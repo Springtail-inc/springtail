@@ -97,36 +97,51 @@ namespace springtail {
     PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row)
     {
         switch (field->get_type()) {
-            case SchemaType::INT64:
-                return Int64GetDatum(field->get_int64(row));
-            case SchemaType::UINT64:
-                return UInt64GetDatum(field->get_uint64(row));
-            case SchemaType::INT32:
-                return Int32GetDatum(field->get_int32(row));
-            case SchemaType::UINT32:
-                return UInt32GetDatum(field->get_uint32(row));
-            case SchemaType::INT16:
-                return Int16GetDatum(field->get_int16(row));
-            case SchemaType::UINT16:
-                return UInt16GetDatum(field->get_uint16(row));
-            case SchemaType::INT8:
-                return Int8GetDatum(field->get_int8(row));
-            case SchemaType::UINT8:
-                return UInt8GetDatum(field->get_uint8(row));
-            case SchemaType::BOOLEAN:
-                return BoolGetDatum(field->get_bool(row));
-            case SchemaType::FLOAT64:
-                return Float8GetDatum(field->get_float64(row));
-            case SchemaType::FLOAT32:
-                return Float4GetDatum(field->get_float32(row));
-            case SchemaType::TEXT: {
-                const std::string_view value(field->get_text(row));
-                char *duped_str = pnstrdup(value.data(), value.size());
-                return CStringGetTextDatum(duped_str);
-            }
+        case SchemaType::INT64:
+            return Int64GetDatum(field->get_int64(row));
+        case SchemaType::UINT64:
+            return UInt64GetDatum(field->get_uint64(row));
+        case SchemaType::INT32:
+            return Int32GetDatum(field->get_int32(row));
+        case SchemaType::UINT32:
+            return UInt32GetDatum(field->get_uint32(row));
+        case SchemaType::INT16:
+            return Int16GetDatum(field->get_int16(row));
+        case SchemaType::UINT16:
+            return UInt16GetDatum(field->get_uint16(row));
+        case SchemaType::INT8:
+            return Int8GetDatum(field->get_int8(row));
+        case SchemaType::UINT8:
+            return UInt8GetDatum(field->get_uint8(row));
+        case SchemaType::BOOLEAN:
+            return BoolGetDatum(field->get_bool(row));
+        case SchemaType::FLOAT64:
+            return Float8GetDatum(field->get_float64(row));
+        case SchemaType::FLOAT32:
+            return Float4GetDatum(field->get_float32(row));
+        case SchemaType::TEXT: {
+            const std::string_view value(field->get_text(row));
+            char *duped_str = pnstrdup(value.data(), value.size());
+            return CStringGetTextDatum(duped_str);
+        }
+        case SchemaType::BINARY: {
+            auto &&value = field->get_binary(row);
+            auto len = value.size();
 
-            default:
-                return 0;
+            // note: it's possible we will need to put the data size here
+#if 0
+            text *result = (text *)palloc(len + VARHDRSZ);
+            SET_VARSIZE(result, len + VARHDRSZ);
+            memcpy(VARDATA(result), value.data(), len);
+#endif
+            text *result = (text *)palloc(len);
+            memcpy(result, value.data(), len);
+
+            return PointerGetDatum(result);
+        }
+
+        default:
+            return 0;
         }
     }
 

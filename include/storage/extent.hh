@@ -237,8 +237,7 @@ namespace springtail {
             uint32_t offset = 0;
             while (offset < _variable_data->size()) {
                 // retrieve the size
-                std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
-                            reinterpret_cast<char *>(&size));
+                size = recvint32(_variable_data->data() + offset);
 
                 // calculate the hash
                 uint64_t hash = XXH64(_variable_data->data() + offset + sizeof(uint32_t), size, 0);
@@ -394,9 +393,7 @@ namespace springtail {
         /** Retrieve text from the variable data at a given offset. */
         std::string_view get_text(uint32_t offset) const {
             // first 4 bytes are the length of the string
-            uint32_t size;
-            std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
-                        reinterpret_cast<char *>(&size));
+            uint32_t size = recvint32(_variable_data->data() + offset);
 
             // remainder is the string
             return std::string_view(reinterpret_cast<const char *>(_variable_data->data() + offset + 4), size);
@@ -405,9 +402,7 @@ namespace springtail {
         /** Retrieve binary data from the variable data at a given offset. */
         const std::span<const char> get_binary(uint32_t offset) const {
             // first 4 bytes are the length of the data
-            uint32_t size;
-            std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
-                        reinterpret_cast<char *>(&size));
+            uint32_t size = recvint32(_variable_data->data() + offset);
 
             // remainder is the binary data
             return std::span<const char>(_variable_data->data() + offset + 4,
@@ -425,9 +420,7 @@ namespace springtail {
             if (i != _variable_hash.end()) {
                 for (uint32_t offset : i->second) {
                     // check size
-                    uint32_t vsize;
-                    std::copy_n(_variable_data->data() + offset, sizeof(uint32_t),
-                                reinterpret_cast<char *>(&vsize));
+                    uint32_t vsize = recvint32(_variable_data->data() + offset);
 
                     if (size == vsize) {
                         // check the actual data
@@ -444,7 +437,7 @@ namespace springtail {
             // if doesn't exist, append and return the new location
             uint32_t new_offset = _variable_data->size();
             _variable_data->resize(new_offset + size + 4);
-            std::copy_n(reinterpret_cast<char *>(&size), 4, _variable_data->data() + new_offset);
+            sendint32(size, _variable_data->data() + new_offset);
             std::copy_n(buffer, size, _variable_data->data() + new_offset + 4);
 
             // store the new offset into the hash table
@@ -475,9 +468,10 @@ namespace springtail {
             uint32_t fsize = _fixed_data->size();
             uint32_t vsize = _variable_data->size();
 
-            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data());
+            sendint32(fsize, data.data());
             std::copy_n(_fixed_data->data(), fsize, data.data() + 4);
-            std::copy_n(reinterpret_cast<char *>(&fsize), 4, data.data() + 4 + fsize);
+
+            sendint32(vsize, data.data() + 4 + fsize);
             std::copy_n(_variable_data->data(), vsize, data.data() + 4 + fsize + 4);
 
             return data;
@@ -485,14 +479,11 @@ namespace springtail {
 
         void deserialize(const std::string &data)
         {
-            uint32_t fsize, vsize;
-            std::copy_n(data.data(), 4, reinterpret_cast<char *>(&fsize));
-
+            uint32_t fsize = recvint32(data.data());
             _fixed_data->resize(fsize);
             std::copy_n(data.data() + 4, fsize, _fixed_data->data());
 
-            std::copy_n(data.data() + 4 + fsize, 4, reinterpret_cast<char *>(&vsize));
-
+            uint32_t vsize = recvint32(data.data() + 4 + fsize);
             _variable_data->resize(vsize);
             std::copy_n(data.data() + 4 + fsize + 4, vsize, _variable_data->data());
         }

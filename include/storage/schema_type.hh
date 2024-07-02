@@ -7,7 +7,7 @@ namespace springtail {
 
     /** The available types for fields. */
     enum class SchemaType : uint8_t {
-        TEXT = 1, // bool, bytea
+        TEXT = 1, // text, varchar, bpchar
         UINT64,
         INT64, // int8, money, time, timestamp, timestamptz, xid8
         UINT32,
