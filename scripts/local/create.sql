@@ -1,2 +1,8 @@
-CREATE TABLE test_data (a INT PRIMARY KEY, b TEXT);
-INSERT INTO test_data (a, b) VALUES (1, 'a');
+CREATE TABLE test_data (a INT PRIMARY KEY, b TEXT, c TIMESTAMP, d JSON);
+INSERT INTO test_data (a, b, c, d) VALUES (1, 'a', now(), '{"bar": "baz", "balance": 7.77, "active": false}'::json);
+
+CREATE TABLE test_data2 (a INTEGER[] PRIMARY KEY, b TEXT, c TIMESTAMP, d INTEGER);
+INSERT INTO test_data2 (a, b, c, d) VALUES ('{1, 2}', 'a', now(), 1);
+
+CREATE TABLE test_data3 (a INTEGER[], b TEXT PRIMARY KEY, c TIMESTAMP, d INTEGER);
+INSERT INTO test_data3 (a, b, c, d) VALUES ('{1, 2}', 'a', now(), 1);

@@ -144,6 +144,8 @@ namespace springtail {
             lock.unlock();
             return _read_committed_xid();
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: get committed xid: {}", _committed_xid);
         return _committed_xid;
     }
 

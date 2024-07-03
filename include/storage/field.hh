@@ -158,6 +158,29 @@ namespace springtail {
             case SchemaType::TEXT:
                 return (this->get_text(lhs_row) < rhs->get_text(rhs_row));
 
+            case SchemaType::BINARY: {
+                // retrieve the binary data
+                auto lhval = this->get_binary(lhs_row);
+                auto rhval = rhs->get_binary(rhs_row);
+
+                // perform a byte-wise comparison
+                auto min = std::min(lhval.size(), rhval.size());
+                auto cmp = std::memcmp(lhval.data(), rhval.data(), min);
+
+                // check the result
+                if (cmp < 0) {
+                    return true;
+                } else if (cmp > 0) {
+                    return false;
+                }
+
+                // if equal, check the sizes
+                if (lhval.size() < rhval.size()) {
+                    return true;
+                }
+                return false;
+            }
+
             default:
                 SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
                 throw TypeError();
@@ -225,6 +248,20 @@ namespace springtail {
 
             case SchemaType::TEXT:
                 return (this->get_text(lhs_row) == rhs->get_text(rhs_row));
+
+            case SchemaType::BINARY: {
+                auto lhval = this->get_binary(lhs_row);
+                auto rhval = rhs->get_binary(rhs_row);
+
+                // check the sizes
+                if (lhval.size() != rhval.size()) {
+                    return false;
+                }
+
+                // perform a byte-wise comparison
+                auto cmp = std::memcmp(lhval.data(), rhval.data(), lhval.size());
+                return (cmp == 0);
+            }
 
             default:
                 SPDLOG_ERROR("Unsupported data type: {}", (int)this->get_type());
@@ -1249,6 +1286,10 @@ namespace springtail {
 
                 case SchemaType::TEXT:
                     value += fmt::format("{}:", this->field(i)->get_text(this->row()));
+                    break;
+
+                case SchemaType::BINARY:
+                    value += fmt::format("<binary>:");
                     break;
 
                 default:

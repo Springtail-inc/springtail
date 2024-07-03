@@ -937,86 +937,85 @@ namespace springtail
             int32_t length = recvint32(row.data() + pos);
             pos += 4;
 
-            std::string type = _schema.columns[i].type;
+            // get the underlying springtail type
+            std::string pg_type = _schema.columns[i].type;
+            auto type = TableMgr::convert_pg_type(pg_type);
 
-            if (type == "int4" || type == "int" || type == "serial4" || type == "serial" ||
-                type == "date") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::INT32));
-                } else {
-                    assert(length == 4);
-                    fields->push_back(std::make_shared<ConstTypeField<int32_t>>(recvint32(row.data() + pos)));
-                    pos += length;
-                }
+            // check if null
+            if (length == -1) {
+                fields->push_back(std::make_shared<ConstNullField>(type));
+                continue;
             }
-            else if (type == "text" || type == "varchar" ||
-                     type == "bpchar"  || type == "_bpchar") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::TEXT));
-                } else {
-                    fields->push_back(std::make_shared<ConstTypeField<std::string>>(std::string(row.data() + pos, length)));
-                    pos += length;
-                }
+
+            // otherwise store the data accordingly
+            switch (type) {
+            case (SchemaType::TEXT):
+                fields->push_back(std::make_shared<ConstTypeField<std::string>>(std::string(row.data() + pos, length)));
+                pos += length;
+                break;
+
+            case (SchemaType::INT64):
+                assert(length == 8);
+                fields->push_back(std::make_shared<ConstTypeField<int64_t>>(recvint64(row.data() + pos)));
+                pos += length;
+                break;
+
+            case (SchemaType::INT32):
+                assert(length == 4);
+                fields->push_back(std::make_shared<ConstTypeField<int32_t>>(recvint32(row.data() + pos)));
+                pos += length;
+                break;
+
+            case (SchemaType::INT16):
+                assert(length == 2);
+                fields->push_back(std::make_shared<ConstTypeField<int16_t>>(recvint16(row.data() + pos)));
+                pos += length;
+                break;
+
+            case (SchemaType::INT8):
+                assert(length == 1);
+                fields->push_back(std::make_shared<ConstTypeField<int8_t>>(recvint8(row.data() + pos)));
+                ++pos;
+                break;
+
+            case (SchemaType::BOOLEAN):
+                assert(length == 1);
+                fields->push_back(std::make_shared<ConstTypeField<bool>>(*(row.data() + pos) == 1));
+                ++pos;
+                break;
+
+            case (SchemaType::FLOAT64): {
+                assert(length == 8);
+                auto num = recvint64(row.data() + pos);
+                double d = *reinterpret_cast<double *>(&num);
+                fields->push_back(std::make_shared<ConstTypeField<double>>(d));
+                pos += length;
+                break;
             }
-            else if (type == "int8" || type == "serial8" ||
-                     type == "timestamp" || type == "timestamptz" || type == "time") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::INT64));
-                } else {
-                    assert(length == 8);
-                    fields->push_back(std::make_shared<ConstTypeField<int64_t>>(recvint64(row.data() + pos)));
-                    pos += length;
-                }
+
+            case (SchemaType::FLOAT32): {
+                assert(length == 4);
+                auto num = recvint32(row.data() + pos);
+                float f = *reinterpret_cast<float *>(&num);
+                fields->push_back(std::make_shared<ConstTypeField<float>>(f));
+                pos += length;
+                break;
             }
-            else if (type == "bool") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::BOOLEAN));
-                } else {
-                    assert(length == 1);
-                    fields->push_back(std::make_shared<ConstTypeField<bool>>(*(row.data() + pos) == 1));
-                    ++pos;
-                }
+
+            case (SchemaType::BINARY): {
+                std::string_view tmp(row.data() + pos, length);
+
+                SPDLOG_WARN("Converting unsupported type '{}' into BINARY -- {}",
+                            pg_type, tmp);
+                std::vector<char> data(tmp.begin(), tmp.end());
+                fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
+                pos += length;
+                break;
             }
-            else if (type == "int2" || type == "serial2") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::INT16));
-                } else {
-                    assert(length == 2);
-                    fields->push_back(std::make_shared<ConstTypeField<int16_t>>(recvint16(row.data() + pos)));
-                    pos += length;
-                }
-            }
-            else if (type == "float4") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::FLOAT32));
-                } else {
-                    assert(length == 4);
-                    auto num = recvint32(row.data() + pos);
-                    float f = *reinterpret_cast<float *>(&num);
-                    fields->push_back(std::make_shared<ConstTypeField<float>>(f));
-                    pos += length;
-                }
-            }
-            else if (type == "float8") {
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::FLOAT64));
-                } else {
-                    assert(length == 8);
-                    auto num = recvint64(row.data() + pos);
-                    double d = *reinterpret_cast<double *>(&num);
-                    fields->push_back(std::make_shared<ConstTypeField<double>>(d));
-                    pos += length;
-                }
-            } else {
-                SPDLOG_WARN("Converting unsupported type '{}' into BINARY", type);
-                if (length == -1) {
-                    fields->push_back(std::make_shared<ConstNullField>(SchemaType::BINARY));
-                } else {
-                    std::string_view tmp(row.data() + pos, length);
-                    std::vector<char> data(tmp.begin(), tmp.end());
-                    fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
-                    pos += length;
-                }
+
+            default:
+                throw TypeError(fmt::format("PG doesn't support type: {}",
+                                            static_cast<uint8_t>(type)));
             }
         }
 

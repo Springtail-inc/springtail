@@ -11,6 +11,7 @@ extern "C" {
     #include <utils/builtins.h>
     #include <nodes/pg_list.h>
     #include <nodes/primnodes.h>
+    #include <varatt.h>
 }
 
 namespace springtail {
@@ -29,11 +30,11 @@ namespace springtail {
     PgFdwState *
     PgFdwMgr::fdw_begin(uint64_t tid, uint64_t xid)
     {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
+
         if (xid == 0) {
             xid = XidMgrClient::get_instance()->get_committed_xid();
         }
-
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
         PgFdwState *state = new PgFdwState{table, tid, xid, table->begin()};
@@ -128,14 +129,10 @@ namespace springtail {
             auto &&value = field->get_binary(row);
             auto len = value.size();
 
-            // note: it's possible we will need to put the data size here
-#if 0
+            // note: we store the binary data as a vardata so that PG can unpack it for us
             text *result = (text *)palloc(len + VARHDRSZ);
             SET_VARSIZE(result, len + VARHDRSZ);
             memcpy(VARDATA(result), value.data(), len);
-#endif
-            text *result = (text *)palloc(len);
-            memcpy(result, value.data(), len);
 
             return PointerGetDatum(result);
         }
