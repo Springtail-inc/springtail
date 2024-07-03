@@ -36,9 +36,9 @@ extern "C" {
 
     /** Iterate scan wrapper */
     bool
-    fdw_iterate_scan(void *state, Datum *values, bool *nulls) {
+    fdw_iterate_scan(void *state, int num_attrs, int *attrnums, Datum *values, bool *nulls) {
         if (state) {
-            return get_fdw_mgr()->fdw_iterate_scan(static_cast<PgFdwState*>(state), values, nulls);
+            return get_fdw_mgr()->fdw_iterate_scan(static_cast<PgFdwState*>(state), num_attrs, attrnums, values, nulls);
         }
         return false;
     }

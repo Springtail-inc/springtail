@@ -32,6 +32,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
 )
+#add_dsymutil_command(springtail_pg_fdw)
 
 add_executable(copy_schema test/copy_schema.cc)
 target_include_directories(copy_schema

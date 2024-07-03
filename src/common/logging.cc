@@ -73,6 +73,8 @@ namespace logging {
             for (const auto &module : log_modules) {
                 if (log_module_map.find(module) != log_module_map.end()) {
                     module_mask |= log_module_map[module];
+                } else {
+                    std::cerr << fmt::format("Unknown log module: {}\n", module);
                 }
             }
         }

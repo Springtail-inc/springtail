@@ -22,6 +22,7 @@
 #include "optimizer/restrictinfo.h"
 #include "optimizer/subselect.h"
 #include "optimizer/planmain.h"
+#include "optimizer/tlist.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_operator.h"
@@ -755,7 +756,6 @@ multicorn_getRelSize(PlannerInfo *root,
             // modified to use attrno instead of name
             Var		   *var = (Var *) lfirst(lc);
             int         attnum = var->varattno;
-
             planstate->target_list = lappend(planstate->target_list, makeInteger(attnum));
         }
     }
@@ -868,7 +868,6 @@ multicorn_getForeignPlan(PlannerInfo *root,
     /* Extract the quals coming from a parameterized path, if any */
     if (best_path->path.param_info)
     {
-
         foreach(lc, scan_clauses)
         {
             extractRestrictions(
@@ -881,42 +880,16 @@ multicorn_getForeignPlan(PlannerInfo *root,
     planstate->pathkeys = (List *) best_path->fdw_private;
 
     List *fdw_private = list_make1((void *)planstate);
-    List *fdw_scan_tlist = NIL;
 
     elog(LOG, "multicorn_getForeignPlan()");
-
-    foreach(lc, tlist)
-    {
-        TargetEntry *tle = (TargetEntry *) lfirst(lc);
-        elog(LOG, "tlist attnum: %d", tle->resno);
-    }
-
-    /* Iterate over the target list to build the fdw_scan_tlist */
-    foreach(lc, tlist)
-    {
-        TargetEntry *tle = (TargetEntry *) lfirst(lc);
-
-        ListCell *lc2;
-        foreach(lc2, planstate->target_list)
-        {
-            elog(LOG, "tlist attnum: %d, target attnum: %d", tle->resno, intVal(lfirst(lc2)));
-            if (tle->resno == intVal(lfirst(lc2)))
-            {
-                elog(LOG, "matched!");
-                fdw_scan_tlist = lappend(fdw_scan_tlist, tle);
-                //break;
-            }
-        }
-    }
-
 
     return make_foreignscan(tlist,
                             scan_clauses,
                             scan_relid,
-                            scan_clauses,     /* no expressions to evaluate */
-                            fdw_private,      /* private data */
-                            fdw_scan_tlist,   /* no custom tlist */
-                            NULL,             /* All quals are meant to be rechecked */
+                            scan_clauses,   /* no expressions to evaluate */
+                            fdw_private,    /* private data */
+                            NULL,           /* no custom tlist */
+                            NULL,           /* All quals are meant to be rechecked */
                             NULL);
 }
 

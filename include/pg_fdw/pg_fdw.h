@@ -29,7 +29,7 @@ void *fdw_begin_scan(void *stat, List *target_list, List *qual_list, List *sortg
 void fdw_end_scan(void *state);
 
 /** Iterate scan -- get next row */
-bool fdw_iterate_scan(void *state, Datum *values, bool *nulls);
+bool fdw_iterate_scan(void *state, int num_attrs, int *attrnums, Datum *values, bool *nulls);
 
 /** Reset scan */
 void fdw_reset_scan(void *state);

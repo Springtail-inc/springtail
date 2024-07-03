@@ -71,14 +71,15 @@ namespace pg_fdw {
         // init target list vector
         ListCell *lc;
         std::vector<std::string> target_colnames;
+        int i = 0;
         foreach(lc, target_list) {
             int attno = intVal(lfirst(lc));
             target_colnames.push_back(state->columns[attno].name);
+            state->target_columns.insert({attno,i++});
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Target list column: {}:{}",
                                 attno, state->columns[attno].name);
         }
 
-        // generate field list
         if (target_colnames.empty()) {
             // if no target columns, use all columns
             state->fields = state->table->extent_schema()->get_fields();
@@ -119,7 +120,7 @@ namespace pg_fdw {
     }
 
     bool
-    PgFdwMgr::fdw_iterate_scan(PgFdwState *state, Datum *values, bool *nulls)
+    PgFdwMgr::fdw_iterate_scan(PgFdwState *state, int num_attrs, int *attrnums, Datum *values, bool *nulls)
     {
         // check iterator is valid
         if (!state->iter.has_value()) {
@@ -135,10 +136,25 @@ namespace pg_fdw {
 
         // get current row
         Extent::Row row = *(*state->iter);
-        // iterate through fields
-        for (size_t i = 0; i < state->fields->size(); i++) {
-            // get field
-            FieldPtr field = state->fields->at(i);
+
+        // iterate through attributes passed in
+        for (int i = 0; i < num_attrs; i++) {
+            int attrno = attrnums[i];
+
+            // check if this column is in target list, if not skip
+            if (!state->target_columns.contains(attrno)) {
+                nulls[i] = true;
+                values[i] = 0;
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping column: {}", attrno);
+                continue;
+            }
+
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Fetching column: {}", attrno);
+
+            // get field idx that matches this attrno, then fetch the field and data
+            int field_idx = state->target_columns[attrno];
+            FieldPtr field = state->fields->at(field_idx);
+
             // set null
             nulls[i] = field->is_null(row);
 

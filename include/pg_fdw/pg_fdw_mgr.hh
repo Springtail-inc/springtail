@@ -59,8 +59,7 @@ namespace pg_fdw {
         std::optional<Table::Iterator> iter;
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
-
-        std::vector<uint32_t> target_columns;         ///< List of target columns
+        std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
         std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
 
         List *qual_list;    ///< List of predicate clauses (BaseQual)
@@ -121,8 +120,15 @@ namespace pg_fdw {
          */
         void fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup);
 
-        /** Iterate scan -- get next row */
-        bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);
+        /** Iterate scan -- get next row
+         * @param state PgFdwState
+         * @param num_attrs Number of attributes
+         * @param attrnums Array of attribute numbers
+         * @param values Array of Datum values (output)
+         * @param isnull Array of null flags (output)
+         * @return True if row is valid, false if end of scan
+         */
+        bool fdw_iterate_scan(PgFdwState *state, int num_attrs, int *attrnums, Datum *values, bool *isnull);
 
         /** End scan -- free state */
         void fdw_end_scan(PgFdwState *state);

@@ -190,7 +190,18 @@ dump_table(uint64_t tid, uint64_t xid)
 {
     TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
     ExtentSchemaPtr schema = table->extent_schema();
+    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+
     auto fields = schema->get_fields();
+    int attrnums[fields->size()];
+
+    // iterate over column map and extract attrnums
+    int i = 0;
+    for (auto &col : columns) {
+        if (col.second.exists) {
+            attrnums[i++] = col.first;
+        }
+    }
 
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
@@ -199,13 +210,13 @@ dump_table(uint64_t tid, uint64_t xid)
 
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, values, nulls)) {
+    while (mgr->fdw_iterate_scan(state, i, attrnums, values, nulls)) {
         // print the values
-        for (size_t i = 0; i < fields->size(); i++) {
-            if (nulls[i]) {
+        for (size_t j = 0; j < fields->size(); j++) {
+            if (nulls[j]) {
                 std::cout << "NULL";
             } else {
-                std::cout << dump_datum(values[i], fields->at(i)->get_type());
+                std::cout << dump_datum(values[j], fields->at(j)->get_type());
             }
             std::cout << " ";
         }
