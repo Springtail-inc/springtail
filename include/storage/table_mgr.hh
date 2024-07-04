@@ -56,11 +56,6 @@ namespace springtail {
          */
         void update_roots(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const std::vector<uint64_t> &roots);
 
-        /**
-         * Converts a Postgres type to a Springtail type.
-         */
-        static SchemaType convert_pg_type(const std::string &pg_type);
-
     private:
         static TableMgr *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance

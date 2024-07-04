@@ -15,8 +15,14 @@
 #include <pg_repl/pg_repl_msg.hh>
 
 #include <storage/system_tables.hh>
+#include <storage/schema.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
+
+extern "C" {
+#   include <postgres.h>
+#   include <catalog/pg_type.h>
+}
 
 /* See: https://www.postgresql.org/docs/current/datatype.html for postgres types */
 
@@ -33,7 +39,7 @@ namespace springtail
     /** select name, position, is_nullable, default, type, and is primary key for each column */
     static constexpr char SCHEMA_QUERY[] =
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
-        "       column_default, udt_name, "
+        "       column_default, atttypid, "
         "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey "
         "FROM pg_catalog.pg_attribute pga "
         "JOIN information_schema.columns "
@@ -134,7 +140,7 @@ namespace springtail
 
     /**
      * @brief Extract schema from table and store in internal _schema object
-     * @details Uses udt_name from information_catalog.columns table for name of type
+     * @details Uses atttypid from pg_attribute table for identifier of the type.
      *          Saves the column name, ordinal position, default value (as string), column type
      *          and is_nullable flag for each table column.  Requires getTableOid() first.
      *
@@ -185,15 +191,15 @@ namespace springtail
                 // column_default varchar
                 column.default_value = _connection.get_string_optional(i, 3);
 
-                // udt_name varchar
-                column.type = _connection.get_string(i, 4);
+                // atttypid oid
+                column.pg_type = _connection.get_int32(i, 4);
 
                 // is primary key
                 column.is_pkey = _connection.get_boolean(i, 5);
 
                 SPDLOG_DEBUG_MODULE(LOG_PG_REPL,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={}",
-                                    column.name, column.type, column.position, column.is_nullable,
+                                    column.name, column.pg_type, column.position, column.is_nullable,
                                     column.default_value.value_or("NULL"), column.is_pkey);
 
                 _schema.columns[i] = column;
@@ -453,7 +459,7 @@ namespace springtail
             write_bool(column.is_nullable);
             write_bool(column.is_pkey);
             write_string(column.name);
-            write_string(column.type);
+            write_int32(column.pg_type);
             write_string(column.default_value);
         }
     }
@@ -487,11 +493,11 @@ namespace springtail
             _schema.columns[i].is_nullable = read_bool();
             _schema.columns[i].is_pkey = read_bool();
             _schema.columns[i].name = read_string();
-            _schema.columns[i].type = read_string();
+            _schema.columns[i].pg_type = read_int32();
             _schema.columns[i].default_value = read_string_optional();
 
             std::cout << fmt::format("Column: {} type={} position={} nullable={} default_value={} pkey={}\n",
-                                     _schema.columns[i].name, _schema.columns[i].type,
+                                     _schema.columns[i].name, _schema.columns[i].pg_type,
                                      _schema.columns[i].position,
                                      _schema.columns[i].is_nullable,
                                      _schema.columns[i].default_value.value_or("NULL"),
@@ -626,7 +632,8 @@ namespace springtail
         for(const PgColumn &pg_col : pg_columns){
             columns.push_back(PgMsgSchemaColumn{
                     pg_col.name,
-                    pg_col.type,
+                    static_cast<uint8_t>(convert_pg_type(pg_col.pg_type)),
+                    pg_col.pg_type,
                     pg_col.default_value,
                     pg_col.position,
                     pg_col.is_pkey ? _get_vec_pos(pkeys, pg_col.name) : -1, // pk_position
@@ -829,9 +836,9 @@ namespace springtail
                 int32_t length = read_int32();
 
                 std::cout << fmt::format("column {} type={}, length={}",
-                                         _schema.columns[i].name, _schema.columns[i].type, length);
+                                         _schema.columns[i].name, _schema.columns[i].pg_type, length);
 
-                std::string type = _schema.columns[i].type;
+                int32_t pg_type = _schema.columns[i].pg_type;
 
                 // NOTE: a length of -1 indicates a NULL value
                 if (length == -1) {
@@ -839,27 +846,27 @@ namespace springtail
                 }
 
                 // a length of 0 indicates empty string
-                if (length == 0 && (type == "text" || type == "varchar")) {
+                if (length == 0 && (pg_type == TEXTOID || pg_type == VARCHAROID)) {
                     std::cout << "data=\n";
                 }
 
                 if (length > 0) {
-                    if (type == "int4" || type == "int" || type == "serial4" || type == "serial") {
+                    switch (pg_type) {
+                    case INT4OID:
                         assert(length == 4);
                         std::cout << fmt::format("data={}", read_int32());
-                    }
-                    else if (type == "text" || type == "varchar") {
+                        break;
+                    case TEXTOID:
+                    case VARCHAROID:
                         std::cout << fmt::format("data={}", read_string(length));
-                    }
-                    else if (type == "int8" || type == "serial8") {
+                        break;
+                    case INT8OID:
                         assert(length == 8);
                         std::cout << fmt::format("data={}", read_int64());
-                    }
-                    else if (type == "bool") {
+                    case BOOLOID:
                         assert(length == 1);
                         std::cout << fmt::format("data={}", read_bool());
-                    }
-                    else if (type == "bpchar") {
+                    case BPCHAROID:
                         // fixed length blank padded char
                         if (length == 1) {
                             char c = read_char();
@@ -867,48 +874,50 @@ namespace springtail
                         } else {
                             std::fseek(_file, length, SEEK_CUR);
                         }
-                    }
-                    else if (type == "int2" || type == "serial2") {
+                    case INT2OID:
                         assert(length == 2);
                         std::cout << fmt::format("data={}", read_int16());
-                    }
-                    else if (type == "float4") {
+                    case FLOAT4OID: {
                         assert(length == 4);
                         int32_t num = read_int32();
                         float f = *reinterpret_cast<float *>(&num);
                         std::cout << fmt::format("data={}", f);
+                        break;
                     }
-                    else if (type == "float8") {
+                    case FLOAT8OID: {
                         assert(length == 8);
                         int64_t num = read_int64();
                         double d = *reinterpret_cast<double *>(&num);
                         std::cout << fmt::format("data={}", d);
+                        break;
                     }
-                    else if (type == "timestamp" || type == "timestamptz") {
+                    case TIMESTAMPOID:
+                    case TIMESTAMPTZOID: {
                         // micro seconds since 2000-01-01 00:00:00
                         assert(length == 8);
                         uint64_t ts = read_int64();
                         uint64_t epoch_ms = ts/1000 + MSEC_SINCE_Y2K;
                         std::cout << fmt::format("data={}:{}", ts, epoch_ms);
+                        break;
                     }
-                    else if (type == "time") {
+                    case TIMEOID: {
                         // micro seconds since day start
                         assert(length == 8);
                         uint64_t ts = read_int64();
                         std::cout << fmt::format("data={} : {} hrs", ts, (ts/1000/1000/60/60));
+                        break;
                     }
-                    else if (type == "date") {
+                    case DATEOID: {
                         // days since 2000-01-01 00:00:00
                         assert(length == 4);
                         uint32_t dt = read_int32();
                         uint64_t epoch_ms = dt * 24 * 60 * 60 * 1000L + MSEC_SINCE_Y2K;
                         std::cout << fmt::format("data={} : {}", dt, epoch_ms);
+                        break;
                     }
-                    else if (type == "_bpchar") {
-                        // array of blank padded chars
+                    default:
                         std::fseek(_file, length, SEEK_CUR);
-                    } else {
-                        std::fseek(_file, length, SEEK_CUR);
+                        break;
                     }
                 }  // if (length > 0)
             }
@@ -938,8 +947,9 @@ namespace springtail
             pos += 4;
 
             // get the underlying springtail type
-            std::string pg_type = _schema.columns[i].type;
-            auto type = TableMgr::convert_pg_type(pg_type);
+            int32_t pg_type = _schema.columns[i].pg_type;
+            auto type = convert_pg_type(pg_type);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Got type {} from {}", static_cast<uint8_t>(type), pg_type);
 
             // check if null
             if (length == -1) {
@@ -1007,6 +1017,7 @@ namespace springtail
 
                 SPDLOG_WARN("Converting unsupported type '{}' into BINARY -- {}",
                             pg_type, tmp);
+                // XXX print out the binary data here
                 std::vector<char> data(tmp.begin(), tmp.end());
                 fields->push_back(std::make_shared<ConstTypeField<std::vector<char>>>(data));
                 pos += length;
@@ -1020,6 +1031,47 @@ namespace springtail
         }
 
         return fields;
+    }
+
+    SchemaType
+    PgCopyTable::convert_pg_type(int32_t pg_type)
+    {
+        switch (pg_type) {
+        case INT4OID:
+        case DATEOID:
+            return SchemaType::INT32;
+
+        case TEXTOID:
+        case VARCHAROID:
+        case BPCHAROID:
+            return SchemaType::TEXT;
+
+        case INT8OID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+        case TIMEOID:
+        case TIMETZOID:
+            return SchemaType::INT64;
+
+        case BOOLOID:
+            return SchemaType::BOOLEAN;
+
+        case INT2OID:
+            return SchemaType::INT16;
+
+        case FLOAT4OID:
+            return SchemaType::FLOAT32;
+
+        case FLOAT8OID:
+            return SchemaType::FLOAT64;
+
+        case CHAROID:
+            return SchemaType::INT8;
+
+        default:
+            // put all other types into BINARY data for now
+            return SchemaType::BINARY;
+        }
     }
 }
 

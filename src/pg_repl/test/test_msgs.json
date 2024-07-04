@@ -1,6 +1,6 @@
 ### Do not modify in use by test_msg_stream.cc
 {"cmd":"begin"}
-{"cmd":"create table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": "int4", "is_pkey": true},{"name":"b", "is_nullable": true, "type":"text", "is_pkey": false}]}
+{"cmd":"create table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "is_pkey": true},{"name":"b", "is_nullable": true, "type":1, "pg_type":25, "is_pkey": false}]}
 {"cmd":"insert", "table": "table1", "row": ["1", "one"]}
 {"cmd":"insert", "table": "table1", "row": ["2", "two"]}
 {"cmd":"insert", "table": "table1", "row": ["3", "three"]}
@@ -16,7 +16,7 @@
 {"cmd":"truncate", "table": "table1"}
 {"cmd":"commit"}
 {"cmd":"begin"}
-{"cmd":"alter table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": "int4", "is_pkey": true},{"name":"b", "is_nullable": true, "type":"text", "is_pkey": false},{"name":"c", "is_nullable": true, "type":"bool", "is_pkey": false}]}
+{"cmd":"alter table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "is_pkey": true},{"name":"b", "is_nullable": true, "type": 1, "pg_type": 25, "is_pkey": false},{"name":"c", "is_nullable": true, "type": 10,"pg_type":16, "is_pkey": false}]}
 {"cmd":"insert", "table": "table1", "row": ["4", null, true]}
 {"cmd":"commit"}
 {"cmd":"stream start"}

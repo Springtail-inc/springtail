@@ -153,8 +153,8 @@ namespace springtail {
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
                                                        true, // exists
                                                        column.column_name,
-                                                       static_cast<uint8_t>(convert_pg_type(column.udt_type)),
-                                                       column.udt_type, // sql_type
+                                                       column.type,
+                                                       column.pg_type, // pg type oid
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -219,8 +219,8 @@ namespace springtail {
             std::map<uint32_t, SchemaColumn> new_columns;
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
-                                                         convert_pg_type(col.udt_type),
-                                                         col.udt_type,
+                                                         SchemaType(col.type),
+                                                         col.pg_type,
                                                          true, col.is_nullable,
                                                          col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
                                                          col.default_value);
@@ -233,7 +233,7 @@ namespace springtail {
             auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, access_xid, xid);
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, update.position, xid, lsn,
                                                        (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
-                                                       col.name, static_cast<uint8_t>(col.type), col.sql_type,
+                                                       col.name, static_cast<uint8_t>(col.type), col.pg_type,
                                                        col.nullable, col.default_value, static_cast<uint8_t>(update.update_type));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
 
@@ -458,47 +458,5 @@ namespace springtail {
         std::string_view &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
         std::string_view &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
         return { std::string(old_namespace), std::string(old_name) };
-    }
-
-    SchemaType
-    TableMgr::convert_pg_type(const std::string &pg_type)
-    {
-        if (pg_type == "int4" || pg_type == "int" || pg_type == "serial4" || pg_type == "serial" ||
-            pg_type == "date") {
-            return SchemaType::INT32;
-        }
-
-        if (pg_type == "text" || pg_type == "varchar" || pg_type == "bpchar" || pg_type == "_bpchar") {
-            return SchemaType::TEXT;
-        }
-
-        if (pg_type == "int8" || pg_type == "serial8" ||
-            pg_type == "timestamp" || pg_type == "timestamptz" ||
-            pg_type == "time" || pg_type == "timetz") {
-            return SchemaType::INT64;
-        }
-
-        if (pg_type == "bool") {
-            return SchemaType::BOOLEAN;
-        }
-
-        if (pg_type == "int2" || pg_type == "serial2") {
-            return SchemaType::INT16;
-        }
-
-        if (pg_type == "float4") {
-            return SchemaType::FLOAT32;
-        }
-
-        if (pg_type == "float8") {
-            return SchemaType::FLOAT64;
-        }
-
-        if (pg_type == "float8") {
-            return SchemaType::FLOAT64;
-        }
-
-        // put all other types into BINARY data for now
-        return SchemaType::BINARY;
     }
 }

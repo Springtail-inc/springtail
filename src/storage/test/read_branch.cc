@@ -14,13 +14,13 @@ main(int argc,
     
     // construct a schema for testing
     std::vector<SchemaColumn> columns({
-            { "table_id", 0, SchemaType::UINT64, "uint8", false },
-            { "name", 1, SchemaType::TEXT, "text", false },
-            { "offset", 2, SchemaType::UINT64, "uint8", false }
+            { "table_id", 0, SchemaType::UINT64, 0, false },
+            { "name", 1, SchemaType::TEXT, 0, false },
+            { "offset", 2, SchemaType::UINT64, 0, false }
         });
     auto schema = std::make_shared<ExtentSchema>(columns);
 
-    SchemaColumn child("child", 0, SchemaType::UINT64, "uint8", false);
+    SchemaColumn child("child", 0, SchemaType::UINT64, 0, false);
     auto keys = std::vector<std::string>({"name", "table_id"});
     auto branch_schema = schema->create_schema(keys, { child }, keys);
     auto name_f = branch_schema->get_field("name");

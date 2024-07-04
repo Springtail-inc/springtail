@@ -19,3 +19,6 @@ DROP PUBLICATION IF EXISTS springtail_pub;
 
 -- remove the test data
 DROP TABLE test_data;
+DROP TABLE test_data2;
+DROP TABLE test_data3;
+DROP TABLE test_data4;

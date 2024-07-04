@@ -10,6 +10,11 @@
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
+extern "C" {
+#    include <postgres.h>
+#    include <catalog/pg_type.h>
+}
+
 namespace springtail {
     PgMsgLogGen::PgMsgLogGen(const std::filesystem::path &file_name) : _file_name(file_name)
     {
@@ -80,7 +85,8 @@ namespace springtail {
             nlohmann::json col;
             col["name"] = c.column_name;
             col["is_nullable"] = c.is_nullable;
-            col["type"] = c.udt_type;
+            col["type"] = c.type;
+            col["pg_type"] = c.pg_type;
             if (c.default_value.has_value()) {
                 col["default"] = c.default_value.value();
             } else {
@@ -92,14 +98,14 @@ namespace springtail {
             col["is_generated"] = false;
             columns_json.push_back(col);
 
-            assert(c.udt_type == PG_SCHEMA_TYPE_BOOL ||
-                   c.udt_type == PG_SCHEMA_TYPE_INT4 ||
-                   c.udt_type == PG_SCHEMA_TYPE_INT8 ||
-                   c.udt_type == PG_SCHEMA_TYPE_TEXT);
+            assert(c.pg_type == BOOLOID ||
+                   c.pg_type == INT4OID ||
+                   c.pg_type == INT8OID ||
+                   c.pg_type == TEXTOID);
 
-            _schema_map[table_id].push_back(c.udt_type);
+            _schema_map[table_id].push_back(c.pg_type);
             if (c.is_pkey) {
-                _pkey_map[table_id].push_back(c.udt_type);
+                _pkey_map[table_id].push_back(c.pg_type);
             }
         }
 
@@ -108,8 +114,8 @@ namespace springtail {
 
     void
     PgMsgLogGen::_write_tuple(uint32_t table_id,
-                           const std::vector<std::string> &types,
-                           const std::vector<std::string> &columns)
+                              const std::vector<int32_t> &types,
+                              const std::vector<std::string> &columns)
     {
         _write_uint16(columns.size());
         assert(types.size() == columns.size());
@@ -125,20 +131,20 @@ namespace springtail {
 
             _write_uint8('b'); // binary format
 
-            if (t == PG_SCHEMA_TYPE_BOOL) {
+            if (t == BOOLOID) {
                 _write_uint32(1);
                 if (c == PG_VALUE_TRUE) {
                     _write_uint8(1);
                 } else {
                     _write_uint8(0);
                 }
-            } else if (t == PG_SCHEMA_TYPE_INT4) {
+            } else if (t == INT4OID) {
                 _write_uint32(4);
                 _write_uint32(std::stoi(c));
-            } else if (t == PG_SCHEMA_TYPE_INT8) {
+            } else if (t == INT8OID) {
                 _write_uint32(8);
                 _write_uint64(std::stoll(c));
-            } else if (t == PG_SCHEMA_TYPE_TEXT) {
+            } else if (t == TEXTOID) {
                 _write_uint32(c.size());
                 _write(c.c_str(), c.size());
             } else {
@@ -574,7 +580,8 @@ namespace springtail {
             PgMsgSchemaColumn col;
             col.column_name = c["name"];
             col.is_nullable = c["is_nullable"];
-            col.udt_type = c["type"];
+            col.type = c["type"];
+            col.pg_type = c["pg_type"];
             if (!c.contains("default") || c["default"].is_null()) {
                 col.default_value = std::nullopt;
             } else {

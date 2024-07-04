@@ -32,6 +32,7 @@ namespace springtail  {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields;
+        std::vector<int32_t> types;
         std::optional<Table::Iterator> iter;
 
         /** Constructor */
@@ -39,6 +40,7 @@ namespace springtail  {
             : table(table), tid(tid), xid(xid), iter(iter)
         {
             fields = table->extent_schema()->get_fields();
+            types = table->extent_schema()->get_types();
         }
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
@@ -85,13 +87,13 @@ namespace springtail  {
         static PgFdwMgr* _init();          ///< Initialize singleton
 
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(FieldPtr field, const Extent::Row &row);
+        static Datum _get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type);
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server,
                                               const std::string &table,
                                               uint64_t tid,
-                                              std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> &columns);
+                                              std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,

@@ -19,6 +19,7 @@ using namespace springtail;
 extern "C" {
     #include "varatt.h"
     #include "utils/builtins.h"
+    #include <access/htup_details.h>
 
     // These files are not being linked in, from libpq
     // so we define them here
@@ -34,9 +35,9 @@ extern "C" {
     }
 
     /** Dummy pg_fprintf, does nothing */
-    int pg_fprintf(FILE *stream, const char *fmt, ...) {
-        return 0;
-    }
+    // int pg_fprintf(FILE *stream, const char *fmt, ...) {
+    //     return 0;
+    // }
 
     /** Dummy function so that we can link with pg_fdw_mgr.cc */
     text *
@@ -62,6 +63,23 @@ extern "C" {
         result[len] = '\0';
         return result;
     }
+
+    // stubs
+
+    Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3) {
+        return (Datum)0;
+    }
+
+    void ReleaseSysCache(HeapTuple tuple) { }
+
+    HeapTuple SearchSysCache1(int cacheId, Datum key1) {
+        return (HeapTuple)nullptr;
+    }
+
+    void errfinish(const char *filename, int lineno, const char *funcname) { }
+
+    int errmsg_internal(const char *fmt,...) { return 0; }
+    bool errstart_cold(int elevel, const char *domain) { return false; }
 }
 
 /** List all tables from TableNames system table */

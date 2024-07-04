@@ -132,6 +132,7 @@ namespace springtail {
             column.name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
             column.position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row);
             column.type = static_cast<SchemaType>(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row));
+            column.pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row);
             column.exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
             column.nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
@@ -286,7 +287,8 @@ namespace springtail {
     SchemaMgr::SchemaMgr()
         : _cache(1024*1024)
     {
-        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, "uint8", false);
+        // note: don't need a valid sql_type for the internal nodes since they aren't exposed
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
 
         // TableNames
         _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);

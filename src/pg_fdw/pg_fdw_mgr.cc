@@ -8,10 +8,15 @@
 extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
+    #include <access/htup_details.h>
+    #include <catalog/pg_type.h>
     #include <utils/builtins.h>
+    #include <utils/syscache.h>
+    #include <utils/typcache.h>
     #include <nodes/pg_list.h>
     #include <nodes/primnodes.h>
     #include <varatt.h>
+    #include <lib/stringinfo.h>
 }
 
 namespace springtail {
@@ -82,7 +87,7 @@ namespace springtail {
 
             // set value
             if (!nulls[i]) {
-                values[i] = _get_datum_from_field(field, row);
+                values[i] = _get_datum_from_field(field, row, state->types.at(i));
             } else {
                 values[i] = 0;
             }
@@ -95,7 +100,7 @@ namespace springtail {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row)
+    PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type)
     {
         switch (field->get_type()) {
         case SchemaType::INT64:
@@ -126,15 +131,39 @@ namespace springtail {
             return CStringGetTextDatum(duped_str);
         }
         case SchemaType::BINARY: {
+            // retrieve the type's entry from the pg_type table
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+		elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
+            }
+
+            // get the receive function
+            regproc typeinput = ((Form_pg_type) GETSTRUCT(tuple))->typreceive;
+
+            // handle array types by retrieving the subscript element type
+            Oid typelem = ((Form_pg_type) GETSTRUCT(tuple))->typelem;
+            if (typelem != 0) {
+                pg_type = typelem;
+            }
+
+            ReleaseSysCache(tuple);
+
             auto &&value = field->get_binary(row);
-            auto len = value.size();
 
-            // note: we store the binary data as a vardata so that PG can unpack it for us
-            text *result = (text *)palloc(len + VARHDRSZ);
-            SET_VARSIZE(result, len + VARHDRSZ);
-            memcpy(VARDATA(result), value.data(), len);
+            // note: we need to store the data into a StringInfo so that the receive function can
+            // unpack it for us
+            StringInfoData string;
+            initStringInfo(&string);
+            appendBinaryStringInfoNT(&string, value.data(), value.size());
+            Datum datum = PointerGetDatum(&string);
 
-            return PointerGetDatum(result);
+            // call the recieve function
+            // XXX we need to replace that -1 with the pgtypmod from the pg_attribute table... can
+            //     figure out the right way to retrieve that when we merge this code with the new
+            //     FDW code
+            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(-1)); // Int32GetDatum(pgtypmod)
+
+            return value_datum;
         }
 
         default:
@@ -146,7 +175,7 @@ namespace springtail {
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> &columns)
+                                 std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
@@ -154,14 +183,19 @@ namespace springtail {
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         for (int i = 0; i < columns.size(); i++) {
-            const auto &[column_name, sql_type, nullable, default_value] = columns[i];
+            const auto &[column_name, pg_type, nullable, default_value] = columns[i];
             std::string column = fmt::format("  {} ", quote_identifier(column_name.c_str()));
 
-            if (sql_type == "uint8" || sql_type == "uint4" || sql_type == "uint2") {
-                column += sql_type.substr(1);
-            } else {
-                column += sql_type;
+            // get the type name
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+		elog(ERROR, "cache lookup failed for type%u", pg_type);
             }
+
+            std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
+            ReleaseSysCache(tuple);
+
+            column += type_name;
 
             // add nullability and default
             if (!nullable) {
@@ -192,11 +226,11 @@ namespace springtail {
                                     uint64_t tid,
                                     const std::vector<SchemaColumn> &column_schema)
     {
-        // column description: name, sql_type, nullable, default
-        std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> columns;
+        // column description: name, pg_type, nullable, default
+        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
 
         for (const auto &column : column_schema) {
-            columns.push_back({column.name, column.sql_type, column.nullable, column.default_value});
+            columns.push_back({column.name, column.pg_type, column.nullable, column.default_value});
         }
 
         return _gen_fdw_table_sql(server, table_name, tid, columns);
@@ -331,7 +365,7 @@ namespace springtail {
         // Move on to iterating through the schemas table
 
         // column list: name, type, nullable, default
-        std::vector<std::tuple<std::string, std::string, bool, std::optional<std::string>>> columns;
+        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
 
         uint64_t current_tid=0;
         std::string current_table;
@@ -387,7 +421,7 @@ namespace springtail {
 
             // add column if it exists
             std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
-            std::string sql_type(fields->at(sys_tbl::Schemas::Data::SQL_TYPE)->get_text(row));
+            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             std::optional<std::string> default_value{};
 
@@ -395,7 +429,7 @@ namespace springtail {
                 default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
             }
 
-            columns.push_back({column_name, sql_type, nullable, default_value});
+            columns.push_back({column_name, pg_type, nullable, default_value});
         }
 
         // process last table

@@ -56,7 +56,7 @@ namespace springtail {
             _column_order.push_back(column.name);
 
             // add the sql types in column order
-            _sql_types.push_back(column.sql_type);
+            _pg_types.push_back(column.pg_type);
 
             // save the pkey mappings
             if (column.pkey_position) {
@@ -188,7 +188,7 @@ namespace springtail {
                         name,
                         size,
                         i->second.first->get_type(),
-                        _sql_types[i->second.second],
+                        _pg_types[i->second.second],
                         i->second.first->can_be_null()
                     });
             } else {
@@ -196,7 +196,7 @@ namespace springtail {
                         name,
                         size,
                         i->second.first->get_type(),
-                        _sql_types[i->second.second],
+                        _pg_types[i->second.second],
                         i->second.first->can_be_null(),
                         (pos - sort_columns.begin())
                     });
