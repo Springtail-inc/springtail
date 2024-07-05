@@ -85,6 +85,11 @@ namespace springtail {
          */
         std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);
 
+        /**
+         * Find the table statistics from the TableStats system table.
+         */
+        TableStats _find_stats(uint64_t table_id, uint64_t xid);
+
     private:
         // singleton; delete copy constructor
         TableMgr(const TableMgr &) = delete;

@@ -15,13 +15,15 @@ namespace springtail {
                  const std::vector<std::string> &primary_key,
                  const std::vector<std::vector<std::string>> &secondary_keys,
                  std::vector<uint64_t> root_offsets,
-                 ExtentSchemaPtr schema)
+                 ExtentSchemaPtr schema,
+                 const TableStats &stats)
         : _id(table_id),
           _xid(xid),
           _table_dir(table_dir),
           _primary_key(primary_key),
           _secondary_keys(secondary_keys),
-          _schema(schema)
+          _schema(schema),
+          _stats(stats)
     {
         // make sure that the table directory exists
         std::filesystem::create_directory(_table_dir);
@@ -136,6 +138,27 @@ namespace springtail {
     }
 
     Table::Iterator
+    Table::inverse_lower_bound(TuplePtr search_key)
+    {
+        // find the extent that could contain the inverse_lower_bound() key
+        auto &&i = _primary_index->inverse_lower_bound(search_key);
+        if (i == _primary_index->end()) {
+            return end();
+        }
+
+        // read the extent and find the inverse_lower_bound() of the key within it
+        auto page = _read_page_via_primary(i);
+
+        // find the inverse_lower_bound() of the key within the data extent
+        auto &&j = page->inverse_lower_bound(search_key, _schema);
+
+        // note: the primary index indicates that there is a value <= the search_key in this page
+        assert(j != page->end());
+
+        return Iterator(this, _primary_index, i, page, j);
+    }
+
+    Table::Iterator
     Table::begin()
     {
         auto &&index_i = _primary_index->begin();
@@ -175,6 +198,7 @@ namespace springtail {
                                const std::vector<std::string> &primary_key,
                                const std::vector<std::vector<std::string>> &secondary_keys,
                                ExtentSchemaPtr schema,
+                               const TableStats &stats,
                                bool for_gc)
     : _id(id),
       _access_xid(access_xid),
@@ -184,6 +208,7 @@ namespace springtail {
       _primary_key(primary_key),
       _secondary_keys(secondary_keys),
       _schema(schema),
+      _stats(stats),
       _for_gc(for_gc)
     {
         // make sure that the table directory exists

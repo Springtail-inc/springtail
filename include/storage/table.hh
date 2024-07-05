@@ -8,6 +8,17 @@
 namespace springtail {
 
     /**
+     * Structure to hold table statistics.  Currently only holds the row count of the table.
+     */
+    struct TableStats {
+        uint64_t row_count;
+
+        TableStats()
+            : row_count(0)
+        { }
+    };
+
+    /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
@@ -111,7 +122,8 @@ namespace springtail {
               const std::vector<std::string> &primary_key,
               const std::vector<std::vector<std::string>> &secondary_keys,
               std::vector<uint64_t> root_offsets,
-              ExtentSchemaPtr schema);
+              ExtentSchemaPtr schema,
+              const TableStats &stats);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -146,6 +158,12 @@ namespace springtail {
          * key.  Search key must match the primary index order.
          */
         Iterator lower_bound(TuplePtr search_key);
+
+        /**
+         * Returns an iterator to the first row that is less than or equal to the provided search
+         * key.  Search key must match the primary index order.
+         */
+        Iterator inverse_lower_bound(TuplePtr search_key);
 
         /**
          * An iterator to the start of the table.
@@ -214,6 +232,8 @@ namespace springtail {
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
+
+        TableStats _stats; ///< The statistics for this table.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -233,6 +253,7 @@ namespace springtail {
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
                      ExtentSchemaPtr schema,
+                     const TableStats &stats,
                      bool for_gc = false);
 
         /**
@@ -429,6 +450,7 @@ namespace springtail {
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
         StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
+        TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
     };

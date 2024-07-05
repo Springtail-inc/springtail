@@ -69,7 +69,8 @@ namespace {
                                            _primary_keys,
                                            _secondary_keys,
                                            roots,
-                                           _schema);
+                                           _schema,
+                                           TableStats());
         }
 
         MutableTablePtr
@@ -82,7 +83,8 @@ namespace {
                                                   _base_dir / fmt::format("{}", table_id),
                                                   _primary_keys,
                                                   _secondary_keys,
-                                                  _schema);
+                                                  _schema,
+                                                  TableStats());
         }
 
         std::shared_ptr<Tuple>

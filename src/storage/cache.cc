@@ -472,6 +472,39 @@ namespace springtail {
     }
 
     StorageCache::Page::Iterator
+    StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+
+        // check if the page is empty
+        if (empty()) {
+            return end();
+        }
+
+        // perform a lower-bound to find the row with a key <= the provided tuple
+        auto i = lower_bound(tuple, schema);
+        if (i == end()) {
+            --i;
+            return i;
+        }
+
+        // if the key is equal, return it
+        auto key = FieldTuple(schema->get_sort_fields(), *i);
+        if (tuple->equal(key)) {
+            return i;
+        }
+
+        // if we are at the first entry, nothing before it
+        if (i == begin()) {
+            return end();
+        }
+
+        // go to the previous entry
+        --i;
+        return i;
+    }
+
+    StorageCache::Page::Iterator
     StorageCache::Page::at(uint32_t index)
     {
         // iterate through the extents to find the requested index in the page

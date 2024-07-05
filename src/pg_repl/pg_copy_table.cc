@@ -693,7 +693,8 @@ namespace springtail
                                                     table_dir,
                                                     schema->get_sort_keys(), // primary keys
                                                     std::vector<std::vector<std::string>>{}, // secondary keys
-                                                    schema);
+                                                    schema,
+                                                    TableStats());
 
         // start the COPY
         prepare_copy();

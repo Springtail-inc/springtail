@@ -124,4 +124,22 @@ namespace springtail::sys_tbl {
         "xid",
         "lsn"
     };
+
+    // TableStats
+    const std::vector<SchemaColumn> TableStats::Data::SCHEMA = {
+        { "table_id", 0, SchemaType::UINT64, INT8OID, false, 0 },
+        { "xid", 1, SchemaType::UINT64, INT8OID, false, 2 },
+        { "row_count", 2, SchemaType::UINT64, INT8OID, false }
+    };
+
+    const std::vector<SchemaColumn> TableStats::Primary::SCHEMA = {
+        { "table_id", 0, SchemaType::UINT64, INT8OID, false },
+        { "xid", 1, SchemaType::UINT64, INT8OID, false },
+        { constant::INDEX_EID_FIELD, 2, SchemaType::UINT64, INT8OID, false }
+    };
+
+    const std::vector<std::string> TableStats::Primary::KEY = {
+        "table_id",
+        "xid"
+    };
 }
