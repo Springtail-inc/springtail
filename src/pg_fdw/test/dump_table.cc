@@ -20,6 +20,7 @@ using namespace springtail::pg_fdw;
 extern "C" {
     #include "varatt.h"
     #include "utils/builtins.h"
+    #include <access/htup_details.h>
 
     // These files are not being linked in, from libpq
     // so we define them here
@@ -32,11 +33,6 @@ extern "C" {
     /** Dummy lappend, does nothing */
     List *lappend(List *list, void *datum) {
         return list;
-    }
-
-    /** Dummy pg_fprintf, does nothing */
-    int pg_fprintf(FILE *stream, const char *fmt, ...) {
-        return 0;
     }
 
     /** Dummy function so that we can link with pg_fdw_mgr.cc */
@@ -90,6 +86,22 @@ extern "C" {
     int errmsg_internal(const char *fmt, ...) { return 0; }
 
     bool errstart_cold(int elevel, const char* domain) { return false; }
+    // stubs
+
+    Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3) {
+        return (Datum)0;
+    }
+
+    void ReleaseSysCache(HeapTuple tuple) { }
+
+    HeapTuple SearchSysCache1(int cacheId, Datum key1) {
+        return (HeapTuple)nullptr;
+    }
+
+    void errfinish(const char *filename, int lineno, const char *funcname) { }
+
+    int errmsg_internal(const char *fmt,...) { return 0; }
+    bool errstart_cold(int elevel, const char *domain) { return false; }
 }
 
 /** List all tables from TableNames system table */
@@ -104,8 +116,8 @@ list_tables()
 
     // iterate over the table names table
     for (auto row : (*table)) {
-        std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+        std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+        std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
         uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
         uint64_t xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
         bool exists = fields->at(sys_tbl::TableNames::Data::EXISTS)->get_bool(row);
@@ -131,8 +143,8 @@ lookup_table(const std::string &schema_name, const std::string &table_name, uint
     // iterate over the table names table
     uint64_t found_tid = -1;
     for (auto row : (*table)) {
-        std::string ns = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
-        std::string name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+        std::string ns(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+        std::string name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
         uint64_t tid = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(row);
         uint64_t t_xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(row);
 
@@ -173,12 +185,6 @@ dump_datum(Datum value, SchemaType type)
         case SchemaType::TEXT:
             //return fmt::format("{}", DatumGetCString(value));
             return fmt::format("{}", TextDatumGetCString(value));
-        case SchemaType::TIMESTAMP:
-            return fmt::format("{}", DatumGetUInt64(value));
-        case SchemaType::DATE:
-            return fmt::format("{}", DatumGetUInt32(value));
-        case SchemaType::TIME:
-            return fmt::format("{}", DatumGetUInt64(value));
         default:
             return "UNKNOWN";
     }

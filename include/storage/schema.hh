@@ -36,6 +36,7 @@ namespace springtail {
         std::string name;
         uint32_t position;  ///< position and postgres column ID, can have holes
         SchemaType type;
+        int32_t pg_type;
         bool exists;
         bool nullable;
         std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
@@ -49,6 +50,7 @@ namespace springtail {
                      const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
+                     int32_t pg_type,
                      bool exists,
                      bool nullable,
                      std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
@@ -58,6 +60,7 @@ namespace springtail {
               name(name),
               position(position),
               type(type),
+              pg_type(pg_type),
               exists(exists),
               nullable(nullable),
               pkey_position(pkey_position),
@@ -67,6 +70,7 @@ namespace springtail {
         SchemaColumn(const std::string_view &name,
                      uint32_t position,
                      SchemaType type,
+                     int32_t pg_type,
                      bool nullable,
                      std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
@@ -75,6 +79,7 @@ namespace springtail {
               name(name),
               position(position),
               type(type),
+              pg_type(pg_type),
               nullable(nullable),
               pkey_position(pkey_position),
               default_value(default_value)
@@ -121,6 +126,9 @@ namespace springtail {
 
         /** The order of the columns. */
         std::vector<std::string> _column_order;
+
+        /** The set of SQL types in column order. */
+        std::vector<int32_t> _pg_types;
 
         /** The sort columns of the schema. */
         std::shared_ptr<std::vector<FieldPtr>> _sort_fields;
@@ -203,6 +211,13 @@ namespace springtail {
         create_schema(const std::vector<std::string> &old_columns,
                       const std::vector<SchemaColumn> &new_columns,
                       const std::vector<std::string> &sort_columns) const;
+
+        /**
+         * Retrieve the list of column types.
+         */
+        std::vector<int32_t> get_types() const {
+            return _pg_types;
+        }
 
         /**
          * Generate a list of all of the fields in the schema.

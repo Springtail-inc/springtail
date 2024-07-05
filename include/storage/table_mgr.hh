@@ -81,11 +81,6 @@ namespace springtail {
         std::pair<std::string, std::string> _get_table_name(uint64_t table_id, uint64_t xid, uint64_t lsn);
 
         /**
-         * Converts a Postgres type to a Springtail type.
-         */
-        SchemaType _convert_pg_type(const std::string &pg_type);
-
-        /**
          * Find the roots of a given table from the TableRoots system table.
          */
         std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);

@@ -19,10 +19,10 @@ namespace {
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
-                    { "table_id", 0, SchemaType::INT64, false },
-                    { "name", 1, SchemaType::TEXT, false, 0 },
-                    { "offset", 2, SchemaType::INT64, false, 1 },
-                    { "index", 3, SchemaType::INT16, false, 2 }
+                    { "table_id", 0, SchemaType::INT64, 0, false },
+                    { "name", 1, SchemaType::TEXT, 0, false, 0 },
+                    { "offset", 2, SchemaType::INT64, 0, false, 1 },
+                    { "index", 3, SchemaType::INT16, 0, false, 2 }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 

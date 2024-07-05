@@ -14,7 +14,7 @@ namespace springtail
     /** Stores the column schema for the table being copied */
     struct PgColumn {
         std::string name;
-        std::string type;
+        int32_t pg_type;
         std::optional<std::string> default_value;
         int32_t position;
         bool is_nullable;
@@ -100,6 +100,8 @@ namespace springtail
         void read_header();
         void read_schema();
         void read_copy_data();
+
+        SchemaType convert_pg_type(int32_t pg_type);
 
     public:
 

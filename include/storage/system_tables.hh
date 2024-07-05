@@ -192,9 +192,10 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXISTS = 4;
             static constexpr uint32_t NAME = 5;
             static constexpr uint32_t TYPE = 6;
-            static constexpr uint32_t NULLABLE = 7;
-            static constexpr uint32_t DEFAULT = 8;
-            static constexpr uint32_t UPDATE_TYPE = 9;
+            static constexpr uint32_t PG_TYPE = 7;
+            static constexpr uint32_t NULLABLE = 8;
+            static constexpr uint32_t DEFAULT = 9;
+            static constexpr uint32_t UPDATE_TYPE = 10;
 
             static const std::vector<SchemaColumn> SCHEMA;
 
@@ -206,11 +207,12 @@ namespace springtail::sys_tbl {
                   bool exists,
                   const std::string &name,
                   uint8_t type,
+                  int32_t pg_type,
                   bool nullable,
                   const std::optional<std::string> &default_value,
                   uint8_t update_type)
             {
-                auto fields = std::make_shared<FieldArray>(10);
+                auto fields = std::make_shared<FieldArray>(11);
 
                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
@@ -219,6 +221,7 @@ namespace springtail::sys_tbl {
                 fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
                 fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
                 fields->at(TYPE) = std::make_shared<ConstTypeField<uint8_t>>(type);
+                fields->at(PG_TYPE) = std::make_shared<ConstTypeField<int32_t>>(pg_type);
                 fields->at(NULLABLE) = std::make_shared<ConstTypeField<bool>>(nullable);
                 if (default_value) {
                     fields->at(DEFAULT) = std::make_shared<ConstTypeField<std::string>>(*default_value);

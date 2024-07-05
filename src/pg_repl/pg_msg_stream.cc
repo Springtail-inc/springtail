@@ -818,7 +818,7 @@ namespace springtail {
 
     void
     PgMsgStreamReader::_decode_schema_columns(nlohmann::json &column_json,
-                                        std::vector<PgMsgSchemaColumn> &columns)
+                                              std::vector<PgMsgSchemaColumn> &columns)
     {
         // iterate through json array
         for (auto &el: column_json.items()) {
@@ -826,7 +826,8 @@ namespace springtail {
             nlohmann::json json = el.value();
 
             json["name"].get_to(column.column_name);
-            json["type"].get_to(column.udt_type);
+            json["type"].get_to(column.type);
+            json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["position"].get_to(column.position);
