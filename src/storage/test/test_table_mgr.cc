@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/json.hh>
 #include <common/object_cache.hh>
+#include <common/properties.hh>
 #include <common/threaded_test.hh>
 
 #include <storage/system_tables.hh>
@@ -15,14 +17,19 @@ namespace {
      */
     class TableMgr_Test : public testing::Test {
         void SetUp() override {
-            std::filesystem::remove_all("/tmp/springtail/table");
-
             springtail_init();
+
+            auto json = Properties::get(Properties::STORAGE_CONFIG);
+            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir,
+                                                "/tmp/springtail/table");
+            std::filesystem::remove_all(_table_dir);
         }
 
         void TearDown() override {
-            std::filesystem::remove_all("/tmp/springtail/table");
+            std::filesystem::remove_all(_table_dir);
         }
+
+        std::filesystem::path _table_dir;
     };
 
     // Tests the schema modification paths
@@ -34,8 +41,8 @@ namespace {
         create_msg.xid = 2;
         create_msg.schema = "public";
         create_msg.table = "x";
-        create_msg.columns.push_back({"col1", "text", "foo", 0, 0, false, true});
-        create_msg.columns.push_back({"col2", "int4", std::nullopt, 1, 0, true, false});
+        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
+        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
 
         TableMgr::get_instance()->create_table(2, 0, create_msg);
 
@@ -46,8 +53,8 @@ namespace {
         alter_msg.xid = 3;
         alter_msg.schema = "public";
         alter_msg.table = "x";
-        alter_msg.columns.push_back({"col1", "text", "foo", 0, 0, false, true});
-        alter_msg.columns.push_back({"colnew", "int4", std::nullopt, 1, 0, true, false});
+        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
+        alter_msg.columns.push_back({"colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
 
         TableMgr::get_instance()->alter_table(3, 0, alter_msg);
 

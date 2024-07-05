@@ -21,9 +21,9 @@ namespace {
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
-                    { "table_id", 0, SchemaType::UINT64, false },
-                    { "name", 1, SchemaType::TEXT, false, 0 },
-                    { "offset", 2, SchemaType::UINT64, false }
+                    { "table_id", 0, SchemaType::UINT64, 0, false },
+                    { "name", 1, SchemaType::TEXT, 0, false, 0 },
+                    { "offset", 2, SchemaType::UINT64, 0, false }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 
@@ -691,9 +691,8 @@ namespace {
 
             uint64_t extent_id = table->primary_lookup(search_key);
 
-            auto value = _create_value(count++,
-                                       search_key->field(0)->get_text(search_key->row()),
-                                       20000);
+            std::string name(search_key->field(0)->get_text(search_key->row()));
+            auto value = _create_value(count++, name, 20000);
 
             tuple_map[extent_id].push_back(value);
         }

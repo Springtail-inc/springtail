@@ -141,8 +141,8 @@ namespace springtail {
         std::vector<PgTransactionPtr> _xact_list; ///< transaction list
 
         std::map<uint32_t, std::string> _table_id_to_name; ///< table id to name
-        std::map<uint32_t, std::vector<std::string>> _schema_map; ///< table id to schema type list
-        std::map<uint32_t, std::vector<std::string>> _pkey_map; ///< table id to primary key type list
+        std::map<uint32_t, std::vector<int32_t>> _schema_map; ///< table id to schema type list
+        std::map<uint32_t, std::vector<int32_t>> _pkey_map; ///< table id to primary key type list
 
         /** write uint64 */
         void _write_uint64(uint64_t val) {
@@ -185,7 +185,7 @@ namespace springtail {
         void _write_message(const char *prefix, const nlohmann::json &msg);
 
         /** write tuple data */
-        void _write_tuple(uint32_t table_id, const std::vector<std::string> &types, const std::vector<std::string> &columns);
+        void _write_tuple(uint32_t table_id, const std::vector<int32_t> &types, const std::vector<std::string> &columns);
 
         /** write header */
         void _write_header();

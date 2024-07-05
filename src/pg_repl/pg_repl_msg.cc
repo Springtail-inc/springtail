@@ -249,7 +249,7 @@ namespace pg_msg {
 
                 for (PgMsgSchemaColumn &column: table.columns) {
                     ss << "  - name=" << column.column_name << std::endl;
-                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - type=" << column.type << std::endl;
                     ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
                     ss << "  - is_pkey=" << column.is_pkey << std::endl;
@@ -273,7 +273,7 @@ namespace pg_msg {
 
                 for (PgMsgSchemaColumn &column: table.columns) {
                     ss << "  - name=" << column.column_name << std::endl;
-                    ss << "  - type=" << column.udt_type << std::endl;
+                    ss << "  - type=" << column.type << std::endl;
                     ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
                     ss << "  - position=" << column.position << std::endl;

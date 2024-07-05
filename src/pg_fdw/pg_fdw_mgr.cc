@@ -8,9 +8,15 @@
 extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
+    #include <access/htup_details.h>
+    #include <catalog/pg_type.h>
     #include <utils/builtins.h>
+    #include <utils/syscache.h>
+    #include <utils/typcache.h>
     #include <nodes/pg_list.h>
     #include <nodes/primnodes.h>
+    #include <varatt.h>
+    #include <lib/stringinfo.h>
 }
 
 namespace springtail {
@@ -29,11 +35,11 @@ namespace springtail {
     PgFdwState *
     PgFdwMgr::fdw_begin(uint64_t tid, uint64_t xid)
     {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
+
         if (xid == 0) {
             xid = XidMgrClient::get_instance()->get_committed_xid();
         }
-
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin: tid: {}, xid: {}", tid, xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
         PgFdwState *state = new PgFdwState{table, tid, xid, table->begin()};
@@ -81,7 +87,7 @@ namespace springtail {
 
             // set value
             if (!nulls[i]) {
-                values[i] = _get_datum_from_field(field, row);
+                values[i] = _get_datum_from_field(field, row, state->types.at(i));
             } else {
                 values[i] = 0;
             }
@@ -94,44 +100,74 @@ namespace springtail {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row)
+    PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type)
     {
         switch (field->get_type()) {
-            case SchemaType::INT64:
-                return Int64GetDatum(field->get_int64(row));
-            case SchemaType::UINT64:
-                return UInt64GetDatum(field->get_uint64(row));
-            case SchemaType::INT32:
-                return Int32GetDatum(field->get_int32(row));
-            case SchemaType::UINT32:
-                return UInt32GetDatum(field->get_uint32(row));
-            case SchemaType::INT16:
-                return Int16GetDatum(field->get_int16(row));
-            case SchemaType::UINT16:
-                return UInt16GetDatum(field->get_uint16(row));
-            case SchemaType::INT8:
-                return Int8GetDatum(field->get_int8(row));
-            case SchemaType::UINT8:
-                return UInt8GetDatum(field->get_uint8(row));
-            case SchemaType::BOOLEAN:
-                return BoolGetDatum(field->get_bool(row));
-            case SchemaType::FLOAT64:
-                return Float8GetDatum(field->get_float64(row));
-            case SchemaType::FLOAT32:
-                return Float4GetDatum(field->get_float32(row));
-            case SchemaType::TEXT: {
-                char *duped_str = pstrdup(field->get_text(row).c_str());
-                return CStringGetTextDatum(duped_str);
+        case SchemaType::INT64:
+            return Int64GetDatum(field->get_int64(row));
+        case SchemaType::UINT64:
+            return UInt64GetDatum(field->get_uint64(row));
+        case SchemaType::INT32:
+            return Int32GetDatum(field->get_int32(row));
+        case SchemaType::UINT32:
+            return UInt32GetDatum(field->get_uint32(row));
+        case SchemaType::INT16:
+            return Int16GetDatum(field->get_int16(row));
+        case SchemaType::UINT16:
+            return UInt16GetDatum(field->get_uint16(row));
+        case SchemaType::INT8:
+            return Int8GetDatum(field->get_int8(row));
+        case SchemaType::UINT8:
+            return UInt8GetDatum(field->get_uint8(row));
+        case SchemaType::BOOLEAN:
+            return BoolGetDatum(field->get_bool(row));
+        case SchemaType::FLOAT64:
+            return Float8GetDatum(field->get_float64(row));
+        case SchemaType::FLOAT32:
+            return Float4GetDatum(field->get_float32(row));
+        case SchemaType::TEXT: {
+            const std::string_view value(field->get_text(row));
+            char *duped_str = pnstrdup(value.data(), value.size());
+            return CStringGetTextDatum(duped_str);
+        }
+        case SchemaType::BINARY: {
+            // retrieve the type's entry from the pg_type table
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+		elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
             }
 
-            // XXX no getters in field for
-            case SchemaType::TIMESTAMP:
-            case SchemaType::DATE:
-            case SchemaType::TIME:
-            case SchemaType::DECIMAL128:
+            // get the receive function
+            regproc typeinput = ((Form_pg_type) GETSTRUCT(tuple))->typreceive;
 
-            default:
-                return 0;
+            // handle array types by retrieving the subscript element type
+            Oid typelem = ((Form_pg_type) GETSTRUCT(tuple))->typelem;
+            if (typelem != 0) {
+                pg_type = typelem;
+            }
+
+            ReleaseSysCache(tuple);
+
+            auto &&value = field->get_binary(row);
+
+            // note: we need to store the data into a StringInfo so that the receive function can
+            // unpack it for us
+            StringInfoData string;
+            initStringInfo(&string);
+            appendBinaryStringInfoNT(&string, value.data(), value.size());
+            Datum datum = PointerGetDatum(&string);
+
+            // call the recieve function
+            // XXX we need to replace that -1 with the pgtypmod from the pg_attribute table... can
+            //     figure out the right way to retrieve that when we merge this code with the new
+            //     FDW code
+            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(-1)); // Int32GetDatum(pgtypmod)
+
+            return value_datum;
+        }
+
+        default:
+            return 0;
         }
     }
 
@@ -139,7 +175,7 @@ namespace springtail {
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> &columns)
+                                 std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
@@ -147,54 +183,19 @@ namespace springtail {
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         for (int i = 0; i < columns.size(); i++) {
-            const auto &[column_name, type, nullable, default_value] = columns[i];
+            const auto &[column_name, pg_type, nullable, default_value] = columns[i];
             std::string column = fmt::format("  {} ", quote_identifier(column_name.c_str()));
 
-            switch (static_cast<SchemaType>(type)) {
-                case SchemaType::UINT8: // XXX no good mapping; use smallint for now
-                case SchemaType::INT8:
-                    column += "SMALLINT";
-                    break;
-                case SchemaType::UINT32:
-                case SchemaType::INT32:
-                    column += "INTEGER";
-                    break;
-                case SchemaType::UINT16:
-                case SchemaType::INT16:
-                    column += "SMALLINT";
-                    break;
-                case SchemaType::UINT64:
-                case SchemaType::INT64:
-                    column += "BIGINT";
-                    break;
-                case SchemaType::FLOAT32:
-                    column += "FLOAT4";
-                    break;
-                case SchemaType::FLOAT64:
-                    column += "FLOAT8";
-                    break;
-                case SchemaType::BOOLEAN:
-                    column += "BOOLEAN";
-                    break;
-                case SchemaType::TEXT:
-                    column += "TEXT";
-                    break;
-                case SchemaType::DATE:
-                    column += "DATE";
-                    break;
-                case SchemaType::TIME:
-                    column += "TIME";
-                    break;
-                case SchemaType::TIMESTAMP:
-                    column += "TIMESTAMP";
-                    break;
-                case SchemaType::BINARY:
-                    column += "BYTEA";
-                    break;
-                default:
-                    SPDLOG_ERROR("Unknown type {}", type);
-                    return "";
+            // get the type name
+            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+            if (!HeapTupleIsValid(tuple)) {
+		elog(ERROR, "cache lookup failed for type%u", pg_type);
             }
+
+            std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
+            ReleaseSysCache(tuple);
+
+            column += type_name;
 
             // add nullability and default
             if (!nullable) {
@@ -225,11 +226,11 @@ namespace springtail {
                                     uint64_t tid,
                                     const std::vector<SchemaColumn> &column_schema)
     {
-        // column description: name, type, nullable, default
-        std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
+        // column description: name, pg_type, nullable, default
+        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
 
         for (const auto &column : column_schema) {
-            columns.push_back({column.name, (uint8_t)column.type, column.nullable, column.default_value});
+            columns.push_back({column.name, column.pg_type, column.nullable, column.default_value});
         }
 
         return _gen_fdw_table_sql(server, table_name, tid, columns);
@@ -306,14 +307,14 @@ namespace springtail {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            std::string schema_name = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row);
+            std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
 
             // check for schema match
             if (schema_name != schema) {
                 continue;
             }
 
-            std::string table_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row);
+            std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema_name, table_name);
@@ -364,7 +365,7 @@ namespace springtail {
         // Move on to iterating through the schemas table
 
         // column list: name, type, nullable, default
-        std::vector<std::tuple<std::string, uint8_t, bool, std::optional<std::string>>> columns;
+        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
 
         uint64_t current_tid=0;
         std::string current_table;
@@ -419,8 +420,8 @@ namespace springtail {
             }
 
             // add column if it exists
-            std::string column_name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
-            uint8_t type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
+            std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
+            int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             std::optional<std::string> default_value{};
 
@@ -428,7 +429,7 @@ namespace springtail {
                 default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
             }
 
-            columns.push_back({column_name, type, nullable, default_value});
+            columns.push_back({column_name, pg_type, nullable, default_value});
         }
 
         // process last table

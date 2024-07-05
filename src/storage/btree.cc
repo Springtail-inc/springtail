@@ -18,7 +18,8 @@ namespace springtail {
         _leaf_keys = _leaf_schema->get_sort_fields();
 
         // construct the schema for the branches
-        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        // note: don't need a valid sql_type for the internal nodes since they aren't exposed
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
         _branch_schema = _leaf_schema->create_schema(keys, { child }, keys);
 
         // construct the field tuples for the branch nodes

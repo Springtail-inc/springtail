@@ -10,7 +10,9 @@ find_package(Boost COMPONENTS thread REQUIRED)
 
 ## main library
 add_library(springtail_storage ${STORAGE_SOURCES})
-target_include_directories(springtail_storage PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(springtail_storage
+  PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
