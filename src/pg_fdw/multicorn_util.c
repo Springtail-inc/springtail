@@ -669,10 +669,11 @@ extractRestrictions(PlannerInfo *root,
             break;
         default:
             {
-                ereport(WARNING,
+                ereport(LOG,
                         (errmsg("unsupported expression for "
                                 "extractClauseFrom"),
-                         errdetail("%s", nodeToString(node))));
+                         errdetail("nodetag: %d, %s", (int)nodeTag(node),
+                                   nodeToString(node))));
             }
             break;
     }
