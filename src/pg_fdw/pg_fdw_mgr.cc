@@ -145,20 +145,20 @@ namespace pg_fdw {
 
         // iterate through attributes passed in
         for (int i = 0; i < num_attrs; i++) {
-            int attrno = attrnums[i];
+            int attno = attrnums[i];
 
             // check if this column is in target list, if not skip
-            if (!state->target_columns.contains(attrno)) {
+            if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping column: {}", attrno);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping column: {}", attno);
                 continue;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Fetching column: {}", attrno);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Fetching column: {}", attno);
 
             // get field idx that matches this attrno, then fetch the field and data
-            int field_idx = state->target_columns[attrno];
+            int field_idx = state->target_columns[attno];
             FieldPtr field = state->fields->at(field_idx);
 
             // set null
@@ -166,7 +166,7 @@ namespace pg_fdw {
 
             // set value
             if (!nulls[i]) {
-                values[i] = _get_datum_from_field(field, row, state->types.at(field_idx));
+                values[i] = _get_datum_from_field(field, row, state->columns[attno].pg_type);
             } else {
                 values[i] = 0;
             }

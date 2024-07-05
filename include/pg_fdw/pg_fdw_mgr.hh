@@ -56,7 +56,6 @@ namespace pg_fdw {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields;
-        std::vector<int32_t> types;
         std::optional<Table::Iterator> iter;
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
@@ -82,7 +81,6 @@ namespace pg_fdw {
                 }
             }
             pkey_column_ids.resize(num_pkeys);
-            types = table->extent_schema()->get_types();
         }
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
