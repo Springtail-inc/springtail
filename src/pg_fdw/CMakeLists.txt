@@ -5,6 +5,7 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 
 set(PG_FDW_SOURCES
     pg_fdw.c
+    multicorn_util.c
     pg_fdw_mgr.cc
     pg_fdw_mgr_wrap.cc
 )
@@ -31,6 +32,7 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
 )
+#add_dsymutil_command(springtail_pg_fdw)
 
 add_executable(copy_schema test/copy_schema.cc)
 target_include_directories(copy_schema
@@ -38,8 +40,8 @@ target_include_directories(copy_schema
 )
 target_link_libraries(copy_schema
     PRIVATE springtail_common
-    PRIVATE springtail_storage
     PRIVATE springtail_pg
+    PRIVATE springtail_storage
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(copy_schema)

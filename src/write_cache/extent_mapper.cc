@@ -85,7 +85,7 @@ namespace springtail {
     std::vector<uint64_t>
     TableExtentMapper::reverse_map(uint64_t access_xid,
                                    uint64_t target_xid,
-                                   uint64_t extent_id) 
+                                   uint64_t extent_id)
     {
         SPDLOG_DEBUG("{}, {}, {}", access_xid, target_xid, extent_id);
 
@@ -137,12 +137,12 @@ namespace springtail {
         // note: always lock lookup before forward, before reverse to avoid deadlock
         boost::unique_lock lock(_mutex);
 
-        SPDLOG_DEBUG("Expire {}", commit_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Expire {}", commit_xid);
 
         // remove any metadata prior to the provided commit XID
         auto it = _xid_map.begin();
         while (it != _xid_map.end()) {
-            SPDLOG_DEBUG("Check xid@{}", it->first);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Check xid@{}", it->first);
 
             // stop once we go past the commit XID
             if (commit_xid < it->first) {
@@ -151,7 +151,7 @@ namespace springtail {
             auto xid = it->first;
 
             for (auto eid : it->second) {
-                SPDLOG_DEBUG("Cleanup {}", eid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Cleanup {}", eid);
 
                 // cleanup the lookup map
                 auto l = _lookup_map.find(eid);
@@ -159,7 +159,7 @@ namespace springtail {
 
                 // check if this extent ID has more references past this XID
                 if (l->second.latest_xid <= xid) {
-                    SPDLOG_DEBUG("Clear from lookup {}", l->first);
+                    SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Clear from lookup {}", l->first);
 
                     // clear the lookup map
                     _lookup_map.erase(l);
@@ -169,7 +169,7 @@ namespace springtail {
                     assert(f != _forward_map.end());
 
                     for (auto &entry : f->second) {
-                        SPDLOG_DEBUG("Try clear reverse xid@{}", entry.xid);
+                        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Try clear reverse xid@{}", entry.xid);
 
                         if (entry.xid > commit_xid) {
                             break; // stop once we are past the commit XID
@@ -177,27 +177,27 @@ namespace springtail {
 
                         // remove the extent ID from each of the reverse map entries of new extent IDs
                         for (auto new_eid : entry.eids) {
-                            SPDLOG_DEBUG("Clear reverse entry {}", new_eid);
+                            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Clear reverse entry {}", new_eid);
 
                             // find the reverse map entry
                             auto r = _reverse_map.find(new_eid);
                             assert(r != _reverse_map.end());
-                            
+
                             // remove from the historical list
-                            SPDLOG_DEBUG("Erase reverse entry {}", eid);
+                            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Erase reverse entry {}", eid);
                             auto i = std::ranges::find(r->second, eid);
                             assert(i != r->second.end());
                             r->second.erase(i);
 
                             // if there are no historical extent IDs now, clear the entry
                             if (r->second.empty()) {
-                                SPDLOG_DEBUG("Clear empty reverse {}", r->first);
+                                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Clear empty reverse {}", r->first);
                                 _reverse_map.erase(r);
                             }
                         }
                     }
 
-                    SPDLOG_DEBUG("Clear from forward {}", f->first);
+                    SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Clear from forward {}", f->first);
 
                     // clear from the forward map
                     _forward_map.erase(f);

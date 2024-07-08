@@ -50,9 +50,6 @@ namespace logging {
     {
         nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
 
-        // log bitmask
-        logging::_log_mask = module_mask;
-
         // configuration options
         std::string log_path;
         std::string log_level;
@@ -64,6 +61,26 @@ namespace logging {
         Json::get_to<int>(props, "log_file_count", max_files, 5);
         Json::get_to<std::string>(props, "log_level", log_level, "trace");
         Json::get_to<std::string>(props, "log_pattern", pattern, "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
+
+        // check if log_module is set in properties, if so override
+        // mask passed in
+        if (props.contains("log_modules")) {
+            std::set<std::string> log_modules;
+            // extract log_module array from properties
+            Json::get_to<std::set<std::string>>(props, "log_modules", log_modules);
+            // generate bit pattern for log modules looking up in map
+            module_mask = 0;
+            for (const auto &module : log_modules) {
+                if (log_module_map.find(module) != log_module_map.end()) {
+                    module_mask |= log_module_map[module];
+                } else {
+                    std::cerr << fmt::format("Unknown log module: {}\n", module);
+                }
+            }
+        }
+
+        // log bitmask
+        logging::_log_mask = module_mask;
 
         // console sink
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();

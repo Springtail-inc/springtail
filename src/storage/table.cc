@@ -655,7 +655,7 @@ namespace springtail {
         // we didn't receive an extent_id, but we have a primary index, so perform a lookup of the key
         auto i = _primary_lookup->lower_bound(key, true);
 
-        // if the key isn't available, then it may be in the 
+        // if the key isn't available, then it may be in the
         uint64_t extent_id = constant::UNKNOWN_EXTENT;
         if (i != _primary_lookup->end()) {
             // if the primary index is not empty, get the target extent

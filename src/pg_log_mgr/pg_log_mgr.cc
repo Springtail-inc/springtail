@@ -73,13 +73,13 @@ namespace springtail {
     PgLogMgr::start_streaming(uint64_t lsn)
     {
         _pg_conn.connect();
-        SPDLOG_DEBUG("Connecting to postgres server: {}\n", _host);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
 
         // create slot if need be
         bool create_slot = !_pg_conn.check_slot_exists();
 
         if (create_slot) {
-            SPDLOG_DEBUG("Creating replication slot: {}\n", _slot_name);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
             _pg_conn.create_replication_slot(false,  // export
                                              false); // temporary
         }
@@ -114,7 +114,7 @@ namespace springtail {
         while (!_shutdown) {
             _pg_conn.read_data(data);
 
-            SPDLOG_DEBUG("Recevied data: length={}, msg_length={}, msg_offset={}\n",
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}\n",
                          data.length, data.msg_length, data.msg_offset);
 
             if (data.length == 0) {

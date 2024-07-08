@@ -7,6 +7,7 @@
 #include "access/htup_details.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
+#include "access/xact.h"
 #include "catalog/pg_foreign_table.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -24,15 +25,38 @@
 #include "optimizer/restrictinfo.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/guc.h"
 
 PG_MODULE_MAGIC;
 
 // define from storage/constants.hh
 #define INVALID_TABLE 0
 
-typedef struct SpringtailFdwTableOptions {
-    uint64_t tid;
-} SpringtailFdwTableOptions;
+// exposed from and defined in multicorn_util.c
+extern List *
+multicorn_getForeignPaths(PlannerInfo *root,
+                          RelOptInfo *baserel,
+                          Oid foreigntableid,
+                          SpringtailPlanState *planstate);
+
+extern ForeignScan *
+multicorn_getForeignPlan(PlannerInfo *root,
+                         RelOptInfo *baserel,
+                         Oid foreigntableid,
+                         ForeignPath *best_path,
+                         List *tlist,
+                         List *scan_clauses,
+                         Plan *outer_plan,
+                         SpringtailPlanState *planstate);
+
+extern void
+multicorn_getRelSize(PlannerInfo *root,
+                     RelOptInfo *baserel,
+                     Oid foreigntableid,
+                     SpringtailPlanState *planstate);
+
+extern List *
+multicorn_buildSimpleQualList(ForeignScanState *node);
 
 /*
  * FDW callback routines
@@ -69,20 +93,54 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
 
 static List *springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
 
-
-// Split function definition
-void
-split_uint64(uint64_t input, uint32_t *low, uint32_t *high)
+/** Transaction commit/abort callback */
+static void
+fdw_xact_callback(XactEvent event, void *arg)
 {
-    *low = (uint32_t)(input & 0xFFFFFFFF);          // Extract the lower 32 bits
-    *high = (uint32_t)((input >> 32) & 0xFFFFFFFF); // Extract the upper 32 bits
+    FullTransactionId pg_xid = GetCurrentFullTransactionIdIfAny();
+    if (!FullTransactionIdIsValid(pg_xid)) {
+        return;
+    }
+
+    switch (event)
+    {
+        case XACT_EVENT_COMMIT:
+            elog(DEBUG1, "Transaction committed: %lu", pg_xid.value);
+            fdw_commit_rollback(pg_xid.value, true);
+            break;
+        case XACT_EVENT_ABORT:
+            elog(DEBUG1, "Transaction aborted: %lu", pg_xid.value);
+            fdw_commit_rollback(pg_xid.value, false);
+            break;
+        default:
+            break;
+    }
 }
 
-// Combine function definition
-uint64_t
-combine_uint32(uint32_t low, uint32_t high)
+/* Register the transaction callback */
+void
+_PG_init(void)
 {
-    return ((uint64_t)high << 32) | low; // Combine the upper 32 bits and lower 32 bits
+    // Register the transaction commit/rollback callback
+    RegisterXactCallback(fdw_xact_callback, NULL);
+
+    // Define the configuration file path
+    char *fdw_config_file_path = NULL;
+    DefineCustomStringVariable(
+        "springtail_fdw.config_file_path",
+        "Path to the FDW configuration file",
+        NULL,
+        &fdw_config_file_path,
+        "/tmp/system.json",
+        PGC_SUSET,
+        0,
+        NULL,
+        NULL,
+        NULL
+    );
+
+    // Initialize the FDW; springtail_init()
+    fdw_init(fdw_config_file_path);
 }
 
 /*
@@ -134,7 +192,7 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
 }
 
 /**
- * @brief Update baserel->rows, and possibly baserel->width and
+ * @brief Update baserel->rows, and possibly baserel->reltarget->width and
  *        baserel->tuples, with an estimated result set size for a
  *        scan of baserel
  * @param root
@@ -163,7 +221,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
        table_close(rel, NoLock);
 
        baserel->fdw_private = opts; // can store private data here
-*/
+    */
 
     // Can store options on create table and access them here
     ForeignTable *ft = GetForeignTable(foreigntableid);
@@ -191,10 +249,19 @@ springtail_GetForeignRelSize(PlannerInfo *root,
                             errhint("Invalid oid for table from table options")));
     }
 
-    // store the tid in the fdw_private field of the baserel
-    SpringtailFdwTableOptions *opts = (SpringtailFdwTableOptions *)palloc(sizeof(SpringtailFdwTableOptions));
-    opts->tid = tid;
-    baserel->fdw_private = opts;
+    // create the plan state
+    SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
+    planstate->tid = tid;
+
+    // Get the postgres transaction id, and create the internal state
+    FullTransactionId pg_xid = GetCurrentFullTransactionId();
+    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value);
+
+    // store the plan state in the baserel
+    baserel->fdw_private = planstate;
+
+    // get the estimate of the number of rows and width of the table
+   multicorn_getRelSize(root, baserel, foreigntableid, planstate);
 }
 
 /**
@@ -211,16 +278,10 @@ springtail_GetForeignPaths(PlannerInfo *root,
                            RelOptInfo *baserel,
                            Oid foreigntableid)
 {
-    Path *path = (Path *)create_foreignscan_path(root, baserel,
-        NULL,              /* default pathtarget */
-        baserel->rows,     /* rows */
-        1,                 /* startup cost */
-        1 + baserel->rows, /* total cost */
-        NIL,               /* no pathkeys */
-        NULL,              /* no required outer relids */
-        NULL,              /* no fdw_outerpath */
-        NIL);              /* no fdw_private */
-    add_path(baserel, path);
+    SpringtailPlanState *state = (SpringtailPlanState *)baserel->fdw_private;
+
+    // get the foreign paths -- call helper to set them up
+    multicorn_getForeignPaths(root, baserel, foreigntableid, state);
 }
 
 /**
@@ -245,51 +306,41 @@ springtail_GetForeignPlan(PlannerInfo *root,
                           List *scan_clauses,
                           Plan *outer_plan)
 {
-    SpringtailFdwTableOptions *opts = (SpringtailFdwTableOptions *)baserel->fdw_private;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)baserel->fdw_private;
 
-    // postgres only supports integer value for lists, so to be safe we split the oid
-    uint32_t low, high;
-    split_uint64(opts->tid, &low, &high);
-    List *fdw_private = list_make2(makeInteger(low), makeInteger(high));
-
-    /* build a List * of the clause field of the passed in scan_clauses,
-       which are a list of RestrictInfo * nodes. */
-    scan_clauses = extract_actual_clauses(scan_clauses, false);
-
-    return make_foreignscan(tlist,
-        scan_clauses,
-        baserel->relid,
-        NIL, /* no expressions we will evaluate */
-        fdw_private, /* private data */
-        NIL, /* no custom tlist; our scan tuple looks like tlist */
-        NIL, /* no quals we will recheck */
-        outer_plan);
+    // call into helper to set the foreign plan
+    return multicorn_getForeignPlan(root, baserel, foreigntableid, best_path,
+                                    tlist, scan_clauses, outer_plan, planstate);
 }
 
 /**
- * @brief Initialize initial state; allocate and init
+ * @brief Initialize initial scan,
  * @param node
  * @param eflags
  */
 static void
 springtail_BeginForeignScan(ForeignScanState *node, int eflags)
 {
-    // extract tid from fdw_private
+    // extract plan state and set the fdw state on the scan node
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
-    uint32_t low = intVal(linitial(fs->fdw_private));
-    uint32_t high = intVal(lsecond(fs->fdw_private));
-    uint64_t tid = combine_uint32(low, high);
+    List *fdw_private = fs->fdw_private;
+    SpringtailPlanState *planstate = (SpringtailPlanState *)linitial(fdw_private);
 
-    // allocate and initialize state
-    struct PgFdwMgr *mgr = get_fdw_mgr();
+    node->fdw_state = planstate->pg_fdw_state;
 
-    // allocate and initialize state
-    node->fdw_state = fdw_begin_scan(mgr, tid);
-
-    /* Do nothing in EXPLAIN */
+    /* XXX Do nothing in EXPLAIN */
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
         return;
     }
+
+    // build a simple qual list against constants only
+    List *qual_list = multicorn_buildSimpleQualList(node);
+
+    /* NOTE from Multicorn multicorn.c */
+    /* Those list must be copied, because their memory context can become */
+    /* invalid during the execution (in particular with the cursor interface) */
+    /* The copy occurs within the fdw_begin_scan() call */
+    fdw_begin_scan(planstate->pg_fdw_state, planstate->target_list, qual_list, planstate->pathkeys);
 
     return;
 }
@@ -306,11 +357,19 @@ springtail_IterateForeignScan(ForeignScanState *node)
     ExecClearTuple(slot);
 
     void *state = node->fdw_state;
-    struct PgFdwMgr *mgr = get_fdw_mgr();
+
+    int attrnums[slot->tts_tupleDescriptor->natts];
+
+    for (int i = 0; i < slot->tts_tupleDescriptor->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
+        attrnums[i] = attr->attnum;
+        elog(LOG, "iterate slot %d: %d %s", i, attr->attnum, attr->attname.data);
+    }
 
     // get next row, if true it was filled in successfully
     // if false we return the empty slot
-    if (!fdw_iterate_scan(mgr, state, slot->tts_values, slot->tts_isnull)) {
+    if (!fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrnums, slot->tts_values, slot->tts_isnull)) {
         return slot;
     }
 
@@ -326,9 +385,8 @@ static void
 springtail_ReScanForeignScan(ForeignScanState *node)
 {
     // reset state to beginning of table
-    struct PgFdwMgr *mgr = get_fdw_mgr();
     void *state = node->fdw_state;
-    fdw_reset_scan(mgr, state);
+    fdw_reset_scan(state);
 }
 
 /**
@@ -339,9 +397,8 @@ static void
 springtail_EndForeignScan(ForeignScanState *node)
 {
     // cleanup fdw_state
-    struct PgFdwMgr *mgr = get_fdw_mgr();
     void *state = node->fdw_state;
-    fdw_end_scan(mgr, state);
+    fdw_end_scan(state);
     node->fdw_state = NULL;
 }
 
@@ -369,10 +426,8 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
     bool       limit_to_list = false;
     bool       except_list = false;
 
-    PgFdwMgr *mgr = get_fdw_mgr();
-
     /* Apply restrictions for LIMIT TO and EXCEPT */
-	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO) {
+    if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO) {
         limit_to_list = true;
         table_list = stmt->table_list;
     } else if (stmt->list_type == FDW_IMPORT_SCHEMA_EXCEPT) {
@@ -380,5 +435,5 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
         table_list = stmt->table_list;
     }
 
-    return fdw_import_foreign_schema(mgr, server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
+    return fdw_import_foreign_schema(server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
 }

@@ -21,7 +21,7 @@ namespace springtail {
 
         return _instance;
     }
-    
+
     void
     SchemaMgr::shutdown()
     {
@@ -82,7 +82,7 @@ namespace springtail {
             // find the correct entry based on the requested LSN
             auto &&j = std::lower_bound(i->second.begin(), i->second.end(), lsn,
                                         [](const SchemaColumn &column, uint64_t lsn) {
-                                            return (column.lsn < lsn);
+                                            return (column.lsn > lsn);
                                         });
             auto &column = *j;
 
