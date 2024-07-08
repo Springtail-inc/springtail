@@ -628,7 +628,7 @@ namespace springtail {
         _check_split(extent_i, *extent, schema);
     }
 
-    void
+    bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
@@ -651,7 +651,7 @@ namespace springtail {
 
             // release back to the cache
             cache->_data_cache->put(extent);
-            return;
+            return true;
         }
 
         // extract the key to find the insert position
@@ -680,9 +680,11 @@ namespace springtail {
                                               });
 
         // see if the row's key matches the tuple's key
+        bool did_insert = false;
         if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal(*key)) {
             // update the existing row
             MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
+            did_insert = true;
         } else {
             // insert the tuple into the extent
             auto row = (*extent)->insert(row_i);
@@ -691,6 +693,9 @@ namespace springtail {
 
         // check for split
         _check_split(extent_i, *extent, schema);
+
+        // indicate if an insert occurred or not
+        return did_insert;
     }
 
     void
@@ -748,6 +753,11 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
+        if (extent_i == _extents.end()) {
+            SPDLOG_DEBUG("Didn't find: {}", key->to_string());
+            SafeExtent extent(_file, _extents.back());
+            SPDLOG_DEBUG("Last entry is: {}", FieldTuple(schema->get_sort_fields(), (*extent)->back()).to_string());
+        }
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent

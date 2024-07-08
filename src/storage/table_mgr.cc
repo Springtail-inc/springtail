@@ -76,6 +76,7 @@ namespace springtail {
     {
         std::vector<uint64_t> roots;
 
+#if 0
         // get the root of the table's primary index
         auto roots_t = _get_system_table(sys_tbl::TableRoots::ID, xid);
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
@@ -91,6 +92,8 @@ namespace springtail {
         // retrieve the root extent ID of the primary
         auto eid_f = roots_t->extent_schema()->get_field("extent_id");
         roots.push_back(eid_f->get_uint64(*it));
+#endif
+
         return roots;
     }
 
@@ -408,6 +411,22 @@ namespace springtail {
         roots_t->finalize();
     }
 
+    void
+    TableMgr::update_stats(uint64_t table_id,
+                           uint64_t access_xid,
+                           uint64_t target_xid,
+                           const TableStats &stats)
+    {
+        // modify the table_stats table
+        auto stats_t = get_mutable_table(sys_tbl::TableStats::ID, access_xid, target_xid);
+        auto tuple = sys_tbl::TableStats::Data::tuple(table_id, target_xid, stats.row_count);
+        stats_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
+
+        SPDLOG_DEBUG("Updated stats {}@{} - {}", table_id, target_xid, stats.row_count);
+
+        // finalize the changes to disk
+        stats_t->finalize();
+    }
 
     MutableTablePtr
     TableMgr::_get_mutable_system_table(uint64_t table_id,
@@ -419,6 +438,8 @@ namespace springtail {
         std::vector<std::vector<std::string>> secondary_keys;
         ExtentSchemaPtr schema;
         std::filesystem::path table_path;
+
+        // XXX note that the table stats are currently broken for system tables... need a way to bootstrap
 
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
@@ -474,6 +495,20 @@ namespace springtail {
                                                   roots,
                                                   table_path,
                                                   sys_tbl::Schemas::Primary::KEY,
+                                                  secondary_keys,
+                                                  schema,
+                                                  TableStats());
+        }
+        case (sys_tbl::TableStats::ID): {
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID, access_xid);
+            table_path = _table_base / std::to_string(sys_tbl::TableStats::ID);
+
+            return std::make_shared<MutableTable>(sys_tbl::TableStats::ID,
+                                                  access_xid,
+                                                  target_xid,
+                                                  roots,
+                                                  table_path,
+                                                  sys_tbl::TableStats::Primary::KEY,
                                                   secondary_keys,
                                                   schema,
                                                   TableStats());

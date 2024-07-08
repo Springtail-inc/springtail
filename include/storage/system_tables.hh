@@ -5,6 +5,12 @@
 namespace springtail::sys_tbl {
 
     /**
+     * The maximum ID of a system table.  Currently set to 100, but could be higher based on
+     * Postgres behavior.
+     */
+    constexpr uint32_t MAX_SYS_TBL_ID = 100;
+
+    /**
      * Helper functions and constants for the table_names table.
      */
     class TableNames {

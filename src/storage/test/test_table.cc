@@ -151,15 +151,18 @@ namespace {
     };
 
     TEST_F(Table_Test, CreateEmpty) {
+        uint64_t access_xid = 1, target_xid = 1;
+
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1000, 1, roots);
+        auto mtable = _create_mtable(1000, target_xid, roots);
 
         // finalize the empty table
         roots = mtable->finalize();
 
         // create an access table
-        auto table = _create_table(1000, 1, roots);
+        access_xid = target_xid;
+        auto table = _create_table(1000, access_xid, roots);
 
         // get a key that doesn't exist since the table is empty
         auto key = _create_key("aaaa");
@@ -173,18 +176,21 @@ namespace {
     }
 
     TEST_F(Table_Test, Inserts) {
+        uint64_t access_xid = 1, target_xid = 2;
+
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1001, 1, roots);
+        auto mtable = _create_mtable(1001, target_xid, roots);
 
         // insert a number of rows
-        _populate_table(mtable, 1);
+        _populate_table(mtable, target_xid);
 
         // finalize the table
         roots = mtable->finalize();
 
         // create an access table
-        auto table = _create_table(1001, 1, roots);
+        access_xid = target_xid;
+        auto table = _create_table(1001, access_xid, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -204,12 +210,14 @@ namespace {
     }
 
     TEST_F(Table_Test, SingleXactMutations) {
+        uint64_t access_xid = 2, target_xid = 3;
+
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1002, 1, roots);
+        auto mtable = _create_mtable(1002, target_xid, roots);
 
         // insert a number of rows
-        _populate_table(mtable, 1);
+        _populate_table(mtable, target_xid);
 
         // remove rows with unknown positions
         // note: rows with table_id == 1
@@ -221,7 +229,7 @@ namespace {
             "sfrankland0"
         };
         for (auto &key : keys) {
-            mtable->remove(_create_key(key), 1, constant::UNKNOWN_EXTENT);
+            mtable->remove(_create_key(key), target_xid, constant::UNKNOWN_EXTENT);
         }
 
         // update some row data with unknown positions
@@ -234,7 +242,7 @@ namespace {
             _create_value(6, "gnatte5", 100)
         };
         for (auto &value : update_values) {
-            mtable->update(value, 1, constant::UNKNOWN_EXTENT);
+            mtable->update(value, target_xid, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some missing rows with unknown positions
@@ -246,7 +254,7 @@ namespace {
             _create_value(1500, "sfrankland0", 1)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, 1, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
         }
 
         // upsert some existing rows with unknown positions
@@ -258,14 +266,15 @@ namespace {
             _create_value(3, "dhaggleton2", 103)
         };
         for (auto &value : upsert_values) {
-            mtable->upsert(value, 1, constant::UNKNOWN_EXTENT);
+            mtable->upsert(value, target_xid, constant::UNKNOWN_EXTENT);
         }
 
         // finalize the table
         roots = mtable->finalize();
 
         // create an access table
-        auto table = _create_table(1002, 1, roots);
+        access_xid = target_xid;
+        auto table = _create_table(1002, access_xid, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -310,20 +319,20 @@ namespace {
     }
 
     TEST_F(Table_Test, MultiXactMutations) {
-        uint64_t access_xid, target_xid = 1;
+        uint64_t access_xid = 3, target_xid = 4;
 
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
         auto mtable = _create_mtable(1003, target_xid, roots);
 
         // insert a number of rows
-        _populate_table(mtable, 1);
+        _populate_table(mtable, target_xid);
 
         // finalize the table
         roots = mtable->finalize();
-        access_xid = target_xid;
 
         // create an access table for lookup
+        access_xid = target_xid;
         auto table = _create_table(1003, access_xid, roots);
 
         // create a new mutable table with a later XID target
@@ -360,9 +369,9 @@ namespace {
 
         // finalize the table
         roots = mtable->finalize();
-        access_xid = target_xid;
 
         // create an access table
+        access_xid = target_xid;
         table = _create_table(1003, access_xid, roots);
 
         // verify the data at this point
@@ -438,9 +447,9 @@ namespace {
 
         // finalize the table
         roots = mtable->finalize();
-        access_xid = target_xid;
 
         // create an access table
+        access_xid = target_xid;
         table = _create_table(1003, access_xid, roots);
 
         // verify the data at this point
@@ -521,9 +530,9 @@ namespace {
 
         // finalize the table
         roots = mtable->finalize();
-        access_xid = target_xid;
 
         // create an access table
+        access_xid = target_xid;
         table = _create_table(1003, access_xid, roots);
 
         count = 0;
@@ -609,9 +618,9 @@ namespace {
 
         // finalize the table
         roots = mtable->finalize();
-        access_xid = target_xid;
 
         // create an access table
+        access_xid = target_xid;
         table = _create_table(1003, access_xid, roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
@@ -667,7 +676,7 @@ namespace {
 
 
     TEST_F(Table_Test, MultiThreadMutations) {
-        uint64_t target_xid = 1;
+        uint64_t access_xid = 8, target_xid = 9;
 
         // create a mutable table
         std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
@@ -678,9 +687,9 @@ namespace {
 
         // finalize the table
         roots = mtable->finalize();
-        uint64_t access_xid = target_xid;
 
         // create an access table and identify extents to be mutated
+        access_xid = target_xid;
         auto table = _create_table(1004, access_xid, roots);
 
         std::map<uint64_t, std::vector<TuplePtr>> tuple_map;
@@ -716,7 +725,8 @@ namespace {
             // create an access table
             auto roots = mtable->finalize();
 
-            auto table = _create_table(1004, target_xid, roots);
+            auto access_xid = target_xid;
+            auto table = _create_table(1004, access_xid, roots);
 
             // ensure that it has all of the expected rows through both the primary and secondary index
             // and that everything else works as expected (find, lower_bound, etc)

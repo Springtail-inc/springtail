@@ -372,18 +372,18 @@ namespace springtail {
          * Either inserts a tuple directly into the provided extent at the given XID, or updates an
          * existing row with the same primary key value.
          */
-        void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        bool _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
         /**
          * Upserts a tuple into the "empty" Page object.  Used when the Table started empty.
          */
-        void _upsert_empty(TuplePtr value, uint64_t xid);
+        bool _upsert_empty(TuplePtr value, uint64_t xid);
 
         /**
          * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
          * value, using a primary key lookup to find the containing extent.
          */
-        void _upsert_by_lookup(TuplePtr value, uint64_t xid);
+        bool _upsert_by_lookup(TuplePtr value, uint64_t xid);
 
         /**
          * Removes a tuple from the provided extent at the given XID that has the same primary key

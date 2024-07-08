@@ -128,7 +128,7 @@ namespace springtail::sys_tbl {
     // TableStats
     const std::vector<SchemaColumn> TableStats::Data::SCHEMA = {
         { "table_id", 0, SchemaType::UINT64, INT8OID, false, 0 },
-        { "xid", 1, SchemaType::UINT64, INT8OID, false, 2 },
+        { "xid", 1, SchemaType::UINT64, INT8OID, false, 1 },
         { "row_count", 2, SchemaType::UINT64, INT8OID, false }
     };
 
