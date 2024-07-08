@@ -4,12 +4,14 @@
 #include <memory>
 #include <optional>
 
+#include <storage/constants.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 #include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
+#include <storage/schema_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -22,9 +24,31 @@
 extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
+    #include <c.h>
 }
 
+#include <pg_fdw/pg_fdw_common.h>
+
 namespace springtail  {
+namespace pg_fdw {
+
+    struct PgFdwSortGroup {
+        std::string attname;
+        int attnum;
+        bool reversed;
+        bool nulls_first;
+        std::string collate;
+
+        PgFdwSortGroup(const DeparsedSortGroup *sort_group)
+            : attname(sort_group->attname == NULL ? "" : sort_group->attname),
+              attnum(sort_group->attnum),
+              reversed(sort_group->reversed),
+              nulls_first(sort_group->nulls_first),
+              collate(sort_group->collate == NULL ? "" : sort_group->collate)
+        {}
+    };
+    using PgFdwSortGroupPtr = std::shared_ptr<PgFdwSortGroup>;
+
 
     /** Internal state used to track table scan */
     struct PgFdwState {
@@ -32,15 +56,31 @@ namespace springtail  {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields;
-        std::vector<int32_t> types;
         std::optional<Table::Iterator> iter;
+        std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
+        std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
+        std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
+        std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
+
+        List *qual_list;    ///< List of predicate clauses (BaseQual)
 
         /** Constructor */
-        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid, Table::Iterator iter)
-            : table(table), tid(tid), xid(xid), iter(iter)
+        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
+            : table(table), tid(tid), xid(xid), iter(std::nullopt)
         {
-            fields = table->extent_schema()->get_fields();
-            types = table->extent_schema()->get_types();
+            // fetch the columns and column IDs for the table
+            columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+
+            // populate pkey column ids
+            int num_pkeys = 0;
+            pkey_column_ids.resize(columns.size());
+            for (const auto &col : columns) {
+                if (col.second.exists && col.second.pkey_position.has_value()) {
+                    pkey_column_ids[col.second.pkey_position.value()] = col.first;
+                    num_pkeys++;
+                }
+            }
+            pkey_column_ids.resize(num_pkeys);
         }
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
@@ -60,14 +100,38 @@ namespace springtail  {
             return _instance;
         }
 
-        /** Begin scan */
-        PgFdwState *fdw_begin(uint64_t tid, uint64_t xid=0);
+        /**
+         * Init call, pass in config file path;
+         * Ideally, call before first get_instance()
+         */
+        static void fdw_init(const char *config_file);
 
-        /** Iterate scan -- get next row */
-        bool fdw_iterate_scan(PgFdwState *state, Datum *values, bool *isnull);
+        /** Create state based on table ID
+         * @param tid Table ID
+         * @param pg_xid Postgres XID of current transaction
+         */
+        PgFdwState *fdw_create_state(uint64_t tid, uint64_t pg_xid);
+
+        /** Begin scan
+         * @param state PgFdwState
+         * @param target_list List of target columns (Value or String)
+         * @param qual_list List of predicate clauses (BaseQual)
+         * @param sortgroup List of sort group columns (DeparsedSortGroup)
+         */
+        void fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup);
+
+        /** Iterate scan -- get next row
+         * @param state PgFdwState
+         * @param num_attrs Number of attributes
+         * @param attrnums Array of attribute numbers
+         * @param values Array of Datum values (output)
+         * @param isnull Array of null flags (output)
+         * @return True if row is valid, false if end of scan
+         */
+        bool fdw_iterate_scan(PgFdwState *state, int num_attrs, int *attrnums, Datum *values, bool *isnull);
 
         /** End scan -- free state */
-        void fdw_end(PgFdwState *state);
+        void fdw_end_scan(PgFdwState *state);
 
         /** Reset scan -- set iterator to beginning */
         void fdw_reset_scan(PgFdwState *state);
@@ -75,6 +139,33 @@ namespace springtail  {
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
         List *fdw_import_foreign_schema(const std::string &server, const std::string &schema,
                                         const List *table_list, bool exclude, bool limit);
+
+        /** Helper return list / subset of sortable columns if table is sortable by sort group
+         *  Called from get_foreign_paths
+         * @param state Plan state
+         * @param sortgroup List of DeparsedSortGroup
+         * @return List or sublist of path keys based on sort group
+         */
+        List *fdw_can_sort(SpringtailPlanState *state, List *sortgroup);
+
+        /** Get list of path keys -- indexes
+         * @param state Planstate
+         * @return List of a List of path keys (key attnum, num rows)
+         */
+        List *fdw_get_path_keys(SpringtailPlanState *state);
+
+        /** Get estimate of row width/number of rows
+         * @param planstate Plan state
+         * @param target_list List of target columns (String or Value)
+         * @param qual_list List of predicate clauses (BaseQual)
+         */
+        void fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width);
+
+        /** Commit or rollback a transaction, remove the XID mappings
+         * @param pg_xid Postgres XID
+         * @param commit True if commit, false if rollback
+         */
+        void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
     private:
         /** Delete constructor */
@@ -85,6 +176,8 @@ namespace springtail  {
         static PgFdwMgr* _instance;        ///< Singleton instance
         static std::once_flag _init_flag;  ///< Initialization flag
         static PgFdwMgr* _init();          ///< Initialize singleton
+
+        std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type);
@@ -105,5 +198,8 @@ namespace springtail  {
         static List *_import_springtail_catalog(const std::string &server,
                                                 const std::set<std::string> table_set,
                                                 bool exclude, bool limit);
+
+        static void _handle_exception(const Error &e);
     };
-}
+} // namespace pg_fdw
+} // namespace springtail

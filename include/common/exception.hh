@@ -3,7 +3,7 @@
 #include <cpptrace/cpptrace.hpp>
 
 namespace springtail {
-    /** 
+    /**
      * Base error class for exceptions.  Uses cpptrace for stack tracing.
      */
     class Error : public std::exception {

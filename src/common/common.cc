@@ -8,10 +8,10 @@
 
 namespace springtail {
 
-    void init_system_properties()
+    void init_system_properties(const std::string &path)
     {
-        if (std::filesystem::exists(std::filesystem::path(Properties::SPRINGTAIL_PROPERTIES_FILE))) {
-            Properties::init(std::string(Properties::SPRINGTAIL_PROPERTIES_FILE));
+        if (std::filesystem::exists(std::filesystem::path(path))) {
+            Properties::init(path);
             return;
         }
 
@@ -30,12 +30,13 @@ namespace springtail {
         throw Error("Springtail system.json properties file not found");
     }
 
-    void springtail_init(uint32_t logging_mask) {
+    void springtail_init(uint32_t logging_mask, const std::string &properties_path)
+    {
         // initialize the backtrace signal handling
         init_exception();
 
         // init system properties
-        init_system_properties();
+        init_system_properties(properties_path);
 
         // initialize the logging infrastructure
         init_logging(logging_mask);

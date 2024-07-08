@@ -38,7 +38,7 @@ namespace springtail
     void
     WriteCacheTableSet::_insert_rows(uint64_t tid, uint64_t eid, uint64_t xid)
     {
-        SPDLOG_DEBUG("Inserting: {}:{}:{}\n", tid, eid, xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: {}:{}:{}\n", tid, eid, xid);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(xid, WriteCacheIndexNode::IndexType::XID);
@@ -57,7 +57,7 @@ namespace springtail
                                  uint64_t end_xid, uint32_t count, uint64_t &cursor,
                                  std::vector<std::shared_ptr<WriteCacheIndexRow>> &result)
     {
-        SPDLOG_DEBUG("Searching for rows in range: {}:{}\n", start_xid, end_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for rows in range: {}:{}\n", start_xid, end_xid);
         return _row_map->get(tid, eid, start_xid, end_xid, count, cursor, result);
     }
 
@@ -66,7 +66,7 @@ namespace springtail
                                  uint32_t count, uint64_t start_offset, uint64_t &end_offset,
                                  std::vector<int64_t> &result)
     {
-        SPDLOG_DEBUG("Searching for tids in range: {}:{}\n", start_xid, end_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for tids in range: {}:{}\n", start_xid, end_xid);
 
         int result_cnt = 0;
         std::set<uint64_t> set;
@@ -74,17 +74,17 @@ namespace springtail
 
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid && result_cnt < count; xid++) {
-            SPDLOG_DEBUG("Finding tids in xid: {}\n", xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in xid: {}\n", xid);
             // fetch xid node for this xid and read lock it
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                SPDLOG_DEBUG("XID {} not found\n", xid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
                 continue;
             }
 
             // fetch ids into set to keep them unique
             result_cnt += _fetch_ids(xid_node, count-result_cnt, true, start_offset, end_offset, set);
-            SPDLOG_DEBUG("Found unique tids, result_cnt={}\n", result_cnt);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Found unique tids, result_cnt={}\n", result_cnt);
         }
 
         // copy results to vector
@@ -100,7 +100,7 @@ namespace springtail
                                  uint32_t count, uint64_t &cursor, std::vector<int64_t> &result)
     {
         int result_cnt = 0;
-        SPDLOG_DEBUG("Searching for eids in range: {}:{}\n", start_xid, end_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for eids in range: {}:{}\n", start_xid, end_xid);
 
         std::set<uint64_t> set;
         uint64_t start_offset = cursor;
@@ -111,18 +111,18 @@ namespace springtail
             // fetch xid node for this xid if exists
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                SPDLOG_DEBUG("XID not found: {}", xid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID not found: {}", xid);
                 continue;
             }
 
             // fetch tid node if exists
             WriteCacheIndexNodePtr tid_node = xid_node->find(tid);
             if (tid_node == nullptr) {
-                SPDLOG_DEBUG("TID not found: {}", xid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "TID not found: {}", xid);
                 continue;
             }
 
-            SPDLOG_DEBUG("Fetching eids for TID={}, XID={}, end_offset={}\n", tid, xid, end_offset);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Fetching eids for TID={}, XID={}, end_offset={}\n", tid, xid, end_offset);
 
             // fetch ids into set to keep them unique; start_offset is decr; end_offset is incr
             result_cnt += _fetch_ids(tid_node, count - result_cnt, true, start_offset, end_offset, set);
@@ -185,24 +185,24 @@ namespace springtail
     {
         std::set<uint64_t> eid_set;
 
-        SPDLOG_DEBUG("Evicting table: TID={} XIDs=({}:{}]\n", tid, start_xid, end_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Evicting table: TID={} XIDs=({}:{}]\n", tid, start_xid, end_xid);
 
         // iterate through xids exclusive of start
         for (uint64_t xid = start_xid + 1; xid <= end_xid; xid++) {
             // fetch xid node for this xid if exists
-            SPDLOG_DEBUG("Searching for XID: {}\n", xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for XID: {}\n", xid);
             WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
             if (xid_node == nullptr) {
-                SPDLOG_DEBUG("XID {} not found\n", xid);
+                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
                 continue;
             }
 
-            SPDLOG_DEBUG("Removing TID: {}\n", tid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Removing TID: {}\n", tid);
             WriteCacheIndexNodePtr table_node = xid_node->remove(tid);
             if (table_node != nullptr) {
                 // add eid to extent set, so we can remove row data later
                 for (auto extent_node: table_node->children) {
-                    SPDLOG_DEBUG("Found table {}, adding extent eid={}\n", tid, extent_node->id);
+                    SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Found table {}, adding extent eid={}\n", tid, extent_node->id);
                     eid_set.insert(extent_node->id);
                 }
             }

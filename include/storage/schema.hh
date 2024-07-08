@@ -34,12 +34,12 @@ namespace springtail {
         uint64_t xid;
         uint64_t lsn;
         std::string name;
-        uint32_t position;
+        uint32_t position;  ///< position and postgres column ID, can have holes
         SchemaType type;
         int32_t pg_type;
         bool exists;
         bool nullable;
-        std::optional<uint32_t> pkey_position;
+        std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
         std::optional<std::string> default_value;
         SchemaUpdateType update_type;
 

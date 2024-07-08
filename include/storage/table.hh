@@ -55,7 +55,7 @@ namespace springtail {
                 if (_btree_i == _btree->end()) {
                     return *this;
                 }
-                
+
                 // retrieve the data extent
                 _page = _table->_read_page_via_primary(_btree_i);
                 _page_i = _page->begin();

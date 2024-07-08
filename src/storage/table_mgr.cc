@@ -21,7 +21,7 @@ namespace springtail {
 
         return _instance;
     }
-    
+
     void
     TableMgr::shutdown()
     {
@@ -159,7 +159,7 @@ namespace springtail {
         // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
         uint64_t access_xid = xid - 1;
 
-        SPDLOG_DEBUG("Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
 
         // 1) add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
@@ -207,7 +207,7 @@ namespace springtail {
             for (auto &&entry : primary_keys) {
                 fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
                 fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
-                
+
                 indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr), xid, constant::UNKNOWN_EXTENT);
             }
             indexes_t->finalize();
@@ -404,7 +404,7 @@ namespace springtail {
             auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, idx, target_xid, roots[idx]);
             roots_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
 
-            SPDLOG_DEBUG("Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
         }
 
         // finalize the changes to disk

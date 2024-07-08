@@ -106,7 +106,7 @@ namespace springtail {
 
         // lookup path for file object; creates new one if not present
         // marks file object as in use
-        SPDLOG_DEBUG("IOWorker got request for path: {}", path.c_str());
+        SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOWorker got request for path: {}", path.c_str());
 
         std::shared_ptr<IOFile> io_file = mgr->lookup(path, compressed);
 

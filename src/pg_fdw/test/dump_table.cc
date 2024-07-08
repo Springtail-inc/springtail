@@ -15,6 +15,7 @@
 #include <storage/schema.hh>
 
 using namespace springtail;
+using namespace springtail::pg_fdw;
 
 extern "C" {
     #include "varatt.h"
@@ -33,11 +34,6 @@ extern "C" {
     List *lappend(List *list, void *datum) {
         return list;
     }
-
-    /** Dummy pg_fprintf, does nothing */
-    // int pg_fprintf(FILE *stream, const char *fmt, ...) {
-    //     return 0;
-    // }
 
     /** Dummy function so that we can link with pg_fdw_mgr.cc */
     text *
@@ -64,6 +60,32 @@ extern "C" {
         return result;
     }
 
+    Const *makeConst(Oid consttype,
+                     int32 consttypmod,
+                     Oid constcollid,
+                     int constlen,
+                     Datum constvalue,
+                     bool constisnull,
+                     bool constbyval)
+    {
+        return nullptr; // XXX not impl
+    }
+
+    List *list_append_unique_int(List *list, int datum) {
+        return list; // XXX not impl
+    }
+
+    bool errstart(int elevel, const char *domain) {
+        return false;
+    }
+
+    void errfinish(const char *filename,
+                   int  lineno,
+                   const char *funcname) {}
+
+    int errmsg_internal(const char *fmt, ...) { return 0; }
+
+    bool errstart_cold(int elevel, const char* domain) { return false; }
     // stubs
 
     Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3) {
@@ -75,11 +97,6 @@ extern "C" {
     HeapTuple SearchSysCache1(int cacheId, Datum key1) {
         return (HeapTuple)nullptr;
     }
-
-    void errfinish(const char *filename, int lineno, const char *funcname) { }
-
-    int errmsg_internal(const char *fmt,...) { return 0; }
-    bool errstart_cold(int elevel, const char *domain) { return false; }
 }
 
 /** List all tables from TableNames system table */
@@ -174,28 +191,40 @@ dump_table(uint64_t tid, uint64_t xid)
 {
     TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
     ExtentSchemaPtr schema = table->extent_schema();
+    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+
     auto fields = schema->get_fields();
+    int attrnums[fields->size()];
+
+    // iterate over column map and extract attrnums
+    int i = 0;
+    for (auto &col : columns) {
+        if (col.second.exists) {
+            attrnums[i++] = col.first;
+        }
+    }
 
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
-    PgFdwState *state = mgr->fdw_begin(tid, xid);
+    PgFdwState *state = mgr->fdw_create_state(tid, xid);
+    mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
 
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, values, nulls)) {
+    while (mgr->fdw_iterate_scan(state, i, attrnums, values, nulls)) {
         // print the values
-        for (size_t i = 0; i < fields->size(); i++) {
-            if (nulls[i]) {
+        for (size_t j = 0; j < fields->size(); j++) {
+            if (nulls[j]) {
                 std::cout << "NULL";
             } else {
-                std::cout << dump_datum(values[i], fields->at(i)->get_type());
+                std::cout << dump_datum(values[j], fields->at(j)->get_type());
             }
             std::cout << " ";
         }
         std::cout << std::endl;
     }
 
-    mgr->fdw_end(state);
+    mgr->fdw_end_scan(state);
 }
 
 /** Dump a table by schema, table name and xid */
@@ -220,6 +249,8 @@ int main(int argc, char *argv[])
     uint64_t xid=0;
     uint64_t tid=0;
     bool list = false;
+
+    springtail::springtail_init();
 
     // parse the arguments
     boost::program_options::options_description desc("Allowed options");
