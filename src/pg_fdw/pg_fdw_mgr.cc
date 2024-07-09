@@ -126,7 +126,11 @@ namespace pg_fdw {
     }
 
     bool
-    PgFdwMgr::fdw_iterate_scan(PgFdwState *state, int num_attrs, int *attrnums, Datum *values, bool *nulls)
+    PgFdwMgr::fdw_iterate_scan(PgFdwState *state,
+                               int num_attrs,
+                               Form_pg_attribute *attrs,
+                               Datum *values,
+                               bool *nulls)
     {
         // check iterator is valid
         if (!state->iter.has_value()) {
@@ -145,7 +149,7 @@ namespace pg_fdw {
 
         // iterate through attributes passed in
         for (int i = 0; i < num_attrs; i++) {
-            int attno = attrnums[i];
+            int attno = attrs[i]->attnum;
 
             // check if this column is in target list, if not skip
             if (!state->target_columns.contains(attno)) {
@@ -166,7 +170,8 @@ namespace pg_fdw {
 
             // set value
             if (!nulls[i]) {
-                values[i] = _get_datum_from_field(field, row, state->columns[attno].pg_type);
+                assert (attrs[i]->atttypid == state->columns[attno].pg_type);
+                values[i] = _get_datum_from_field(field, row, state->columns[attno].pg_type, attrs[i]->atttypmod);
             } else {
                 values[i] = 0;
             }
@@ -254,9 +259,44 @@ namespace pg_fdw {
     void
     PgFdwMgr::fdw_get_rel_size(SpringtailPlanState *planstate, List *target_list, List *qual_list, double *rows, int *width)
     {
-        // XXX not implemented
-        *rows = 10000;
-        *width = 16;
+        // fetch stats from state for row count
+        PgFdwState *state = static_cast<PgFdwState *>(planstate->pg_fdw_state);
+        *rows = state->stats.row_count;
+
+        // estimate width based on target list using most common types
+        ListCell *lc;
+        *width = 0;
+        foreach(lc, target_list) {
+            int attno = intVal(lfirst(lc));
+            switch (state->columns[attno].pg_type) {
+            case FLOAT8OID:
+            case INT8OID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+                *width += 8;
+                break;
+            case DATEOID:
+            case FLOAT4OID:
+            case INT4OID:
+                *width += 4;
+                break;
+            case INT2OID:
+                *width += 2;
+                break;
+            case BOOLOID:
+                *width += 1;
+                break;
+            case VARCHAROID:
+            case TEXTOID:
+                *width += 16; // estimate
+                break;
+            default:
+                // XXX need to handle binary types
+                *width += 8;
+                break;
+            }
+        }
     }
 
     void
@@ -276,7 +316,10 @@ namespace pg_fdw {
     }
 
     Datum
-    PgFdwMgr::_get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type)
+    PgFdwMgr::_get_datum_from_field(FieldPtr field,
+                                    const Extent::Row &row,
+                                    int32_t pg_type,
+                                    int32_t atttypmod)
     {
         switch (field->get_type()) {
         case SchemaType::INT64:
@@ -310,7 +353,7 @@ namespace pg_fdw {
             // retrieve the type's entry from the pg_type table
             HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
             if (!HeapTupleIsValid(tuple)) {
-		elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
+                elog(ERROR, "FDW: cache lookup failed for type %u", pg_type);
             }
 
             // get the receive function
@@ -334,10 +377,7 @@ namespace pg_fdw {
             Datum datum = PointerGetDatum(&string);
 
             // call the recieve function
-            // XXX we need to replace that -1 with the pgtypmod from the pg_attribute table... can
-            //     figure out the right way to retrieve that when we merge this code with the new
-            //     FDW code
-            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(-1)); // Int32GetDatum(pgtypmod)
+            Datum value_datum = OidFunctionCall3(typeinput, datum, ObjectIdGetDatum(pg_type), Int32GetDatum(atttypmod));
 
             return value_datum;
         }

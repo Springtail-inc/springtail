@@ -194,13 +194,17 @@ dump_table(uint64_t tid, uint64_t xid)
     std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
 
     auto fields = schema->get_fields();
-    int attrnums[fields->size()];
+    FormData_pg_attribute attrdata[fields->size()];
+    Form_pg_attribute attrs[fields->size()];
 
     // iterate over column map and extract attrnums
     int i = 0;
     for (auto &col : columns) {
         if (col.second.exists) {
-            attrnums[i++] = col.first;
+            attrs[i] = &attrdata[i];
+            attrs[i]->attnum = col.first;
+            attrs[i]->atttypid = col.second.pg_type;
+            attrs[i]->atttypmod = -1;
         }
     }
 
@@ -211,7 +215,7 @@ dump_table(uint64_t tid, uint64_t xid)
 
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, i, attrnums, values, nulls)) {
+    while (mgr->fdw_iterate_scan(state, i, attrs, values, nulls)) {
         // print the values
         for (size_t j = 0; j < fields->size(); j++) {
             if (nulls[j]) {

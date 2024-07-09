@@ -56,6 +56,7 @@ namespace pg_fdw {
         uint64_t tid;
         uint64_t xid;
         FieldArrayPtr fields;
+        TableStats stats;
         std::optional<Table::Iterator> iter;
         std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
         std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
@@ -66,7 +67,7 @@ namespace pg_fdw {
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), iter(std::nullopt)
+            : table(table), tid(tid), xid(xid), stats(table->get_stats()), iter(std::nullopt)
         {
             // fetch the columns and column IDs for the table
             columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
@@ -123,12 +124,12 @@ namespace pg_fdw {
         /** Iterate scan -- get next row
          * @param state PgFdwState
          * @param num_attrs Number of attributes
-         * @param attrnums Array of attribute numbers
+         * @param attrs Array of pg attributes
          * @param values Array of Datum values (output)
          * @param isnull Array of null flags (output)
          * @return True if row is valid, false if end of scan
          */
-        bool fdw_iterate_scan(PgFdwState *state, int num_attrs, int *attrnums, Datum *values, bool *isnull);
+        bool fdw_iterate_scan(PgFdwState *state, int num_attrs, Form_pg_attribute *attrs, Datum *values, bool *isnull);
 
         /** End scan -- free state */
         void fdw_end_scan(PgFdwState *state);
@@ -180,7 +181,10 @@ namespace pg_fdw {
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
         /** Helper to convert field to PG Datum */
-        static Datum _get_datum_from_field(FieldPtr field, const Extent::Row &row, int32_t pg_type);
+        static Datum _get_datum_from_field(FieldPtr field,
+                                           const Extent::Row &row,
+                                           int32_t pg_type,
+                                           int32_t atttypmod);
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server,

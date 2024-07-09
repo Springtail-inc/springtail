@@ -197,6 +197,14 @@ namespace springtail {
          */
         StorageCache::PagePtr read_page(uint64_t extent_id) const;
 
+        /**
+         * @brief Get table stats
+         * @return TableStats
+         */
+        TableStats get_stats() const {
+            return _stats;
+        }
+
     protected:
         /**
          * Reads a data extent using the provided iterator position within the primary index.
