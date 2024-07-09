@@ -25,11 +25,15 @@ target_link_libraries(xid_mgr_daemon
 )
 add_dsymutil_command(xid_mgr_daemon)
 
-# add_executable(threaded_test test/threaded_test.cc)
-# target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-# target_link_libraries(threaded_test
-#     PUBLIC springtail_common
-#            springtail_xid_mgr
-#     PRIVATE Boost::program_options
-# )
-# add_dsymutil_command(threaded_test)
+add_executable(threaded_test test/threaded_test.cc)
+target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
+target_link_libraries(threaded_test
+    PUBLIC springtail_common
+           springtail_xid_mgr
+    PRIVATE Boost::program_options
+            GTest::gtest_main
+)
+add_dsymutil_command(threaded_test)
+
+# hook tests into gtest framework
+gtest_discover_tests(threaded_test)
