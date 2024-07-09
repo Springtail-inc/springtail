@@ -298,7 +298,7 @@ namespace springtail::sys_tbl {
 
             static TuplePtr
             key_tuple(uint64_t table_id, uint64_t xid) {
-                auto key_fields = std::make_shared<FieldArray>(3);
+                auto key_fields = std::make_shared<FieldArray>(2);
                 key_fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
                 return std::make_shared<FieldTuple>(key_fields, nullptr);
