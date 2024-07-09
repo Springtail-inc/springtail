@@ -94,6 +94,7 @@ namespace pg_fdw {
         static constexpr char CATALOG_TABLE_ROOTS[] = "table_roots";      ///< Table name for system table roots
         static constexpr char CATALOG_TABLE_INDEXES[] = "indexes";        ///< Table name for system table indexes
         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
+        static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
 
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {

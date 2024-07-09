@@ -485,6 +485,12 @@ namespace pg_fdw {
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
+        if (!((exclude && table_set.contains(CATALOG_TABLE_STATS)) ||
+              (limit && !table_set.contains(CATALOG_TABLE_STATS)))) {
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_STATS, sys_tbl::TableStats::ID, sys_tbl::TableStats::Data::SCHEMA);
+            commands = lappend(commands, pstrdup(sql.c_str()));
+        }
+
         return commands;
     }
 
