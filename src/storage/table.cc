@@ -1,4 +1,6 @@
+#include <storage/system_tables.hh>
 #include <storage/table.hh>
+#include <storage/table_mgr.hh>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {
@@ -15,13 +17,15 @@ namespace springtail {
                  const std::vector<std::string> &primary_key,
                  const std::vector<std::vector<std::string>> &secondary_keys,
                  std::vector<uint64_t> root_offsets,
-                 ExtentSchemaPtr schema)
+                 ExtentSchemaPtr schema,
+                 const TableStats &stats)
         : _id(table_id),
           _xid(xid),
           _table_dir(table_dir),
           _primary_key(primary_key),
           _secondary_keys(secondary_keys),
-          _schema(schema)
+          _schema(schema),
+          _stats(stats)
     {
         // make sure that the table directory exists
         std::filesystem::create_directory(_table_dir);
@@ -136,6 +140,27 @@ namespace springtail {
     }
 
     Table::Iterator
+    Table::inverse_lower_bound(TuplePtr search_key)
+    {
+        // find the extent that could contain the inverse_lower_bound() key
+        auto &&i = _primary_index->inverse_lower_bound(search_key);
+        if (i == _primary_index->end()) {
+            return end();
+        }
+
+        // read the extent and find the inverse_lower_bound() of the key within it
+        auto page = _read_page_via_primary(i);
+
+        // find the inverse_lower_bound() of the key within the data extent
+        auto &&j = page->inverse_lower_bound(search_key, _schema);
+
+        // note: the primary index indicates that there is a value <= the search_key in this page
+        assert(j != page->end());
+
+        return Iterator(this, _primary_index, i, page, j);
+    }
+
+    Table::Iterator
     Table::begin()
     {
         auto &&index_i = _primary_index->begin();
@@ -175,6 +200,7 @@ namespace springtail {
                                const std::vector<std::string> &primary_key,
                                const std::vector<std::vector<std::string>> &secondary_keys,
                                ExtentSchemaPtr schema,
+                               const TableStats &stats,
                                bool for_gc)
     : _id(id),
       _access_xid(access_xid),
@@ -184,6 +210,7 @@ namespace springtail {
       _primary_key(primary_key),
       _secondary_keys(secondary_keys),
       _schema(schema),
+      _stats(stats),
       _for_gc(for_gc)
     {
         // make sure that the table directory exists
@@ -274,6 +301,11 @@ namespace springtail {
         } else {
             _insert_direct(value, xid, extent_id);
         }
+
+        // update the stats
+        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+            ++_stats.row_count;
+        }
     }
 
     void
@@ -281,6 +313,8 @@ namespace springtail {
                          uint64_t xid,
                          uint64_t extent_id)
     {
+        bool did_insert = false;
+
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 // with no primary key, we just resort to a separate removal and insert
@@ -288,10 +322,15 @@ namespace springtail {
                 _remove_by_scan(search_key, xid);
                 _insert_append(value, xid);
             } else {
-                _upsert_by_lookup(value, xid);
+                did_insert = _upsert_by_lookup(value, xid);
             }
         } else {
-            _upsert_direct(value, xid, extent_id);
+            did_insert = _upsert_direct(value, xid, extent_id);
+        }
+
+        // update the stats
+        if (did_insert && _id > sys_tbl::MAX_SYS_TBL_ID) {
+            ++_stats.row_count;
         }
     }
 
@@ -300,6 +339,7 @@ namespace springtail {
                          uint64_t xid,
                          uint64_t extent_id)
     {
+        // perform the removal
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 _remove_by_scan(key, xid);
@@ -308,6 +348,11 @@ namespace springtail {
             }
         } else {
             _remove_direct(key, xid, extent_id);
+        }
+
+        // update the stats
+        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+            --_stats.row_count;
         }
     }
 
@@ -324,6 +369,8 @@ namespace springtail {
         } else {
             _update_direct(value, xid, extent_id);
         }
+
+        // note: no change in the stats.row_count
     }
 
     bool
@@ -422,7 +469,8 @@ namespace springtail {
                     auto key_fields = _schema->get_fields(_secondary_keys[i]);
 
                     auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
-                    SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
+                    // note: uncomment if you need to debug the entries being populated into the secondary indexes
+                    // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
                 }
 
@@ -459,7 +507,17 @@ namespace springtail {
             roots.push_back(secondary->finalize());
         }
 
+        // update the roots and stats in the system tables for non-system tables
+        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+            auto table_mgr = TableMgr::get_instance();
+
+            // note: don't currently keep table roots or table stats for system tables
+            table_mgr->update_roots(_id, _access_xid, _target_xid, roots);
+            table_mgr->update_stats(_id, _access_xid, _target_xid, _stats);
+        }
+
         // store the roots into a look-aside root file
+        // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
         for (auto root : roots) {
             auto &&row = extent->append();
@@ -557,7 +615,7 @@ namespace springtail {
         _insert_direct(value, xid, extent_id);
     }
 
-    void
+    bool
     MutableTable::_upsert_direct(TuplePtr value,
                                  uint64_t xid,
                                  uint64_t extent_id)
@@ -566,14 +624,16 @@ namespace springtail {
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
 
         // add the row to the page
-        page->upsert(value, _schema);
+        bool did_insert = page->upsert(value, _schema);
 
         // release the page back to the write cache
         StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
                                                           this, std::placeholders::_1));
+
+        return did_insert;
     }
 
-    void
+    bool
     MutableTable::_upsert_empty(TuplePtr value,
                                 uint64_t xid)
     {
@@ -583,18 +643,17 @@ namespace springtail {
         }
 
         // add the row to the page
-        _empty_page->upsert(value, _schema);
+        return _empty_page->upsert(value, _schema);
     }
 
-    void
+    bool
     MutableTable::_upsert_by_lookup(TuplePtr value,
                                     uint64_t xid)
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _upsert_empty(value, xid);
-            return;
+            return _upsert_empty(value, xid);
         }
 
         // we didn't receive an extent_id, so we need to look up the extent from the primary index
@@ -608,7 +667,7 @@ namespace springtail {
         }
 
         // then we can do a direct insert
-        _upsert_direct(value, xid, extent_id);
+        return _upsert_direct(value, xid, extent_id);
     }
 
     void

@@ -301,6 +301,9 @@ namespace springtail {
 
         // Schemas
         _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
+
+        // TableStats
+        _system_cache[{ sys_tbl::TableStats::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableStats::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>

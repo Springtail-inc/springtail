@@ -64,7 +64,8 @@ namespace springtail {
               exists(exists),
               nullable(nullable),
               pkey_position(pkey_position),
-              default_value(default_value)
+              default_value(default_value),
+              update_type(SchemaUpdateType::NEW_COLUMN)
         { }
 
         SchemaColumn(const std::string_view &name,
@@ -82,7 +83,8 @@ namespace springtail {
               pg_type(pg_type),
               nullable(nullable),
               pkey_position(pkey_position),
-              default_value(default_value)
+              default_value(default_value),
+              update_type(SchemaUpdateType::NEW_COLUMN)
         { }
 
         /**

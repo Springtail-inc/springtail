@@ -241,8 +241,6 @@ namespace springtail {
          * or equal to the provided search_key.  Returns end() if there is no such entry.
          *
          * @param search_key The key we are searching for in the tree.
-         * @param xid The XID at which we are searching.
-
          * @param for_update If true, then will return an iterator to the last element in the tree rather than end()
          */
         Iterator lower_bound(TuplePtr search_key, bool for_update = false) const;
@@ -252,16 +250,22 @@ namespace springtail {
          * less than the provided search_key.  Returns end() if there is no such entry.
          *
          * @param search_key The key we are searching for in the tree.
-         * @param xid The XID at which we are searching.
          */
         Iterator inverse_upper_bound(TuplePtr search_key) const;
+
+        /**
+         * Returns an iterator to the first entry at a given XID that has a key that is less than or
+         * equal to the provided search_key.  Returns end() if there is no such entry.
+         *
+         * @param search_key The key we are searching for in the tree.
+         */
+        Iterator inverse_lower_bound(TuplePtr search_key) const;
 
         /**
          * Returns an iterator to the first entry at a given XID that has a key that is equal to the
          * provided search_key.  Returns end() if there is no such entry.
          *
          * @param search_key The key we are searching for in the tree.
-         * @param xid The XID at which we are searching.
          */
         Iterator find(TuplePtr search_key) const;
 

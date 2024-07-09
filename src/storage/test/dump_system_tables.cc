@@ -18,7 +18,8 @@ main(int argc,
     for (auto table_id : { sys_tbl::TableNames::ID,
                            sys_tbl::TableRoots::ID,
                            sys_tbl::Indexes::ID,
-                           sys_tbl::Schemas::ID }) {
+                           sys_tbl::Schemas::ID,
+                           sys_tbl::TableStats::ID }) {
         auto table = TableMgr::get_instance()->get_table(table_id,
                                                          constant::LATEST_XID,
                                                          constant::MAX_LSN);

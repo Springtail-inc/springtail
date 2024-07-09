@@ -56,6 +56,12 @@ namespace springtail {
          */
         void update_roots(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const std::vector<uint64_t> &roots);
 
+        /**
+         * Update the stats of a table.
+         */
+        void update_stats(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const TableStats &stats);
+
+
     private:
         static TableMgr *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
@@ -84,6 +90,11 @@ namespace springtail {
          * Find the roots of a given table from the TableRoots system table.
          */
         std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);
+
+        /**
+         * Find the table statistics from the TableStats system table.
+         */
+        TableStats _find_stats(uint64_t table_id, uint64_t xid);
 
     private:
         // singleton; delete copy constructor

@@ -109,8 +109,8 @@ namespace springtail {
                 if (_callback(std::get<1>(entry)) == true) {
                     // callback returned true so we can evict item
                     // reverse iterator is pointing behind of where we want it
-                    _cache.erase(std::next(current).base()); 
                     _remove_entry(entry);
+                    _cache.erase(std::next(current).base()); 
                     return true;
                 }
             }

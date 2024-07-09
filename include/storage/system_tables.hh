@@ -5,6 +5,12 @@
 namespace springtail::sys_tbl {
 
     /**
+     * The maximum ID of a system table.  Currently set to 100, but could be higher based on
+     * Postgres behavior.
+     */
+    constexpr uint32_t MAX_SYS_TBL_ID = 100;
+
+    /**
      * Helper functions and constants for the table_names table.
      */
     class TableNames {
@@ -256,4 +262,47 @@ namespace springtail::sys_tbl {
         };
     };
 
+    /**
+     * Helper functions and constants for the table_stats table.
+     */
+    class TableStats {
+    public:
+        static constexpr uint32_t ID = 5;
+
+        struct Data {
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t XID = 1;
+            static constexpr uint32_t ROW_COUNT = 2;
+
+            static const std::vector<SchemaColumn> SCHEMA;
+
+            static TuplePtr
+            tuple(uint64_t table_id,
+                  uint64_t xid,
+                  uint64_t row_count)
+            {
+                auto fields = std::make_shared<FieldArray>(4);
+                fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+                fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
+                return std::make_shared<FieldTuple>(fields, nullptr);
+            }
+        };
+
+        struct Primary {
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t XID = 1;
+
+            static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
+
+            static TuplePtr
+            key_tuple(uint64_t table_id, uint64_t xid) {
+                auto key_fields = std::make_shared<FieldArray>(3);
+                key_fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+                key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                return std::make_shared<FieldTuple>(key_fields, nullptr);
+            }
+        };
+    };
 }

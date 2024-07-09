@@ -668,6 +668,12 @@ namespace springtail {
             Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
+             * Returns the first row of the page with columns <= the matching columns of the provided tuple.
+             * @param tuple A tuple holding data that matches the sort columns of the extent.
+             */
+            Iterator inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
              * Returns an iterator to the row at the provided index within the page.
              * @param index The index within the page to retrieve the row.
              */
@@ -725,8 +731,9 @@ namespace springtail {
 
             /**
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
+             * @return True if the upsert() resulted in an insert()
              */
-            void upsert(TuplePtr tuple, ExtentSchemaPtr schema);
+            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match

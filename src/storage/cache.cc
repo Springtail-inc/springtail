@@ -472,6 +472,39 @@ namespace springtail {
     }
 
     StorageCache::Page::Iterator
+    StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+
+        // check if the page is empty
+        if (empty()) {
+            return end();
+        }
+
+        // perform a lower-bound to find the row with a key <= the provided tuple
+        auto i = lower_bound(tuple, schema);
+        if (i == end()) {
+            --i;
+            return i;
+        }
+
+        // if the key is equal, return it
+        auto key = FieldTuple(schema->get_sort_fields(), *i);
+        if (tuple->equal(key)) {
+            return i;
+        }
+
+        // if we are at the first entry, nothing before it
+        if (i == begin()) {
+            return end();
+        }
+
+        // go to the previous entry
+        --i;
+        return i;
+    }
+
+    StorageCache::Page::Iterator
     StorageCache::Page::at(uint32_t index)
     {
         // iterate through the extents to find the requested index in the page
@@ -595,7 +628,7 @@ namespace springtail {
         _check_split(extent_i, *extent, schema);
     }
 
-    void
+    bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
@@ -618,7 +651,7 @@ namespace springtail {
 
             // release back to the cache
             cache->_data_cache->put(extent);
-            return;
+            return true;
         }
 
         // extract the key to find the insert position
@@ -647,9 +680,11 @@ namespace springtail {
                                               });
 
         // see if the row's key matches the tuple's key
+        bool did_insert = false;
         if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal(*key)) {
             // update the existing row
             MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
+            did_insert = true;
         } else {
             // insert the tuple into the extent
             auto row = (*extent)->insert(row_i);
@@ -658,6 +693,9 @@ namespace springtail {
 
         // check for split
         _check_split(extent_i, *extent, schema);
+
+        // indicate if an insert occurred or not
+        return did_insert;
     }
 
     void
