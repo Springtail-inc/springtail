@@ -469,6 +469,7 @@ namespace springtail {
                     auto key_fields = _schema->get_fields(_secondary_keys[i]);
 
                     auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
+                    // note: uncomment if you need to debug the entries being populated into the secondary indexes
                     // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
                 }

@@ -76,7 +76,6 @@ namespace springtail {
     {
         std::vector<uint64_t> roots;
 
-#if 0
         // get the root of the table's primary index
         auto roots_t = _get_system_table(sys_tbl::TableRoots::ID, xid);
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
@@ -92,7 +91,6 @@ namespace springtail {
         // retrieve the root extent ID of the primary
         auto eid_f = roots_t->extent_schema()->get_field("extent_id");
         roots.push_back(eid_f->get_uint64(*it));
-#endif
 
         return roots;
     }
@@ -111,8 +109,8 @@ namespace springtail {
 
         auto it = stats_t->inverse_lower_bound(search_key);
         if (it == stats_t->end() || !FieldTuple(stats_key_fields, *it).equal(*search_key)) {
-            // no stats?  seems like an error
-            SPDLOG_ERROR("Couldn't find table_stats entry for {}@{}", table_id, xid);
+            // no stats?  seems like a potential error
+            SPDLOG_WARN("Couldn't find table_stats entry for {}@{}", table_id, xid);
             return stats;
         }
 

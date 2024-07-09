@@ -753,11 +753,6 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
-        if (extent_i == _extents.end()) {
-            SPDLOG_DEBUG("Didn't find: {}", key->to_string());
-            SafeExtent extent(_file, _extents.back());
-            SPDLOG_DEBUG("Last entry is: {}", FieldTuple(schema->get_sort_fields(), (*extent)->back()).to_string());
-        }
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
