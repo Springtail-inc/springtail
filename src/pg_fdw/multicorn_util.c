@@ -615,10 +615,15 @@ extractClauseFromNullTest(PlannerInfo *root,
                           NullTest *node,
                           List **quals)
 {
+    if (node->argisrow) {
+        // this is a null check for entire row, not handled right now
+        return;
+    }
+
     if (IsA(node->arg, Var))
     {
         Var		   *var = (Var *) node->arg;
-        BaseQual *result;
+        BaseQual   *result;
         char	   *opname = NULL;
 
         if (var->varattno < 1)
@@ -641,6 +646,53 @@ extractClauseFromNullTest(PlannerInfo *root,
     }
 }
 
+static void
+extractClauseFromBoolTest(PlannerInfo *root,
+                          Relids base_relids,
+                          BooleanTest *node,
+                          List **quals)
+{
+    if (IsA(node->arg, Var))
+    {
+        Var		   *var = (Var *) node->arg;
+        BaseQual   *result;
+        char	   *opname = NULL;
+
+        if (var->varattno < 1)
+        {
+            return;
+        }
+        switch (node->booltesttype) {
+            case IS_NOT_FALSE:
+            case IS_TRUE:
+                opname = "=";
+                break;
+            case IS_FALSE:
+            case IS_NOT_TRUE:
+                opname = "<>";
+                break;
+            case IS_UNKNOWN:
+                opname = "=";
+                break;
+            case IS_NOT_UNKNOWN:
+                opname = "<>";
+                break;
+        }
+
+        if (node->booltesttype == IS_UNKNOWN || node->booltesttype == IS_NOT_UNKNOWN) {
+            result = makeQual(var->varattno, opname,
+                              (Expr *) makeNullConst(INT4OID, -1, InvalidOid),
+                              false,
+                              false);
+        } else {
+            result = makeQual(var->varattno, opname,
+                              (Expr *) makeBoolConst(node->booltesttype == IS_TRUE, false),
+                              false,
+                              false);
+        }
+        *quals = lappend(*quals, result);
+    }
+}
 
 /*
  * Extract conditions that can be pushed down, as well as the parameters.
@@ -667,7 +719,20 @@ extractRestrictions(PlannerInfo *root,
                                                (ScalarArrayOpExpr *) node,
                                                quals);
             break;
+        case T_BooleanTest:
+            extractClauseFromBoolTest(root, base_relids,
+                                      (BooleanTest *) node, quals);
+            break;
+
         default:
+            /*
+             * Note: multicorn issue: 8 https://github.com/pgsql-io/multicorn2/issues/8 on OR / AND NOT clauses
+             * - As per the OP, and some tests I performed, a T_BoolOpExpr occurs when the where clause
+             * qualifier has the form of an OR, or AND NOT (and, I suspect, anything other than an AND) [1].
+             * - The analogous code in Postgres' contrib.postgres_fdw implmentation has - not
+             * surprisingly - a recursive expansion of the qualifier where we have code for 3 specific
+             * cases (equality, test for NULL and IN).
+             */
             {
                 ereport(LOG,
                         (errmsg("unsupported expression for "
