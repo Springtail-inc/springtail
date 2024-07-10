@@ -83,8 +83,15 @@ namespace springtail {
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
 
         auto it = roots_t->inverse_lower_bound(search_key);
-        if (it == roots_t->end() || !FieldTuple(roots_key_fields, *it).equal(*search_key)) {
+
+        // need to confirm that the table ID and index ID match, but the XID may not match
+        auto table_id_f = roots_t->extent_schema()->get_field("table_id");
+        auto index_id_f = roots_t->extent_schema()->get_field("index_id");
+        if (it == roots_t->end() ||
+            table_id_f->get_uint64(*it) != table_id ||
+            index_id_f->get_uint64(*it) != constant::INDEX_PRIMARY) {
             // no roots?  try to find it in the roots file by returning empty roots
+            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}", table_id, xid);
             return roots;
         }
 
@@ -108,8 +115,11 @@ namespace springtail {
         auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid);
 
         auto it = stats_t->inverse_lower_bound(search_key);
-        if (it == stats_t->end() || !FieldTuple(stats_key_fields, *it).equal(*search_key)) {
-            // no stats?  seems like a potential error
+
+        // need to confirm that the table ID matches, but the XID may not match
+        auto table_id_f = stats_t->extent_schema()->get_field("table_id");
+        if (it == stats_t->end() || table_id_f->get_uint64(*it) != table_id) {
+            // no stats for this table?  seems like a potential error
             SPDLOG_WARN("Couldn't find table_stats entry for {}@{}", table_id, xid);
             return stats;
         }

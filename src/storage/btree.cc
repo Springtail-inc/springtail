@@ -159,7 +159,7 @@ namespace springtail {
             return i;
         }
 
-        // if we are at the first entry, nothing before it
+        // if we are at the first entry, nothing before it, so return that?
         if (i == begin()) {
             return end();
         }

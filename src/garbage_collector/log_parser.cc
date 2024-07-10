@@ -311,6 +311,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -330,6 +332,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -352,6 +356,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -655,6 +661,16 @@ namespace springtail::gc {
                     // record the truncate into the write cache look-aside
                     WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
                                                           WriteCacheClient::TableOp::TRUNCATE };
+                    _write_cache->add_table_change(table->id(), change);
+                    break;
+                }
+                case PgMsgEnum::CREATE_TABLE:
+                case PgMsgEnum::ALTER_TABLE:
+                case PgMsgEnum::DROP_TABLE: {
+                    // XXX need to record the details about the change...
+                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                                                          WriteCacheClient::TableOp::SCHEMA_CHANGE };
+
                     _write_cache->add_table_change(table->id(), change);
                     break;
                 }
