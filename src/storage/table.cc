@@ -143,7 +143,7 @@ namespace springtail {
     Table::inverse_lower_bound(TuplePtr search_key)
     {
         // find the extent that could contain the inverse_lower_bound() key
-        auto &&i = _primary_index->inverse_lower_bound(search_key);
+        auto &&i = _primary_index->lower_bound(search_key);
         if (i == _primary_index->end()) {
             return end();
         }

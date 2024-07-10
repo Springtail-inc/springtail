@@ -118,6 +118,15 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
+            // XXX This is where we need to implement the schema changes in the FDW.  We need to
+            //     perform the following actions:
+            //     1. pre-commit the XID -- this will block the FDW operation for new queries
+            //     2. connect to each FDW and perform the schema+metadata changes for this XID
+            //     3. commit the XID -- mark the XID as ready in the XID mgr which unblocks the FDWs
+
+            // note: if we want to implement roll-forward on query, then we could apply the schema
+            //       changes after the data changes are written to the write cache
+
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
