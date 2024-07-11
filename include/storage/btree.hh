@@ -245,6 +245,9 @@ namespace springtail {
          */
         Iterator lower_bound(TuplePtr search_key, bool for_update = false) const;
 
+        Iterator upper_bound(TuplePtr search_key, bool for_update = false) const;
+
+
         /**
          * Returns an iterator to the first entry at a given XID that has a key that is strictly
          * less than the provided search_key.  Returns end() if there is no such entry.

@@ -69,6 +69,41 @@ namespace springtail {
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
             /**
+             * Move the iterator backward to the previous row.
+             */
+            Iterator& operator--() {
+                // check if this is end()
+                if (_page == nullptr) {
+                    // move to the final page referenced by the primary index
+                    assert(_btree_i == _btree->end());
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // check if we are on the first row
+                if (_page_i == _page->begin()) {
+                    // need to move to the previous page
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // move to the previous row
+                --_page_i;
+                return *this;
+            }
+
+            /**
+             * Returns a new iterator at the previous row.
+             */
+            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
+
+            /**
              * Compares two iterators for equality.
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
@@ -158,6 +193,8 @@ namespace springtail {
          * key.  Search key must match the primary index order.
          */
         Iterator lower_bound(TuplePtr search_key);
+
+        Iterator upper_bound(TuplePtr search_key);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search

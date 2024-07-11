@@ -472,6 +472,42 @@ namespace springtail {
     }
 
     StorageCache::Page::Iterator
+    StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+
+        // perform a upper-bound check to find the appropriate extent
+        // note: we don't use std::ranges::upper_bound() here because the projection causes the
+        //       SafeExtent to go out of scope before it is used in the comparison
+        auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
+                                 [this, &schema](const Tuple &key, const ExtentRef &ref) {
+                                     SafeExtent extent(_file, ref);
+                                     auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
+                                     return !tuple.less_than(key) && !key.equal(tuple);
+                                 });
+
+        if (extent_i == _extents.end()) {
+            return end();
+        }
+
+        SafeExtent extent(_file, *extent_i);
+
+        // perform a lower-bound check to find the appropriate row within the extent
+        auto row_i = std::ranges::upper_bound(**extent, *tuple,
+                                              [](const Tuple &lhs, const Tuple &rhs) {
+                                                  return !rhs.less_than(lhs) && !lhs.equal(rhs);
+                                              },
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                              });
+
+        // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
+        assert(row_i != (*extent)->end());
+
+        return Iterator(this, extent_i, std::move(extent), row_i);
+    }
+
+    StorageCache::Page::Iterator
     StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
     {
         boost::shared_lock lock(_mutex);

@@ -1215,7 +1215,7 @@ namespace springtail {
         bool equal(const Tuple &rhs) const {
             // check the tuple lengths and types using assert()
             // we assume correct usage in production
-            assert(this->size() == rhs.size());
+            assert(this->size() <= rhs.size());
             for (int i = 0; i < this->size(); i++) {
                 assert(this->field(i)->get_type() == rhs.field(i)->get_type());
             }
@@ -1329,6 +1329,7 @@ namespace springtail {
     private:
         FieldArrayPtr _array;
     };
+    typedef std::shared_ptr<FieldTuple> FieldTuplePtr;
 
 
     class KeyValueTuple : public Tuple {

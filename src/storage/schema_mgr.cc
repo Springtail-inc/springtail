@@ -307,8 +307,37 @@ namespace springtail {
     }
 
     std::map<uint32_t, SchemaColumn>
+    SchemaMgr::_get_columns_for_system_tables(const std::vector<SchemaColumn> &columns)
+    {
+        std::map<uint32_t, SchemaColumn> column_map;
+        for (auto &&column : columns) {
+            column_map.insert({column.position, column});
+        }
+        return column_map;
+    }
+
+    std::map<uint32_t, SchemaColumn>
     SchemaMgr::get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn)
     {
+        // handle system tables
+        if (table_id <= sys_tbl::MAX_SYS_TBL_ID) {
+            switch (table_id) {
+                case sys_tbl::TableNames::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableNames::Data::SCHEMA);
+                case sys_tbl::TableRoots::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableRoots::Data::SCHEMA);
+                case sys_tbl::Indexes::ID:
+                    return _get_columns_for_system_tables(sys_tbl::Indexes::Data::SCHEMA);
+                case sys_tbl::Schemas::ID:
+                    return _get_columns_for_system_tables(sys_tbl::Schemas::Data::SCHEMA);
+                case sys_tbl::TableStats::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableStats::Data::SCHEMA);
+                default:
+                    assert(false);
+                    break;
+            }
+        }
+
         // XXX can't call this for system tables
         assert(_system_cache.find({ table_id, constant::INDEX_DATA, true }) == _system_cache.end());
 
