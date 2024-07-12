@@ -246,7 +246,7 @@ namespace pg_fdw {
         }
 
         // check if we are scanning up and iterator is at the end
-        if (state->scan_up && *state->iter_start == state->iter_end) {
+        if (state->scan_up && *state->iter_start == *state->iter_end) {
             if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end

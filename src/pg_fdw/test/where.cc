@@ -73,7 +73,7 @@ void search(int val, QualOpName op)
     FieldPtr key_field = std::make_shared<ConstTypeField<int32_t>>(val);
     auto fields = table->extent_schema()->get_fields();
     std::cout << "Up\n";
-    while (iter_start != iter_end) {
+    while (*iter_start != *iter_end) {
         auto row = *(*iter_start);
         if (check_row(row, fields, key_field, op)) {
             std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
@@ -89,7 +89,7 @@ void search(int val, QualOpName op)
         iter_end.emplace(Table::Iterator(table->end()));
 
         // do it again
-        while (iter_start != iter_end) {
+        while (*iter_start != *iter_end) {
             auto row = *(*iter_start);
             if (check_row(row, fields, key_field, op)) {
                 std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
