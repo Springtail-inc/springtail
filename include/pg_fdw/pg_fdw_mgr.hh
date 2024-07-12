@@ -55,12 +55,16 @@ namespace pg_fdw {
         TablePtr table;
         uint64_t tid;
         uint64_t xid;
-        FieldArrayPtr fields;       ///< Fields for the columns from the target list
-        FieldArrayPtr qual_fields;  ///< Fields for the columns from the qual list
-        TableStats stats;           ///< Table statistics
-        bool scan_up = true;        ///< Scan direction for iterator
+        FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
+        FieldArrayPtr qual_fields = nullptr;  ///< Fields for the columns from the qual list
+        TableStats stats;                     ///< Table statistics
+        bool scan_up = true;                  ///< Scan direction for iterator
 
-        std::optional<Table::Iterator> iter;          ///< Iterator for table scan
+        ///< Start iterator for table scan
+        std::optional<Table::Iterator> iter_start = std::nullopt;
+        ///< End iterator for table scan
+        std::optional<Table::Iterator> iter_end = std::nullopt;
+
         std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
         std::vector<uint32_t> pkey_column_ids;        ///< Primary key column IDs
         std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
@@ -69,8 +73,7 @@ namespace pg_fdw {
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), fields(nullptr), qual_fields(nullptr),
-              stats(table->get_stats()), iter(std::nullopt)
+            : table(table), tid(tid), xid(xid), stats(table->get_stats())
         {
             // fetch the columns and column IDs for the table
             columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
@@ -228,7 +231,7 @@ namespace pg_fdw {
         static void _init_quals(PgFdwState *state, List *qual_list);
 
         /** Helper to setup itertor based on filtered qual list */
-        static void _init_qual_iterator(PgFdwState *state, ConstQual *qual);
+        static void _init_qual_fields(PgFdwState *state);
 
         /** Helper to create constant field from qual and add to field array */
         static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
@@ -238,6 +241,9 @@ namespace pg_fdw {
                                    FieldPtr row_field,
                                    FieldPtr key_field,
                                    QualOpName op);
+
+        /** Helper to set/reset scan iterators from beginning based on quals */
+        static void _set_scan_iterators(PgFdwState *state);
     };
 } // namespace pg_fdw
 } // namespace springtail

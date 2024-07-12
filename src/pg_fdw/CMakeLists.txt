@@ -59,3 +59,13 @@ target_link_libraries(dump_table
     PRIVATE PostgreSQL::PostgreSQL
 )
 add_dsymutil_command(dump_table)
+
+add_executable(where test/where.cc)
+target_include_directories(where
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(where
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+)
+add_dsymutil_command(where)

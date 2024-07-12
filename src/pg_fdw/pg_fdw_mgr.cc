@@ -95,14 +95,8 @@ namespace pg_fdw {
         // init quals
         if (qual_list != nullptr) {
             _init_quals(state, qual_list);
-        }
 
-        // note: just because we have some quals doesn't mean we can use them
-        // so filtered_quals may be empty even if qual_list is not
-        if (!state->filtered_quals.empty()) {
-            // setup iterator based on first qual (first primary key)
-            _init_qual_iterator(state, state->filtered_quals[0]);
-
+            // note: it is possible state->filtered_quals is empty if no quals are usable
             // go through qual columns and make sure they are part of the target columns
             i = state->target_columns.size();
             for (int j = 0; j < state->filtered_quals.size(); j++) {
@@ -112,10 +106,6 @@ namespace pg_fdw {
                     state->target_columns.insert({attno, i++});
                 }
             }
-        } else {
-            // use standard iterator for full scan
-            state->iter.emplace(Table::Iterator(state->table->begin()));
-            state->scan_up = true;
         }
 
         // set target columns; will contain filtered qual columns as well
@@ -126,37 +116,48 @@ namespace pg_fdw {
             // otherwise, use target columns (by name
             state->fields = state->table->extent_schema()->get_fields(target_colnames);
         }
+
+        // set the iterators for the scan taking quals into consideration
+        _set_scan_iterators(state);
     }
 
     void
-    PgFdwMgr::_init_qual_iterator(PgFdwState *state, ConstQual *qual)
+    PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
-        // create the fields and tuple for the iterator
-        state->qual_fields = std::make_shared<FieldArray>(state->filtered_quals.size());
+        // NOTE: for now we always scan up this is the natural order of the table data
+        // we could scan down for reverse sort but would need to switch start/end iterators
+        state->scan_up = true;
 
-        // iterate through the quals and add them to the key fields
-        for (int i = 0; i < state->filtered_quals.size(); i++) {
-            // create a const field for the qual and add it to the field array
-            _make_const_field(state->qual_fields, i, state->filtered_quals[i]);
+        if (state->qual_fields == nullptr) {
+            // full table scan
+            state->iter_start.emplace(Table::Iterator(state->table->begin()));
+            state->iter_end.emplace(Table::Iterator(state->table->end()));
+            return;
         }
+
+        // setup scan based on first qual
+        ConstQual *qual = state->filtered_quals[0];
 
         // create the field tuple
         FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
 
-        // set up the iterator based on first key
-        if (qual->base.op == LESS_THAN_EQUALS || qual->base.op == GREATER_THAN) {
-            state->iter.emplace(Table::Iterator(state->table->upper_bound(tuple)));
-        } else {
-            // note: for not_equals we start with lower bound and scan down
-            // this is also the default for other ops
-            state->iter.emplace(Table::Iterator(state->table->lower_bound(tuple)));
+        // set up the start iterator based on first key op
+        QualOpName op = qual->base.op;
+        if (op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
+            state->iter_start.emplace(Table::Iterator(state->table->begin()));
+        } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
+            state->iter_start.emplace(Table::Iterator(state->table->lower_bound(tuple)));
+        } else if (op == GREATER_THAN) {
+            state->iter_start.emplace(Table::Iterator(state->table->upper_bound(tuple)));
         }
 
-        // set scan direction based on first key
-        if (qual->base.op == LESS_THAN_EQUALS || qual->base.op == LESS_THAN || qual->base.op == NOT_EQUALS) {
-            state->scan_up = false;   // scan down
-        } else {
-            state->scan_up = true;
+        // set end iterator based on first key op
+        if (op == LESS_THAN || op == NOT_EQUALS) {
+            state->iter_end.emplace(Table::Iterator(state->table->lower_bound(tuple)));
+        } else if (op == LESS_THAN_EQUALS || op == EQUALS) {
+            state->iter_end.emplace(Table::Iterator(state->table->upper_bound(tuple)));
+        } else if (op == GREATER_THAN || op == GREATER_THAN_EQUALS) {
+            state->iter_end.emplace(Table::Iterator(state->table->end()));
         }
     }
 
@@ -196,6 +197,21 @@ namespace pg_fdw {
                 i++;
             }
         }
+
+        // note: just because we have some quals doesn't mean we can use them
+        // so filtered_quals may be empty even if qual_list is not
+        if (state->filtered_quals.empty()) {
+            return;
+        }
+
+        // create the fields and tuple for the iterator
+        state->qual_fields = std::make_shared<FieldArray>(state->filtered_quals.size());
+
+        // iterate through the quals and add them to the key fields
+        for (int i = 0; i < state->filtered_quals.size(); i++) {
+            // create a const field for the qual and add it to the field array
+            _make_const_field(state->qual_fields, i, state->filtered_quals[i]);
+        }
     }
 
     void
@@ -209,8 +225,7 @@ namespace pg_fdw {
     PgFdwMgr::fdw_reset_scan(PgFdwState *state)
     {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_reset_scan: tid: {}", state->tid);
-        state->iter.reset();
-        state->iter.emplace(Table::Iterator(state->table->begin()));
+        _set_scan_iterators(state);
     }
 
     bool
@@ -225,44 +240,34 @@ namespace pg_fdw {
         *eos = false;
 
         // check iterator is valid
-        if (!state->iter.has_value()) {
+        if (!state->iter_start.has_value()) {
             *eos = true;
             return false;
         }
 
         // check if we are scanning up and iterator is at the end
-        if (state->scan_up && *state->iter == state->table->end()) {
+        if (state->scan_up && *state->iter_start == state->iter_end) {
+            if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
+                // check if we need to switch iterators for not equals
+                // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
+                if (state->iter_end != state->table->end()) {
+                    FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->upper_bound(tuple));
+                    state->iter_end.emplace(state->table->end());
+                    return false;
+                }
+            }
+
             *eos = true;
             return false;
         }
 
-        // check if we are scanning down
-        if (!state->scan_up) {
-
-            // if we are at table begin we are done; unless first qual has <> op
-            if (*state->iter == state->table->begin()) {
-
-                // if the first qual has a not equals operator, then we need to do a
-                // upper_bound and scan up; we just finished scanning down from lower_bound
-                if (state->qual_fields != nullptr && state->filtered_quals[0]->base.op == NOT_EQUALS) {
-                    FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter.emplace(Table::Iterator(state->table->upper_bound(tuple)));
-                    state->scan_up = true;
-                    return false;
-                }
-
-                *eos = true;
-                return false;
-            }
-
-            // otherwise decr iterator
-            --(*state->iter);
-        }
+        // Note: for now always scan up, so we don't need to check if we are scanning down
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // get current row
-        Extent::Row row = *(*state->iter);
+        Extent::Row row = *(*state->iter_start);
 
         // go through the qual fields and see how they compare to the values with in the row
         // if they all match then we can return the row
@@ -326,7 +331,7 @@ namespace pg_fdw {
 
         // increment iterator if scanning up
         if (state->scan_up) {
-            ++(*state->iter);
+            ++(*state->iter_start);
         }
 
         return true;
