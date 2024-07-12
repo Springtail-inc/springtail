@@ -483,7 +483,7 @@ namespace springtail {
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
                                      SafeExtent extent(_file, ref);
                                      auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
-                                     return !tuple.less_than(key) && !key.equal(tuple);
+                                     return key.less_than(tuple);
                                  });
 
         if (extent_i == _extents.end()) {
@@ -495,13 +495,13 @@ namespace springtail {
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
                                               [](const Tuple &lhs, const Tuple &rhs) {
-                                                  return !rhs.less_than(lhs) && !lhs.equal(rhs);
+                                                  return lhs.less_than(rhs);
                                               },
                                               [&schema](const Extent::Row &row) {
                                                   return FieldTuple(schema->get_sort_fields(), row);
                                               });
 
-        // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
+        // note: shouldn't be possible to hit end() given the above upper_bound() check to find the extent
         assert(row_i != (*extent)->end());
 
         return Iterator(this, extent_i, std::move(extent), row_i);

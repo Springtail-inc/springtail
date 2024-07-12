@@ -667,6 +667,10 @@ namespace springtail {
              */
             Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
 
+            /**
+             * Returns the first row of the page with columns > the matching columns of the provided tuple.
+             * @param tuple A tuple holding data that matches the sort columns of the extent.
+             */
             Iterator upper_bound(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
