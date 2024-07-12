@@ -69,8 +69,6 @@ namespace pg_fdw {
     PgFdwMgr::fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup)
     {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_begin_scan: tid: {}", state->tid);
-        state->iter.emplace(Table::Iterator(state->table->begin()));
-        state->qual_list = qual_list;
 
         // copy lists into state structure in a more CPP friendly way
 
@@ -86,14 +84,6 @@ namespace pg_fdw {
                                 attno, state->columns[attno].name);
         }
 
-        if (target_colnames.empty()) {
-            // if no target columns, use all columns
-            state->fields = state->table->extent_schema()->get_fields();
-        } else {
-            // otherwise, use target columns (by name
-            state->fields = state->table->extent_schema()->get_fields(target_colnames);
-        }
-
         // init sort group vector
         foreach(lc, sortgroup) {
             DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
@@ -102,11 +92,109 @@ namespace pg_fdw {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Sort group column: {}:{}", pathkey_ptr->attnum, pathkey_ptr->attname);
         }
 
-        // dump out qual list
+        // init quals
+        if (qual_list != nullptr) {
+            _init_quals(state, qual_list);
+        }
+
+        // note: just because we have some quals doesn't mean we can use them
+        // so filtered_quals may be empty even if qual_list is not
+        if (!state->filtered_quals.empty()) {
+            // setup iterator based on first qual (first primary key)
+            _init_qual_iterator(state, state->filtered_quals[0]);
+
+            // go through qual columns and make sure they are part of the target columns
+            i = state->target_columns.size();
+            for (int j = 0; j < state->filtered_quals.size(); j++) {
+                int attno = state->filtered_quals[j]->base.varattno;
+                if (!state->target_columns.contains(attno)) {
+                    target_colnames.push_back(state->columns[attno].name);
+                    state->target_columns.insert({attno, i++});
+                }
+            }
+        } else {
+            // use standard iterator for full scan
+            state->iter.emplace(Table::Iterator(state->table->begin()));
+            state->scan_up = true;
+        }
+
+        // set target columns; will contain filtered qual columns as well
+        if (target_colnames.empty()) {
+            // if no target columns, use all columns
+            state->fields = state->table->extent_schema()->get_fields();
+        } else {
+            // otherwise, use target columns (by name
+            state->fields = state->table->extent_schema()->get_fields(target_colnames);
+        }
+    }
+
+    void
+    PgFdwMgr::_init_qual_iterator(PgFdwState *state, ConstQual *qual)
+    {
+        // create the fields and tuple for the iterator
+        state->qual_fields = std::make_shared<FieldArray>(state->filtered_quals.size());
+
+        // iterate through the quals and add them to the key fields
+        for (int i = 0; i < state->filtered_quals.size(); i++) {
+            // create a const field for the qual and add it to the field array
+            _make_const_field(state->qual_fields, i, state->filtered_quals[i]);
+        }
+
+        // create the field tuple
+        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+
+        // set up the iterator based on first key
+        if (qual->base.op == LESS_THAN_EQUALS || qual->base.op == GREATER_THAN) {
+            state->iter.emplace(Table::Iterator(state->table->upper_bound(tuple)));
+        } else {
+            // note: for not_equals we start with lower bound and scan down
+            // this is also the default for other ops
+            state->iter.emplace(Table::Iterator(state->table->lower_bound(tuple)));
+        }
+
+        // set scan direction based on first key
+        if (qual->base.op == LESS_THAN_EQUALS || qual->base.op == LESS_THAN || qual->base.op == NOT_EQUALS) {
+            state->scan_up = false;   // scan down
+        } else {
+            state->scan_up = true;
+        }
+    }
+
+    void
+    PgFdwMgr::_init_quals(PgFdwState *state, List *qual_list)
+    {
+        ListCell   *lc;
+
+        // map from primary key position to qual
+        std::map<uint32_t, ConstQualPtr> pkey_qual_map;
+
+        // iterate through qual list looking for quals that are primary keys
         foreach(lc, qual_list) {
-            BaseQual *qual = static_cast<BaseQual *>(lfirst(lc));
+            ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual: varattno: {}, right_type: {}, typeoid: {}, opname: {}, isArray: {}, useOr: {}",
-                                qual->varattno, (int)qual->right_type, qual->typeoid, qual->opname, qual->isArray, qual->useOr);
+                                qual->base.varattno, (int)qual->base.right_type, qual->base.typeoid, qual->base.opname, qual->base.isArray, qual->base.useOr);
+
+            // filter out those quals that are not sortable by us, that aren't primary keys or are arrays
+            if (state->columns[qual->base.varattno].pkey_position.has_value() && _is_type_sortable(qual->base.typeoid) &&
+                qual->base.op != UNSUPPORTED && qual->base.isArray == false) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual is in primary key and is sortable: {}", state->columns[qual->base.varattno].name);
+                // add qual to the map in primary key position
+                pkey_qual_map[state->columns[qual->base.varattno].pkey_position.value()] = qual;
+            }
+        }
+
+        // go through the primary key qual map and make sure we have quals for columns
+        // that are in primary key order, stop when we find a hole in the pkey space
+        int i = 0;
+        if (!pkey_qual_map.empty()) {
+            for (const auto &[pkey_pos, qual] : pkey_qual_map) {
+                if (pkey_pos != i) {
+                    break;
+                }
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Adding qual: name={}, pkey position={}", state->columns[qual->base.varattno].name, i);
+                state->filtered_quals.push_back(qual);
+                i++;
+            }
         }
     }
 
@@ -130,22 +218,81 @@ namespace pg_fdw {
                                int num_attrs,
                                Form_pg_attribute *attrs,
                                Datum *values,
-                               bool *nulls)
+                               bool *nulls,
+                               bool *eos)
     {
+        // default to not end of scan
+        *eos = false;
+
         // check iterator is valid
         if (!state->iter.has_value()) {
+            *eos = true;
             return false;
         }
 
-        // check if iterator is at end
-        if (*state->iter == state->table->end()) {
+        // check if we are scanning up and iterator is at the end
+        if (state->scan_up && *state->iter == state->table->end()) {
+            *eos = true;
             return false;
+        }
+
+        // check if we are scanning down
+        if (!state->scan_up) {
+
+            // if we are at table begin we are done; unless first qual has <> op
+            if (*state->iter == state->table->begin()) {
+
+                // if the first qual has a not equals operator, then we need to do a
+                // upper_bound and scan up; we just finished scanning down from lower_bound
+                if (state->qual_fields != nullptr && state->filtered_quals[0]->base.op == NOT_EQUALS) {
+                    FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter.emplace(Table::Iterator(state->table->upper_bound(tuple)));
+                    state->scan_up = true;
+                    return false;
+                }
+
+                *eos = true;
+                return false;
+            }
+
+            // otherwise decr iterator
+            --(*state->iter);
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // get current row
         Extent::Row row = *(*state->iter);
+
+        // go through the qual fields and see how they compare to the values with in the row
+        // if they all match then we can return the row
+        if (state->qual_fields != nullptr) {
+            for (int i = 0; i < state->filtered_quals.size(); i++) {
+                // extract the attrno and field index to find the field in the row
+                ConstQual *qual = state->filtered_quals[i];
+                int attno = qual->base.varattno;
+                assert(state->target_columns.contains(attno));
+                int field_idx = state->target_columns[attno];
+
+                // compare the qual field to the field in the row
+                bool res = _compare_field(row, state->fields->at(field_idx),
+                                          state->qual_fields->at(i), qual->base.op);
+
+                if (i == 0 && qual->base.op == EQUALS && res == false) {
+                    // if first qual is not equal, then we are done as the data is sorted
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "First qual not equal, end of scan");
+                    *eos = true;
+                    return false;
+                }
+
+                if (!res) {
+                    // qual doesn't match, so this row must be skipped
+                    // since it isn't the first qual, we can skip to the next row
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                    return false;
+                }
+            }
+        }
 
         // iterate through attributes passed in
         for (int i = 0; i < num_attrs; i++) {
@@ -155,7 +302,7 @@ namespace pg_fdw {
             if (!state->target_columns.contains(attno)) {
                 nulls[i] = true;
                 values[i] = 0;
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Skipping column: {}", attno);
+                SPDLOG_WARN("Skipping column: {}; not found in target column", attno);
                 continue;
             }
 
@@ -177,8 +324,10 @@ namespace pg_fdw {
             }
         }
 
-        // increment iterator
-        ++(*state->iter);
+        // increment iterator if scanning up
+        if (state->scan_up) {
+            ++(*state->iter);
+        }
 
         return true;
     }
@@ -269,32 +418,33 @@ namespace pg_fdw {
         foreach(lc, target_list) {
             int attno = intVal(lfirst(lc));
             switch (state->columns[attno].pg_type) {
-            case FLOAT8OID:
-            case INT8OID:
-            case TIMESTAMPOID:
-            case TIMESTAMPTZOID:
-            case TIMEOID:
-                *width += 8;
-                break;
-            case DATEOID:
-            case FLOAT4OID:
-            case INT4OID:
-                *width += 4;
-                break;
-            case INT2OID:
-                *width += 2;
-                break;
-            case BOOLOID:
-                *width += 1;
-                break;
-            case VARCHAROID:
-            case TEXTOID:
-                *width += 16; // estimate
-                break;
-            default:
-                // XXX need to handle binary types
-                *width += 8;
-                break;
+                case FLOAT8OID:
+                case INT8OID:
+                case TIMESTAMPOID:
+                case TIMESTAMPTZOID:
+                case TIMEOID:
+                    *width += 8;
+                    break;
+                case DATEOID:
+                case FLOAT4OID:
+                case INT4OID:
+                    *width += 4;
+                    break;
+                case INT2OID:
+                    *width += 2;
+                    break;
+                case BOOLOID:
+                case CHAROID:
+                    *width += 1;
+                    break;
+                case VARCHAROID:
+                case TEXTOID:
+                    *width += 16; // estimate
+                    break;
+                default:
+                    // XXX need to handle binary types
+                    *width += 8;
+                    break;
             }
         }
     }
@@ -405,7 +555,7 @@ namespace pg_fdw {
             // get the type name
             HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
             if (!HeapTupleIsValid(tuple)) {
-		elog(ERROR, "cache lookup failed for type%u", pg_type);
+                elog(ERROR, "cache lookup failed for type%u", pg_type);
             }
 
             std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
@@ -662,6 +812,92 @@ namespace pg_fdw {
         }
 
         return commands;
+    }
+
+    bool
+    PgFdwMgr::_is_type_sortable(Oid pg_type)
+    {
+        // these types can be sorted and used by primary key where clauses
+        switch (pg_type) {
+            case INT8OID:
+            case INT4OID:
+            case INT2OID:
+            case FLOAT8OID:
+            case FLOAT4OID:
+            case DATEOID:
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case BOOLOID:
+            case CHAROID:
+            //case UUIDOID: // XXX need to test
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    void
+    PgFdwMgr::_make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual)
+    {
+        // Generate a const field based on type; populate it into fields array
+        switch (qual->base.typeoid) {
+            case TIMESTAMPOID:
+            case TIMESTAMPTZOID:
+            case TIMEOID:
+            case INT8OID:
+                fields->at(idx) = std::make_shared<ConstTypeField<int64_t>>(DatumGetInt64(qual->value));
+                break;
+            case DATEOID:
+            case INT4OID:
+                fields->at(idx) = std::make_shared<ConstTypeField<int32_t>>(DatumGetInt32(qual->value));
+                break;
+            case INT2OID:
+                fields->at(idx) = std::make_shared<ConstTypeField<int16_t>>(DatumGetInt16(qual->value));
+                break;
+            case FLOAT8OID:
+                fields->at(idx) = std::make_shared<ConstTypeField<double>>(DatumGetFloat8(qual->value));
+                break;
+            case FLOAT4OID:
+                fields->at(idx) = std::make_shared<ConstTypeField<float>>(DatumGetFloat4(qual->value));
+                break;
+            case BOOLOID:
+                fields->at(idx) = std::make_shared<ConstTypeField<bool>>(DatumGetBool(qual->value));
+                break;
+            case CHAROID:
+                fields->at(idx) = std::make_shared<ConstTypeField<int8_t>>(DatumGetBool(qual->value));
+                break;
+            default:
+                elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
+                break;
+        }
+    }
+
+    bool
+    PgFdwMgr::_compare_field(const std::any &row,
+                             FieldPtr val_field,
+                             FieldPtr key_field,
+                             QualOpName op)
+    {
+        // determine how the val field (from the row) compares to the key field from the qual
+        switch (op) {
+            case EQUALS:
+                return key_field->equal(nullptr, val_field, row);
+            case NOT_EQUALS:
+                return !key_field->equal(nullptr, val_field, row);
+            case LESS_THAN:
+                return val_field->less_than(row, key_field, nullptr);
+            case LESS_THAN_EQUALS:
+                return (val_field->less_than(row, key_field, nullptr) ||
+                        key_field->equal(nullptr, val_field, row));
+            case GREATER_THAN:
+                return (!val_field->less_than(row, key_field, nullptr) &&
+                        !key_field->equal(nullptr, val_field, row));
+            case GREATER_THAN_EQUALS:
+                return !val_field->less_than(row, key_field, nullptr);
+            default:
+                return false;
+        }
     }
 
 } // namespace pg_fdw

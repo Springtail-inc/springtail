@@ -217,7 +217,12 @@ dump_table(uint64_t tid, uint64_t xid)
     // iterate through the table and print the values
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, i, attrs, values, nulls)) {
+    bool eos = false;
+    while (!eos) {
+        bool row_valid = mgr->fdw_iterate_scan(state, fields->size(), attrs, values, nulls, &eos);
+        if (!row_valid) {
+            continue;
+        }
         // print the values
         for (size_t j = 0; j < fields->size(); j++) {
             if (nulls[j]) {

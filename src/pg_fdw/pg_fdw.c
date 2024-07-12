@@ -368,12 +368,20 @@ springtail_IterateForeignScan(ForeignScanState *node)
     }
 
     // get next row, if true it was filled in successfully
-    // if false we return the empty slot
-    if (!fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrs, slot->tts_values, slot->tts_isnull)) {
-        return slot;
+    // if eos is false we return the empty slot
+    while (true) {
+        bool eos = false;
+        bool row_valid = fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrs, slot->tts_values, slot->tts_isnull, &eos);
+        if (row_valid) {
+            break;
+        }
+        if (eos) {
+            return slot;
+        }
     }
 
     ExecStoreVirtualTuple(slot);
+
     return slot;
 }
 

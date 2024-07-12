@@ -347,6 +347,26 @@ computeDeparsedSortGroup(List *deparsed,
     }
 }
 
+/* For support qual opnames, convert to enum */
+static QualOpName
+getOpEnum(char *opname)
+{
+    if (strcmp(opname, "=") == 0) {
+        return EQUALS;
+    } else if (strcmp(opname, "<>") == 0) {
+        return NOT_EQUALS;
+    } else if (strcmp(opname, "<") == 0) {
+        return LESS_THAN;
+    } else if (strcmp(opname, "<=") == 0) {
+        return LESS_THAN_EQUALS;
+    } else if (strcmp(opname, ">") == 0) {
+        return GREATER_THAN;
+    } else if (strcmp(opname, ">=") == 0) {
+        return GREATER_THAN_EQUALS;
+    }
+    return UNSUPPORTED;
+}
+
 /*
  *	Build an opaque "qual" object.
  */
@@ -383,6 +403,7 @@ makeQual(AttrNumber varattno, char *opname, Expr *value, bool isarray,
     }
     qual->varattno = varattno;
     qual->opname = opname;
+    qual->op = getOpEnum(opname);
     qual->isArray = isarray;
     qual->useOr = useOr;
     elog(DEBUG3, "makeQual() opname '%s': right_type '%d'", opname, qual->right_type);

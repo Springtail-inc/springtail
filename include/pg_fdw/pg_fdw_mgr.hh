@@ -55,19 +55,22 @@ namespace pg_fdw {
         TablePtr table;
         uint64_t tid;
         uint64_t xid;
-        FieldArrayPtr fields;
-        TableStats stats;
-        std::optional<Table::Iterator> iter;
-        std::map<uint32_t, SchemaColumn> columns; ///< Column mapping from column ID to column metadata
-        std::vector<uint32_t> pkey_column_ids;    ///< Primary key column IDs
+        FieldArrayPtr fields;       ///< Fields for the columns from the target list
+        FieldArrayPtr qual_fields;  ///< Fields for the columns from the qual list
+        TableStats stats;           ///< Table statistics
+        bool scan_up = true;        ///< Scan direction for iterator
+
+        std::optional<Table::Iterator> iter;          ///< Iterator for table scan
+        std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
+        std::vector<uint32_t> pkey_column_ids;        ///< Primary key column IDs
         std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
         std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
-
-        List *qual_list;    ///< List of predicate clauses (BaseQual)
+        std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), stats(table->get_stats()), iter(std::nullopt)
+            : table(table), tid(tid), xid(xid), fields(nullptr), qual_fields(nullptr),
+              stats(table->get_stats()), iter(std::nullopt)
         {
             // fetch the columns and column IDs for the table
             columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
@@ -120,7 +123,10 @@ namespace pg_fdw {
          * @param qual_list List of predicate clauses (BaseQual)
          * @param sortgroup List of sort group columns (DeparsedSortGroup)
          */
-        void fdw_begin_scan(PgFdwState *state, List *target_list, List *qual_list, List *sortgroup);
+        void fdw_begin_scan(PgFdwState *state,
+                            List *target_list,
+                            List *qual_list,
+                            List *sortgroup);
 
         /** Iterate scan -- get next row
          * @param state PgFdwState
@@ -128,9 +134,15 @@ namespace pg_fdw {
          * @param attrs Array of pg attributes
          * @param values Array of Datum values (output)
          * @param isnull Array of null flags (output)
-         * @return True if row is valid, false if end of scan
+         * @param eos End of scan flag; no more data (output)
+         * @return True if row is valid, false row not valid, check eos for more data
          */
-        bool fdw_iterate_scan(PgFdwState *state, int num_attrs, Form_pg_attribute *attrs, Datum *values, bool *isnull);
+        bool fdw_iterate_scan(PgFdwState *state,
+                              int num_attrs,
+                              Form_pg_attribute *attrs,
+                              Datum *values,
+                              bool *isnull,
+                              bool *eos);
 
         /** End scan -- free state */
         void fdw_end_scan(PgFdwState *state);
@@ -139,8 +151,11 @@ namespace pg_fdw {
         void fdw_reset_scan(PgFdwState *state);
 
         /** Import foreign schema -- scan through system table generating sql for create foreign table */
-        List *fdw_import_foreign_schema(const std::string &server, const std::string &schema,
-                                        const List *table_list, bool exclude, bool limit);
+        List *fdw_import_foreign_schema(const std::string &server,
+                                        const std::string &schema,
+                                        const List *table_list,
+                                        bool exclude,
+                                        bool limit);
 
         /** Helper return list / subset of sortable columns if table is sortable by sort group
          *  Called from get_foreign_paths
@@ -205,6 +220,24 @@ namespace pg_fdw {
                                                 bool exclude, bool limit);
 
         static void _handle_exception(const Error &e);
+
+        /** Helper to determine if a type can be used in a where clause */
+        static bool _is_type_sortable(Oid pg_type);
+
+        /** Helper to setup quals and scan iterator in state, called from begin_scan */
+        static void _init_quals(PgFdwState *state, List *qual_list);
+
+        /** Helper to setup itertor based on filtered qual list */
+        static void _init_qual_iterator(PgFdwState *state, ConstQual *qual);
+
+        /** Helper to create constant field from qual and add to field array */
+        static void _make_const_field(FieldArrayPtr fields, int idx, ConstQual *qual);
+
+        /** Helper to compare a primary key const qual field to the data within a row */
+        static bool _compare_field(const std::any &row,
+                                   FieldPtr row_field,
+                                   FieldPtr key_field,
+                                   QualOpName op);
     };
 } // namespace pg_fdw
 } // namespace springtail

@@ -41,16 +41,28 @@ typedef struct DeparsedSortGroup
     PathKey       *key;
 } DeparsedSortGroup;
 
+typedef enum {
+    UNSUPPORTED,
+    EQUALS,
+    NOT_EQUALS,
+    LESS_THAN,
+    LESS_THAN_EQUALS,
+    GREATER_THAN,
+    GREATER_THAN_EQUALS,
+} QualOpName;
+
 /** Base qual for predicates */
 typedef struct BaseQual
 {
     AttrNumber     varattno;
     NodeTag        right_type;
     Oid            typeoid;
+    QualOpName     op;
     char          *opname;
     bool           isArray;
     bool           useOr;
 } BaseQual;
+typedef BaseQual *BaseQualPtr;
 
 /** Constant predicate */
 typedef struct ConstQual
@@ -59,6 +71,7 @@ typedef struct ConstQual
     Datum          value;
     bool           isnull;
 } ConstQual;
+typedef ConstQual *ConstQualPtr;
 
 /** Variable predicate */
 typedef struct VarQual
