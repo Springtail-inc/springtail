@@ -364,17 +364,14 @@ springtail_IterateForeignScan(ForeignScanState *node)
 	{
 		Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,i);
         attrs[i] = attr;
-        elog(LOG, "iterate slot %d: %d %s", i, attr->attnum, attr->attname.data);
     }
 
     // get next row, if true it was filled in successfully
     // if eos is false we return the empty slot
-    while (true) {
-        bool eos = false;
-        bool row_valid = fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrs, slot->tts_values, slot->tts_isnull, &eos);
-        if (row_valid) {
-            break;
-        }
+    bool row_valid = false;
+    bool eos = false;
+    while (!row_valid) {
+        row_valid = fdw_iterate_scan(state, slot->tts_tupleDescriptor->natts, attrs, slot->tts_values, slot->tts_isnull, &eos);
         if (eos) {
             return slot;
         }

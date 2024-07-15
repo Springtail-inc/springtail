@@ -338,9 +338,7 @@ namespace springtail {
             }
         }
 
-        // XXX can't call this for system tables
-        assert(_system_cache.find({ table_id, constant::INDEX_DATA, true }) == _system_cache.end());
-
+        // non-system tables
         std::shared_ptr<SchemaInfo> info = _cache.get(table_id);
         if (info == nullptr) {
             info = std::make_shared<SchemaInfo>(table_id);

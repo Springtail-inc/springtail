@@ -58,6 +58,8 @@ namespace pg_fdw {
         FieldArrayPtr fields = nullptr;       ///< Fields for the columns from the target list
         FieldArrayPtr qual_fields = nullptr;  ///< Fields for the columns from the qual list
         TableStats stats;                     ///< Table statistics
+        int rows_fetched = 0;                 ///< Number of rows fetched
+        int rows_skipped = 0;                 ///< Number of rows skipped
         bool scan_up = true;                  ///< Scan direction for iterator
 
         ///< Start iterator for table scan
@@ -244,6 +246,11 @@ namespace pg_fdw {
 
         /** Helper to set/reset scan iterators from beginning based on quals */
         static void _set_scan_iterators(PgFdwState *state);
+
+        /** Helper to generate tuple used in upper/lower bound calculations for scan iter */
+        static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
+                                             const FieldArrayPtr qual_fields);
+
     };
 } // namespace pg_fdw
 } // namespace springtail

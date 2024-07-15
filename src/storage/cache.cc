@@ -492,7 +492,7 @@ namespace springtail {
 
         SafeExtent extent(_file, *extent_i);
 
-        // perform a lower-bound check to find the appropriate row within the extent
+        // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
                                               [](const Tuple &lhs, const Tuple &rhs) {
                                                   return lhs.less_than(rhs);

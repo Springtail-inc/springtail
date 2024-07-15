@@ -31,7 +31,7 @@ namespace springtail {
             friend Table;
 
         public:
-            using iterator_category = std::forward_iterator_tag;
+            using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;
             using pointer           = const Extent::Row *;  // or also value_type*

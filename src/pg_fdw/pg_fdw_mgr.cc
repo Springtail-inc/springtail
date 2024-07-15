@@ -121,6 +121,34 @@ namespace pg_fdw {
         _set_scan_iterators(state);
     }
 
+
+    FieldTuplePtr
+    PgFdwMgr::_gen_qual_tuple(const std::vector<ConstQual*> &quals, const FieldArrayPtr qual_fields)
+    {
+        // create the field tuple used for bounds, it is based on the number of EQUAL quals
+        // the tuple always has at least the first qual field from the primary key
+        // if additional fields are EQUALS, they are added to the tuple
+        FieldArrayPtr fields = std::make_shared<FieldArray>();
+        fields->push_back(qual_fields->at(0));
+
+        // this is an optimzation where multiple keys are compared with EQUALS
+        // and it works with both the start/end iterators
+        // XXX additional optimization could be added for other types of quals but would
+        // be dependent on whether it is for the start or the end iterator, the tuple wouldn't
+        // be common for both
+        if (quals[0]->base.op == EQUALS) {
+            for (int i = 1; i < quals.size(); i++) {
+                if (quals[i]->base.op == EQUALS) {
+                    fields->push_back(qual_fields->at(i));
+                } else {
+                    break;
+                }
+            }
+        }
+
+        return std::make_shared<FieldTuple>(fields, nullptr);
+    }
+
     void
     PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
@@ -138,8 +166,8 @@ namespace pg_fdw {
         // setup scan based on first qual
         ConstQual *qual = state->filtered_quals[0];
 
-        // create the field tuple
-        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+        // create the field tuple used for bounds
+        FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
 
         // set up the start iterator based on first key op
         QualOpName op = qual->base.op;
@@ -217,7 +245,8 @@ namespace pg_fdw {
     void
     PgFdwMgr::fdw_end_scan(PgFdwState *state)
     {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}", state->tid);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_end: tid: {}, rows fetched: {}, rows skipped: {}",
+                            state->tid, state->rows_fetched, state->rows_skipped);
         delete state;
     }
 
@@ -263,11 +292,11 @@ namespace pg_fdw {
         }
 
         // Note: for now always scan up, so we don't need to check if we are scanning down
-
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // get current row
         Extent::Row row = *(*state->iter_start);
+        state->rows_fetched++;
 
         // go through the qual fields and see how they compare to the values with in the row
         // if they all match then we can return the row
@@ -283,17 +312,15 @@ namespace pg_fdw {
                 bool res = _compare_field(row, state->fields->at(field_idx),
                                           state->qual_fields->at(i), qual->base.op);
 
-                if (i == 0 && qual->base.op == EQUALS && res == false) {
-                    // if first qual is not equal, then we are done as the data is sorted
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "First qual not equal, end of scan");
-                    *eos = true;
-                    return false;
-                }
-
                 if (!res) {
                     // qual doesn't match, so this row must be skipped
                     // since it isn't the first qual, we can skip to the next row
                     SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                    state->rows_skipped++;
+                    // increment iterator if scanning up -- only scanning up for now
+                    if (state->scan_up) {
+                        ++(*state->iter_start);
+                    }
                     return false;
                 }
             }
@@ -885,6 +912,8 @@ namespace pg_fdw {
                              QualOpName op)
     {
         // determine how the val field (from the row) compares to the key field from the qual
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Value: {}, op: {}, Key: {}", val_field->get_int32(row), (int)op, key_field->get_int32(nullptr));
+
         switch (op) {
             case EQUALS:
                 return key_field->equal(nullptr, val_field, row);
