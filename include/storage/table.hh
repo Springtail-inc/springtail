@@ -31,7 +31,7 @@ namespace springtail {
             friend Table;
 
         public:
-            using iterator_category = std::forward_iterator_tag;
+            using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;
             using pointer           = const Extent::Row *;  // or also value_type*
@@ -67,6 +67,41 @@ namespace springtail {
              * Returns a new iterator at the next row.
              */
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+
+            /**
+             * Move the iterator backward to the previous row.
+             */
+            Iterator& operator--() {
+                // check if this is end()
+                if (_page == nullptr) {
+                    // move to the final page referenced by the primary index
+                    assert(_btree_i == _btree->end());
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // check if we are on the first row
+                if (_page_i == _page->begin()) {
+                    // need to move to the previous page
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // move to the previous row
+                --_page_i;
+                return *this;
+            }
+
+            /**
+             * Returns a new iterator at the previous row.
+             */
+            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
             /**
              * Compares two iterators for equality.
@@ -159,6 +194,8 @@ namespace springtail {
          */
         Iterator lower_bound(TuplePtr search_key);
 
+        Iterator upper_bound(TuplePtr search_key);
+
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
@@ -196,6 +233,14 @@ namespace springtail {
          * @return A pointer to the requested page.
          */
         StorageCache::PagePtr read_page(uint64_t extent_id) const;
+
+        /**
+         * @brief Get table stats
+         * @return TableStats
+         */
+        TableStats get_stats() const {
+            return _stats;
+        }
 
     protected:
         /**

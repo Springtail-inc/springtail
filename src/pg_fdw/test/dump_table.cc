@@ -194,24 +194,35 @@ dump_table(uint64_t tid, uint64_t xid)
     std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
 
     auto fields = schema->get_fields();
-    int attrnums[fields->size()];
+    FormData_pg_attribute attrdata[fields->size()];
+    Form_pg_attribute attrs[fields->size()];
 
     // iterate over column map and extract attrnums
     int i = 0;
     for (auto &col : columns) {
         if (col.second.exists) {
-            attrnums[i++] = col.first;
+            attrs[i] = &attrdata[i];
+            attrs[i]->attnum = col.first;
+            attrs[i]->atttypid = col.second.pg_type;
+            attrs[i]->atttypmod = -1;
         }
     }
 
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
+    // create the fdw state for the table @xid and begin the scan
     PgFdwState *state = mgr->fdw_create_state(tid, xid);
     mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
 
+    // iterate through the table and print the values
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, i, attrnums, values, nulls)) {
+    bool eos = false;
+    while (!eos) {
+        bool row_valid = mgr->fdw_iterate_scan(state, fields->size(), attrs, values, nulls, &eos);
+        if (!row_valid) {
+            continue;
+        }
         // print the values
         for (size_t j = 0; j < fields->size(); j++) {
             if (nulls[j]) {
@@ -224,6 +235,7 @@ dump_table(uint64_t tid, uint64_t xid)
         std::cout << std::endl;
     }
 
+    // end the scan releasing the state
     mgr->fdw_end_scan(state);
 }
 
