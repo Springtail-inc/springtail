@@ -912,8 +912,6 @@ namespace pg_fdw {
                              QualOpName op)
     {
         // determine how the val field (from the row) compares to the key field from the qual
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Value: {}, op: {}, Key: {}", val_field->get_int32(row), (int)op, key_field->get_int32(nullptr));
-
         switch (op) {
             case EQUALS:
                 return key_field->equal(nullptr, val_field, row);
