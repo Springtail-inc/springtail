@@ -35,56 +35,22 @@ namespace springtail {
 
 
     std::map<uint32_t, SchemaColumn>
-    SchemaMgr::SchemaInfo::_get_columns_for_xid(uint64_t xid)
+    SchemaMgr::SchemaInfo::get_columns(const XidLsn &xidlsn)
     {
         std::map<uint32_t, SchemaColumn> columns;
 
         // for each column, try to find a valid SchemaColumn for the provided xid
         for (const auto &pair : _column_map) {
             // find the schema column definition for this XID
-            auto &&i = pair.second.lower_bound(xid);
+            auto &&i = pair.second.lower_bound(xidlsn);
 
-            // if there's no entry for this column with a starting XID <= xid, go to the next column
+            // if there's no entry for this column with a starting XID/LSN <= xidlsn, go to the next column
             if (i == pair.second.end()) {
                 continue;
             }
 
-            // get the last column definition within the XID
-            auto &column = i->second.back();
-
-            // if the entry does not exist at this point, move to the next column
-            if (!column.exists) {
-                continue;
-            }
-
-            // we found a valid entry, add it to the vector of columns
-            columns[pair.first] = column;
-        }
-
-        return columns;
-    }
-
-    std::map<uint32_t, SchemaColumn>
-    SchemaMgr::SchemaInfo::get_columns_for_xid_lsn(uint64_t xid, uint64_t lsn)
-    {
-        std::map<uint32_t, SchemaColumn> columns;
-
-        // for each column, try to find a valid SchemaColumn for the provided xid
-        for (const auto &pair : _column_map) {
-            // find the schema column definition for this XID
-            auto &&i = pair.second.upper_bound(xid);
-
-            // if there's no entry for this column with a starting XID < xid, go to the next column
-            if (i == pair.second.end()) {
-                continue;
-            }
-
-            // find the correct entry based on the requested LSN
-            auto &&j = std::lower_bound(i->second.begin(), i->second.end(), lsn,
-                                        [](const SchemaColumn &column, uint64_t lsn) {
-                                            return (column.lsn > lsn);
-                                        });
-            auto &column = *j;
+            // get the column definition
+            auto &column = i->second;
 
             // if the entry does not exist at this point, move to the next column
             if (!column.exists) {
@@ -141,7 +107,7 @@ namespace springtail {
             column.update_type = static_cast<SchemaUpdateType>(fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(row));
 
             // place the column into the map
-            _column_map[column.position][column.xid].push_back(column);
+            _column_map[column.position][{column.xid, column.lsn}] = std::move(column);
 
             ++table_i;
         }
@@ -181,9 +147,14 @@ namespace springtail {
 
             if (index_id == 0) {
                 // update the columns with the primary key positions
-                // XXX not handling changes in the primary index
-                for (auto &column : _column_map[column_id][xid]) {
-                    column.pkey_position = _primary_index.size();
+                // XXX currently not handling changes in the primary index
+                auto &map = _column_map[column_id];
+
+                auto begin = map.lower_bound({xid, constant::MAX_LSN});
+                auto end = map.upper_bound({xid, 0});
+
+                for (auto i = begin; i != end; ++i) {
+                    i->pkey_position = _primary_index.size();
                 }
 
                 // note the primary key
@@ -203,7 +174,7 @@ namespace springtail {
     }
 
     std::vector<std::string>
-    SchemaMgr::SchemaInfo::get_index_keys(uint64_t index_id, uint64_t xid)
+    SchemaMgr::SchemaInfo::get_index_keys(uint64_t index_id, const XidLsn &xidlsn)
     {
         std::vector<std::string> key;
 
@@ -215,7 +186,7 @@ namespace springtail {
         auto &&i = index.lower_bound(xid);
         for (uint32_t column : i->second) {
             // XXX need to handle lookup failure
-            key.push_back(_column_map[column].lower_bound(xid)->second.back().name);
+            key.push_back(_column_map[column].lower_bound(xidlsn)->second.name);
         }
 
         return key;
@@ -223,9 +194,11 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     SchemaMgr::SchemaInfo::get_extent_schema(uint64_t extent_xid)
+
     {
         // determine the columns for the extent XID
-        auto &&columns = _get_columns_for_xid(extent_xid);
+        // note: which is based on the last XID that was fully applied to the extent
+        auto &&columns = this->get_columns({extent_xid, constant::MAX_LSN});
         assert(!columns.empty());
 
         // use the vector of columns to generate the schema
@@ -233,12 +206,11 @@ namespace springtail {
     }
 
     std::shared_ptr<VirtualSchema>
-    SchemaMgr::SchemaInfo::get_virtual_schema(uint32_t extent_xid,
-                                              uint64_t target_xid,
-                                              uint64_t lsn)
+    SchemaMgr::SchemaInfo::get_virtual_schema(const XidLsn &access_xl,
+                                              const XidLsn &target_xl)
     {
         // determine the columns for the extent XID
-        auto &&columns = _get_columns_for_xid(extent_xid);
+        auto &&columns = this->get_columns(access_xl);
 
         std::vector<SchemaColumn> updates;
 
@@ -247,7 +219,7 @@ namespace springtail {
         for (const auto & [id, history]: _column_map) {
             // find any updates from xids after the extent schema xid
             // note: the map is in reverse XID order, so most recent XID first
-            auto &&i = history.upper_bound(extent_xid);
+            auto &&i = history.upper_bound(access_xl);
             auto changes_i = std::make_reverse_iterator(i); // go through the map backward from the "current" entry
 
             while (true) {
@@ -257,22 +229,14 @@ namespace springtail {
                 }
 
                 // if any such updates are past the target_xid, then continue to the next column
-                if (changes_i->first > target_xid) {
+                if (changes_i->first > target_xl) {
                     break;
                 }
 
                 // apply any updates from the xid prior to the LSN (if one was provided)
-                for (const auto &update : changes_i->second) {
-                    // if an LSN was provided and the update's LSN is greater than the provided LSN, stop applying updates
-                    if (update.lsn > lsn) {
-                        break;
-                    }
+                updates.push_back(changes_i->second);
 
-                    // apply the update to the schema as a schema upgrade
-                    updates.push_back(update);
-                }
-
-                // move to the next xid with schema updates
+                // move to the next XID/LSN with schema updates
                 ++changes_i;
             }
         }
@@ -318,7 +282,7 @@ namespace springtail {
             _cache.insert(table_id, info);
         }
 
-        return info->get_columns_for_xid_lsn(xid, lsn);
+        return info->get_columns({xid, lsn});
     }
 
     std::shared_ptr<Schema>
@@ -347,7 +311,8 @@ namespace springtail {
 
     std::shared_ptr<ExtentSchema>
     SchemaMgr::get_extent_schema(uint64_t table_id,
-                                 uint64_t xid)
+                                 uint64_t xid,
+                                 uint64_t lsn)
     {
         // first check if it's an immutable system table schema
         auto &&system_i = _system_cache.find({ table_id, constant::INDEX_DATA, true });
@@ -365,7 +330,7 @@ namespace springtail {
         }
 
         // retrieve the schema at the appropriate point-in-time
-        return info->get_extent_schema(xid);
+        return info->get_extent_schema(xid, lsn);
     }
 
     SchemaColumn

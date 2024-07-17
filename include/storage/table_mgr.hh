@@ -6,8 +6,6 @@
 
 namespace springtail {
 
-    //// SYSTEM TABLE HELPERS
-
     /**
      * Singleton for managing the table metadata.  Handles table metadata mutations and provides
      * interfaces for retrieving a table object at a given XID as well as a mutable table object for

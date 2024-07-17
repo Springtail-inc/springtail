@@ -45,8 +45,27 @@ namespace springtail::gc {
 
                 uint64_t extent_cursor = 0;
                 for (auto tid : table_list) {
+                    uint64_t txid = 0, tlsn = 0;
+
+                    // retrieve the set of table changes for this table
+                    auto table_changes = _write_cache->fetch_table_changes(tid, _committed_xid, xid);
+                    for (auto &&change : table_changes) {
+                        // if any of the changes are a truncate, then we will ignore all row
+                        // mutations before the last truncate XID/LSN
+                        // note: this assumes that the changes are coming back in XID/LSN order
+                        if (change.op == TableOp::TRUNCATE) {
+                            txid = change.xid;
+                            tlsn = change.xid_seq;
+                        }
+                    }
+
                     // construct the mutable table object
                     auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid, true);
+
+                    // check if we need to perform a table truncate
+                    if (txid > 0) {
+                        table->truncate();
+                    }
 
                     boost::unique_lock lock(_mutex);
                     _table_map[tid] = table;
@@ -72,7 +91,7 @@ namespace springtail::gc {
                             ++_tid_count[tid];
                             lock.unlock();
 
-                            auto entry = std::make_shared<WorkerEntry>(table, eid, xid);
+                            auto entry = std::make_shared<WorkerEntry>(table, eid, xid, txid, tlsn);
                             _worker_queue.push(entry);
                         }
                     }
@@ -126,6 +145,12 @@ namespace springtail::gc {
 
             // note: if we want to implement roll-forward on query, then we could apply the schema
             //       changes after the data changes are written to the write cache
+
+            // pre-commit the XID
+            _xid_mgr->pre_commit_xid(xid);
+
+            // perform the schema mutations
+            
 
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
@@ -196,12 +221,57 @@ namespace springtail::gc {
     void
     Committer::_process_rows(MutableTablePtr table,
                              uint64_t extent_id,
-                             uint64_t xid)
+                             uint64_t xid,
+                             uint64_t txid,
+                             uint64_t tlsn)
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows for {}:{}@{}", table->id(), extent_id, xid);
 
         // save the schema
         auto schema = table->schema();
+
+        // determine if the provided extent_id needs to be forward mapped
+        uint64_t mapped_eid = extent_id;
+        auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
+        if (extent_ids.empty()) {
+            // no mapping, use provided extent_id
+            if (txid > 0) {
+                // in the case of a truncate, we don't know the extent ID
+                mapped_eid = constant::UNKNOWN_EXTENT;
+            }
+        } else if (extent_ids.size() == 1) {
+            // single extent output, use it
+            mapped_eid = extent_ids.front();
+        } else {
+            // XXX need to create a list of key -> extent_id to figure out which extent a given row
+            // should be applied to
+            assert(0);
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
+
+        StorageCache::PagePtr page;
+        std::vector<SchemaColumn> changes;
+        if (mapped_eid != constant::UNKNOWN_EXTENT) {
+            // 1) retrieve the XID at which the given extent was written
+            auto page = table->read_page(mapped_eid);
+
+            // 2) apply all of the schema changes to the page
+            page->apply_schema_changes(_committed_xid, xid);
+            page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
+        }
+
+            // StorageCache::PagePtr page;
+            // std::vector<SchemaColumn> changes;
+            // if (mapped_eid != constant::UNKNOWN_EXTENT) {
+            //     // 1) retrieve the XID at which the given extent was written
+            //     auto page = table->read_page(mapped_eid);
+
+            //     // 2) apply all of the schema changes to the page
+            //     page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
+
+            // }
+            // auto change_i = changes.begin();
 
         uint64_t cursor = 0;
         bool done = false;
@@ -216,22 +286,6 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
 
-            // determine if the provided extent_id needs to be forward mapped
-            uint64_t mapped_eid = extent_id;
-            auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
-            if (extent_ids.empty()) {
-                // no mapping, use provided extent_id
-            } else if (extent_ids.size() == 1) {
-                // single extent output, use it
-                mapped_eid = extent_ids.front();
-            } else {
-                // XXX need to create a list of key -> extent_id to figure out which extent a given row
-                // should be applied to
-                assert(0);
-            }
-
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
-
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
             //     at once rather than looking it up every time.  This would require changes to
@@ -240,47 +294,83 @@ namespace springtail::gc {
             auto key_fields = schema->get_fields(schema->get_sort_keys());
 
             for (const auto &row : rows) {
+                // if this data is from before a truncate, ignore it
+                if (txid > 0) {
+                    if (row.xid < txid || (row.xid == txid && row.lsn < tlsn)) {
+                        continue;
+                    }
+                }
+
                 // construct a tuple from the row data
+                // 2. apply data mutations by using the virtual schema on top of them
+                //    a. we need to unroll the virtual schema as we pass by each schema change
+                vschema = SchemaMgr::get_instance()->get_schema(table_id, row.xid, row.lsn, xid, constant::MAX_LSN);
+                row_fields = vschema->get_fields();
+                key_fields = vschema->get_fields(schema->get_sort_keys());
+
                 // XXX seems like we've got more copies here than strictly necessary... we could
                 //     instead construct a read-only extent via pointers into the existing data
                 //     object
 
+                // check if we need to apply a table mutation to the extent
+
                 // pass that tuple into the appropriate table mutation
                 switch (row.op) {
-                case (WriteCacheClient::RowOp::INSERT):
-                    {
-                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
-                        Extent extent(header);
-                        extent.deserialize(row.data);
+                case (WriteCacheClient::RowOp::INSERT): {
+                    ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                    Extent extent(header);
+                    extent.deserialize(row.data);
 
-                        auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
-                        table->insert(value, xid, mapped_eid);
-                        break;
-                    }
-                case (WriteCacheClient::RowOp::UPDATE):
-                    {
-                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
-                        Extent extent(header);
-                        extent.deserialize(row.data);
+                    auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                    SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
+                    table->insert(value, xid, mapped_eid);
+                    break;
+                }
 
-                        auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        table->update(value, xid, mapped_eid);
-                        break;
-                    }
-                case (WriteCacheClient::RowOp::DELETE):
-                    {
-                        auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
-                        ExtentHeader header(ExtentType(), xid, pkey_schema->row_size(), 0);
-                        Extent extent(header);
+                case (WriteCacheClient::RowOp::UPDATE): {
+                    ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                    Extent extent(header);
+                    extent.deserialize(row.data);
 
-                        extent.deserialize(row.pkey);
-                        auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
-                        table->remove(key, xid, mapped_eid);
-                        break;
-                    }
+                    auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                    table->update(value, xid, mapped_eid);
+                    break;
+                }
+
+                case (WriteCacheClient::RowOp::DELETE): {
+                    auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                    ExtentHeader header(ExtentType(), xid, pkey_schema->row_size(), 0);
+                    Extent extent(header);
+
+                    extent.deserialize(row.pkey);
+                    auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
+                    table->remove(key, xid, mapped_eid);
+                    break;
+                }
+
                 }
             }
         }
+    }
+
+    void
+    Committer::_apply_schema_changes(StorageCache::Page page,
+                                     uint64_t access_xid,
+                                     uint64_t target_xid,
+                                     uint64_t target_lsn)
+    {
+        // get a clean page at the target XID
+        auto new_page = StorageCache::get_instance()->get(page->_file, constant::UNKNOWN_EXTENT, target_xid);
+
+        // construct a virtual schema to transform the original page's data to the schema at the target XID
+        auto vschema = SchemaMgr::get_instance()->get_schema(table_id, access_xid, target_xid, target_lsn);
+
+        // scan the current page and write it's contents to the new page
+        auto vfields = vschema->get_fields();
+        for (auto &&row : *page) {
+            new_page->append(FieldTuple(vfields, row));
+        }
+
+        return new_page;
     }
 }

@@ -4,6 +4,7 @@
 
 #include <storage/schema.hh>
 #include <storage/constants.hh>
+#include <storage/xid.hh>
 
 namespace springtail {
 
@@ -47,8 +48,11 @@ namespace springtail {
          *
          * @param table_id The table we need the schema for.
          * @param xid The XID that we need the schema at.
+         * @param lsn The LSN that we need the schema at.  Defaults to the MAX_LSN, providing the
+         *            schema at the point after all changes in the XID have been applied.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid);
+        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid,
+                                                        uint64_t lsn = constant::MAX_LSN);
 
         /**
          * Helper function to generate a SchemaUpdate that defines the change between the old and
@@ -94,8 +98,9 @@ namespace springtail {
              * Retrieve the schema for an extent written at a specific XID.
              *
              * @param extent_xid The XID of the extent being processed.
+             * @param lsn The LSN within the XID at which the schema should be constructed.
              */
-            std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t extent_xid);
+            std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t extent_xid, uint64_t lsn);
 
             /**
              * Construct a VirtualSchema on top of an ExtentSchema that brings the schema forward to
@@ -108,16 +113,14 @@ namespace springtail {
              */
             std::shared_ptr<VirtualSchema> get_virtual_schema(uint32_t extent_xid, uint64_t target_xid, uint64_t lsn=constant::MAX_LSN);
 
-            std::map<uint32_t, SchemaColumn> get_columns_for_xid_lsn(uint64_t xid, uint64_t lsn);
+
+            /**
+             * Retrieve the set of columns that are valid at the provided XID/LSN.
+             * @param xidlsn The XID/LSN that the schema should be generated for.
+             */
+            std::map<uint32_t, SchemaColumn> get_columns(const XidLsn &xidlsn);
 
         private:
-            /**
-             * Retrieve the set of columns that are valid at the provided XID.
-             * @param xid The XID that the schema should be generated for.
-             */
-            std::map<uint32_t, SchemaColumn> _get_columns_for_xid(uint64_t xid);
-
-
             /**
              * Read the schema metadata for the table.  Pulls the full schema history so always need
              * to read the latest available XID.
@@ -141,7 +144,9 @@ namespace springtail {
              * xid using upper_bound.  The list is the ordered column definitions by LSN within the
              * XID.
              */
-            std::map<uint32_t, std::map<uint64_t, std::vector<SchemaColumn>, std::greater<uint64_t>>> _column_map;
+            std::map<uint32_t, std::map<XidLsn, SchemaColumn, std::greater<XidLsn>>> _column_map;
+
+            // std::map<uint32_t, std::map<uint64_t, std::vector<SchemaColumn>, std::greater<uint64_t>>> _column_map;
 
             /**
              * A map from <xid> to <primary key>, where primary key is defined as an ordered set of

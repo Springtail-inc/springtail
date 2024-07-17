@@ -55,12 +55,16 @@ namespace springtail::gc {
             MutableTablePtr table;
             uint64_t extent_id;
             uint64_t xid;
+            uint64_t txid; ///< The XID at which a truncate took place.  Zero if none.
+            uint64_t tlsn; ///< The LSN at which a truncate took place.  Zero if none.
             bool do_finalize;
 
-            WorkerEntry(MutableTablePtr table, uint64_t extent_id, uint64_t xid)
+            WorkerEntry(MutableTablePtr table, uint64_t extent_id, uint64_t xid, uint64_t txid, uint64_t tlsn)
                 : table(table),
                   extent_id(extent_id),
                   xid(xid),
+                  txid(txid),
+                  tlsn(tlsn),
                   do_finalize(false)
             { }
 
@@ -68,6 +72,8 @@ namespace springtail::gc {
                 : table(table),
                   extent_id(constant::UNKNOWN_EXTENT),
                   xid(xid),
+                  txid(0),
+                  tlsn(0),
                   do_finalize(true)
             { }
         };
@@ -86,6 +92,11 @@ namespace springtail::gc {
          * Worker helper function to process mutations to a given extent ID.
          */
         void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid);
+
+        /**
+         * Applies a schema change to a cache page of a table.
+         */
+        void _apply_schema_change(StorageCache::PagePtr page, const SchemaChange &change, uint64_t xid, uint64_t lsn);
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.

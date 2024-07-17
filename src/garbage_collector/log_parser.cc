@@ -312,7 +312,12 @@ namespace springtail::gc {
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
 
-                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
+                            // pass the schema change to the workers
+                            // note: will load the message into the write cache to be applied by the
+                            //       committer (GC-2) when rolling the XID forward
+                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
+                                                                       _state->entry->xid, _state->lsn, rel_id);
+                            _parser_queue->push(entry);
                         }
                         break;
                     }
@@ -333,7 +338,10 @@ namespace springtail::gc {
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
 
-                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
+                            // pass to the workers
+                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
+                                                                       _state->entry->xid, _state->lsn, rel_id);
+                            _parser_queue->push(entry);
                         }
                         break;
                     }
@@ -357,7 +365,10 @@ namespace springtail::gc {
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
 
-                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
+                            // pass to the workers
+                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
+                                                                       _state->entry->xid, _state->lsn, rel_id);
+                            _parser_queue->push(entry);
                         }
                         break;
                     }
@@ -402,6 +413,7 @@ namespace springtail::gc {
                 _state->mutation_count->wait();
 
                 // XXX notify the ExtentMapper that the XID has been fully processed
+                //     note: we would only do this if the FDW supports roll-forward
                 // write_cache->set_lookup();
 
                 // clear the dependencies and commit the entry in the Redis queue
