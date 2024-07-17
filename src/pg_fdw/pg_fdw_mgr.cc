@@ -208,8 +208,8 @@ namespace pg_fdw {
                                 qual->base.varattno, (int)qual->base.right_type, qual->base.typeoid, qual->base.opname, qual->base.isArray, qual->base.useOr);
 
             // filter out those quals that are not sortable by us, that aren't primary keys or are arrays
-            if (state->columns[qual->base.varattno].pkey_position.has_value() && _is_type_sortable(qual->base.typeoid) &&
-                qual->base.op != UNSUPPORTED && qual->base.isArray == false) {
+            if (state->columns[qual->base.varattno].pkey_position.has_value() &&
+                _is_type_sortable(qual->base.typeoid, qual->base.op) && qual->base.isArray == false) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual is in primary key and is sortable: {}", state->columns[qual->base.varattno].name);
                 // add qual to the map in primary key position
                 pkey_qual_map[state->columns[qual->base.varattno].pkey_position.value()] = qual;
@@ -475,6 +475,7 @@ namespace pg_fdw {
                 case CHAROID:
                     *width += 1;
                     break;
+                case UUIDOID:
                 case VARCHAROID:
                 case TEXTOID:
                     *width += 16; // estimate
@@ -853,9 +854,14 @@ namespace pg_fdw {
     }
 
     bool
-    PgFdwMgr::_is_type_sortable(Oid pg_type)
+    PgFdwMgr::_is_type_sortable(Oid pg_type, QualOpName op)
     {
+        if (op == UNSUPPORTED) {
+            return false;
+        }
+
         // these types can be sorted and used by primary key where clauses
+        // an entry must exist in _make_const_field for these types
         switch (pg_type) {
             case INT8OID:
             case INT4OID:
@@ -868,8 +874,12 @@ namespace pg_fdw {
             case TIMEOID:
             case BOOLOID:
             case CHAROID:
-            //case UUIDOID: // XXX need to test
+            case UUIDOID:
                 return true;
+            case VARCHAROID:
+            case TEXTOID:
+                // due to different collations/encodings we only support equality for text
+                return (op == EQUALS || op == NOT_EQUALS);
             default:
                 return false;
         }
@@ -905,6 +915,18 @@ namespace pg_fdw {
             case CHAROID:
                 fields->at(idx) = std::make_shared<ConstTypeField<int8_t>>(DatumGetBool(qual->value));
                 break;
+            case UUIDOID: {
+                std::vector<char> uuid(16);
+                memcpy(uuid.data(), DatumGetPointer(qual->value), 16);
+                fields->at(idx) = std::make_shared<ConstTypeField<std::vector<char>>>(uuid);
+                break;
+            }
+            case VARCHAROID:
+            case TEXTOID: {
+                const char *str = TextDatumGetCString(qual->value);
+                fields->at(idx) = std::make_shared<ConstTypeField<std::string>>(str);
+                break;
+            }
             default:
                 elog(ERROR, "Unsupported type for constant field: %d", qual->base.typeoid);
                 break;
