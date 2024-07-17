@@ -46,7 +46,7 @@ target_link_libraries(copy_schema
 )
 add_dsymutil_command(copy_schema)
 
-add_executable(dump_table test/dump_table.cc pg_fdw_mgr.cc)
+add_executable(dump_table test/dump_table.cc test/mock_pg.c pg_fdw_mgr.cc)
 target_include_directories(dump_table
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
@@ -59,3 +59,27 @@ target_link_libraries(dump_table
     PRIVATE PostgreSQL::PostgreSQL
 )
 add_dsymutil_command(dump_table)
+
+add_executable(where test/where.cc)
+target_include_directories(where
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(where
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+)
+add_dsymutil_command(where)
+
+add_executable(test_where test/where_test.cc test/mock_pg.c pg_fdw_mgr.cc)
+target_include_directories(test_where
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(test_where
+    PRIVATE springtail_common
+    PRIVATE springtail_storage
+    PRIVATE springtail_xid_mgr
+    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_where)
+gtest_discover_tests(test_where)

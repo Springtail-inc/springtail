@@ -1191,15 +1191,15 @@ namespace springtail {
         }
 
         bool less_than(const Tuple &rhs, bool nulls_last=false) const {
-            // check the tuple lengths and types using assert()
-            // we assume correct usage in production
-            assert(this->size() >= rhs.size());
-            for (int i = 0; i < rhs.size(); i++) {
+            // use the minimum size of the two tuples for comparison
+            int size = std::min(this->size(), rhs.size());
+
+            for (int i = 0; i < size; i++) {
                 assert(this->field(i)->get_type() == rhs.field(i)->get_type());
             }
 
             // XXX switch everything to compare()?
-            for (int i = 0; i < rhs.size(); i++) {
+            for (int i = 0; i < size; i++) {
                 if (this->field(i)->less_than(this->row(), rhs.field(i), rhs.row(), nulls_last)) {
                     return true;
                 }
@@ -1329,6 +1329,7 @@ namespace springtail {
     private:
         FieldArrayPtr _array;
     };
+    typedef std::shared_ptr<FieldTuple> FieldTuplePtr;
 
 
     class KeyValueTuple : public Tuple {

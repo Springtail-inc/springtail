@@ -140,6 +140,27 @@ namespace springtail {
     }
 
     Table::Iterator
+    Table::upper_bound(TuplePtr search_key)
+    {
+        // find the extent that could contain the upper_bound() key
+        auto &&i = _primary_index->upper_bound(search_key);
+        if (i == _primary_index->end()) {
+            return end();
+        }
+
+        // read the extent and find the upper_bound() of the key within it
+        auto page = _read_page_via_primary(i);
+
+        // find the upper_bound() of the key within the data extent
+        auto &&j = page->upper_bound(search_key, _schema);
+
+        // note: the primary index indicates that there is a value >= the search_key in this page
+        assert(j != page->end());
+
+        return Iterator(this, _primary_index, i, page, j);
+    }
+
+    Table::Iterator
     Table::inverse_lower_bound(TuplePtr search_key)
     {
         // find the extent that could contain the inverse_lower_bound() key

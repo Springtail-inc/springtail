@@ -1,10 +1,14 @@
 #include <iostream>
 
-#include <boost/program_options.hpp>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdbool.h>
+
 #include <fmt/format.h>
+#include <boost/program_options.hpp>
 
 #include <common/common.hh>
-
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <storage/table.hh>
@@ -16,88 +20,6 @@
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
-
-extern "C" {
-    #include "varatt.h"
-    #include "utils/builtins.h"
-    #include <access/htup_details.h>
-
-    // These files are not being linked in, from libpq
-    // so we define them here
-
-    /** Dummy function so that we can link with pg_fdw_mgr.cc */
-    const char *quote_identifier(const char *ident) {
-        return ident;
-    }
-
-    /** Dummy lappend, does nothing */
-    List *lappend(List *list, void *datum) {
-        return list;
-    }
-
-    /** Dummy function so that we can link with pg_fdw_mgr.cc */
-    text *
-    cstring_to_text(const char *s)
-    {
-        int len = strlen(s);
-        text *result = (text *) palloc(VARHDRSZ + len + 1);
-        SET_VARSIZE(result, VARHDRSZ + len);
-        memcpy(VARDATA(result), s, len);
-
-        return result;
-    }
-
-    char *
-    text_to_cstring(const text *t)
-    {
-        int len;
-        char *result;
-
-        len = VARSIZE_ANY_EXHDR(t);
-        result = (char *) palloc(len + 1);
-        memcpy(result, VARDATA_ANY(t), len);
-        result[len] = '\0';
-        return result;
-    }
-
-    Const *makeConst(Oid consttype,
-                     int32 consttypmod,
-                     Oid constcollid,
-                     int constlen,
-                     Datum constvalue,
-                     bool constisnull,
-                     bool constbyval)
-    {
-        return nullptr; // XXX not impl
-    }
-
-    List *list_append_unique_int(List *list, int datum) {
-        return list; // XXX not impl
-    }
-
-    bool errstart(int elevel, const char *domain) {
-        return false;
-    }
-
-    void errfinish(const char *filename,
-                   int  lineno,
-                   const char *funcname) {}
-
-    int errmsg_internal(const char *fmt, ...) { return 0; }
-
-    bool errstart_cold(int elevel, const char* domain) { return false; }
-    // stubs
-
-    Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3) {
-        return (Datum)0;
-    }
-
-    void ReleaseSysCache(HeapTuple tuple) { }
-
-    HeapTuple SearchSysCache1(int cacheId, Datum key1) {
-        return (HeapTuple)nullptr;
-    }
-}
 
 /** List all tables from TableNames system table */
 void
@@ -194,24 +116,35 @@ dump_table(uint64_t tid, uint64_t xid)
     std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
 
     auto fields = schema->get_fields();
-    int attrnums[fields->size()];
+    FormData_pg_attribute attrdata[fields->size()];
+    Form_pg_attribute attrs[fields->size()];
 
     // iterate over column map and extract attrnums
     int i = 0;
     for (auto &col : columns) {
         if (col.second.exists) {
-            attrnums[i++] = col.first;
+            attrs[i] = &attrdata[i];
+            attrs[i]->attnum = col.first;
+            attrs[i]->atttypid = col.second.pg_type;
+            attrs[i]->atttypmod = -1;
         }
     }
 
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
+    // create the fdw state for the table @xid and begin the scan
     PgFdwState *state = mgr->fdw_create_state(tid, xid);
     mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
 
+    // iterate through the table and print the values
     Datum values[fields->size()];
     bool nulls[fields->size()];
-    while (mgr->fdw_iterate_scan(state, i, attrnums, values, nulls)) {
+    bool eos = false;
+    while (!eos) {
+        bool row_valid = mgr->fdw_iterate_scan(state, fields->size(), attrs, values, nulls, &eos);
+        if (!row_valid) {
+            continue;
+        }
         // print the values
         for (size_t j = 0; j < fields->size(); j++) {
             if (nulls[j]) {
@@ -224,6 +157,7 @@ dump_table(uint64_t tid, uint64_t xid)
         std::cout << std::endl;
     }
 
+    // end the scan releasing the state
     mgr->fdw_end_scan(state);
 }
 

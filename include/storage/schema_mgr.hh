@@ -196,6 +196,9 @@ namespace springtail {
 
         /** A cache of SchemaInfo objects. */
         LruObjectCache<uint64_t, SchemaInfo> _cache;
+
+        /** Helper to convert schema column to map */
+        std::map<uint32_t, SchemaColumn> _get_columns_for_system_tables(const std::vector<SchemaColumn> &columns);
     };
 
 }

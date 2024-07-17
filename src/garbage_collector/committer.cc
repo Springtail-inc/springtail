@@ -149,9 +149,9 @@ namespace springtail::gc {
             // pre-commit the XID
             _xid_mgr->pre_commit_xid(xid);
 
-            // perform the schema mutations
-            
+            // perform the schema mutations in the FDWs
 
+            
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
