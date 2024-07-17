@@ -25,6 +25,7 @@ extern "C" {
     #include <postgres.h>
     #include <nodes/pg_list.h>
     #include <c.h>
+    #include <utils/builtins.h>
 }
 
 #include <pg_fdw/pg_fdw_common.h>

@@ -183,7 +183,7 @@ namespace springtail {
                 // update the columns with the primary key positions
                 // XXX not handling changes in the primary index
                 for (auto &column : _column_map[column_id][xid]) {
-                    column.pkey_position = _primary_index.size();
+                    column.pkey_position = _primary_index[xid].size();
                 }
 
                 // note the primary key

@@ -158,6 +158,7 @@ namespace pg_fdw {
 
         if (state->qual_fields == nullptr) {
             // full table scan
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan");
             state->iter_start.emplace(Table::Iterator(state->table->begin()));
             state->iter_end.emplace(Table::Iterator(state->table->end()));
             return;
@@ -168,6 +169,9 @@ namespace pg_fdw {
 
         // create the field tuple used for bounds
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
+
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
+                            qual->base.opname, tuple->to_string());
 
         // set up the start iterator based on first key op
         QualOpName op = qual->base.op;
@@ -265,6 +269,9 @@ namespace pg_fdw {
                                bool *nulls,
                                bool *eos)
     {
+        // Note: for now always scan up, so we don't need to check if we are scanning down
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
+
         // default to not end of scan
         *eos = false;
 
@@ -276,6 +283,8 @@ namespace pg_fdw {
 
         // check if we are scanning up and iterator is at the end
         if (state->scan_up && *state->iter_start == *state->iter_end) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+
             if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
@@ -290,9 +299,6 @@ namespace pg_fdw {
             *eos = true;
             return false;
         }
-
-        // Note: for now always scan up, so we don't need to check if we are scanning down
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: tid: {}", state->tid);
 
         // get current row
         Extent::Row row = *(*state->iter_start);

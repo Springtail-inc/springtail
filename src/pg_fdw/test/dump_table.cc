@@ -1,10 +1,14 @@
 #include <iostream>
 
-#include <boost/program_options.hpp>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdbool.h>
+
 #include <fmt/format.h>
+#include <boost/program_options.hpp>
 
 #include <common/common.hh>
-
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <storage/table.hh>
@@ -16,88 +20,6 @@
 
 using namespace springtail;
 using namespace springtail::pg_fdw;
-
-extern "C" {
-    #include "varatt.h"
-    #include "utils/builtins.h"
-    #include <access/htup_details.h>
-
-    // These files are not being linked in, from libpq
-    // so we define them here
-
-    /** Dummy function so that we can link with pg_fdw_mgr.cc */
-    const char *quote_identifier(const char *ident) {
-        return ident;
-    }
-
-    /** Dummy lappend, does nothing */
-    List *lappend(List *list, void *datum) {
-        return list;
-    }
-
-    /** Dummy function so that we can link with pg_fdw_mgr.cc */
-    text *
-    cstring_to_text(const char *s)
-    {
-        int len = strlen(s);
-        text *result = (text *) palloc(VARHDRSZ + len + 1);
-        SET_VARSIZE(result, VARHDRSZ + len);
-        memcpy(VARDATA(result), s, len);
-
-        return result;
-    }
-
-    char *
-    text_to_cstring(const text *t)
-    {
-        int len;
-        char *result;
-
-        len = VARSIZE_ANY_EXHDR(t);
-        result = (char *) palloc(len + 1);
-        memcpy(result, VARDATA_ANY(t), len);
-        result[len] = '\0';
-        return result;
-    }
-
-    Const *makeConst(Oid consttype,
-                     int32 consttypmod,
-                     Oid constcollid,
-                     int constlen,
-                     Datum constvalue,
-                     bool constisnull,
-                     bool constbyval)
-    {
-        return nullptr; // XXX not impl
-    }
-
-    List *list_append_unique_int(List *list, int datum) {
-        return list; // XXX not impl
-    }
-
-    bool errstart(int elevel, const char *domain) {
-        return false;
-    }
-
-    void errfinish(const char *filename,
-                   int  lineno,
-                   const char *funcname) {}
-
-    int errmsg_internal(const char *fmt, ...) { return 0; }
-
-    bool errstart_cold(int elevel, const char* domain) { return false; }
-    // stubs
-
-    Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3) {
-        return (Datum)0;
-    }
-
-    void ReleaseSysCache(HeapTuple tuple) { }
-
-    HeapTuple SearchSysCache1(int cacheId, Datum key1) {
-        return (HeapTuple)nullptr;
-    }
-}
 
 /** List all tables from TableNames system table */
 void
