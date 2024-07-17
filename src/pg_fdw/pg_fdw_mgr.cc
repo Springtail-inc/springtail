@@ -863,6 +863,7 @@ namespace pg_fdw {
         // these types can be sorted and used by primary key where clauses
         // an entry must exist in _make_const_field for these types
         switch (pg_type) {
+            case MONEYOID:
             case INT8OID:
             case INT4OID:
             case INT2OID:
@@ -890,6 +891,7 @@ namespace pg_fdw {
     {
         // Generate a const field based on type; populate it into fields array
         switch (qual->base.typeoid) {
+            case MONEYOID:
             case TIMESTAMPOID:
             case TIMESTAMPTZOID:
             case TIMEOID:
