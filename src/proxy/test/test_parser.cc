@@ -3,10 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <common/common.hh>
 #include <common/logging.hh>
 #include <proxy/parser.hh>
 
 using namespace springtail;
+using namespace springtail::pg_proxy;
 
 /** Tests to run.  In format: query string, is_read_safe, output name if any */
 static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
@@ -50,7 +52,7 @@ static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
 // gtest function
 TEST(ProxyParser_Test, TestParser)
 {
-    init_logging(LOG_ALL);
+    springtail_init();
 
     for (int i = 0; i < tests.size(); i++) {
         std::vector<Parser::StmtContextPtr> res = Parser::parse_query(std::get<0>(tests[i]));

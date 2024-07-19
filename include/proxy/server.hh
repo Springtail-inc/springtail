@@ -20,6 +20,8 @@
 #include <proxy/database.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
         ProxyServer(int port,
@@ -139,5 +141,5 @@ namespace springtail {
                                     const std::filesystem::path &key_file={});
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-
-}
+} // namespace pg_proxy
+} // namespace springtail

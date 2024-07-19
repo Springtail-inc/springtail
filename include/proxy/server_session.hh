@@ -6,6 +6,8 @@
 #include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ClientSession; ///< forward declaration
 
     /**
@@ -146,4 +148,5 @@ namespace springtail {
         void _discard_msg(int32_t msg_length);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
-}
+} // namespace pg_proxy
+} // namespace springtail

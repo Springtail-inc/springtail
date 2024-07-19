@@ -4,6 +4,11 @@
 #include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
+    /**
+     * @brief Class for encoding and decoding error messages from postgres
+     */
     class ProxyProtoError {
     public:
         // for full error codes: https://www.postgresql.org/docs/16/errcodes-appendix.html
@@ -59,5 +64,5 @@ namespace springtail {
             } while (type != '\0');
         }
     };
-
-}
+} // namespace pg_proxy
+} // namespace springtail

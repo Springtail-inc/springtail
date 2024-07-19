@@ -21,13 +21,15 @@
 #include <proxy/auth/scram.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server)
 
         : Session(connection, server, CLIENT),
           _stmt_cache(STATEMENT_CACHE_SIZE)
     {
-        SPDLOG_DEBUG("Client connected: endpoint={}, id={}", connection->endpoint(), _id);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected: endpoint={}, id={}", connection->endpoint(), _id);
 
         // initialize pid and key for cancellation
         get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
@@ -54,7 +56,7 @@ namespace springtail {
         ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
         assert(server_session != nullptr);
 
-        SPDLOG_DEBUG("Releasing server session: id={}", server_session->id());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Releasing server session: id={}", server_session->id());
 
         // clear associated session from the client session
         clear_associated_session();
@@ -75,12 +77,12 @@ namespace springtail {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
-        SPDLOG_DEBUG("Client session got message from server session: {:d}", (int8_t)msg->type());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got message from server session: {:d}", (int8_t)msg->type());
 
         // entry point for messages from server session
         switch(msg->type()) {
             case SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
-                SPDLOG_DEBUG("Client session got auth done from server session");
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got auth done from server session");
                 if (_state == READY) {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
@@ -93,7 +95,7 @@ namespace springtail {
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
-                SPDLOG_DEBUG("Client session got fatal error from server session");
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got fatal error from server session");
                 throw ProxyServerError();
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_SUCCESS:
@@ -107,7 +109,7 @@ namespace springtail {
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
-                SPDLOG_DEBUG("Client session got ready from server session: status={}",
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got ready from server session: status={}",
                              msg->status().transaction_status);
 
                 // check if we are in/still in a transaction
@@ -115,6 +117,8 @@ namespace springtail {
                 if (status.transaction_status == 'I') {
                     _in_transaction = false;
                 } else {
+                    assert(status.transaction_status == 'E' || status.transaction_status == 'T');
+
                     // either 'E' or 'T' -- error requiring rollback or in transaction.
                     // could track transaction error state and avoid server round trips
                     // until we get a rollback...
@@ -152,7 +156,7 @@ namespace springtail {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        SPDLOG_DEBUG("Processing packet, client session: state={:d}", (int8_t)_state);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing packet, client session: state={:d}", (int8_t)_state);
 
         // main entry point for thread processing
         // resume from where we left off
@@ -187,11 +191,11 @@ namespace springtail {
         // this will return 1 on success, -1 if more data is needed; throws exception on fatal error
         int rc = _connection->SSL_accept();
         if (rc < 0) {
-            SPDLOG_DEBUG("SSL client handshake in progress, need more data");
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL client handshake in progress, need more data");
             return;
         }
 
-        SPDLOG_DEBUG("SSL client handshake complete");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL client handshake complete");
 
         _state = STARTUP;
     }
@@ -206,11 +210,11 @@ namespace springtail {
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
 
-        SPDLOG_DEBUG("Startup message: msg_length={}, code={}", msg_length, code);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Startup message: msg_length={}, code={}", msg_length, code);
 
         switch (code) {
             case MSG_SSLREQ:
-                SPDLOG_DEBUG("SSL negotiation requested");
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL negotiation requested");
                 _process_ssl_request();
                 break;
 
@@ -234,7 +238,7 @@ namespace springtail {
     void
     ClientSession::_process_startup_msg(int32_t code, int32_t remaining)
     {
-        SPDLOG_DEBUG("Proto version 3.0 requested");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Proto version 3.0 requested");
 
         // read parameter strings
         std::string key;
@@ -243,6 +247,8 @@ namespace springtail {
         std::string database;
 
         // this shouldn't be too big
+        assert(remaining <= 4096);
+
         char buffer[remaining];
         ssize_t n = _connection->read(buffer, remaining);
         assert(n == remaining);
@@ -254,7 +260,7 @@ namespace springtail {
             key = read_buffer.get_string();
             value = read_buffer.get_string();
 
-            SPDLOG_DEBUG("Parameter: {}={}", key, value);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parameter: {}={}", key, value);
 
             if (key == "user") {
                 username = value;
@@ -324,17 +330,17 @@ namespace springtail {
 
         switch(_login->_type) {
             case TRUST:
-                SPDLOG_DEBUG("User {} authenticated with trust", _user->username());
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticated with trust", _user->username());
                 _create_server_session(Session::Type::PRIMARY);
                 return; // did send above so we return here
 
             case MD5:
-                SPDLOG_DEBUG("User {} authenticating with md5", _user->username());
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticating with md5", _user->username());
                 _encode_auth_md5(buffer);
                 break;
 
             case SCRAM:
-                SPDLOG_DEBUG("User {} authenticating with scram", _user->username());
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticating with scram", _user->username());
                 _encode_auth_scram(buffer);
                 break;
 
@@ -365,7 +371,7 @@ namespace springtail {
 
             int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
-            SPDLOG_DEBUG("Auth continue: msg_length={}", msg_length);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Auth continue: msg_length={}", msg_length);
 
             switch(_login->_type) {
                 case MD5: {
@@ -393,7 +399,7 @@ namespace springtail {
                         throw ProxyAuthError();
                     }
 
-                    SPDLOG_DEBUG("MD5 password match");
+                    SPDLOG_DEBUG_MODULE(LOG_PROXY, "MD5 password match");
 
                     // auth successful on client side
                     // see if we need to create a server session
@@ -405,7 +411,7 @@ namespace springtail {
                 case SCRAM: {
                     // see if this is the first or second message
                     if (_login->scram_state.server_nonce == nullptr) {
-                        SPDLOG_DEBUG("Handling SCRAM SASL initial response");
+                        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling SCRAM SASL initial response");
 
                         // process as SASLInitialResponse
                         std::string_view scram_type = buffer->get_string();
@@ -418,7 +424,7 @@ namespace springtail {
                         std::string_view data = buffer->get_bytes(len);
                         _handle_scram_auth(data);
                     } else {
-                        SPDLOG_DEBUG("Handling SCRAM SASL response");
+                        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling SCRAM SASL response");
                         // process as SASLResponse
                         std::string_view data = buffer->get_bytes(msg_length);
                         _handle_scram_auth_continue(data);
@@ -593,7 +599,7 @@ namespace springtail {
         // set state to ready
         _state = READY;
 
-        SPDLOG_DEBUG("Client session auth done, ready for queries");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session auth done, ready for queries");
     }
 
     void
@@ -742,7 +748,7 @@ namespace springtail {
         // query string
         std::string_view query = buffer->get_string();
 
-        SPDLOG_DEBUG("Parse: stmt={}, query={}", stmt, query);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parse: stmt={}, query={}", stmt, query);
 
         // parse the query
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query);
@@ -779,7 +785,7 @@ namespace springtail {
         // statement string -- prepared name
         std::string_view stmt = buffer->get_string();
 
-        SPDLOG_DEBUG("Bind: prepared={}, portal={}", stmt, portal);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Bind: prepared={}, portal={}", stmt, portal);
 
         // get the prepared statement from the cache
         std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_prepared(stmt);
@@ -820,7 +826,7 @@ namespace springtail {
         // portal or statement name
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG("Describe request: type={}, name={}", stmt_type, name);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Describe request: type={}, name={}", stmt_type, name);
 
         // get the statement from the cache
         std::pair<QueryStmtPtr, bool> lookup_result;
@@ -866,7 +872,7 @@ namespace springtail {
         // portal name
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG("Describe request: name={}", name);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Describe request: name={}", name);
 
         // find the dependency
         QueryStmt::Type qs_type = QueryStmt::ANONYMOUS;
@@ -917,7 +923,7 @@ namespace springtail {
         // portal or statement
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG("Close request: type={}, name={}", stmt_type, name);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Close request: type={}, name={}", stmt_type, name);
 
         // cache the close packet for the transaction
         if (!_in_transaction) {
@@ -958,7 +964,7 @@ namespace springtail {
     void
     ClientSession::_handle_sync(BufferPtr buffer)
     {
-        SPDLOG_DEBUG("Sync request");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Sync request");
         if (get_associated_session() == nullptr) {
             // this is a weird case as it doesn't make sense to issue
             // a sync without a set of other extended queries preceeding it
@@ -976,7 +982,7 @@ namespace springtail {
     {
         std::string_view query = buffer->get_string();
 
-        SPDLOG_DEBUG("Simple Query: {}", query);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Simple Query: {}", query);
 
         // parse the query and determine if it is a read or write query
         if (!_in_transaction) {
@@ -1003,12 +1009,12 @@ namespace springtail {
     ServerSessionPtr
     ClientSession::_select_session(Session::Type type)
     {
-        SPDLOG_DEBUG("Selecting server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Selecting server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
 
         // if we have an associated session use it (typically in a transaction)
         if (get_associated_session() != nullptr) {
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
-            SPDLOG_DEBUG("Using associated session: id={}", session->id());
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Using associated session: id={}", session->id());
             return session;
         }
 
@@ -1029,10 +1035,10 @@ namespace springtail {
         }
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
-        SPDLOG_DEBUG("Creating new server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Creating new server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
         session = _create_server_session(type);
         assert (session != nullptr);
-        SPDLOG_DEBUG("Created new server session: id={}", session->id());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new server session: id={}", session->id());
 
         set_associated_session(session);
 
@@ -1057,10 +1063,10 @@ namespace springtail {
         ServerSessionPtr session = instance->get_session(_database, _user->username());
         if (session == nullptr) {
             // need to allocate a new session
-            SPDLOG_DEBUG("Allocating new server session: {}:{}", _database, _user->username());
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Allocating new server session: {}:{}", _database, _user->username());
             session = instance->allocate_session(_server, _user, _database);
         }
-        SPDLOG_DEBUG("Got server session: id={}, is_ready={}", session->id(), session->is_ready());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Got server session: id={}, is_ready={}", session->id(), session->is_ready());
 
         if (type == PRIMARY) {
             // store reference to primary session
@@ -1239,4 +1245,5 @@ namespace springtail {
         return qs;
     }
 
-}
+} // namespace pg_proxy
+} // namespace springtail

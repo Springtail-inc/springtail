@@ -17,6 +17,8 @@
 #include <proxy/session_msg.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     // forward declarations to avoid circular dependencies
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
@@ -103,7 +105,7 @@ namespace springtail {
         Session& operator=(const Session&) = delete;
 
         /** Destruct a connection. */
-        virtual ~Session() { SPDLOG_DEBUG("Session destructor"); };
+        virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
 
         /** Process messages for session connection;
          * thread entry, calls _process() */
@@ -175,7 +177,7 @@ namespace springtail {
 
         /** Shutdown the session, close connection, etc */
         void shutdown() {
-            SPDLOG_DEBUG("Shutting down session: type={}, socket={}",
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
             assert(_associated_session == nullptr);
@@ -308,4 +310,5 @@ namespace springtail {
         void _handle_error();
     };
     using SessionPtr = std::shared_ptr<Session>;
-}
+} // namespace pg_proxy
+} // namespace springtail

@@ -3,6 +3,7 @@
 #include <common/exception.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     class ProxyError : public Error {
     public:
@@ -61,4 +62,5 @@ namespace springtail {
         }
     };
 
+} // namespace pg_proxy
 } // namespace springtail

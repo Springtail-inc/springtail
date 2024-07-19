@@ -14,6 +14,8 @@
 #include <proxy/parser.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
@@ -117,4 +119,5 @@ namespace springtail {
         void _release_server_session();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
-}
+} // namespace pg_proxy
+} // namespace springtail

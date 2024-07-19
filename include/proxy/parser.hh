@@ -5,10 +5,18 @@
 #include <memory>
 
 extern "C" {
+    // from postgres include/nodes/nodes.h
+    // don't want to include the whole thing
     struct Node;
 };
 
 namespace springtail {
+namespace pg_proxy {
+
+    /**
+     * @brief Parser for Postgres SQL queries; breaks a SQL query into individual statements
+     * and provides information about the query and whether it is supported by a read-only replica.
+     */
     class Parser {
     public:
         /**
@@ -79,14 +87,18 @@ namespace springtail {
         };
         using StmtContextPtr = std::shared_ptr<StmtContext>;
 
+        /** Parse the query into multiple statements */
         static std::vector<StmtContextPtr> parse_query(const std::string_view query);
 
+        /** Debugging, dump the parse tree */
         static void dump_parse_tree(const std::string &query);
 
+        /** Debugging dump the statement after parsing */
         static void dump_context(const StmtContext &context);
 
     private:
 
+        /** Structure to hold the state and the resultant set of statements while parsing */
         struct ParseContext {
             bool has_error=false;
 
@@ -97,13 +109,27 @@ namespace springtail {
             std::vector<StmtContextPtr> stmts;
         };
 
+        /** Return true if query is read only */
         static bool _is_query_readonly(const StmtContext &context);
+
+        /** Iterate through the parse tree, moving to next node */
         static bool _node_walker(Node *node, void *ctx);
+
+        /** Entry to parsing the query, fills in the parse context */
         static void _parse_query(const std::string_view query, ParseContext &context);
+
+        /** Checks if a function is safe for read-replica */
         static bool _is_function_readonly_safe(const std::string &funcname);
+
+        /** Checks if a table is safe for read-replica */
         static bool _is_table_readonly_safe(const std::pair<std::string, std::string> &table);
+
+        /** Check to see if current parse node should be parsed (i.e., is the statement supported or not) */
         static bool _check_stmt(Node *node);
+
+        /** Convert from internal postgres string in node to a C++ string */
         static void _set_string(const char *str, std::string &dest);
     };
     using ParserPtr = std::shared_ptr<Parser>;
-}
+} // namespace pg_proxy
+} // namespace springtail

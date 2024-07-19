@@ -12,6 +12,7 @@
 #include <proxy/history_cache.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     /** Messages between sessions */
     class SessionMsg {
@@ -142,3 +143,4 @@ namespace springtail {
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
 } // namespace springtail
+} // namespace pg_proxy

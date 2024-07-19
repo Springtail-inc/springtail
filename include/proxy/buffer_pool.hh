@@ -12,6 +12,7 @@
 #include <pg_repl/pg_types.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     class Buffer;
     using BufferPtr = std::shared_ptr<Buffer>;
@@ -252,5 +253,5 @@ namespace springtail {
 
         std::vector<BufferPtr> buffers;
     };
-
-}
+} // namespace pg_proxy
+} // namespace springtail

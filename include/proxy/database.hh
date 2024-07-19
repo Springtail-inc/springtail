@@ -17,6 +17,7 @@
 #include <proxy/server_session.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     class DatabasePool {
     public:
@@ -66,7 +67,7 @@ namespace springtail {
             std::unique_lock lock(_mutex);
             _free_sessions.push_back(session);
             _active_count--;
-            SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_count);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session released: {:d}, active={}", session->id(), _active_count);
         }
 
         /**
@@ -359,3 +360,4 @@ namespace springtail {
 
 
 } // namespace springtail
+} // namespace pg_proxy

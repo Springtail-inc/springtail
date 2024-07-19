@@ -4,6 +4,7 @@
 #include <set>
 
 namespace springtail {
+namespace pg_proxy {
 
     static const std::set<std::string> proxy_unsafe_ops {
         /* https://www.postgresql.org/docs/current/sql-commands.html */
@@ -1560,5 +1561,5 @@ namespace springtail {
         "xpath",
         "xpath_exists",
     };
-
-} // namespace springtail",
+} // namespace pg_proxy
+} // namespace springtail

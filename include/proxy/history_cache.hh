@@ -16,6 +16,7 @@
 #include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     /**
      * @brief Encapsulates a query statement, this may be a full packet or a portion of a simple query string
@@ -129,42 +130,8 @@ namespace springtail {
     };
     using QueryStmtPtr = std::shared_ptr<QueryStmt>;
 
-    /**
-     * @brief Cache of statements (used as a prepared statement cache)
-     */
-    class QueryStmtCache {
-    public:
-        explicit QueryStmtCache(int capacity)
-            : _lru_cache(capacity)
-        {}
-
-        QueryStmtCache(const QueryStmtCache&) = delete;
-        QueryStmtCache(const QueryStmtCache&&) = delete;
-        QueryStmtCache& operator=(const QueryStmtCache&) = delete;
-
-        /**
-         * @brief Evict a statement from the cache
-         * @param name name of the statement to evict
-         */
-        void evict(const std::string &name) {
-            _lru_cache.evict(name);
-        }
-
-        void add(const std::string &name, QueryStmtPtr stmt) {
-            _lru_cache.insert(name, stmt);
-        }
-
-        QueryStmtPtr get(const std::string &name) {
-            return _lru_cache.get(name);
-        }
-
-        void clear() {
-            _lru_cache.clear();
-        }
-
-    private:
-        LruObjectCache<std::string, QueryStmt> _lru_cache;   ///< cache of prepared statements
-    };
+    /** Cache of statements (used as a prepared statement cache) */
+    using QueryStmtCache = LruObjectCache<std::string, QueryStmt>;
     using QueryStmtCachePtr = std::shared_ptr<QueryStmtCache>;
 
     /**
@@ -357,4 +324,5 @@ namespace springtail {
         void _release_savepoint(const std::string &name);
     };
 
+} // namespace pg_proxy
 } // namespace springtail

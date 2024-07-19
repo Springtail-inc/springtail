@@ -9,6 +9,7 @@
 #include <proxy/session.hh>
 
 using namespace springtail;
+using namespace springtail::pg_proxy;
 
 void setup(ProxyServerPtr server)
 {
@@ -32,7 +33,7 @@ void setup(ProxyServerPtr server)
     md5[35] = '\0'; // null terminate
     uint32_t salt;
     get_random_bytes((uint8_t*)&salt, 4);
-    SPDLOG_DEBUG("Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
+    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
     server->add_user("test_md5", md5, salt);
 
     // add user for test db with scram

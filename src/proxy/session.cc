@@ -11,6 +11,7 @@
 #include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     /** unique session id counter */
     static std::atomic<uint64_t> session_id(0);
@@ -47,7 +48,7 @@ namespace springtail {
         // thread entry point from server
         bool has_data = false;
 
-        SPDLOG_DEBUG("Processing data: session id: {}", _id);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing data: session id: {}", _id);
 
         do {
             // thread entry point
@@ -76,7 +77,7 @@ namespace springtail {
             }
 
             if (_waiting_on_session) {
-                SPDLOG_DEBUG("Waiting on external session, id: {}", _id);
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Waiting on external session, id: {}", _id);
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
@@ -91,11 +92,11 @@ namespace springtail {
             // check if there is more data to process
             // checks buffered data in ssl connection
             has_data = _connection->has_pending();
-            SPDLOG_DEBUG("Has data: {}", has_data);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Has data: {}", has_data);
         } while (has_data);
 
         // signal server to wait on this connection
-        SPDLOG_DEBUG("Adding connection to server poll list: session_id={}, socket={}", _id, _connection->get_socket());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding connection to server poll list: session_id={}, socket={}", _id, _connection->get_socket());
         _server->signal(_connection);
     }
 
@@ -103,7 +104,7 @@ namespace springtail {
     Session::_internal_process_msgs(bool is_remote)
     {
         while (_ready_for_message) {
-            SPDLOG_DEBUG("Looking for messages: session id: {}", _id);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Looking for messages: session id: {}", _id);
 
             SessionMsgPtr msg = get_msg();
             if (msg == nullptr) {
@@ -111,7 +112,7 @@ namespace springtail {
             }
 
             // send message to session
-            SPDLOG_DEBUG("Processing message: type={}, session id: {}", (int8_t)msg->type(), _id);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing message: type={}, session id: {}", (int8_t)msg->type(), _id);
 
             try {
                 _process_msg(msg);
@@ -195,7 +196,7 @@ namespace springtail {
             // message length includes length field but not code byte
             // so really msg_length -= 4
             msg_length = recvint32(buffer + offset + 1) + 1;
-            SPDLOG_DEBUG("Read message length: {}", msg_length);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Read message length: {}", msg_length);
 
             // allocate a buffer from the buffer pool and copy data in
             BufferPtr bufferp = blist.get(msg_length);
@@ -211,7 +212,7 @@ namespace springtail {
         // if we didn't get all the data for the last buffer
         if (offset > n) {
             // read remaining data into tail buffer
-            SPDLOG_DEBUG("Need to read more data for message: {}", offset-n);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Need to read more data for message: {}", offset-n);
             BufferPtr tail = blist.buffers.back();
             int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
             tail->incr_size(rd);
@@ -230,11 +231,11 @@ namespace springtail {
         sendint32(msg_length+4, buffer + 1);
         int n = _associated_session->get_connection()->write(buffer, 5);
         assert (n == 5);
-        SPDLOG_DEBUG("Streamed header to remote session: code={}, msg_length={}", code, msg_length);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed header to remote session: code={}, msg_length={}", code, msg_length);
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
-            SPDLOG_DEBUG("Reading {} bytes from local socket", std::min(msg_length, 4096));
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Reading {} bytes from local socket", std::min(msg_length, 4096));
             // throws exception on error
             int n = _connection->read(buffer, std::min(msg_length, 4096));
             assert (n == std::min(msg_length, 4096));
@@ -242,7 +243,7 @@ namespace springtail {
             int m = _associated_session->get_connection()->write(buffer, n);
             assert (m == n);
 
-            SPDLOG_DEBUG("Streamed {} bytes to remote session", m);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed {} bytes to remote session", m);
 
             msg_length -= m;
         }
@@ -295,4 +296,5 @@ namespace springtail {
         }
         SPDLOG_ERROR("Shutdown complete");
     }
-}
+} // namespace pg_proxy
+} // namespace springtail

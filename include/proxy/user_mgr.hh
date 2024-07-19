@@ -14,6 +14,7 @@
 #include <proxy/auth/scram-common.h>
 
 namespace springtail {
+namespace pg_proxy {
 
     enum AuthType : int8_t {
         TRUST=0,
@@ -51,7 +52,7 @@ namespace springtail {
         ~UserLogin() {
             // release the scram state pointers.  The keys are copied into the User object
             if (_type == SCRAM) {
-                SPDLOG_DEBUG("Freeing scram state");
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Freeing scram state");
                 free_scram_state(&scram_state);
             }
         }
@@ -191,4 +192,5 @@ namespace springtail {
         std::map<std::string, UserPtr> _user_map;
     };
     using UserMgrPtr = std::shared_ptr<UserMgr>;
-}
+} // namespace pg_proxy
+} // namespace springtail

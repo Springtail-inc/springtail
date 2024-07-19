@@ -1,6 +1,7 @@
 #include <proxy/history_cache.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     void
     HistoryCache::add(QueryStmtPtr entry, bool prune)
@@ -250,7 +251,7 @@ namespace springtail {
                 // we clear unamed prepared statements at the end of a simple query
 
                 // add to session level prepared stmt cache
-                _prepared_cache.add(entry->name, entry);
+                _prepared_cache.insert(entry->name, entry);
 
                 // no need to add to transaction history,
                 // as soon as they succeed they are visible; rollbacks don't affect them
@@ -347,4 +348,5 @@ namespace springtail {
         }
         _transaction_history.clear();
     }
-}
+} // namespace pg_proxy
+} // namespace springtail

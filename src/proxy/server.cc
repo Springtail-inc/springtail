@@ -21,6 +21,8 @@
 #include <proxy/server.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     /**
      * @brief Construct a new Proxy Server object.
      * The server handles the poll loop and accepts new connections.
@@ -117,31 +119,31 @@ namespace springtail {
         }
 
         if (where & SSL_CB_HANDSHAKE_START) {
-            SPDLOG_DEBUG("SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
         } else if (where & SSL_CB_HANDSHAKE_DONE) {
-            SPDLOG_DEBUG("SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
         } else if (where & SSL_CB_LOOP) {
-            SPDLOG_DEBUG("SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
         } else if (where & SSL_CB_ALERT) {
             str = (where & SSL_CB_READ) ? "read" : "write";
-            SPDLOG_DEBUG("SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
                          SSL_alert_type_string_long(ret),
                          SSL_alert_desc_string_long(ret));
        } else if (where & SSL_CB_EXIT) {
             if (ret == 0) {
-                SPDLOG_DEBUG("SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
             } else if (ret < 0) {
-                SPDLOG_DEBUG("SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
             }
         } else {
-            SPDLOG_DEBUG("SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
         }
     }
 
     static int
     ssl_verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
     {
-        SPDLOG_DEBUG("SSL verify callback: preverify_ok={}", preverify_ok);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL verify callback: preverify_ok={}", preverify_ok);
         return 1; // no verification
     }
 
@@ -207,7 +209,7 @@ namespace springtail {
     ProxyServer::_do_accept()
     {
         while (true) { // accept is non-blocking and will return when no more connections
-            SPDLOG_DEBUG("Accepting new connection");
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Accepting new connection");
 
             struct sockaddr_in client_address;
             socklen_t client_address_size = sizeof(client_address);
@@ -232,7 +234,7 @@ namespace springtail {
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
 
-            SPDLOG_DEBUG("Client connected from: {} on socket {}", client_ip, client_socket);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected from: {} on socket {}", client_ip, client_socket);
 
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
             ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this());
@@ -262,7 +264,7 @@ namespace springtail {
 
             int i = 2;
             for (auto &session_socket : _waiting_sessions) {
-                SPDLOG_DEBUG("Adding socket to poll list: {}", session_socket);
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding socket to poll list: {}", session_socket);
                 fds[i].fd = session_socket;
                 fds[i].events = POLLIN;
                 i++;
@@ -270,7 +272,7 @@ namespace springtail {
 
             lock.unlock();
 
-            SPDLOG_DEBUG("Polling for sockets: size={}", _waiting_sessions.size());
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Polling for sockets: size={}", _waiting_sessions.size());
 
             int n = poll(fds, i, -1);
             if (n == -1) {
@@ -281,7 +283,7 @@ namespace springtail {
                 }
                 break;
             }
-            SPDLOG_DEBUG("Poll returned: {}", n);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Poll returned: {}", n);
 
             // handle any new accepts
             if (fds[0].revents & POLLIN) {
@@ -306,7 +308,7 @@ namespace springtail {
             for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
                     auto session = _sessions.find(fds[i].fd);
-                    SPDLOG_DEBUG("Socket {} is now runnable", fds[i].fd);
+                    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Socket {} is now runnable", fds[i].fd);
                     if (session != _sessions.end()) {
                         runnable_sessions.insert(session->second);
                         _waiting_sessions.erase(fds[i].fd);
@@ -320,7 +322,7 @@ namespace springtail {
             lock2.unlock();
 
             // queue the sessions that are now runnable
-            SPDLOG_DEBUG("Queueing {} sessions", runnable_sessions.size());
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
                 _thread_pool.queue(session);
             }
@@ -352,7 +354,7 @@ namespace springtail {
         char buf[1] = {0};
         write(_pipe[1], buf, 1);
 
-        SPDLOG_DEBUG("Signaled server waiting on socket {}", connection->get_socket());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Signaled server waiting on socket {}", connection->get_socket());
     }
 
     void
@@ -370,6 +372,5 @@ namespace springtail {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.insert(std::make_pair(session->get_connection()->get_socket(), session));
     }
-
-
-}
+} // namespace pg_proxy
+} // namespace springtail
