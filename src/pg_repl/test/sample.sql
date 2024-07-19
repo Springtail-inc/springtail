@@ -6,5 +6,6 @@ CREATE TABLE test_pgcopy (
   name VARCHAR(255) PRIMARY KEY,
   "offset" INT
 );
+CREATE INDEX test_pgcopy_table_id_idx ON test_pgcopy(table_id);
 
 \copy test_pgcopy(table_id, name, "offset") FROM '../../storage/test/test_btree_simple.csv' DELIMITER ',' CSV HEADER;
