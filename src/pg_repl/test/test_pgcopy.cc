@@ -31,12 +31,12 @@ namespace {
             std::filesystem::create_directories(_base_dir);
 
             std::cout << "writing to " << _base_dir << "\n";
-/*
+
             int err = std::system("psql postgresql://postgres:springtail@localhost -f sample.sql");
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
             }
-*/
+
         }
 
         void TearDown() override {
