@@ -9,6 +9,8 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
+#include <garbage_collector/xid_ready.hh>
+
 #include <pg_log_mgr/pg_redis_xact.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
@@ -222,6 +224,7 @@ namespace springtail::gc {
                    ParserQueuePtr parser_queue)
                 : _shutdown(false),
                   _pg_queue(pg_queue_key),
+                  _gc_queue(redis::QUEUE_GC_XID_READY),
                   _backlog(backlog),
                   _parser_queue(parser_queue)
             {
@@ -284,6 +287,9 @@ namespace springtail::gc {
 
             /** Queue for XID messages from the PG log manager. */
             RedisQueue<PgRedisXactValue> _pg_queue;
+
+            /** Queue for XID messages to the GC committer. */
+            RedisQueue<XidReady> _gc_queue;
 
             /** A shared backlog queue for blocked XIDs. */
             BacklogPtr _backlog;

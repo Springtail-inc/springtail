@@ -1,24 +1,32 @@
 #include <storage/system_tables.hh>
 
+// note: these are hard-coded from the postgres type OIDs to avoid having to include all of the
+// postgres headers here
+constexpr int32_t BOOLOID = 16;
+constexpr int32_t INT8OID = 20;
+constexpr int32_t INT4OID = 23;
+constexpr int32_t TEXTOID = 25;
+
 namespace springtail::sys_tbl {
 
     // TableNames
+    // NOTE: position is 1 based for Postgres compatibility
 
     const std::vector<SchemaColumn> TableNames::Data::SCHEMA = {
-        { "namespace", 0, SchemaType::TEXT, false, 0 },
-        { "name", 1, SchemaType::TEXT, false, 1 },
-        { "table_id", 2, SchemaType::UINT64, false },
-        { "xid", 3, SchemaType::UINT64, false, 2 },
-        { "lsn", 4, SchemaType::UINT64, false, 3 },
-        { "exists", 5, SchemaType::BOOLEAN, false }
+        { "namespace", 1, SchemaType::TEXT, TEXTOID, false, 0 },
+        { "name", 2, SchemaType::TEXT, TEXTOID, false, 1 },
+        { "table_id", 3, SchemaType::UINT64, INT8OID, false },
+        { "xid", 4, SchemaType::UINT64, INT8OID, false, 2 },
+        { "lsn", 5, SchemaType::UINT64, INT8OID, false, 3 },
+        { "exists", 6, SchemaType::BOOLEAN, BOOLOID, false }
     };
 
     const std::vector<SchemaColumn> TableNames::Primary::SCHEMA = {
-        { "namespace", 0, SchemaType::TEXT, false },
-        { "name", 1, SchemaType::TEXT, false },
-        { "xid", 2, SchemaType::UINT64, false },
-        { "lsn", 3, SchemaType::UINT64, false },
-        { constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, false }
+        { "namespace", 1, SchemaType::TEXT, TEXTOID, false },
+        { "name", 2, SchemaType::TEXT, TEXTOID, false },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false },
+        { "lsn", 4, SchemaType::UINT64, INT8OID, false },
+        { constant::INDEX_EID_FIELD, 5, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> TableNames::Primary::KEY = {
@@ -29,9 +37,9 @@ namespace springtail::sys_tbl {
     };
 
     const std::vector<SchemaColumn> TableNames::Secondary::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "xid", 1, SchemaType::UINT64, false },
-        { "lsn", 2, SchemaType::UINT64, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
+        { "xid", 2, SchemaType::UINT64, INT8OID, false },
+        { "lsn", 3, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> TableNames::Secondary::KEY = {
@@ -43,17 +51,17 @@ namespace springtail::sys_tbl {
     // TableRoots
 
     const std::vector<SchemaColumn> TableRoots::Data::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false, 0 },
-        { "index_id", 1, SchemaType::UINT64, false, 1 },
-        { "xid", 2, SchemaType::UINT64, false, 2 },
-        { "extent_id", 3, SchemaType::UINT64, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
+        { "index_id", 2, SchemaType::UINT64, INT8OID, false, 1 },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
+        { "extent_id", 4, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<SchemaColumn> TableRoots::Primary::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "index_id", 1, SchemaType::UINT64, false },
-        { "xid", 2, SchemaType::UINT64, false },
-        { constant::INDEX_EID_FIELD, 3, SchemaType::UINT64, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
+        { "index_id", 2, SchemaType::UINT64, INT8OID, false },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false },
+        { constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> TableRoots::Primary::KEY = {
@@ -65,19 +73,19 @@ namespace springtail::sys_tbl {
     // Indexes
 
     const std::vector<SchemaColumn> Indexes::Data::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false, 0 },
-        { "index_id", 1, SchemaType::UINT64, false, 1 },
-        { "xid", 2, SchemaType::UINT64, false, 2 },
-        { "position", 3, SchemaType::UINT32, false, 3 },
-        { "column_id", 4, SchemaType::UINT32, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
+        { "index_id", 2, SchemaType::UINT64, INT8OID, false, 1 },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
+        { "position", 4, SchemaType::UINT32, INT4OID, false, 3 },
+        { "column_id", 5, SchemaType::UINT32, INT4OID, false }
     };
 
     const std::vector<SchemaColumn> Indexes::Primary::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "index_id", 1, SchemaType::UINT64, false },
-        { "xid", 2, SchemaType::UINT64, false },
-        { "position", 3, SchemaType::UINT32, false },
-        { constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
+        { "index_id", 2, SchemaType::UINT64, INT8OID, false },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false },
+        { "position", 4, SchemaType::UINT32, INT4OID, false },
+        { constant::INDEX_EID_FIELD, 5, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> Indexes::Primary::KEY = {
@@ -90,24 +98,25 @@ namespace springtail::sys_tbl {
     // Schemas
 
     const std::vector<SchemaColumn> Schemas::Data::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false, 0 },
-        { "position", 1, SchemaType::UINT32, false, 1 },
-        { "xid", 2, SchemaType::UINT64, false, 2 },
-        { "lsn", 3, SchemaType::UINT64, false, 3 },
-        { "exists", 4, SchemaType::BOOLEAN, false },
-        { "name", 5, SchemaType::TEXT, false },
-        { "type", 6, SchemaType::UINT8, false },
-        { "nullable", 7, SchemaType::BOOLEAN, false },
-        { "default", 8, SchemaType::TEXT, true },
-        { "update_type", 9, SchemaType::UINT8, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
+        { "position", 2, SchemaType::UINT32, INT4OID, false, 1 },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
+        { "lsn", 4, SchemaType::UINT64, INT8OID, false, 3 },
+        { "exists", 5, SchemaType::BOOLEAN, BOOLOID, false },
+        { "name", 6, SchemaType::TEXT, TEXTOID, false },
+        { "type", 7, SchemaType::UINT8, INT8OID, false },
+        { "pg_type", 8, SchemaType::INT32, INT4OID, false },
+        { "nullable", 9, SchemaType::BOOLEAN, BOOLOID, false },
+        { "default", 10, SchemaType::TEXT, TEXTOID, true },
+        { "update_type", 11, SchemaType::UINT8, INT8OID, false }
     };
 
     const std::vector<SchemaColumn> Schemas::Primary::SCHEMA = {
-        { "table_id", 0, SchemaType::UINT64, false },
-        { "position", 1, SchemaType::UINT32, false },
-        { "xid", 2, SchemaType::UINT64, false },
-        { "lsn", 3, SchemaType::UINT64, false },
-        { constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, false }
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
+        { "position", 2, SchemaType::UINT32, INT4OID, false },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false },
+        { "lsn", 4, SchemaType::UINT64, INT8OID, false },
+        { constant::INDEX_EID_FIELD, 5, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> Schemas::Primary::KEY = {
@@ -115,5 +124,23 @@ namespace springtail::sys_tbl {
         "position",
         "xid",
         "lsn"
+    };
+
+    // TableStats
+    const std::vector<SchemaColumn> TableStats::Data::SCHEMA = {
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
+        { "xid", 2, SchemaType::UINT64, INT8OID, false, 1 },
+        { "row_count", 3, SchemaType::UINT64, INT8OID, false }
+    };
+
+    const std::vector<SchemaColumn> TableStats::Primary::SCHEMA = {
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
+        { "xid", 2, SchemaType::UINT64, INT8OID, false },
+        { constant::INDEX_EID_FIELD, 3, SchemaType::UINT64, INT8OID, false }
+    };
+
+    const std::vector<std::string> TableStats::Primary::KEY = {
+        "table_id",
+        "xid"
     };
 }

@@ -8,6 +8,17 @@
 namespace springtail {
 
     /**
+     * Structure to hold table statistics.  Currently only holds the row count of the table.
+     */
+    struct TableStats {
+        uint64_t row_count;
+
+        TableStats()
+            : row_count(0)
+        { }
+    };
+
+    /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
@@ -20,7 +31,7 @@ namespace springtail {
             friend Table;
 
         public:
-            using iterator_category = std::forward_iterator_tag;
+            using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
             using value_type        = const Extent::Row;
             using pointer           = const Extent::Row *;  // or also value_type*
@@ -44,7 +55,7 @@ namespace springtail {
                 if (_btree_i == _btree->end()) {
                     return *this;
                 }
-                
+
                 // retrieve the data extent
                 _page = _table->_read_page_via_primary(_btree_i);
                 _page_i = _page->begin();
@@ -56,6 +67,41 @@ namespace springtail {
              * Returns a new iterator at the next row.
              */
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+
+            /**
+             * Move the iterator backward to the previous row.
+             */
+            Iterator& operator--() {
+                // check if this is end()
+                if (_page == nullptr) {
+                    // move to the final page referenced by the primary index
+                    assert(_btree_i == _btree->end());
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // check if we are on the first row
+                if (_page_i == _page->begin()) {
+                    // need to move to the previous page
+                    --_btree_i;
+
+                    // read the page and reference the end() of that page
+                    _page = _table->_read_page_via_primary(_btree_i);
+                    _page_i = _page->end();
+                }
+
+                // move to the previous row
+                --_page_i;
+                return *this;
+            }
+
+            /**
+             * Returns a new iterator at the previous row.
+             */
+            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
             /**
              * Compares two iterators for equality.
@@ -111,7 +157,8 @@ namespace springtail {
               const std::vector<std::string> &primary_key,
               const std::vector<std::vector<std::string>> &secondary_keys,
               std::vector<uint64_t> root_offsets,
-              ExtentSchemaPtr schema);
+              ExtentSchemaPtr schema,
+              const TableStats &stats);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -147,6 +194,14 @@ namespace springtail {
          */
         Iterator lower_bound(TuplePtr search_key);
 
+        Iterator upper_bound(TuplePtr search_key);
+
+        /**
+         * Returns an iterator to the first row that is less than or equal to the provided search
+         * key.  Search key must match the primary index order.
+         */
+        Iterator inverse_lower_bound(TuplePtr search_key);
+
         /**
          * An iterator to the start of the table.
          */
@@ -178,6 +233,14 @@ namespace springtail {
          * @return A pointer to the requested page.
          */
         StorageCache::PagePtr read_page(uint64_t extent_id) const;
+
+        /**
+         * @brief Get table stats
+         * @return TableStats
+         */
+        TableStats get_stats() const {
+            return _stats;
+        }
 
     protected:
         /**
@@ -214,6 +277,8 @@ namespace springtail {
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
+
+        TableStats _stats; ///< The statistics for this table.
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -232,7 +297,9 @@ namespace springtail {
                      const std::filesystem::path &table_dir,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
-                     ExtentSchemaPtr schema);
+                     ExtentSchemaPtr schema,
+                     const TableStats &stats,
+                     bool for_gc = false);
 
         /**
          * Returns the file of the raw data associated with the table.
@@ -350,18 +417,18 @@ namespace springtail {
          * Either inserts a tuple directly into the provided extent at the given XID, or updates an
          * existing row with the same primary key value.
          */
-        void _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
+        bool _upsert_direct(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
         /**
          * Upserts a tuple into the "empty" Page object.  Used when the Table started empty.
          */
-        void _upsert_empty(TuplePtr value, uint64_t xid);
+        bool _upsert_empty(TuplePtr value, uint64_t xid);
 
         /**
          * Inserts a tuple at the given XID, or updates an existing tuple with the same primary key
          * value, using a primary key lookup to find the containing extent.
          */
-        void _upsert_by_lookup(TuplePtr value, uint64_t xid);
+        bool _upsert_by_lookup(TuplePtr value, uint64_t xid);
 
         /**
          * Removes a tuple from the provided extent at the given XID that has the same primary key
@@ -428,6 +495,9 @@ namespace springtail {
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
         StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
+        TableStats _stats; ///< The stats for the table.
+
+        bool _for_gc; ///< If this table is being used for the ingest pipeline.
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

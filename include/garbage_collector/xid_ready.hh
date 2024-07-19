@@ -17,8 +17,7 @@ namespace springtail::gc {
             _xid = static_cast<uint64_t>(std::atoll(value.c_str()));
         }
 
-        std::string serialize()
-        {
+        std::string serialize() const {
             return fmt::format("{}", _xid);
         }
 

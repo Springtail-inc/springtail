@@ -1,4 +1,6 @@
+#include <fcntl.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <vector>
@@ -105,7 +107,7 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::read_message(const std::vector<char> &filter)
     {
-        SPDLOG_DEBUG("Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message, current_offset: {}, end_offset: {}\n", _current_offset, _end_offset);
         // check if we've already encountered the end of the file
         if (end_of_stream()) {
             return nullptr;
@@ -125,7 +127,7 @@ namespace springtail {
         bool skip_msg = !_is_message_filtered(msg_type, filter);
         PgMsgPtr msg = nullptr;
 
-        SPDLOG_DEBUG("Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
                       msg_type, _current_offset, _end_offset, skip_msg);
 
         if (skip_msg) {
@@ -816,7 +818,7 @@ namespace springtail {
 
     void
     PgMsgStreamReader::_decode_schema_columns(nlohmann::json &column_json,
-                                        std::vector<PgMsgSchemaColumn> &columns)
+                                              std::vector<PgMsgSchemaColumn> &columns)
     {
         // iterate through json array
         for (auto &el: column_json.items()) {
@@ -824,7 +826,8 @@ namespace springtail {
             nlohmann::json json = el.value();
 
             json["name"].get_to(column.column_name);
-            json["type"].get_to(column.udt_type);
+            json["type"].get_to(column.type);
+            json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
             json["position"].get_to(column.position);

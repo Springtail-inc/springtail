@@ -18,7 +18,7 @@
  * @param len  size of generated data
  * @return std::shared_ptr<std::vector<char>>  Ptr to vector of random data
  */
-std::shared_ptr<std::vector<char>>
+static std::shared_ptr<std::vector<char>>
 gen_data(int len)
 {
     // set of chars to pick from; too many and data is not compressable
@@ -43,7 +43,7 @@ gen_data(int len)
  * @return true if vectors contain same data
  * @return false if vectors do not contain same data
  */
-bool
+static bool
 compare_data(std::shared_ptr<std::vector<char>> data1,
              std::shared_ptr<std::vector<char>> data2)
 {
@@ -65,7 +65,7 @@ compare_data(std::shared_ptr<std::vector<char>> data1,
  * @param len      Length of random data to generate
  * @param count    Number of vectors to generate
  */
-void
+static void
 sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
             std::shared_ptr<springtail::IOHandle> fh_read,
             int len, int count=1)
@@ -105,7 +105,7 @@ sync_append(std::shared_ptr<springtail::IOHandle> fh_write,
  * @param count    Number of vectors to generate
  * @param next_offset Out | next offset
  */
-void
+static void
 sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
            std::shared_ptr<springtail::IOHandle> fh_read,
            int len, uint64_t offset, int count, uint64_t &next_offset)
@@ -141,11 +141,56 @@ sync_write(std::shared_ptr<springtail::IOHandle> fh_write,
     next_offset = write_response->next_offset;
 }
 
-const char *FILE1 = "/tmp/testfile";
-const char *FILE2 = "/tmp/testfile2";
+TEST(IOTest, FHTests)
+{
+    int files = (springtail::IOMgr::MAX_FILE_OBJECTS * 2);
+    int count = (springtail::IOMgr::MAX_FILE_HANDLES_PER_FILE + 2);
+    int data_len = 512;
+
+    std::vector<std::pair<std::string, uint64_t>> file_offsets;
+
+    springtail::springtail_init();
+
+    springtail::IOMgr *IOMgr = springtail::IOMgr::get_instance();
+
+    // open a bunch of files
+    for (int i = 0; i < files; i++) {
+        std::string path = "/tmp/testfile" + std::to_string(i);
+        std::filesystem::remove(path);
+        uint64_t offset = 0;
+
+        for (int j = 0; j < count; j++) {
+            std::shared_ptr<springtail::IOHandle> fh_write = IOMgr->open(path, springtail::IOMgr::IO_MODE::WRITE, false);
+            std::shared_ptr<springtail::IOHandle> fh_read = IOMgr->open(path, springtail::IOMgr::IO_MODE::READ, false);
+            file_offsets.push_back(std::make_pair(path, offset));
+            sync_write(fh_write, fh_read, data_len, offset, 1, offset);
+        }
+    }
+
+    // iterate over file offsets and read them
+    for (auto &fo : file_offsets) {
+        std::string path = fo.first;
+        uint64_t offset = fo.second;
+
+        std::shared_ptr<springtail::IOHandle> fh_read = IOMgr->open(path, springtail::IOMgr::IO_MODE::READ, false);
+        std::shared_ptr<springtail::IOResponseRead> read_response = fh_read->read(offset);
+        ASSERT_TRUE(read_response->is_success());
+        ASSERT_EQ(read_response->data.size(), 1);
+    }
+
+    // cleanup
+    for (auto &fo : file_offsets) {
+        std::string path = fo.first;
+        std::filesystem::remove(path);
+    }
+
+    IOMgr->shutdown(); // don't use IOMgr past this point
+}
 
 TEST(IOTest, IOTests)
 {
+    const char *FILE1 = "/tmp/testfile";
+    const char *FILE2 = "/tmp/testfile2";
     springtail::springtail_init();
 
     std::filesystem::remove(FILE1);
@@ -186,7 +231,9 @@ TEST(IOTest, IOTests)
 
     sync_write(fh_write, fh_read, 256, offset3, 3, unused);
 
-    std::cout << "All tests passed\n";
+    // cleanup
+    std::filesystem::remove(FILE1);
+    std::filesystem::remove(FILE2);
 
     IOMgr->shutdown(); // don't use IOMgr past this point
 }

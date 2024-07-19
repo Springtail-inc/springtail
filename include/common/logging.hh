@@ -3,6 +3,7 @@
 #include <optional>
 #include <utility>
 #include <memory>
+#include <map>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
@@ -30,7 +31,28 @@ namespace springtail {
         LOG_XID_MGR = 0x20,
         LOG_COMMON = 0x40,
         LOG_PROXY = 0x80,
+        LOG_FDW = 0x100,
+        LOG_CACHE = 0x200,
+        LOG_SCHEMA = 0x400,
+        LOG_GC = 0x800,
         LOG_ALL = 0xFFFFFFFF
+    };
+
+    static std::map<std::string, uint32_t> log_module_map = {
+        {"pg_repl", LOG_PG_REPL},
+        {"pg_log_mgr", LOG_PG_LOG_MGR},
+        {"write_cache_server", LOG_WRITE_CACHE_SERVER},
+        {"btree", LOG_BTREE},
+        {"storage", LOG_STORAGE},
+        {"xid_mgr", LOG_XID_MGR},
+        {"common", LOG_COMMON},
+        {"proxy", LOG_PROXY},
+        {"fdw", LOG_FDW},
+        {"cache", LOG_CACHE},
+        {"schema", LOG_SCHEMA},
+        {"gc", LOG_GC},
+        {"none", LOG_NONE},
+        {"all", LOG_ALL}
     };
 
     /**

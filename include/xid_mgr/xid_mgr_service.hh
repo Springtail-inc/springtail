@@ -43,11 +43,11 @@ namespace springtail {
                 std::shared_ptr<apache::thrift::transport::TSocket> sock =
                     std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
 
-                SPDLOG_DEBUG("Incoming connection\n");
-                SPDLOG_DEBUG("\tSocketInfo: {}\n", sock->getSocketInfo());
-                SPDLOG_DEBUG("\tPeerHost: {}\n", sock->getPeerHost());
-                SPDLOG_DEBUG("\tPeerAddress: {}\n", sock->getPeerAddress());
-                SPDLOG_DEBUG("\tPeerPort: {}\n", sock->getPeerPort());
+                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Incoming connection");
+                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tSocketInfo: {}", sock->getSocketInfo());
+                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerHost: {}", sock->getPeerHost());
+                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerAddress: {}", sock->getPeerAddress());
+                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerPort: {}", sock->getPeerPort());
 
                 return new ThriftXidMgrService();
             }

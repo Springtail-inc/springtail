@@ -8,6 +8,8 @@
 #include <string_view>
 #include <filesystem>
 
+#include <thrift/server/TServer.h>
+
 namespace springtail {
 
     /**
@@ -33,7 +35,7 @@ namespace springtail {
             return _instance;
         }
         /**
-         * @brief Shutdown cache
+         * @brief Shutdown XID manager
          */
         static void shutdown() {
             std::call_once(_shutdown_flag, &XidMgrServer::_shutdown);
@@ -42,7 +44,14 @@ namespace springtail {
         /**
          * @brief Startup server; does not return
          */
-        void startup();
+        static void startup() {
+            // start the server
+            auto server = get_instance();
+            server->_startup();
+
+            // after shutdown() we delete the instance
+            delete _instance;
+        }
 
 
         // interfaces from thrift
@@ -92,7 +101,7 @@ namespace springtail {
         int _port;
 
         /** last committed xid */
-        uint64_t _committed_xid = -1;
+        uint64_t _committed_xid = 0;
 
         /** base path */
         std::filesystem::path _base_path;
@@ -102,6 +111,12 @@ namespace springtail {
 
         /** mutex for reading/writing xid */
         std::shared_mutex _mutex;
+
+        /** The thrift server. */
+        std::shared_ptr<apache::thrift::server::TServer> _server;
+
+        /** startup from startup(), called once */
+        void _startup();
 
         /**
          * Write committed xid to file (if larger than last value)

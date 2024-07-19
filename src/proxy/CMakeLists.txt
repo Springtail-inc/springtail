@@ -52,7 +52,7 @@ target_link_libraries(test_parser
     PRIVATE springtail_proxy
     PRIVATE GTest::gtest_main
 )
-
+add_dsymutil_command(test_parser)
 gtest_discover_tests(test_parser)
 
 # test server daemon executable
@@ -77,6 +77,7 @@ target_link_libraries(daemon
     PUBLIC springtail_proxy
     PRIVATE Boost::program_options
 )
+add_dsymutil_command(daemon)
 
 # test client executable -- boost::asio test, not used
 #add_executable(client test/client.cc)

@@ -68,7 +68,7 @@ namespace springtail {
         // First argument is a factory object that constructs a thrift clients
         // using the host and port from above
         _thrift_client_pool = std::make_shared<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>>(
-            std::make_shared<ThriftObjectFactory>(server, port),
+            std::make_shared<WriteCacheThriftObjectFactory>(server, port),
             max_connections/2,
             max_connections
         );
@@ -232,6 +232,7 @@ namespace springtail {
         thrift::write_cache::ListExtentsRequest request;
         thrift::write_cache::ListExtentsResponse response;
 
+        request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
         request.count = count;
@@ -264,7 +265,7 @@ namespace springtail {
 
         c.client->get_rows(response, request);
 
-        cursor = request.cursor;
+        cursor = response.cursor;
 
         std::vector<RowData> rows;
         for (const auto &r: response.rows) {
@@ -368,4 +369,111 @@ namespace springtail {
 
         return;
     }
+
+    void
+    WriteCacheClient::add_mapping(uint64_t tid,
+                                  uint64_t target_xid,
+                                  uint64_t old_eid,
+                                  const std::vector<uint64_t> &new_eids)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::write_cache::AddMappingRequest request;
+        thrift::write_cache::Status result;
+
+        request.table_id = tid;
+        request.target_xid = target_xid;
+        request.old_eid = old_eid;
+
+        // note: performs a copy due to differing types
+        std::copy(new_eids.begin(), new_eids.end(), std::back_inserter(request.new_eids));
+
+        c.client->add_mapping(result, request);
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+    }
+
+    void
+    WriteCacheClient::set_lookup(uint64_t tid,
+                                 uint64_t target_xid,
+                                 uint64_t extent_id)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::write_cache::SetLookupRequest request;
+        thrift::write_cache::Status result;
+
+        request.table_id = tid;
+        request.target_xid = target_xid;
+        request.extent_id = extent_id;
+
+        c.client->set_lookup(result, request);
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+    }
+
+    std::vector<uint64_t>
+    WriteCacheClient::forward_map(uint64_t tid,
+                                  uint64_t target_xid,
+                                  uint64_t extent_id)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::write_cache::ForwardMapRequest request;
+        thrift::write_cache::ExtentMapResponse result;
+
+        request.table_id = tid;
+        request.target_xid = target_xid;
+        request.extent_id = extent_id;
+
+        c.client->forward_map(result, request);
+
+        std::vector<uint64_t> extent_ids;
+        extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
+        return extent_ids;
+    }
+
+    std::vector<uint64_t>
+    WriteCacheClient::reverse_map(uint64_t tid,
+                                  uint64_t access_xid,
+                                  uint64_t target_xid,
+                                  uint64_t extent_id)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::write_cache::ReverseMapRequest request;
+        thrift::write_cache::ExtentMapResponse result;
+
+        request.table_id = tid;
+        request.access_xid = access_xid;
+        request.target_xid = target_xid;
+        request.extent_id = extent_id;
+
+        c.client->reverse_map(result, request);
+
+        std::vector<uint64_t> extent_ids;
+        extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
+        return extent_ids;
+    }
+
+    void
+    WriteCacheClient::expire_map(uint64_t tid,
+                                 uint64_t commit_xid)
+    {
+        ThriftClient c = _get_client();
+
+        thrift::write_cache::ExpireMapRequest request;
+        thrift::write_cache::Status result;
+
+        request.table_id = tid;
+        request.commit_xid = commit_xid;
+
+        c.client->expire_map(result, request);
+        if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
+            throw Error("RPC failed");
+        }
+    }
+
 } // namespace

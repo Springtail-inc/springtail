@@ -27,6 +27,7 @@ namespace springtail {
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
+         * Map from column ID/column position to column metadata.
          */
         std::map<uint32_t, SchemaColumn> get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn);
 
@@ -91,7 +92,7 @@ namespace springtail {
 
             /**
              * Retrieve the schema for an extent written at a specific XID.
-             * 
+             *
              * @param extent_xid The XID of the extent being processed.
              */
             std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t extent_xid);
@@ -190,6 +191,9 @@ namespace springtail {
 
         /** A cache of SchemaInfo objects. */
         LruObjectCache<uint64_t, SchemaInfo> _cache;
+
+        /** Helper to convert schema column to map */
+        std::map<uint32_t, SchemaColumn> _get_columns_for_system_tables(const std::vector<SchemaColumn> &columns);
     };
 
 }

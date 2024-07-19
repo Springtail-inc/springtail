@@ -15,10 +15,10 @@ namespace springtail {
     /**
      * @brief Object pool factory for thrift cache client objects
      */
-    class ThriftObjectFactory : public ObjectPoolFactory<thrift::write_cache::ThriftWriteCacheClient>
+    class WriteCacheThriftObjectFactory : public ObjectPoolFactory<thrift::write_cache::ThriftWriteCacheClient>
     {
     public:
-        ThriftObjectFactory(const std::string &server, int port)
+        WriteCacheThriftObjectFactory(const std::string &server, int port)
             : _server(server), _port(port)
         {}
 

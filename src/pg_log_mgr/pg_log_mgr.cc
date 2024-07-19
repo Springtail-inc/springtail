@@ -58,8 +58,10 @@ namespace springtail {
 
         // if xact log is behind pg log then we need to catchup before starting to stream
         // find last xact from xact_list, and start from there (file + offset)
-        PgTransactionPtr last_xact = xact_list.back();
-        _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
+        if (!xact_list.empty()) {
+            PgTransactionPtr last_xact = xact_list.back();
+            _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
+        }
 
         // XXX notify GC of startup??? notify an external coordinator?
 
@@ -71,13 +73,13 @@ namespace springtail {
     PgLogMgr::start_streaming(uint64_t lsn)
     {
         _pg_conn.connect();
-        SPDLOG_DEBUG("Connecting to postgres server: {}\n", _host);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);
 
         // create slot if need be
         bool create_slot = !_pg_conn.check_slot_exists();
 
         if (create_slot) {
-            SPDLOG_DEBUG("Creating replication slot: {}\n", _slot_name);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Creating replication slot: {}\n", _slot_name);
             _pg_conn.create_replication_slot(false,  // export
                                              false); // temporary
         }
@@ -85,13 +87,13 @@ namespace springtail {
         // get the protocol version
         _proto_version = _pg_conn.get_protocol_version();
 
+        // start steaming
+        _pg_conn.start_streaming(lsn);
+
         // create the worker threads
         _writer_thread = std::thread(&PgLogMgr::_log_writer_thread, this);
         _reader_thread = std::thread(&PgLogMgr::_log_reader_thread, this);
         _xact_thread = std::thread(&PgLogMgr::_xact_handler_thread, this);
-
-        // start steaming
-        _pg_conn.start_streaming(lsn);
     }
 
     void
@@ -112,7 +114,7 @@ namespace springtail {
         while (!_shutdown) {
             _pg_conn.read_data(data);
 
-            SPDLOG_DEBUG("Recevied data: length={}, msg_length={}, msg_offset={}\n",
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}\n",
                          data.length, data.msg_length, data.msg_offset);
 
             if (data.length == 0) {

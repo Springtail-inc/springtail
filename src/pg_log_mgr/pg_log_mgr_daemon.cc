@@ -4,6 +4,16 @@
 #include <common/common.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 
+namespace {
+    std::shared_ptr<springtail::PgLogMgr> log_mgr;
+
+    void
+    handle_sigint(int signal)
+    {
+        log_mgr->shutdown();
+    }
+}
+
 int main(int argc, char *argv[])
 {
     std::string host;
@@ -31,27 +41,37 @@ int main(int argc, char *argv[])
         ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created")
         ("repl_path,r", boost::program_options::value<std::filesystem::path>(&repl_log_path)->default_value(std::filesystem::path("./repl_logs")), "Replication log file path")
         ("xact_path,x", boost::program_options::value<std::filesystem::path>(&xact_log_path)->default_value(std::filesystem::path("./xact_logs")), "Transaction log file path")
+        ("daemonize", "Start the server as a daemon")
     ;
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
     }
+    boost::program_options::notify(vm);
+
+    // daemonize the process
+    if (vm.count("daemonize")) {
+        springtail::common::daemonize("/var/springtail/pg_log_mgr.pid");
+    }
 
     springtail::springtail_init();
 
-    springtail::PgLogMgr log_mgr(repl_log_path, xact_log_path, host,
-                                 db_name, user_name, password, pub_name,
-                                 slot_name, port);
+    log_mgr = std::make_shared<springtail::PgLogMgr>(repl_log_path, xact_log_path, host,
+                                                     db_name, user_name, password, pub_name,
+                                                     slot_name, port);
 
-    log_mgr.start_streaming();
+    // register the SIGINT handler
+    std::signal(SIGINT, handle_sigint);
 
-    log_mgr.join();
+    // log_mgr->start_streaming();
+    log_mgr->startup();
+
+    log_mgr->join();
 
     return 0;
 }

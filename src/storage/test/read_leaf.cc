@@ -14,9 +14,9 @@ main(int argc,
     
     // construct a schema for testing
     std::vector<SchemaColumn> columns({
-            { "table_id", 0, SchemaType::UINT64, false },
-            { "name", 1, SchemaType::TEXT, false },
-            { "offset", 2, SchemaType::UINT64, false }
+            { "table_id", 0, SchemaType::UINT64, 0, false },
+            { "name", 1, SchemaType::TEXT, 0, false },
+            { "offset", 2, SchemaType::UINT64, 0, false }
         });
     auto schema = std::make_shared<ExtentSchema>(columns);
     auto field = schema->get_field("name");

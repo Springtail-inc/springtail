@@ -1,14 +1,20 @@
 #pragma once
 
+#include <unistd.h>
 #include <sys/time.h>
 
+#include <cstdio>
+#include <csignal>
 #include <string>
 #include <vector>
 
 #include <common/logging.hh>
+#include <common/properties.hh>
+#include <common/exception.hh>
 
 namespace springtail {
-    void springtail_init(uint32_t logging_mask = LOG_ALL);
+    void springtail_init(uint32_t logging_mask = LOG_ALL,
+                         const std::string &properties = Properties::SPRINGTAIL_PROPERTIES_FILE);
 
     namespace common {
         /**
@@ -48,5 +54,12 @@ namespace springtail {
                 outvec.push_back(std::move(token));
             }
         }
+
+        /**
+         * Turns the current process into a background daemon, storing it's process ID into the
+         * provided file.
+         * @param pid_filename The path of the file in which to store the PID.
+         */
+        void daemonize(const std::filesystem::path &pid_filename);
     }
 }

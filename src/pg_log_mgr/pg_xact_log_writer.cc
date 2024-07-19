@@ -1,6 +1,9 @@
-#include <unistd.h>
-#include <stdio.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <chrono>
 #include <vector>
 
@@ -28,7 +31,7 @@ namespace springtail {
             throw Error("Error opening file for PgLogFile");
         }
 
-        SPDLOG_DEBUG("Opened xact log file: {}\n", file.c_str());
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Opened xact log file: {}\n", file.c_str());
 
         _fsync_thread = std::thread(&PgXactLogWriter::_fsync_worker, this);
     }

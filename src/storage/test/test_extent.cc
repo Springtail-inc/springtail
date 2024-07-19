@@ -17,10 +17,10 @@ namespace {
 
             // construct a schema for testing that includes inline data, variable data, bit-data and nullable fields
             std::vector<SchemaColumn> columns({
-                    { "variable", 0, SchemaType::TEXT, false },
-                    { "fixed", 1, SchemaType::UINT64, false },
-                    { "bit", 2, SchemaType::BOOLEAN, false },
-                    { "nullable", 3, SchemaType::INT32, true }
+                    { "variable", 0, SchemaType::TEXT, 0, false },
+                    { "fixed", 1, SchemaType::UINT64, 0, false },
+                    { "bit", 2, SchemaType::BOOLEAN, 0, false },
+                    { "nullable", 3, SchemaType::INT32, 0, true }
                 });
             _schema = std::make_shared<ExtentSchema>(columns);
 

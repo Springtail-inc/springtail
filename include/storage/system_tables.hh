@@ -5,6 +5,12 @@
 namespace springtail::sys_tbl {
 
     /**
+     * The maximum ID of a system table.  Currently set to 100, but could be higher based on
+     * Postgres behavior.
+     */
+    constexpr uint32_t MAX_SYS_TBL_ID = 100;
+
+    /**
      * Helper functions and constants for the table_names table.
      */
     class TableNames {
@@ -192,9 +198,10 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t EXISTS = 4;
             static constexpr uint32_t NAME = 5;
             static constexpr uint32_t TYPE = 6;
-            static constexpr uint32_t NULLABLE = 7;
-            static constexpr uint32_t DEFAULT = 8;
-            static constexpr uint32_t UPDATE_TYPE = 9;
+            static constexpr uint32_t PG_TYPE = 7;
+            static constexpr uint32_t NULLABLE = 8;
+            static constexpr uint32_t DEFAULT = 9;
+            static constexpr uint32_t UPDATE_TYPE = 10;
 
             static const std::vector<SchemaColumn> SCHEMA;
 
@@ -206,11 +213,12 @@ namespace springtail::sys_tbl {
                   bool exists,
                   const std::string &name,
                   uint8_t type,
+                  int32_t pg_type,
                   bool nullable,
                   const std::optional<std::string> &default_value,
                   uint8_t update_type)
             {
-                auto fields = std::make_shared<FieldArray>(10);
+                auto fields = std::make_shared<FieldArray>(11);
 
                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
@@ -219,6 +227,7 @@ namespace springtail::sys_tbl {
                 fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
                 fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
                 fields->at(TYPE) = std::make_shared<ConstTypeField<uint8_t>>(type);
+                fields->at(PG_TYPE) = std::make_shared<ConstTypeField<int32_t>>(pg_type);
                 fields->at(NULLABLE) = std::make_shared<ConstTypeField<bool>>(nullable);
                 if (default_value) {
                     fields->at(DEFAULT) = std::make_shared<ConstTypeField<std::string>>(*default_value);
@@ -253,4 +262,47 @@ namespace springtail::sys_tbl {
         };
     };
 
+    /**
+     * Helper functions and constants for the table_stats table.
+     */
+    class TableStats {
+    public:
+        static constexpr uint32_t ID = 5;
+
+        struct Data {
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t XID = 1;
+            static constexpr uint32_t ROW_COUNT = 2;
+
+            static const std::vector<SchemaColumn> SCHEMA;
+
+            static TuplePtr
+            tuple(uint64_t table_id,
+                  uint64_t xid,
+                  uint64_t row_count)
+            {
+                auto fields = std::make_shared<FieldArray>(4);
+                fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+                fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                fields->at(ROW_COUNT) = std::make_shared<ConstTypeField<uint64_t>>(row_count);
+                return std::make_shared<FieldTuple>(fields, nullptr);
+            }
+        };
+
+        struct Primary {
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t XID = 1;
+
+            static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
+
+            static TuplePtr
+            key_tuple(uint64_t table_id, uint64_t xid) {
+                auto key_fields = std::make_shared<FieldArray>(2);
+                key_fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+                key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                return std::make_shared<FieldTuple>(key_fields, nullptr);
+            }
+        };
+    };
 }

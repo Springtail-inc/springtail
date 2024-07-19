@@ -79,15 +79,16 @@ namespace springtail::gc {
 
         // pull the dependencies from redis
         auto &&values = _oid_set.get_by_score(_last_requested_xid + 1);
+        if (!values.empty()) {
+            // update the dependency mappings
+            for (auto const &value : values) {
+                _table_deps[value.oid].insert(value.xid);
+                _xid_map[value.xid].insert(value.oid);
+            }
 
-        // update the dependency mappings
-        for (auto const &value : values) {
-            _table_deps[value.oid].insert(value.xid);
-            _xid_map[value.xid].insert(value.oid);
+            // save that we pulled data through the last seen XID
+            _last_requested_xid = values.back().xid;
         }
-
-        // save that we pulled data through the last seen XID
-        _last_requested_xid = values.back().xid;
     }
 
     void
@@ -168,6 +169,8 @@ namespace springtail::gc {
                 _state = std::make_shared<State>(entry);
             }
 
+            SPDLOG_INFO("Process XID: {}", _state->entry->xid);
+
             // once we have an XID, scan the individual mutations from the log
             uint64_t begin_offset = _state->entry->begin_offset;
             uint64_t commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
@@ -179,6 +182,8 @@ namespace springtail::gc {
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}", _state->entry->xid, _state->entry->begin_path, begin_offset);
+
                 _reader.set_file(_state->entry->begin_path, begin_offset, commit_offset);
 
                 bool end_of_stream = false;
@@ -196,6 +201,8 @@ namespace springtail::gc {
                         end_of_stream = _reader.end_of_stream();
                         continue;
                     }
+
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Got msg {}", _state->entry->xid, static_cast<uint8_t>(msg->msg_type));
 
                     // handle the message
                     switch(msg->msg_type) {
@@ -304,6 +311,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -323,6 +332,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -345,6 +356,8 @@ namespace springtail::gc {
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
+
+                            // XXX pass to the workers to load the message into the write cache to be applied by the FDW when rolling the XID forward
                         }
                         break;
                     }
@@ -364,6 +377,7 @@ namespace springtail::gc {
                 // prepare to scan the next file
                 if (_state->entry->begin_path == _state->entry->commit_path) {
                     // XXX can this ever be hit?  Would it be an error to not have seen a commit?
+                    SPDLOG_WARN("No more files to scan, but didn't see commit");
                     done = true;
                 } else {
                     // XXX how to get the next file?
@@ -382,14 +396,20 @@ namespace springtail::gc {
 
             // if the XID is fully processed, perform cleanup
             if (done) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Waiting for completion", _state->entry->xid);
+
                 // wait for the parsers to complete the work for this XID
                 _state->mutation_count->wait();
 
                 // XXX notify the ExtentMapper that the XID has been fully processed
+                // write_cache->set_lookup();
 
                 // clear the dependencies and commit the entry in the Redis queue
                 _backlog->clear_dep(_state->entry->xid);
                 _pg_queue.commit(_worker_id);
+
+                _gc_queue.push(XidReady(_state->entry->xid));
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", _state->entry->xid);
             }
         }
     }
@@ -503,6 +523,8 @@ namespace springtail::gc {
             // process the work item
             PgMsgPtr msg = entry->msg;
 
+            SPDLOG_INFO("Parser got work item for: {}", entry->xid);
+
             // get the table information for the mutation
             auto table = TableMgr::get_instance()->get_table(entry->table_id, entry->xid, entry->lsn);
 
@@ -532,6 +554,7 @@ namespace springtail::gc {
                     data.op = WriteCacheClient::RowOp::INSERT;
 
                     _write_cache->add_rows(table->id(), extent_id, { data });
+                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::DELETE: {
@@ -555,46 +578,62 @@ namespace springtail::gc {
                     WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
-                    data.data = extent->serialize();
+                    data.pkey = extent->serialize();
                     data.op = WriteCacheClient::RowOp::DELETE;
 
                     _write_cache->add_rows(table->id(), extent_id, { data });
+                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::UPDATE: {
                     auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
 
-                    // tuple type should be 'K' for primary key
-                    assert(update_msg.old_type == 'K');
+                    // tuple type should be 'K' for primary key, 'O' for un-keyed tables, or null
+                    // when no changes to the primary key
+                    assert(update_msg.old_type == 'K' || update_msg.old_type == 'O' || update_msg.old_type == 0);
+                    assert(update_msg.new_type == 'N');
 
-                    // generate extents for the delete data and insert data
-                    auto schema = table->extent_schema();
-                    auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                    if (update_msg.old_type == 0) {
+                        auto schema = table->extent_schema();
 
-                    auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
-                    auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple, pkey_schema);
+                        auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
+                        auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
 
-                    auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
+                        // extract the primary key from the tuple
+                        auto pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
 
-                    // extract the primary key from the new data tuple
-                    auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
+                        // find the affected extent
+                        uint64_t extent_id = table->primary_lookup(pkey_tuple);
 
-                    // look up the extent_id for the old tuple
-                    uint64_t old_extent_id = table->primary_lookup(old_pkey_tuple);
-
-                    // check if they have the same primary key
-                    if (old_pkey_tuple == new_pkey_tuple) {
                         // send the update to the write cache
                         WriteCacheClient::RowData data;
                         data.xid = entry->xid;
                         data.xid_seq = entry->lsn;
-                        data.pkey = old_extent->serialize();
                         data.data = new_extent->serialize();
                         data.op = WriteCacheClient::RowOp::UPDATE;
 
-                        _write_cache->add_rows(table->id(), old_extent_id, { data });
+                        _write_cache->add_rows(table->id(), extent_id, { data });
+                        _write_cache->set_lookup(table->id(), entry->xid, extent_id);
                     } else {
+                        // generate extents for the delete data and insert data
+                        auto schema = table->extent_schema();
+                        auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+
+                        auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
+                        auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple, pkey_schema);
+
+                        auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
+                        auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
+
+                        // extract the primary key from the new data tuple
+                        auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
+
+                        // look up the extent_id for the old tuple
+                        uint64_t old_extent_id = table->primary_lookup(old_pkey_tuple);
+
+                        // they shouldn't have the same primary key in this case
+                        assert(!(old_pkey_tuple == new_pkey_tuple));
+
                         // lookup the extent for the new key
                         uint64_t new_extent_id = table->primary_lookup(new_pkey_tuple);
 
@@ -613,6 +652,8 @@ namespace springtail::gc {
 
                         _write_cache->add_rows(table->id(), old_extent_id, { delete_data });
                         _write_cache->add_rows(table->id(), new_extent_id, { insert_data });
+                        _write_cache->set_lookup(table->id(), entry->xid, old_extent_id);
+                        _write_cache->set_lookup(table->id(), entry->xid, new_extent_id);
                     }
                     break;
                 }
@@ -620,6 +661,16 @@ namespace springtail::gc {
                     // record the truncate into the write cache look-aside
                     WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
                                                           WriteCacheClient::TableOp::TRUNCATE };
+                    _write_cache->add_table_change(table->id(), change);
+                    break;
+                }
+                case PgMsgEnum::CREATE_TABLE:
+                case PgMsgEnum::ALTER_TABLE:
+                case PgMsgEnum::DROP_TABLE: {
+                    // XXX need to record the details about the change...
+                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                                                          WriteCacheClient::TableOp::SCHEMA_CHANGE };
+
                     _write_cache->add_table_change(table->id(), change);
                     break;
                 }
@@ -635,6 +686,9 @@ namespace springtail::gc {
                 //       the lookup until we are making the actual mutation, would be better for a
                 //       reader to scan the mutations to see if they impact the query
                 uint64_t extent_id = constant::UNKNOWN_EXTENT;
+
+                // XXX currently not supported
+                assert(0);
 
                 if (msg->msg_type == PgMsgEnum::INSERT) {
                     // get the message details

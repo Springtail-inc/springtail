@@ -21,7 +21,7 @@ namespace springtail {
 
         return _instance;
     }
-    
+
     void
     SchemaMgr::shutdown()
     {
@@ -82,7 +82,7 @@ namespace springtail {
             // find the correct entry based on the requested LSN
             auto &&j = std::lower_bound(i->second.begin(), i->second.end(), lsn,
                                         [](const SchemaColumn &column, uint64_t lsn) {
-                                            return (column.lsn < lsn);
+                                            return (column.lsn > lsn);
                                         });
             auto &column = *j;
 
@@ -132,6 +132,7 @@ namespace springtail {
             column.name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
             column.position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row);
             column.type = static_cast<SchemaType>(fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row));
+            column.pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row);
             column.exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
             column.nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
@@ -182,7 +183,7 @@ namespace springtail {
                 // update the columns with the primary key positions
                 // XXX not handling changes in the primary index
                 for (auto &column : _column_map[column_id][xid]) {
-                    column.pkey_position = _primary_index.size();
+                    column.pkey_position = _primary_index[xid].size();
                 }
 
                 // note the primary key
@@ -286,7 +287,8 @@ namespace springtail {
     SchemaMgr::SchemaMgr()
         : _cache(1024*1024)
     {
-        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, false);
+        // note: don't need a valid sql_type for the internal nodes since they aren't exposed
+        SchemaColumn child(constant::BTREE_CHILD_FIELD, 0, SchemaType::UINT64, 0, false);
 
         // TableNames
         _system_cache[{ sys_tbl::TableNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableNames::Data::SCHEMA);
@@ -299,14 +301,44 @@ namespace springtail {
 
         // Schemas
         _system_cache[{ sys_tbl::Schemas::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::Schemas::Data::SCHEMA);
+
+        // TableStats
+        _system_cache[{ sys_tbl::TableStats::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableStats::Data::SCHEMA);
+    }
+
+    std::map<uint32_t, SchemaColumn>
+    SchemaMgr::_get_columns_for_system_tables(const std::vector<SchemaColumn> &columns)
+    {
+        std::map<uint32_t, SchemaColumn> column_map;
+        for (auto &&column : columns) {
+            column_map.insert({column.position, column});
+        }
+        return column_map;
     }
 
     std::map<uint32_t, SchemaColumn>
     SchemaMgr::get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn)
     {
-        // XXX can't call this for system tables
-        assert(_system_cache.find({ table_id, constant::INDEX_DATA, true }) == _system_cache.end());
+        // handle system tables
+        if (table_id <= sys_tbl::MAX_SYS_TBL_ID) {
+            switch (table_id) {
+                case sys_tbl::TableNames::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableNames::Data::SCHEMA);
+                case sys_tbl::TableRoots::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableRoots::Data::SCHEMA);
+                case sys_tbl::Indexes::ID:
+                    return _get_columns_for_system_tables(sys_tbl::Indexes::Data::SCHEMA);
+                case sys_tbl::Schemas::ID:
+                    return _get_columns_for_system_tables(sys_tbl::Schemas::Data::SCHEMA);
+                case sys_tbl::TableStats::ID:
+                    return _get_columns_for_system_tables(sys_tbl::TableStats::Data::SCHEMA);
+                default:
+                    assert(false);
+                    break;
+            }
+        }
 
+        // non-system tables
         std::shared_ptr<SchemaInfo> info = _cache.get(table_id);
         if (info == nullptr) {
             info = std::make_shared<SchemaInfo>(table_id);

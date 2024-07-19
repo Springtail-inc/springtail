@@ -58,7 +58,7 @@ namespace springtail {
         // First argument is a factory object that constructs a thrift clients
         // using the host and port from above
         _thrift_client_pool = std::make_shared<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>>(
-            std::make_shared<ThriftObjectFactory>(server, port),
+            std::make_shared<XidMgrThriftObjectFactory>(server, port),
             max_connections/2,
             max_connections
         );

@@ -395,9 +395,9 @@ namespace springtail {
         // verify data hash; compute hash over response compare to hash in header
         uint64_t computed_hash = _compute_hash(response->data);
         if (computed_hash != hash) {
-	    SPDLOG_ERROR("Checksum hash computation mismatch");
-	    request->complete(response, IOStatus::ERR_CKSUM);
-	    return;
+            SPDLOG_ERROR("Checksum hash computation mismatch");
+            request->complete(response, IOStatus::ERR_CKSUM);
+            return;
         }
 
         SPDLOG_DEBUG_MODULE(LOG_STORAGE, "Read {} vectors", response->data.size());

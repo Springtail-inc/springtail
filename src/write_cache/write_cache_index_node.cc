@@ -219,7 +219,7 @@ namespace springtail {
         auto entry_itr = entry->set.lower_bound(rkey);
 
         // iterate through rows to find those within the xid range
-        SPDLOG_DEBUG("Row get: TID:{} EID:{} XIDs:{}:{}\n", tid, eid, start_xid+1, end_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Row get: TID:{} EID:{} XIDs:{}:{}\n", tid, eid, start_xid+1, end_xid);
         int added = 0;
         uint64_t offset = cursor;
         while (entry_itr != entry->set.end() && (*entry_itr)->eid == eid &&

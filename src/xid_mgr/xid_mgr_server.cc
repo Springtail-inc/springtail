@@ -1,3 +1,6 @@
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <iostream>
 #include <mutex>
 #include <shared_mutex>
@@ -26,6 +29,7 @@ namespace springtail {
     XidMgrServer* XidMgrServer::_instance {nullptr};
 
     std::once_flag XidMgrServer::_init_flag;
+    std::once_flag XidMgrServer::_shutdown_flag;
 
     XidMgrServer *
     XidMgrServer::_init()
@@ -41,30 +45,35 @@ namespace springtail {
         nlohmann::json server_json;
 
         if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
-            throw Error("Write cache server settings not found");
+            throw Error("Xid Manager configuration missing server section");
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
 
         Json::get_to<int>(server_json, "port", _port, 55051);
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
 
         std::string base_path;
-        Json::get_to<std::string>(json, "base_path", base_path, "/xid_mgr");
+        Json::get_to<std::string>(server_json, "base_path", base_path, "/xid_mgr");
         _base_path = std::filesystem::path(base_path);
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
+
         if (!std::filesystem::exists(_base_path)) {
             std::filesystem::create_directories(_base_path);
         }
 
-        _fd = open((_base_path / std::filesystem::path(XID_MGR_COMMIT_FILE)).c_str(), O_RDWR | O_CREAT, 0644);
+        _fd = ::open((_base_path / std::filesystem::path(XID_MGR_COMMIT_FILE)).c_str(), O_RDWR | O_CREAT, 0644);
         if (_fd < 0) {
             throw Error("Failed to open xid_mgr file");
         }
     }
 
     /**
-     * Startup thrift threaded server
+     * Startup thrift threaded server; called by the static startup().
      */
     void
-    XidMgrServer::startup()
+    XidMgrServer::_startup()
     {
         // create a thread manager with right number of worker threads
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
@@ -73,7 +82,7 @@ namespace springtail {
         threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
         threadManager->start();
 
-        apache::thrift::server::TThreadPoolServer server(
+        _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
@@ -81,15 +90,14 @@ namespace springtail {
             threadManager
         );
 
-        server.serve();
+        _server->serve();
     }
 
     void
     XidMgrServer::_shutdown()
     {
         if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
+            _instance->_server->stop();
         }
     }
 
@@ -103,6 +111,9 @@ namespace springtail {
         _committed_xid = xid;
         lseek(_fd, 0, SEEK_SET);
         write(_fd, &xid, sizeof(xid));
+        fsync(_fd);
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: write committed xid: {}", xid);
     }
 
     uint64_t
@@ -114,6 +125,7 @@ namespace springtail {
         if (res == 0) {
             _committed_xid = 0;
         }
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: read committed xid: {}", _committed_xid);
         return _committed_xid;
     }
 
@@ -132,6 +144,8 @@ namespace springtail {
             lock.unlock();
             return _read_committed_xid();
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: get committed xid: {}", _committed_xid);
         return _committed_xid;
     }
 

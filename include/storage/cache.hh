@@ -194,7 +194,7 @@ namespace springtail {
             /**
              * Retrieve an extent from the cache based on a file and extent ID.  Must be released
              * back to the cache after use with put().  May block due to IO.
-             * 
+             *
              * @param file The file to read the extent from.
              * @param extent_id The extent_id (offset) of the extent.
              * @return A pointer to the extent.
@@ -205,7 +205,7 @@ namespace springtail {
              * Retrieve an extent from the cache based on a cache ID.  Cache IDs are generated when
              * an extent is extract()'d from the read cache for use in the write cache.  Must be
              * released back to the cache after use with put().  May block due to IO.
-             * 
+             *
              * @param cache_id The unique cache ID of the extent.
              * @param mark_dirty Mark the extent as DIRTY while retrieving.
              * @return A pointer to the extent.
@@ -452,11 +452,15 @@ namespace springtail {
 
                 // copy causes the use count to be incremented
                 SafeExtent(const SafeExtent &other) {
-                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    if (other._extent != nullptr) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
                     _extent = other._extent;
                 }
                 SafeExtent &operator=(const SafeExtent &other) {
-                    StorageCache::get_instance()->_data_cache->use(other._extent);
+                    if (other._extent != nullptr) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
                     _extent = other._extent;
                     return *this;
                 }
@@ -664,6 +668,18 @@ namespace springtail {
             Iterator lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
+             * Returns the first row of the page with columns > the matching columns of the provided tuple.
+             * @param tuple A tuple holding data that matches the sort columns of the extent.
+             */
+            Iterator upper_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
+             * Returns the first row of the page with columns <= the matching columns of the provided tuple.
+             * @param tuple A tuple holding data that matches the sort columns of the extent.
+             */
+            Iterator inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema);
+
+            /**
              * Returns an iterator to the row at the provided index within the page.
              * @param index The index within the page to retrieve the row.
              */
@@ -721,8 +737,9 @@ namespace springtail {
 
             /**
              * Upserts the provided tuple to the Page using the provided ExtentSchema.
+             * @return True if the upsert() resulted in an insert()
              */
-            void upsert(TuplePtr tuple, ExtentSchemaPtr schema);
+            bool upsert(TuplePtr tuple, ExtentSchemaPtr schema);
 
             /**
              * Updates the row in the Page with a matching key as the provided tuple to fully match
@@ -799,7 +816,7 @@ namespace springtail {
          *
          * Pages are valid over a given XID range.  When requesting a page, it should be requested
          * based on a given extent_id using a given access XID and target XID.
-         * 
+         *
          * The access XID specifies the XID at which the Page will be starting.  This is used to
          * check for any known changes to the extent ID that occurred up to the given access XID.
          *

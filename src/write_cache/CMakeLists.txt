@@ -1,3 +1,4 @@
+find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 # source files
@@ -21,8 +22,10 @@ target_link_libraries(springtail_write_cache
 add_executable(write_cache_daemon write_cache_daemon.cc)
 target_include_directories(write_cache_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(write_cache_daemon
-    PUBLIC springtail_write_cache
+  PUBLIC springtail_write_cache
+  PRIVATE Boost::program_options
 )
+add_dsymutil_command(write_cache_daemon)
 
 ## tests
 add_executable(test_threaded test/write_cache_index_test.cc)
@@ -31,6 +34,7 @@ target_link_libraries(test_threaded
     PUBLIC springtail_write_cache
     PRIVATE GTest::gtest_main
 )
+add_dsymutil_command(test_threaded)
 
 add_executable(test_extent_mapper test/test_extent_mapper.cc)
 target_include_directories(test_extent_mapper PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -38,6 +42,7 @@ target_link_libraries(test_extent_mapper
   PUBLIC springtail_write_cache
   PRIVATE GTest::gtest_main
 )
+add_dsymutil_command(test_extent_mapper)
 
 gtest_discover_tests(test_threaded)
 gtest_discover_tests(test_extent_mapper)

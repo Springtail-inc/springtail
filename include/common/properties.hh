@@ -23,9 +23,14 @@ namespace springtail {
         static inline constexpr char XID_MGR_CONFIG[] = "xid_mgr";
         /** Storage config section */
         static inline constexpr char STORAGE_CONFIG[] = "storage";
+        /** Logging config section */
+        static inline constexpr char LOGGING_CONFIG[] = "logging";
 
         /** Default properties file, defined by make -D option, or macro above */
         static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;
+
+        /** Environment variable name for property overrides */
+        static inline constexpr char SPRINGTAIL_ENV_VARIABLE[] = "SPRINGTAIL_PROPERTIES";
 
         /**
          * @brief Get JSON object from a key

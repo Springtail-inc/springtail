@@ -20,18 +20,22 @@ namespace springtail::gc {
         while (!_shutdown) {
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after 60s
-            uint64_t xid = _redis.pop(_worker_id, 60)->xid();
-            if (xid == constant::LATEST_XID) {
-                // timed out, try again
-                continue;
+            auto result = _redis.pop(_worker_id, 60);
+            if (result == nullptr) {
+                continue; // got a timeout, try again
             }
+            uint64_t xid = result->xid();
+
+            SPDLOG_INFO("Commit XID: {}", xid);
 
             // find every table associated with this XID
             uint64_t table_cursor = 0;
             bool tid_done = false;
             while (!tid_done) {
-                // query the write cache for the tables modified in this XID
-                auto table_list = _write_cache->list_tables(xid, xid, 100, table_cursor);
+                // query the write cache for the tables modified through this XID
+                auto table_list = _write_cache->list_tables(_committed_xid, xid, 100, table_cursor);
+
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
                 // check if we are done processing this XID
                 if (table_list.empty()) {
@@ -42,7 +46,7 @@ namespace springtail::gc {
                 uint64_t extent_cursor = 0;
                 for (auto tid : table_list) {
                     // construct the mutable table object
-                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid);
+                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid, true);
 
                     boost::unique_lock lock(_mutex);
                     _table_map[tid] = table;
@@ -51,7 +55,9 @@ namespace springtail::gc {
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(tid, xid, xid, 100, extent_cursor);
+                        auto extent_list = _write_cache->list_extents(tid, _committed_xid, xid, 100, extent_cursor);
+
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
                         // check if we are done processing this table
                         if (extent_list.empty()) {
@@ -74,6 +80,8 @@ namespace springtail::gc {
             }
 
             // wait for tables to complete their processing
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for {} tables to complete", _tid_count.size());
+
             // XXX ideally we could start working on the next XID while these finalize() operations
             //     are being completed.
             boost::unique_lock lock(_mutex);
@@ -81,10 +89,12 @@ namespace springtail::gc {
                 // check if any tables have completed processing
                 std::vector<uint64_t> completed;
                 for (auto &count : _tid_count) {
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Table {} has count {}", count.first, count.second);
                     if (count.second == 0) {
                         // issue a finalize request to a worker
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue finalize for the table {}@{}", count.first, xid);
                         auto table = _table_map[count.first];
-                        auto entry = std::make_shared<WorkerEntry>(table, xid, true);
+                        auto entry = std::make_shared<WorkerEntry>(table, xid);
                         _worker_queue.push(entry);
                     } else if (count.second == -1) {
                         // mark the table to be cleared
@@ -100,14 +110,28 @@ namespace springtail::gc {
 
                 // if there are still outstanding tables, wait for one or more to complete
                 if (!_tid_count.empty()) {
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Wait for outstanding tables");
                     _cv.wait(lock);
                 }
             }
             lock.unlock();
 
+            SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
+
+            // XXX This is where we need to implement the schema changes in the FDW.  We need to
+            //     perform the following actions:
+            //     1. pre-commit the XID -- this will block the FDW operation for new queries
+            //     2. connect to each FDW and perform the schema+metadata changes for this XID
+            //     3. commit the XID -- mark the XID as ready in the XID mgr which unblocks the FDWs
+
+            // note: if we want to implement roll-forward on query, then we could apply the schema
+            //       changes after the data changes are written to the write cache
+
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
+
+            SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);
 
             // mark the XID as complete in the redis queue
             _redis.commit(_worker_id);
@@ -160,6 +184,8 @@ namespace springtail::gc {
     Committer::_process_finalize(MutableTablePtr table,
                                  uint64_t xid)
     {
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Finalize table {}@{}", table->id(), xid);
+
         // finalize the table
         auto roots = table->finalize();
 
@@ -172,6 +198,8 @@ namespace springtail::gc {
                              uint64_t extent_id,
                              uint64_t xid)
     {
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows for {}:{}@{}", table->id(), extent_id, xid);
+
         // save the schema
         auto schema = table->schema();
 
@@ -179,11 +207,30 @@ namespace springtail::gc {
         bool done = false;
         while (!done) {
             // request rows from the write cache for the provided extent ID
-            auto rows = _write_cache->fetch_rows(table->id(), extent_id, xid, xid, 100, cursor);
+            auto rows = _write_cache->fetch_rows(table->id(), extent_id, _committed_xid, xid, 100, cursor);
             if (rows.empty()) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}:{}@{}", table->id(), extent_id, xid);
                 done = true;
                 break;
             }
+
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
+
+            // determine if the provided extent_id needs to be forward mapped
+            uint64_t mapped_eid = extent_id;
+            auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
+            if (extent_ids.empty()) {
+                // no mapping, use provided extent_id
+            } else if (extent_ids.size() == 1) {
+                // single extent output, use it
+                mapped_eid = extent_ids.front();
+            } else {
+                // XXX need to create a list of key -> extent_id to figure out which extent a given row
+                // should be applied to
+                assert(0);
+            }
+
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
 
             // apply the changes to the extent
             // XXX It would be more efficient to retrieve the page and apply all of the changes
@@ -197,28 +244,39 @@ namespace springtail::gc {
                 // XXX seems like we've got more copies here than strictly necessary... we could
                 //     instead construct a read-only extent via pointers into the existing data
                 //     object
-                ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
-                Extent extent(header);
-                extent.deserialize(row.data);
 
                 // pass that tuple into the appropriate table mutation
                 switch (row.op) {
                 case (WriteCacheClient::RowOp::INSERT):
                     {
+                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                        Extent extent(header);
+                        extent.deserialize(row.data);
+
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        table->insert(value, xid, extent_id);
+                        SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
+                        table->insert(value, xid, mapped_eid);
                         break;
                     }
                 case (WriteCacheClient::RowOp::UPDATE):
                     {
+                        ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                        Extent extent(header);
+                        extent.deserialize(row.data);
+
                         auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                        table->update(value, xid, extent_id);
+                        table->update(value, xid, mapped_eid);
                         break;
                     }
                 case (WriteCacheClient::RowOp::DELETE):
                     {
+                        auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                        ExtentHeader header(ExtentType(), xid, pkey_schema->row_size(), 0);
+                        Extent extent(header);
+
+                        extent.deserialize(row.pkey);
                         auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
-                        table->remove(key, xid, extent_id);
+                        table->remove(key, xid, mapped_eid);
                         break;
                     }
                 }

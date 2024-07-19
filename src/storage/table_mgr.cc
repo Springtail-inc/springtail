@@ -21,7 +21,7 @@ namespace springtail {
 
         return _instance;
     }
-    
+
     void
     TableMgr::shutdown()
     {
@@ -60,11 +60,14 @@ namespace springtail {
         // retrieve the roots of the table
         auto &&roots = _find_roots(table_id, xid);
 
+        // retrieve the table stats
+        auto &&stats = _find_stats(table_id, xid);
+
         // construct the table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
         return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
                                        schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
-                                       roots, schema);
+                                       roots, schema, stats);
     }
 
     std::vector<uint64_t>
@@ -78,23 +81,60 @@ namespace springtail {
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
 
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
-        auto it = roots_t->lower_bound(search_key);
-        if (it == roots_t->end() || !FieldTuple(roots_key_fields, *it).equal(*search_key)) {
-            // no roots?  try to find it in the roots file
-            roots.push_back(constant::UNKNOWN_EXTENT);
-        } else {
-            // retrieve the root extent ID of the primary
-            auto eid_f = roots_t->extent_schema()->get_field("extent_id");
-            roots.push_back(eid_f->get_uint64(*it));
+
+        auto it = roots_t->inverse_lower_bound(search_key);
+
+        // need to confirm that the table ID and index ID match, but the XID may not match
+        auto table_id_f = roots_t->extent_schema()->get_field("table_id");
+        auto index_id_f = roots_t->extent_schema()->get_field("index_id");
+        if (it == roots_t->end() ||
+            table_id_f->get_uint64(*it) != table_id ||
+            index_id_f->get_uint64(*it) != constant::INDEX_PRIMARY) {
+            // no roots?  try to find it in the roots file by returning empty roots
+            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}", table_id, xid);
+            return roots;
         }
 
+        // retrieve the root extent ID of the primary
+        auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+        roots.push_back(eid_f->get_uint64(*it));
+
         return roots;
+    }
+
+    TableStats
+    TableMgr::_find_stats(uint64_t table_id,
+                          uint64_t xid)
+    {
+        TableStats stats;
+
+        // get the root of the table's primary index
+        auto stats_t = _get_system_table(sys_tbl::TableStats::ID, xid);
+        auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
+
+        auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid);
+
+        auto it = stats_t->inverse_lower_bound(search_key);
+
+        // need to confirm that the table ID matches, but the XID may not match
+        auto table_id_f = stats_t->extent_schema()->get_field("table_id");
+        if (it == stats_t->end() || table_id_f->get_uint64(*it) != table_id) {
+            // no stats for this table?  seems like a potential error
+            SPDLOG_WARN("Couldn't find table_stats entry for {}@{}", table_id, xid);
+            return stats;
+        }
+
+        // retrieve the stats from the row
+        auto row_count_f = stats_t->extent_schema()->get_field("row_count");
+        stats.row_count = row_count_f->get_uint64(*it);
+        return stats;
     }
 
     MutableTablePtr
     TableMgr::get_mutable_table(uint64_t table_id,
                                 uint64_t access_xid,
-                                uint64_t target_xid)
+                                uint64_t target_xid,
+                                bool for_gc)
     {
         boost::shared_lock lock(_mutex);
 
@@ -107,13 +147,16 @@ namespace springtail {
         // retrieve the roots of the table
         auto &&roots = _find_roots(table_id, access_xid);
 
+        // retrieve the table stats
+        auto &&stats = _find_stats(table_id, access_xid);
+
         // construct the mutable table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, access_xid);
         return std::make_shared<MutableTable>(table_id, access_xid, target_xid, roots,
                                               _table_base / fmt::format("{}", table_id),
                                               schema->get_sort_keys(),
                                               std::vector<std::vector<std::string>>{},
-                                              schema);
+                                              schema, stats, for_gc);
     }
 
     void
@@ -123,6 +166,8 @@ namespace springtail {
     {
         // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
         uint64_t access_xid = xid - 1;
+
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
 
         // 1) add a table -> name mapping that starts the table at the given XID/LSN
         auto table_names_t = get_mutable_table(sys_tbl::TableNames::ID, access_xid, xid);
@@ -149,7 +194,8 @@ namespace springtail {
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
                                                        true, // exists
                                                        column.column_name,
-                                                       static_cast<uint8_t>(_convert_pg_type(column.udt_type)),
+                                                       column.type,
+                                                       column.pg_type, // pg type oid
                                                        column.is_nullable, column.default_value,
                                                        static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
@@ -169,11 +215,17 @@ namespace springtail {
             for (auto &&entry : primary_keys) {
                 fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
                 fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
-                
+
                 indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr), xid, constant::UNKNOWN_EXTENT);
             }
             indexes_t->finalize();
         }
+
+        // 4) create an entry with the table statistics -- currently just a row_count of zero
+        auto table_stats_t = get_mutable_table(sys_tbl::TableStats::ID, access_xid, xid);
+        tuple = sys_tbl::TableStats::Data::tuple(msg.oid, xid, 0);
+        table_stats_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
+        table_stats_t->finalize();
 
         // XXX 4) Secondary indexes??  unclear when to create them.
 
@@ -214,7 +266,8 @@ namespace springtail {
             std::map<uint32_t, SchemaColumn> new_columns;
             for (const auto &col : msg.columns) {
                 new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
-                                                         _convert_pg_type(col.udt_type),
+                                                         SchemaType(col.type),
+                                                         col.pg_type,
                                                          true, col.is_nullable,
                                                          col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
                                                          col.default_value);
@@ -227,7 +280,7 @@ namespace springtail {
             auto schemas_t = get_mutable_table(sys_tbl::Schemas::ID, access_xid, xid);
             auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, update.position, xid, lsn,
                                                        (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
-                                                       col.name, static_cast<uint8_t>(col.type),
+                                                       col.name, static_cast<uint8_t>(col.type), col.pg_type,
                                                        col.nullable, col.default_value, static_cast<uint8_t>(update.update_type));
             schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
 
@@ -269,6 +322,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // initialize the system tables using the look-aside root files
+        // XXX should change this to use the table_roots and table_stats
         std::vector<uint64_t> roots;
         std::vector<std::vector<std::string>> secondary_keys;
         ExtentSchemaPtr schema;
@@ -286,7 +340,8 @@ namespace springtail {
                                            sys_tbl::TableNames::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema);
+                                           schema,
+                                           TableStats());
         }
         case (sys_tbl::TableRoots::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, xid);
@@ -298,7 +353,8 @@ namespace springtail {
                                            sys_tbl::TableRoots::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema);
+                                           schema,
+                                           TableStats());
         }
         case (sys_tbl::Indexes::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, xid);
@@ -310,7 +366,8 @@ namespace springtail {
                                            sys_tbl::Indexes::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema);
+                                           schema,
+                                           TableStats());
         }
         case (sys_tbl::Schemas::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, xid);
@@ -322,7 +379,21 @@ namespace springtail {
                                            sys_tbl::Schemas::Primary::KEY,
                                            secondary_keys,
                                            roots,
-                                           schema);
+                                           schema,
+                                           TableStats());
+        }
+        case (sys_tbl::TableStats::ID): {
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID, xid);
+            table_path = _table_base / std::to_string(sys_tbl::TableStats::ID);
+
+            return std::make_shared<Table>(sys_tbl::TableStats::ID,
+                                           xid,
+                                           table_path,
+                                           sys_tbl::TableStats::Primary::KEY,
+                                           secondary_keys,
+                                           roots,
+                                           schema,
+                                           TableStats());
         }
         default:
             return nullptr;
@@ -341,13 +412,29 @@ namespace springtail {
             auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, idx, target_xid, roots[idx]);
             roots_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
 
-            SPDLOG_DEBUG("Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
         }
 
         // finalize the changes to disk
         roots_t->finalize();
     }
 
+    void
+    TableMgr::update_stats(uint64_t table_id,
+                           uint64_t access_xid,
+                           uint64_t target_xid,
+                           const TableStats &stats)
+    {
+        // modify the table_stats table
+        auto stats_t = get_mutable_table(sys_tbl::TableStats::ID, access_xid, target_xid);
+        auto tuple = sys_tbl::TableStats::Data::tuple(table_id, target_xid, stats.row_count);
+        stats_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
+
+        SPDLOG_DEBUG("Updated stats {}@{} - {}", table_id, target_xid, stats.row_count);
+
+        // finalize the changes to disk
+        stats_t->finalize();
+    }
 
     MutableTablePtr
     TableMgr::_get_mutable_system_table(uint64_t table_id,
@@ -359,6 +446,8 @@ namespace springtail {
         std::vector<std::vector<std::string>> secondary_keys;
         ExtentSchemaPtr schema;
         std::filesystem::path table_path;
+
+        // XXX note that the table stats are currently broken for system tables... need a way to bootstrap
 
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
@@ -373,7 +462,8 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::TableNames::Primary::KEY,
                                                   secondary_keys,
-                                                  schema);
+                                                  schema,
+                                                  TableStats());
         }
         case (sys_tbl::TableRoots::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, access_xid);
@@ -386,7 +476,8 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::TableRoots::Primary::KEY,
                                                   secondary_keys,
-                                                  schema);
+                                                  schema,
+                                                  TableStats());
         }
         case (sys_tbl::Indexes::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, access_xid);
@@ -399,7 +490,8 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::Indexes::Primary::KEY,
                                                   secondary_keys,
-                                                  schema);
+                                                  schema,
+                                                  TableStats());
         }
         case (sys_tbl::Schemas::ID): {
             schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, access_xid);
@@ -412,7 +504,22 @@ namespace springtail {
                                                   table_path,
                                                   sys_tbl::Schemas::Primary::KEY,
                                                   secondary_keys,
-                                                  schema);
+                                                  schema,
+                                                  TableStats());
+        }
+        case (sys_tbl::TableStats::ID): {
+            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID, access_xid);
+            table_path = _table_base / std::to_string(sys_tbl::TableStats::ID);
+
+            return std::make_shared<MutableTable>(sys_tbl::TableStats::ID,
+                                                  access_xid,
+                                                  target_xid,
+                                                  roots,
+                                                  table_path,
+                                                  sys_tbl::TableStats::Primary::KEY,
+                                                  secondary_keys,
+                                                  schema,
+                                                  TableStats());
         }
         default:
             return nullptr;
@@ -449,50 +556,8 @@ namespace springtail {
         auto page = table_names_t->read_page(extent_id);
         auto row = page->at(row_id);
 
-        std::string &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
-        std::string &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
-        return { old_namespace, old_name };
-    }
-
-    SchemaType
-    TableMgr::_convert_pg_type(const std::string &pg_type)
-    {
-        if (pg_type == "int4" || pg_type == "int" || pg_type == "serial4" || pg_type == "serial" ||
-            pg_type == "date") {
-            return SchemaType::INT32;
-        }
-
-        if (pg_type == "text" || pg_type == "varchar" || pg_type == "bpchar" || pg_type == "_bpchar") {
-            return SchemaType::TEXT;
-        }
-
-        if (pg_type == "int8" || pg_type == "serial8" ||
-            pg_type == "timestamp" || pg_type == "timestamptz" ||
-            pg_type == "time" || pg_type == "timetz") {
-            return SchemaType::INT64;
-        }
-
-        if (pg_type == "bool") {
-            return SchemaType::BOOLEAN;
-        }
-
-        if (pg_type == "int2" || pg_type == "serial2") {
-            return SchemaType::INT16;
-        }
-
-        if (pg_type == "float4") {
-            return SchemaType::FLOAT32;
-        }
-
-        if (pg_type == "float8") {
-            return SchemaType::FLOAT64;
-        }
-
-        if (pg_type == "float8") {
-            return SchemaType::FLOAT64;
-        }
-
-        // note: we currently fail on unknown types, eventually stuff them into a binary
-        assert(false);
+        std::string_view &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row);
+        std::string_view &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row);
+        return { std::string(old_namespace), std::string(old_name) };
     }
 }

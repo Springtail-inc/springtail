@@ -23,7 +23,7 @@ namespace {
             // get the base directory for table data
             nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
             Json::get_to<std::filesystem::path>(json, "table_dir", _base_dir,
-                                                "/opt/springtail/table");
+                                                "/tmp/springtail/table");
 
             // cleanup from failed previous run
             TearDown();
@@ -36,6 +36,7 @@ namespace {
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
             }
+
         }
 
         void TearDown() override {

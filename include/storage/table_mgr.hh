@@ -34,7 +34,7 @@ namespace springtail {
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
+        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
 
         /**
          * Create a new table.
@@ -55,6 +55,12 @@ namespace springtail {
          * Update the roots of a table.
          */
         void update_roots(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const std::vector<uint64_t> &roots);
+
+        /**
+         * Update the stats of a table.
+         */
+        void update_stats(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const TableStats &stats);
+
 
     private:
         static TableMgr *_instance; ///< static instance (singleton)
@@ -81,14 +87,14 @@ namespace springtail {
         std::pair<std::string, std::string> _get_table_name(uint64_t table_id, uint64_t xid, uint64_t lsn);
 
         /**
-         * Converts a Postgres type to a Springtail type.
-         */
-        SchemaType _convert_pg_type(const std::string &pg_type);
-
-        /**
          * Find the roots of a given table from the TableRoots system table.
          */
         std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);
+
+        /**
+         * Find the table statistics from the TableStats system table.
+         */
+        TableStats _find_stats(uint64_t table_id, uint64_t xid);
 
     private:
         // singleton; delete copy constructor

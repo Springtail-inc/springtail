@@ -8,10 +8,10 @@
 
 namespace springtail {
 
-    void init_system_properties()
+    void init_system_properties(const std::string &path)
     {
-        if (std::filesystem::exists(std::filesystem::path(Properties::SPRINGTAIL_PROPERTIES_FILE))) {
-            Properties::init(std::string(Properties::SPRINGTAIL_PROPERTIES_FILE));
+        if (std::filesystem::exists(std::filesystem::path(path))) {
+            Properties::init(path);
             return;
         }
 
@@ -30,14 +30,52 @@ namespace springtail {
         throw Error("Springtail system.json properties file not found");
     }
 
-    void springtail_init(uint32_t logging_mask) {
-        // initialize the backtrace infrastructure
-        backward::sh.loaded();
+    void springtail_init(uint32_t logging_mask, const std::string &properties_path)
+    {
+        // initialize the backtrace signal handling
+        init_exception();
+
+        // init system properties
+        init_system_properties(properties_path);
 
         // initialize the logging infrastructure
         init_logging(logging_mask);
+    }
 
-        // init system properties
-        init_system_properties();
+    void
+    common::daemonize(const std::filesystem::path &pid_filename)
+    {
+        int pid = fork();
+        if (pid < 0) {
+            throw Error(fmt::format("Failed to fork: {}", errno));
+        }
+
+        if (pid == 0) {
+            // close the terminal inputs / outputs
+            std::fclose(stdin);
+            std::fclose(stdout);
+            std::fclose(stderr);
+
+            // make this process the session group leader
+            int sid = setsid();
+            if (sid < 0) {
+                throw Error(fmt::format("Error calling setsid(): {}", errno));
+            }
+
+            // ignore hang-up
+            std::signal(SIGHUP, SIG_IGN);
+        } else {
+            // ensure the pid directory exists
+            std::filesystem::path pid_dir(pid_filename);
+            pid_dir.remove_filename();
+            std::filesystem::create_directories(pid_dir);
+
+            // record the pid of the child into the pid file
+            std::ofstream pid_file(pid_filename);
+            pid_file << pid << std::endl;
+
+            // exit cleanly
+            std::exit(0);
+        }
     }
 }

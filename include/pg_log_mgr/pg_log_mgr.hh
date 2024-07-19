@@ -104,7 +104,6 @@ namespace springtail {
         /** Set shutdown flag */
         void shutdown() {
             _shutdown = true;
-            join();
         }
 
     protected:

@@ -126,14 +126,14 @@ namespace springtail {
     {
         assert(extent_id != constant::UNKNOWN_EXTENT);
 
-        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
         boost::unique_lock lock(_mutex);
 
         // check if the page already exists in the cache for the given target XID
         PagePtr page = _try_get(file, extent_id, target_xid);
         if (page != nullptr) {
-            SPDLOG_DEBUG("Found in cache");
+            SPDLOG_DEBUG_MODULE(LOG_CACHE, "Found in cache");
             return page;
         }
 
@@ -149,7 +149,7 @@ namespace springtail {
     StorageCache::PageCache::get_empty(const std::filesystem::path &file,
                                        uint64_t xid)
     {
-        SPDLOG_DEBUG("{}, {}", file, xid);
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}", file, xid);
         boost::unique_lock lock(_mutex);
 
         _make_page_space(1);
@@ -256,7 +256,7 @@ namespace springtail {
                                      uint64_t xid,
                                      const std::vector<uint64_t> &offsets)
     {
-        SPDLOG_DEBUG("{}, {}, {}, {}", file, extent_id, xid, offsets.size());
+        SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, xid, offsets.size());
 
         // make space for the page; evict if we need to make space
         _make_page_space(1);
@@ -472,6 +472,75 @@ namespace springtail {
     }
 
     StorageCache::Page::Iterator
+    StorageCache::Page::upper_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+
+        // perform a upper-bound check to find the appropriate extent
+        // note: we don't use std::ranges::upper_bound() here because the projection causes the
+        //       SafeExtent to go out of scope before it is used in the comparison
+        auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
+                                 [this, &schema](const Tuple &key, const ExtentRef &ref) {
+                                     SafeExtent extent(_file, ref);
+                                     auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
+                                     return key.less_than(tuple);
+                                 });
+
+        if (extent_i == _extents.end()) {
+            return end();
+        }
+
+        SafeExtent extent(_file, *extent_i);
+
+        // perform a upper-bound check to find the appropriate row within the extent
+        auto row_i = std::ranges::upper_bound(**extent, *tuple,
+                                              [](const Tuple &lhs, const Tuple &rhs) {
+                                                  return lhs.less_than(rhs);
+                                              },
+                                              [&schema](const Extent::Row &row) {
+                                                  return FieldTuple(schema->get_sort_fields(), row);
+                                              });
+
+        // note: shouldn't be possible to hit end() given the above upper_bound() check to find the extent
+        assert(row_i != (*extent)->end());
+
+        return Iterator(this, extent_i, std::move(extent), row_i);
+    }
+
+    StorageCache::Page::Iterator
+    StorageCache::Page::inverse_lower_bound(TuplePtr tuple, ExtentSchemaPtr schema)
+    {
+        boost::shared_lock lock(_mutex);
+
+        // check if the page is empty
+        if (empty()) {
+            return end();
+        }
+
+        // perform a lower-bound to find the row with a key <= the provided tuple
+        auto i = lower_bound(tuple, schema);
+        if (i == end()) {
+            --i;
+            return i;
+        }
+
+        // if the key is equal, return it
+        auto key = FieldTuple(schema->get_sort_fields(), *i);
+        if (tuple->equal(key)) {
+            return i;
+        }
+
+        // if we are at the first entry, nothing before it
+        if (i == begin()) {
+            return end();
+        }
+
+        // go to the previous entry
+        --i;
+        return i;
+    }
+
+    StorageCache::Page::Iterator
     StorageCache::Page::at(uint32_t index)
     {
         // iterate through the extents to find the requested index in the page
@@ -595,7 +664,7 @@ namespace springtail {
         _check_split(extent_i, *extent, schema);
     }
 
-    void
+    bool
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
@@ -618,7 +687,7 @@ namespace springtail {
 
             // release back to the cache
             cache->_data_cache->put(extent);
-            return;
+            return true;
         }
 
         // extract the key to find the insert position
@@ -647,9 +716,11 @@ namespace springtail {
                                               });
 
         // see if the row's key matches the tuple's key
+        bool did_insert = false;
         if (row_i != (*extent)->end() && FieldTuple(schema->get_sort_fields(), *row_i).equal(*key)) {
             // update the existing row
             MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
+            did_insert = true;
         } else {
             // insert the tuple into the extent
             auto row = (*extent)->insert(row_i);
@@ -658,6 +729,9 @@ namespace springtail {
 
         // check for split
         _check_split(extent_i, *extent, schema);
+
+        // indicate if an insert occurred or not
+        return did_insert;
     }
 
     void
