@@ -11,9 +11,9 @@
 
 #include <openssl/ssl.h>
 
-#include <proxy/buffer.hh>
-
 namespace springtail {
+namespace pg_proxy {
+
     /** Connection object */
     class ProxyConnection : public std::enable_shared_from_this<ProxyConnection> {
     public:
@@ -23,14 +23,11 @@ namespace springtail {
         {}
 
         ~ProxyConnection() {
-            SPDLOG_DEBUG("Destroying connection to {}", _socket);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Destroying connection to {}", _socket);
             close();
         }
 
-        ssize_t read(char *buffer, int size, int at_least = 0);
-        ssize_t read(ProxyBuffer &buffer, int at_least = 0);
-        ssize_t read(ProxyBuffer &buffer, int max_size, int at_least);
-        ssize_t read_fully(ProxyBuffer &buffer, int size);
+        ssize_t read(char *buffer, int max_size, int at_least = 0);
         ssize_t write(const char *buffer, int size, bool more = false);
 
         void close() {
@@ -107,4 +104,5 @@ namespace springtail {
         void _handle_ssl_error(int rc);
     };
     using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
-}
+} // namespace pg_proxy
+} // namespace springtail

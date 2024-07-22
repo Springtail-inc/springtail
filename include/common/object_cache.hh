@@ -266,5 +266,24 @@ namespace springtail {
             // evict until the cache is the correct size
             _check_and_evict();
         }
+
+        /**
+         * @brief Clear the cache.
+         * @param do_evict if true, evict all entries from the cache calling callback;
+         *                 otherwise just clear without callback
+         */
+        void
+        clear(bool do_evict=false)
+        {
+            if (do_evict && _callback) {
+                while (!_cache.empty()) {
+                    _evict_next();
+                }
+            } else {
+                _cache.clear();
+                _lookup.clear();
+                _cache_size = 0;
+            }
+        }
     };
 }

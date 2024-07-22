@@ -3,6 +3,7 @@
 #include <common/exception.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     class ProxyError : public Error {
     public:
@@ -10,6 +11,13 @@ namespace springtail {
         ProxyError(const std::string &msg)
             : Error(msg)
         {}
+    };
+
+    class ProxyServerError : public ProxyError {
+    public:
+        const char *what() const noexcept {
+            return "Server error";
+        }
     };
 
     class ProxyIOError : public ProxyError {
@@ -40,4 +48,19 @@ namespace springtail {
         }
     };
 
+    class ProxyMessageError : public ProxyError {
+    public:
+        const char *what() const noexcept {
+            return "Error processing message";
+        }
+    };
+
+    class ProxyMessagePreparedError : public ProxyMessageError {
+    public:
+        const char *what() const noexcept {
+            return "Error processing prepared statement";
+        }
+    };
+
+} // namespace pg_proxy
 } // namespace springtail

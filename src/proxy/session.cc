@@ -8,8 +8,10 @@
 #include <proxy/server.hh>
 #include <proxy/connection.hh>
 #include <proxy/exception.hh>
+#include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     /** unique session id counter */
     static std::atomic<uint64_t> session_id(0);
@@ -22,10 +24,7 @@ namespace springtail {
           _state(STARTUP),
           _type(type),
           _id(session_id++)
-    {
-        _read_buffer.reset();
-        _write_buffer.reset();
-    }
+    {}
 
     Session::Session(DatabaseInstancePtr instance,
                      ProxyConnectionPtr connection,
@@ -41,10 +40,7 @@ namespace springtail {
           _database(database),
           _instance(instance),
           _id(session_id++)
-    {
-        _read_buffer.reset();
-        _write_buffer.reset();
-    }
+    {}
 
     void
     Session::operator()()
@@ -52,7 +48,7 @@ namespace springtail {
         // thread entry point from server
         bool has_data = false;
 
-        SPDLOG_DEBUG("Processing data: session id: {}", _id);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing data: session id: {}", _id);
 
         do {
             // thread entry point
@@ -75,51 +71,86 @@ namespace springtail {
                 return;
             }
 
+            // see if remote session has messages that need to be processed
+            if (_associated_session != nullptr) {
+                _associated_session->_internal_process_msgs(true);
+            }
+
             if (_waiting_on_session) {
-                SPDLOG_DEBUG("Waiting on external session, id: {}", _id);
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Waiting on external session, id: {}", _id);
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
                 // at that time it should be added back to the server poll list
+
                 return;
             }
+
+            // check if we have messages pending that still need to be processed
+            _internal_process_msgs(false);
 
             // check if there is more data to process
             // checks buffered data in ssl connection
             has_data = _connection->has_pending();
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Has data: {}", has_data);
         } while (has_data);
 
         // signal server to wait on this connection
-        SPDLOG_DEBUG("Adding connection to server poll list: {}", _connection->get_socket());
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding connection to server poll list: session_id={}, socket={}", _id, _connection->get_socket());
         _server->signal(_connection);
     }
 
     void
-    Session::_internal_process_msg(SessionMsgPtr msg)
+    Session::_internal_process_msgs(bool is_remote)
     {
-        // send message to session
-        SPDLOG_DEBUG("Processing message: session id: {}", _id);
+        while (_ready_for_message) {
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Looking for messages: session id: {}", _id);
 
-        try {
-            _process_msg(msg);
-        } catch (const ProxyIOError &e) {
-            SPDLOG_ERROR("ProxyIOError: {}", e.what());
-            _state = ERROR;
-        } catch (const std::exception &e) {
-            SPDLOG_ERROR("Exception: {}", e.what());
-            _state = ERROR;
-        } catch (...) {
-            SPDLOG_ERROR("Unknown exception");
-            _state = ERROR;
-        }
+            SessionMsgPtr msg = get_msg();
+            if (msg == nullptr) {
+                break;
+            }
 
-        if (_state == ERROR || _connection->closed()) {
-            _handle_error();
-            return;
+            // send message to session
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing message: type={}, session id: {}", (int8_t)msg->type(), _id);
+
+            try {
+                _process_msg(msg);
+            } catch (const ProxyIOError &e) {
+                SPDLOG_ERROR("ProxyIOError: {}", e.what());
+                _state = ERROR;
+            } catch (const std::exception &e) {
+                SPDLOG_ERROR("Exception: {}", e.what());
+                _state = ERROR;
+            } catch (...) {
+                SPDLOG_ERROR("Unknown exception");
+                _state = ERROR;
+            }
+
+            if (_state == ERROR || _connection->closed()) {
+                _handle_error();
+                return;
+            }
         }
 
         // re-enable processing, add socket to poll list
-        _enable_processing();
+        if (is_remote) {
+            _enable_processing();
+        }
+    }
+
+    void
+    Session::_enable_processing()
+    {
+        if (_waiting_on_session) {
+            // if we are waiting on a session, we should not be processing
+            // incoming data from our connection
+            assert(_associated_session != nullptr);
+            return;
+        }
+
+        // add session connection to server poll list
+        _server->signal(_connection);
     }
 
     UserLoginPtr
@@ -134,52 +165,58 @@ namespace springtail {
     std::pair<char,int32_t>
     Session::_read_hdr()
     {
-        // if there is still data in the buffer use that
-        if (_read_buffer.remaining() < 5) {
-            _read_buffer.reset();
-            ssize_t n = _connection->read(_read_buffer, 5, 5); // read at most 5B
-            assert(n == 5);
-        }
+        char buffer[5];
+        ssize_t n = _connection->read(buffer, 5, 5); // read at most 5B
+        assert(n == 5);
 
         // op code
-        char code = _read_buffer.get();
+        char code = buffer[0];
         // message length includes length field but not code byte
         // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32() - 4;
-
-        return {code, msg_length};
-    }
-
-    std::pair<char,int32_t>
-    Session::_read_msg()
-    {
-        // if there is still data in the buffer use that
-        if (_read_buffer.remaining() < 5) {
-            _read_buffer.reset();
-            ssize_t n = _connection->read(_read_buffer, 5); // read at least 5B
-            assert(n >= 5);
-        }
-
-        // op code
-        char code = _read_buffer.get();
-        // message length includes length field but not code byte
-        // so really msg_length -= 4
-        int32_t msg_length = _read_buffer.get32() - 4;
-
-        // if we didn't read the whole message, read the rest
-        if (msg_length > _read_buffer.remaining()) {
-            SPDLOG_DEBUG("Need to read more data for message, this may block");
-            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
-        }
+        int32_t msg_length = recvint32(&buffer[1]) - 4;
 
         return {code, msg_length};
     }
 
     void
-    Session::_read_remaining(int32_t msg_length)
+    Session::_read_msg(BufferList &blist)
     {
-        if (msg_length > _read_buffer.remaining()) {
-            _connection->read_fully(_read_buffer, msg_length - _read_buffer.remaining());
+        char buffer[1024];
+        int offset = 0;
+
+        // read at least 5 bytes, more if available, read into
+        // existing buffer to avoid doing multiple system calls
+        ssize_t n = _connection->read(buffer, 1024, 5);
+        assert(n >= 5);
+
+        ssize_t msg_length = 0;
+
+        while (offset < n) {
+            // code is first byte, skip over it
+            // message length includes length field but not code byte
+            // so really msg_length -= 4
+            msg_length = recvint32(buffer + offset + 1) + 1;
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Read message length: {}", msg_length);
+
+            // allocate a buffer from the buffer pool and copy data in
+            BufferPtr bufferp = blist.get(msg_length);
+
+            // copy data into buffer
+            bufferp->copy_into(buffer + offset, std::min(n, msg_length));
+
+            // incr by full message length instead of by n
+            // this allows us to find out if we read too little for a full buffer
+            offset += msg_length;
+        }
+
+        // if we didn't get all the data for the last buffer
+        if (offset > n) {
+            // read remaining data into tail buffer
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Need to read more data for message: {}", offset-n);
+            BufferPtr tail = blist.buffers.back();
+            int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
+            tail->incr_size(rd);
+            assert(rd == offset-n);
         }
     }
 
@@ -194,11 +231,11 @@ namespace springtail {
         sendint32(msg_length+4, buffer + 1);
         int n = _associated_session->get_connection()->write(buffer, 5);
         assert (n == 5);
-        SPDLOG_DEBUG("Streamed header to remote session: code={}, msg_length={}", code, msg_length);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed header to remote session: code={}, msg_length={}", code, msg_length);
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
-            SPDLOG_DEBUG("Reading {} bytes from local socket", std::min(msg_length, 4096));
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Reading {} bytes from local socket", std::min(msg_length, 4096));
             // throws exception on error
             int n = _connection->read(buffer, std::min(msg_length, 4096));
             assert (n == std::min(msg_length, 4096));
@@ -206,7 +243,7 @@ namespace springtail {
             int m = _associated_session->get_connection()->write(buffer, n);
             assert (m == n);
 
-            SPDLOG_DEBUG("Streamed {} bytes to remote session", m);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed {} bytes to remote session", m);
 
             msg_length -= m;
         }
@@ -226,20 +263,6 @@ namespace springtail {
 
         n = _associated_session->get_connection()->write(data, msg_length);
         assert(n == msg_length);
-    }
-
-    void
-    Session::_enable_processing()
-    {
-        if (_waiting_on_session) {
-            // if we are waiting on a session, we should not be processing
-            // incoming data from our connection
-            assert(_associated_session != nullptr);
-            return;
-        }
-
-        // add session connection to server poll list
-        _server->signal(_connection);
     }
 
     void
@@ -264,10 +287,14 @@ namespace springtail {
 
         // check for associated client session, and notify of error
         if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
-            // notify client session of error
+            // notify client session of error; treat this as an interrupt of sorts
             SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
-            notify_client(msg);
+            _associated_session->_msg_queue.clear();
+            _associated_session->_ready_for_message = true;
+            queue_msg(msg);
+            _associated_session->_internal_process_msgs(true);
         }
         SPDLOG_ERROR("Shutdown complete");
     }
-}
+} // namespace pg_proxy
+} // namespace springtail

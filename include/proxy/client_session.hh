@@ -5,13 +5,17 @@
 #include <utility>
 
 #include <proxy/session.hh>
-#include <proxy/request_handler.hh>
-#include <proxy/buffer.hh>
+#include <proxy/server_session.hh>
+#include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
+#include <proxy/history_cache.hh>
+#include <proxy/parser.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
@@ -19,13 +23,14 @@ namespace springtail {
     {
     public:
         constexpr static char SERVER_VERSION[] = "16.0 (Springtail)";
+        constexpr static int STATEMENT_CACHE_SIZE = 100;
 
         ClientSession(const ClientSession&) = delete;
         ClientSession& operator=(const ClientSession&) = delete;
 
-        /// Construct a connection with the given socket.
-        explicit ClientSession(ProxyConnectionPtr connection,
-                               ProxyServerPtr server);
+        /** Construct a connection with the given socket. */
+        ClientSession(ProxyConnectionPtr connection,
+                      ProxyServerPtr server);
 
         ~ClientSession();
 
@@ -50,33 +55,69 @@ namespace springtail {
         void _process_msg(SessionMsgPtr msg) override;
 
     private:
+        /** cache of statements, transaction history and session history */
+        StatementCache _stmt_cache;
+
+        std::weak_ptr<ServerSession> _primary_session; ///< primary server session
+        std::weak_ptr<ServerSession> _replica_session; ///< replica server session
+
         void _process_startup_msg(int32_t code, int32_t msg_length);
         void _process_ssl_request();
 
-        void _encode_parameter_status(const std::string &key, const std::string &value);
-
-        void _encode_auth_md5();
-        void _encode_auth_ok();
-        void _encode_auth_scram();
-
-        void _create_primary_server_session();
+        void _encode_parameter_status(BufferPtr buffer, const std::string &key, const std::string &value);
+        void _encode_auth_md5(BufferPtr buffer);
+        void _encode_auth_ok(BufferPtr buffer);
+        void _encode_auth_scram(BufferPtr buffer);
 
         void _handle_request();
         void _handle_startup();
         void _handle_ssl_handshake();
         void _handle_auth();
-        void _handle_scram_auth(const std::string &data);
-        void _handle_scram_auth_continue(const std::string &data);
+        void _handle_scram_auth(const std::string_view data);
+        void _handle_scram_auth_continue(const std::string_view data);
         void _handle_server_error(const std::string_view msg);
-        void _handle_simple_query(const std::string &query);
+
+        void _handle_simple_query(BufferPtr buffer);
+        void _handle_parse(BufferPtr buffer);
+        void _handle_bind(BufferPtr buffer);
+        void _handle_describe(BufferPtr buffer);
+        void _handle_execute(BufferPtr buffer);
+        void _handle_close(BufferPtr buffer);
+        void _handle_sync(BufferPtr buffer);
+        void _handle_function_call(BufferPtr buffer);
+
+        void _forward_to_server(BufferPtr buffer);
 
         void _send_auth_req();
         void _send_auth_done();
 
-        ServerSessionPtr _select_session_and_notify(Type type, SessionMsgPtr msg);
+        ServerSessionPtr _create_server_session(Session::Type type);
+
+        /** Does primary server pool exist */
+        bool _primary_pool_exists();
+
+        /**
+         * @brief Parse a simple query and return type of server session that can handle it
+         * @param buffer buffer holding original query
+         * @param query query to parse (multiple queries separated by ';')
+         * @param dependencies vector of query statements that need to be fulfilled
+         * @return query statement that holds the parsed query stmts as children
+         */
+        QueryStmtPtr _parse_simple_query(const BufferPtr buffer, const std::string_view query, std::vector<QueryStmtPtr> &dependencies);
+
+        /**
+         * @brief Remap a parse type from the parser context to a QueryStmt::Type
+         * @param context parser context
+         * @return QueryStmt::Type remapped type
+         */
+        QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context) const;
+
+        /** Select a server session based on type */
+        ServerSessionPtr _select_session(Type type);
 
         /** Release server session back to session pool */
         void _release_server_session();
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
-}
+} // namespace pg_proxy
+} // namespace springtail

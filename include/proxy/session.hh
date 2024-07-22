@@ -8,12 +8,17 @@
 #include <atomic>
 
 #include <common/logging.hh>
+#include <common/concurrent_queue.hh>
+
+#include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
-#include <proxy/buffer.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/user_mgr.hh>
+#include <proxy/session_msg.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     // forward declarations to avoid circular dependencies
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
@@ -39,40 +44,17 @@ namespace springtail {
 
         /** State of session */
         enum State : int8_t {
-            STARTUP=0,
-            SSL_HANDSHAKE=1,
-            AUTH=2,
-            AUTH_SERVER=3,
-            AUTH_DONE=4,
-            READY=5,
-            ERROR=99
+            STARTUP=0,        ///< initial state
+            SSL_HANDSHAKE=1,  ///< SSL handshake
+            AUTH=2,           ///< authentication
+            AUTH_SERVER=3,    ///< server auth
+            AUTH_DONE=4,      ///< auth complete
+            READY=5,          ///< ready for query
+            DEPENDENCIES=6,   ///< waiting on dependencies
+            QUERY=7,          ///< query in progress
+            EXTENDED_ERROR=8, ///< extended message error state
+            ERROR=99          ///< fatal error state
         };
-
-        /** Messages between sessions */
-        struct SessionMsg {
-            enum SessionMsgType : int8_t {
-                // client to server messages
-                MSG_CLIENT_SERVER_STARTUP=0,
-                MSG_CLIENT_SERVER_SIMPLE_QUERY=1,
-
-                // server to client messages
-                MSG_SERVER_CLIENT_AUTH_DONE=10,
-                MSG_SERVER_CLIENT_READY=11,
-                MSG_SERVER_CLIENT_FATAL_ERROR=99
-            } type;
-
-            // union of message types based on SessionMsg type
-            std::variant<std::string> data;
-
-            SessionMsg(SessionMsgType type, std::string data)
-                : type(type), data(data)
-            {}
-
-            SessionMsg(SessionMsgType type)
-                : type(type)
-            {}
-        };
-        using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
         constexpr static int32_t MSG_STARTUP_V2 =0x20000;
         constexpr static int32_t MSG_STARTUP_V3 = 0x30000;
@@ -123,7 +105,7 @@ namespace springtail {
         Session& operator=(const Session&) = delete;
 
         /** Destruct a connection. */
-        virtual ~Session() { SPDLOG_DEBUG("Session destructor"); };
+        virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
 
         /** Process messages for session connection;
          * thread entry, calls _process() */
@@ -146,37 +128,26 @@ namespace springtail {
             _waiting_on_session = true;
         }
 
-        /** Clear waiting on session flag */
-        void clear_waiting_on_session() {
-            _waiting_on_session = false;
-        }
-
         /** Clear associated session from this and remote session */
         void clear_associated_session() {
+            assert(_associated_session != nullptr);
+            assert(_waiting_on_session == true);
+            _waiting_on_session = false;
             _associated_session->_associated_session = nullptr;
             _associated_session = nullptr;
-        }
-
-        /** Notify server session of message */
-        void notify_server(SessionMsgPtr msg, SessionPtr remote_session) {
-            assert(remote_session->_type == PRIMARY || remote_session->_type == REPLICA);
-            SPDLOG_DEBUG("Notifying server session of message: {:d}", (int8_t)msg->type);
-            set_associated_session(remote_session);
-            remote_session->_internal_process_msg(msg);
-        }
-
-        /** Notify client session of message */
-        void notify_client(SessionMsgPtr msg) {
-            assert(_associated_session != nullptr);
-            assert(_associated_session->_type == CLIENT);
-            SPDLOG_DEBUG("Notifying client of message: {:d}", (int8_t)msg->type);
-            _associated_session->clear_waiting_on_session();
-            _associated_session->_internal_process_msg(msg);
         }
 
         /** Get remote session associated with this session */
         std::shared_ptr<Session> get_associated_session() const {
             return _associated_session;
+        }
+
+        Session::Type associated_session_type() const {
+            return _associated_session->_type;
+        }
+
+        void set_waiting_on_session(bool waiting) {
+            _waiting_on_session = waiting;
         }
 
         /** Is this session blocked waiting for another session to complete */
@@ -206,7 +177,7 @@ namespace springtail {
 
         /** Shutdown the session, close connection, etc */
         void shutdown() {
-            SPDLOG_DEBUG("Shutting down session: type={}, socket={}",
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
             assert(_associated_session == nullptr);
@@ -220,22 +191,51 @@ namespace springtail {
         }
 
         /**
-         * Set pending msg; to be executed after current message completes
-         * @param msg SessionMsgPtr message to set as pending
+         * Add a msg to the queue; to be executed after current message completes
+         * @param msg SessionMsgPtr message to enqueue
          */
-        void set_pending_msg(SessionMsgPtr msg) {
-            assert(_pending_msg == nullptr);
-            _pending_msg = msg;
+        void queue_msg(SessionMsgPtr msg, SessionPtr remote_session) {
+            if (_associated_session == nullptr) {
+                set_associated_session(remote_session);
+            }
+            remote_session->_msg_queue.push(msg);
         }
 
         /**
-         * @brief Get the pending msg if one exists
-         * @return SessionMsgPtr or nullptr if no pending msg
+         * @brief Queue message on associated session
+         * @param msg Message to queue
          */
-        SessionMsgPtr get_pending_msg() {
-            SessionMsgPtr msg = _pending_msg;
-            _pending_msg = nullptr;
+        void queue_msg(SessionMsgPtr msg) {
+            assert (_associated_session != nullptr);
+            _associated_session->_msg_queue.push(msg);
+            if (_type == Type::CLIENT) {
+                assert (_waiting_on_session == true);
+            }
+        }
+
+        /**
+         * @brief Check if message queue is empty
+         * @return true if empty
+         */
+        bool is_msg_queue_empty() {
+            return _msg_queue.empty();
+        }
+
+        /**
+         * @brief Get a queued msg if one exists
+         * @return SessionMsgPtr or nullptr if no queued msg
+         */
+        SessionMsgPtr get_msg() {
+            SessionMsgPtr msg = _msg_queue.try_pop();
             return msg;
+        }
+
+        void block_messages() {
+            _ready_for_message = false;
+        }
+
+        void enable_messages() {
+            _ready_for_message = true;
         }
 
         /** Get session id */
@@ -250,9 +250,6 @@ namespace springtail {
         State        _state = STARTUP;    ///< state of session, governs process()
         Type         _type;               ///< type of session
 
-        ProxyBuffer  _read_buffer{1024};
-        ProxyBuffer  _write_buffer{1024};
-
         UserPtr      _user;        ///< user associated with this session
         UserLoginPtr _login;       ///< user login creds, temporary
 
@@ -265,6 +262,8 @@ namespace springtail {
 
         uint64_t _id;                   ///< unique id for session
 
+        bool _in_transaction = false;   ///< is this session in a transaction
+
         /** Process messages for session connection,
          * must be implemented by derived class */
         virtual void _process_connection() = 0;
@@ -275,13 +274,10 @@ namespace springtail {
         UserLoginPtr _get_user_login();
 
         /** Read full message from data connection, returns header: 1B code, 4B length */
-        std::pair<char,int32_t> _read_msg();
+        void _read_msg(BufferList &buffer_list);
 
         /** Read header: 1B code, 4B length from data connection */
         std::pair<char,int32_t> _read_hdr();
-
-        /** If we've just read the header, read the actual data into the local write buffer */
-        void _read_remaining(int32_t msg_length);
 
         /** Stream data from one connection directly to the other */
         void _stream_to_remote_session(char code, int32_t msg_length);
@@ -296,10 +292,16 @@ namespace springtail {
         bool _waiting_on_session = false;
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
-        SessionMsgPtr _pending_msg = nullptr;
+        bool _ready_for_message = true;  ///< ready to process messages
 
-        /** Single place to do error handling on messages */
-        void _internal_process_msg(SessionMsgPtr msg);
+        /** queue of messages to process */
+        ConcurrentQueue<SessionMsg> _msg_queue;
+
+        /**
+         * Single place to do error handling on messages.  Called to check for queued messages.
+         * @param is_remote true if this called on an associated session
+         */
+        void _internal_process_msgs(bool is_remote);
 
         /** enable processing of msgs via server poll loop */
         void _enable_processing();
@@ -308,4 +310,5 @@ namespace springtail {
         void _handle_error();
     };
     using SessionPtr = std::shared_ptr<Session>;
-}
+} // namespace pg_proxy
+} // namespace springtail

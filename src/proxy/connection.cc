@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include <common/logging.hh>
-#include <proxy/buffer.hh>
 #include <proxy/exception.hh>
 #include <proxy/connection.hh>
 
@@ -20,10 +19,15 @@
 #endif
 
 namespace springtail {
+namespace pg_proxy {
 
     ssize_t
     ProxyConnection::write(const char *buffer, int size, bool more)
     {
+        if (closed()) {
+            throw ProxyIOError();
+        }
+
         if (_ssl != nullptr) {
             return _ssl_write(buffer, size);
         } else {
@@ -193,7 +197,7 @@ namespace springtail {
                 at_least -= n;
             } else if (n == 0) {
                 // Connection closed by the client
-                SPDLOG_DEBUG("Connection closed by client");
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Connection closed by client");
                 close();
                 throw ProxyIOError();
             } else if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
@@ -207,38 +211,6 @@ namespace springtail {
         } while (at_least > 0);
 
         return bytes_read;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), buffer.capacity(), at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read(ProxyBuffer &buffer, int max_size, int at_least)
-    {
-        buffer.reset();
-        ssize_t n = read(buffer.data(), max_size, at_least);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
-    }
-
-    ssize_t
-    ProxyConnection::read_fully(ProxyBuffer &buffer, int size)
-    {
-        ssize_t n = read(buffer.next_data(), size, size);
-        if (n > 0) {
-            buffer.set_read(n);
-        }
-        return n;
     }
 
     static std::string hostname_to_ip(const std::string &hostname)
@@ -272,7 +244,7 @@ namespace springtail {
             throw ProxyIOConnectionError();
         }
 
-        SPDLOG_DEBUG("Connecting to {}:{}", hostname, port);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Connecting to {}:{}", hostname, port);
 
         std::string ip = hostname_to_ip(hostname);
         if (ip.empty()) {
@@ -349,7 +321,7 @@ namespace springtail {
         switch (err) {
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:
-                SPDLOG_DEBUG("SSL handshake in progress, need data: err={}", err);
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL handshake in progress, need data: err={}", err);
                 return;
             case SSL_ERROR_SYSCALL:
                 SPDLOG_ERROR("SSL handshake failed: error syscall: errno={}\n", errno);
@@ -424,4 +396,5 @@ namespace springtail {
 
         return false;
     }
-}
+} // namespace pg_proxy
+} // namespace springtail

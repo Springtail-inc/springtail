@@ -7,6 +7,8 @@
 #include <pg_repl/pg_types.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ProxyBuffer {
     public:
         ProxyBuffer(int initial_size) : _capacity(initial_size) {
@@ -137,4 +139,5 @@ namespace springtail {
         int _capacity = 0;
         int _data_size = 0;
     };
-}
+} // namespace pg_proxy
+} // namespace springtail
