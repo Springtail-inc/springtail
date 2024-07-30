@@ -10,8 +10,7 @@
 #include <proxy/exception.hh>
 #include <proxy/buffer_pool.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** unique session id counter */
     static std::atomic<uint64_t> session_id(0);
@@ -221,7 +220,7 @@ namespace pg_proxy {
     }
 
     void
-    Session::_stream_to_remote_session(char code, int32_t msg_length)
+    Session::_stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id)
     {
         assert(_associated_session != nullptr);
         char buffer[4096];
@@ -229,28 +228,37 @@ namespace pg_proxy {
         // first write the header, add 4 to msg length for size of length field
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
-        int n = _associated_session->get_connection()->write(buffer, 5);
-        assert (n == 5);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed header to remote session: code={}, msg_length={}", code, msg_length);
+
+        int n;
+        if (!_is_shadow) {
+            n = _associated_session->get_connection()->write(buffer, 5);
+            assert (n == 5);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed header to remote session: code={}, msg_length={}", code, msg_length);
+        }
 
         // iterate reading buffer from local session and write to remote session
         while (msg_length > 0) {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Reading {} bytes from local socket", std::min(msg_length, 4096));
+
             // throws exception on error
             int n = _connection->read(buffer, std::min(msg_length, 4096));
             assert (n == std::min(msg_length, 4096));
 
-            int m = _associated_session->get_connection()->write(buffer, n);
-            assert (m == n);
+            // log the buffer
+            _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed {} bytes to remote session", m);
+            if (!_is_shadow) {
+                int m = _associated_session->get_connection()->write(buffer, n);
+                assert (m == n);
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Streamed {} bytes to remote session", m);
+            }
 
-            msg_length -= m;
+            msg_length -= n;
         }
     }
 
     void
-    Session::_send_to_remote_session(char code, int32_t msg_length, const char *data)
+    Session::_send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id)
     {
         assert(_associated_session != nullptr);
         char buffer[5];
@@ -258,11 +266,17 @@ namespace pg_proxy {
         // first write the header, add 4 to msg length for size of length field
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
-        int n = _associated_session->get_connection()->write(buffer, 5);
-        assert (n == 5);
 
-        n = _associated_session->get_connection()->write(data, msg_length);
-        assert(n == msg_length);
+        if (!_is_shadow) {
+            int n = _associated_session->get_connection()->write(buffer, 5);
+            assert (n == 5);
+
+            n = _associated_session->get_connection()->write(data, msg_length);
+            assert(n == msg_length);
+        }
+
+        // log the buffer
+        _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);
     }
 
     void
@@ -296,5 +310,32 @@ namespace pg_proxy {
         }
         SPDLOG_ERROR("Shutdown complete");
     }
-} // namespace pg_proxy
-} // namespace springtail
+
+    void
+    Session::_log_buffer(bool incoming, char code,
+                         int32_t len, const char *data,
+                         uint64_t seq_id, bool final)
+    {
+        LoggerPtr logger = _server->get_logger();
+        if (logger ==  nullptr) {
+            return;
+        }
+
+        if (seq_id == -1) {
+            seq_id = _gen_seq_id();
+        }
+
+        Logger::MSG_TYPE log_type;
+
+        if (_type == Type::CLIENT) {
+            log_type = incoming ? Logger::MSG_TYPE::FROM_CLIENT : Logger::MSG_TYPE::TO_CLIENT;
+        } else if (_type == Type::PRIMARY) {
+            log_type = incoming ? Logger::MSG_TYPE::FROM_PRIMARY : Logger::MSG_TYPE::TO_PRIMARY;
+        } else {
+            log_type = incoming ? Logger::MSG_TYPE::FROM_REPLICA : Logger::MSG_TYPE::TO_REPLICA;
+        }
+
+        logger->log_data(log_type, _id, seq_id, code, len, data, final);
+    }
+
+} // namespace springtail::pg_proxy

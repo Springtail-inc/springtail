@@ -16,8 +16,7 @@
 #include <proxy/user_mgr.hh>
 #include <proxy/session_msg.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     // forward declarations to avoid circular dependencies
     class ProxyServer;
@@ -142,7 +141,7 @@ namespace pg_proxy {
             return _associated_session;
         }
 
-        Session::Type associated_session_type() const {
+        Type associated_session_type() const {
             return _associated_session->_type;
         }
 
@@ -206,6 +205,9 @@ namespace pg_proxy {
          * @param msg Message to queue
          */
         void queue_msg(SessionMsgPtr msg) {
+            if (_is_shadow) {
+                return;
+            }
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
             if (_type == Type::CLIENT) {
@@ -239,8 +241,25 @@ namespace pg_proxy {
         }
 
         /** Get session id */
-        int id() const {
+        uint32_t id() const {
             return _id;
+        }
+
+        /**
+         * @brief Set shadow flag
+         * @param shadow true if this is a shadow session
+         */
+        void set_shadow_mode(bool shadow) {
+            assert (_type == Type::REPLICA);
+            _is_shadow = shadow;
+        }
+
+        /**
+         * @brief Get shadow flag
+         * @return true if this is a shadow session
+         */
+        bool is_shadow() const {
+            return _is_shadow;
         }
 
     protected:
@@ -260,9 +279,17 @@ namespace pg_proxy {
 
         DatabaseInstancePtr _instance; ///< database instance associated with this session
 
-        uint64_t _id;                   ///< unique id for session
+        uint32_t _id;                   ///< unique id for session
+
+        std::atomic<uint64_t> _seq_id = 0; ///< sequence id for this session
+
+        uint64_t _gen_seq_id() {
+            return _seq_id++;
+        }
 
         bool _in_transaction = false;   ///< is this session in a transaction
+
+        bool _is_shadow = false;        ///< is this a shadow session; replica shadowing primary
 
         /** Process messages for session connection,
          * must be implemented by derived class */
@@ -280,10 +307,13 @@ namespace pg_proxy {
         std::pair<char,int32_t> _read_hdr();
 
         /** Stream data from one connection directly to the other */
-        void _stream_to_remote_session(char code, int32_t msg_length);
+        void _stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id);
 
         /** Send data to remote session */
-        void _send_to_remote_session(char code, int32_t msg_length, const char *data);
+        void _send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id);
+
+        /** Log buffer */
+        void _log_buffer(bool incoming, char code, int32_t data_length, const char *data, uint64_t seq_id, bool final=true);
 
     private:
         /** client/server session associated with this one */
@@ -310,5 +340,4 @@ namespace pg_proxy {
         void _handle_error();
     };
     using SessionPtr = std::shared_ptr<Session>;
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

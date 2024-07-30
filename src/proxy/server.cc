@@ -19,9 +19,9 @@
 
 #include <proxy/client_session.hh>
 #include <proxy/server.hh>
+#include <proxy/logger.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /**
      * @brief Construct a new Proxy Server object.
@@ -37,10 +37,14 @@ namespace pg_proxy {
                              int thread_pool_size,
                              const std::filesystem::path &cert_file,
                              const std::filesystem::path &key_file,
-                             bool enable_ssl)
+                             bool shadow_mode,
+                             bool enable_ssl,
+                             LoggerPtr logger)
       : _user_mgr(std::make_shared<UserMgr>()),
         _thread_pool(thread_pool_size),
-        _enable_ssl(enable_ssl)
+        _enable_ssl(enable_ssl),
+        _shadow_mode(shadow_mode),
+        _logger(logger)
     {
         // Initialize SSL
         if (_enable_ssl) {
@@ -237,7 +241,7 @@ namespace pg_proxy {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected from: {} on socket {}", client_ip, client_socket);
 
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
-            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this());
+            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this(), _shadow_mode);
 
             // add session to the waiting sessions list and to the session map
             std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
@@ -372,5 +376,4 @@ namespace pg_proxy {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.insert(std::make_pair(session->get_connection()->get_socket(), session));
     }
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

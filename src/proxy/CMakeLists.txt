@@ -91,3 +91,12 @@ add_dsymutil_command(daemon)
 
 add_subdirectory(auth)
 
+# test server daemon executable
+add_executable(test_logger test/test_logger.cc)
+target_include_directories(test_logger
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_logger
+    PUBLIC springtail_common
+)
+add_dsymutil_command(test_logger)

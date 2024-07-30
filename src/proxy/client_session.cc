@@ -24,10 +24,12 @@ namespace springtail {
 namespace pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection,
-                                 ProxyServerPtr server)
+                                 ProxyServerPtr server,
+                                 bool shadow_mode)
 
         : Session(connection, server, CLIENT),
-          _stmt_cache(STATEMENT_CACHE_SIZE)
+          _stmt_cache(STATEMENT_CACHE_SIZE),
+          _shadow_mode(shadow_mode)
     {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected: endpoint={}, id={}", connection->endpoint(), _id);
 
@@ -89,9 +91,15 @@ namespace pg_proxy {
                 }
                 assert(_state == AUTH);
 
-                _send_auth_done();
-                // the client session is established as is a server session.
+                _send_auth_done(msg->seq_id());
+
+                // at this point, the client session is established as is a server session.
                 // the replica session will be created on-demand
+
+                // if in shadow mode, then create the replica session now
+                if (_shadow_mode && _replica_session.expired()) {
+                    _create_server_session(Session::Type::REPLICA, _gen_seq_id());
+                }
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
@@ -210,7 +218,9 @@ namespace pg_proxy {
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Startup message: msg_length={}, code={}", msg_length, code);
+        uint64_t seq_id = _gen_seq_id();
+
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Startup message: msg_length={}, code={}, seq_id={}", msg_length, code, seq_id);
 
         switch (code) {
             case MSG_SSLREQ:
@@ -225,7 +235,7 @@ namespace pg_proxy {
                 break;
 
             case MSG_STARTUP_V3:
-                _process_startup_msg(code, msg_length-4);
+                _process_startup_msg(msg_length-4, seq_id);
                 break;
 
             default:
@@ -236,7 +246,7 @@ namespace pg_proxy {
     }
 
     void
-    ClientSession::_process_startup_msg(int32_t code, int32_t remaining)
+    ClientSession::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Proto version 3.0 requested");
 
@@ -254,6 +264,7 @@ namespace pg_proxy {
         assert(n == remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
+        _log_buffer(true, '?', remaining, buffer, seq_id);
 
         // seems to be a trailing null byte on the end
         while (read_buffer.remaining() > 1) {
@@ -285,7 +296,7 @@ namespace pg_proxy {
         _login = _user->get_user_login();
 
         // handle authentication -- send auth request
-        _send_auth_req();
+        _send_auth_req(seq_id);
     }
 
     void
@@ -322,7 +333,7 @@ namespace pg_proxy {
     }
 
     void
-    ClientSession::_send_auth_req()
+    ClientSession::_send_auth_req(uint64_t seq_id)
     {
         _state = AUTH;
 
@@ -331,7 +342,7 @@ namespace pg_proxy {
         switch(_login->_type) {
             case TRUST:
                 SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticated with trust", _user->username());
-                _create_server_session(Session::Type::PRIMARY);
+                _create_server_session(Session::Type::PRIMARY, seq_id);
                 return; // did send above so we return here
 
             case MD5:
@@ -353,6 +364,9 @@ namespace pg_proxy {
         // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         assert(n == buffer->size());
+
+        // log the buffer
+        _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
     }
 
     void
@@ -371,7 +385,12 @@ namespace pg_proxy {
 
             int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Auth continue: msg_length={}", msg_length);
+            uint64_t seq_id = _gen_seq_id();
+
+            // log buffer
+            _log_buffer(true, code, msg_length, buffer->data() + 5, seq_id);
+
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Auth continue: msg_length={}, seq_id={}", msg_length, seq_id);
 
             switch(_login->_type) {
                 case MD5: {
@@ -396,6 +415,10 @@ namespace pg_proxy {
                         BufferPtr write_buffer = std::make_shared<Buffer>(data, 128);
                         ProxyProtoError::encode_error(write_buffer, ProxyProtoError::INVALID_PASSWORD, "password authentication failed");
                         _connection->write(write_buffer->data(), write_buffer->size());
+
+                        // log buffer
+                        _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
+
                         throw ProxyAuthError();
                     }
 
@@ -403,7 +426,7 @@ namespace pg_proxy {
 
                     // auth successful on client side
                     // see if we need to create a server session
-                    _create_server_session(Session::Type::PRIMARY);
+                    _create_server_session(Session::Type::PRIMARY, seq_id);
 
                     return;
                 }
@@ -422,12 +445,12 @@ namespace pg_proxy {
 
                         int32_t len = buffer->get32();
                         std::string_view data = buffer->get_bytes(len);
-                        _handle_scram_auth(data);
+                        _handle_scram_auth(data, seq_id);
                     } else {
                         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling SCRAM SASL response");
                         // process as SASLResponse
                         std::string_view data = buffer->get_bytes(msg_length);
-                        _handle_scram_auth_continue(data);
+                        _handle_scram_auth_continue(data, seq_id);
                     }
 
                     break;
@@ -441,7 +464,7 @@ namespace pg_proxy {
     }
 
     void
-    ClientSession::_handle_scram_auth(const std::string_view data)
+    ClientSession::_handle_scram_auth(const std::string_view data, uint64_t seq_id)
     {
         char *raw = ::strdup(data.data()); // copy to remove constness
         if (!read_client_first_message(raw,
@@ -473,10 +496,13 @@ namespace pg_proxy {
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
+
+        // log buffer
+        _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
     }
 
     void
-    ClientSession::_handle_scram_auth_continue(const std::string_view data)
+    ClientSession::_handle_scram_auth_continue(const std::string_view data, uint64_t seq_id)
     {
         char *raw = ::strdup(data.data()); // copy to remove constness
         const char *client_final_nonce = nullptr;
@@ -529,15 +555,18 @@ namespace pg_proxy {
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
+        // log buffer
+        _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
+
         // auth successful on client side; see if a primary server side session exists
         if (_primary_session.expired()) {
             // create a new server session for primary
-            _create_server_session(Session::Type::PRIMARY);
+            _create_server_session(Session::Type::PRIMARY, seq_id);
             // wait until this is done before auth done messages are sent
             // server session will notify client through _process_message
         } else {
             // auth is done, send auth done messages
-            _send_auth_done();
+            _send_auth_done(seq_id);
         }
     }
 
@@ -564,7 +593,7 @@ namespace pg_proxy {
     }
 
     void
-    ClientSession::_send_auth_done()
+    ClientSession::_send_auth_done(uint64_t seq_id)
     {
         // send auth ok, parameter status, backend key data, ready for query
         // 1024 should be more than big enough for all of these
@@ -592,6 +621,9 @@ namespace pg_proxy {
 
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         assert(n == buffer->size());
+
+        // log buffer
+        _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
 
         // free login info
         _login.reset();
@@ -644,44 +676,48 @@ namespace pg_proxy {
         BufferList blist;
         _read_msg(blist);
 
-        for (auto buffer: blist.buffers)
-        {
+        for (auto buffer: blist.buffers) {
             char code = buffer->get();
-            buffer->get32(); // skip msg len
+            int32_t len = buffer->get32();
+            uint64_t seq_id = _gen_seq_id();
+
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client got request code: {}, seq_id: {}", code, seq_id);
+
+            _log_buffer(true, code, len, buffer->data(), seq_id);
 
             // handle request
             switch (code) {
             case 'P':
                 // parse - save query as prepared stmt
-                _handle_parse(buffer);
+                _handle_parse(buffer, seq_id);
                 break;
 
             case 'B':
                 // bind - binds a prepared statement to a portal
-                _handle_bind(buffer);
+                _handle_bind(buffer, seq_id);
                 break;
 
             case 'D': {
                 // describe - describe row format of result when executed
-                _handle_describe(buffer);
+                _handle_describe(buffer, seq_id);
                 break;
             }
 
             case 'C': {
                 // close portal or prepared stmt -- release it
-                _handle_close(buffer);
+                _handle_close(buffer, seq_id);
                 break;
             }
 
             case 'E': {
                 // execute portal
-                _handle_execute(buffer);
+                _handle_execute(buffer, seq_id);
                 break;
             }
 
             case 'Q':
                 // query - handle simple query (semicolon separated)
-                _handle_simple_query(buffer);
+                _handle_simple_query(buffer, seq_id);
                 break;
 
             case 'X':
@@ -691,11 +727,11 @@ namespace pg_proxy {
                 return;
 
             case 'F': // function call
-                _handle_function_call(buffer);
+                _handle_function_call(buffer, seq_id);
                 break;
 
             case 'S': // sync
-                _handle_sync(buffer);
+                _handle_sync(buffer, seq_id);
                 break;
 
             case 'H': // flush
@@ -703,7 +739,7 @@ namespace pg_proxy {
             case 'c': // copy done
             case 'd': // copy data
                 // forward to server, should have associated server session
-                _forward_to_server(buffer);
+                _forward_to_server(buffer, seq_id);
                 break;
 
             default:
@@ -714,7 +750,7 @@ namespace pg_proxy {
     }
 
     void
-    ClientSession::_forward_to_server(BufferPtr buffer)
+    ClientSession::_forward_to_server(BufferPtr buffer, uint64_t seq_id)
     {
         // forward the message to the server session
         if (get_associated_session() == nullptr) {
@@ -723,23 +759,23 @@ namespace pg_proxy {
         }
 
         // create a message and queue it
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer);
-        queue_msg(msg);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id);
+        _send_msg(msg, true);
     }
 
     void
-    ClientSession::_handle_function_call(BufferPtr buffer)
+    ClientSession::_handle_function_call(BufferPtr buffer, uint64_t seq_id)
     {
         // doc's state that this should really be deprecated and not used
         // instead clients should use a prepared statement
 
         // send to primary server session
-        _select_session(PRIMARY);
-        queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer));
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id);
+        _send_msg(msg, false);
     }
 
     void
-    ClientSession::_handle_parse(BufferPtr buffer)
+    ClientSession::_handle_parse(BufferPtr buffer, uint64_t seq_id)
     {
         // PARSE packet request, create prepared statement
         // statement string -- prepared name
@@ -768,15 +804,14 @@ namespace pg_proxy {
         _stmt_cache.add(query_stmt);
 
         // create the server message
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE, query_stmt);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE, query_stmt, seq_id);
 
         // select a server session and queue message
-        _select_session(is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, is_read_safe);
     }
 
     void
-    ClientSession::_handle_bind(BufferPtr buffer)
+    ClientSession::_handle_bind(BufferPtr buffer, uint64_t seq_id)
     {
         // BIND packet request, bind a prepared statement to a portal
         // portal string
@@ -805,19 +840,18 @@ namespace pg_proxy {
         qs->dependency = prepared_stmt;
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, qs);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_BIND, qs, seq_id);
         if (!lookup_result.second) {
             // add dependency if not in current transaction
             msg->add_dependency(prepared_stmt);
         }
 
         // queue message to server session
-        _select_session(prepared_stmt->is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, prepared_stmt->is_read_safe);
     }
 
     void
-    ClientSession::_handle_describe(BufferPtr buffer)
+    ClientSession::_handle_describe(BufferPtr buffer, uint64_t seq_id)
     {
         // DESCRIBE packet request, get row details for a prepared statement or portal
         // type: S - statement, P - portal
@@ -854,19 +888,18 @@ namespace pg_proxy {
         qs->dependency = query_stmt;
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE, qs);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_DESCRIBE, qs, seq_id);
         if (!lookup_result.second) {
             // add dependency if not in current transaction
             msg->add_dependency(query_stmt);
         }
 
         // queue message to server session
-        _select_session(query_stmt->is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, query_stmt->is_read_safe);
     }
 
     void
-    ClientSession::_handle_execute(BufferPtr buffer)
+    ClientSession::_handle_execute(BufferPtr buffer, uint64_t seq_id)
     {
         // EXECUTE packet request, execute portal
         // portal name
@@ -906,15 +939,14 @@ namespace pg_proxy {
         QueryStmtPtr qs = _stmt_cache.add(qs_type, buffer, query_stmt->is_read_safe);
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXECUTE, qs);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXECUTE, qs, seq_id);
 
         // select a server session and notify it of this message
-        _select_session(query_stmt->is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, query_stmt->is_read_safe);
     }
 
     void
-    ClientSession::_handle_close(BufferPtr buffer)
+    ClientSession::_handle_close(BufferPtr buffer, uint64_t seq_id)
     {
         // CLOSE packet, close prepared statement or portal
         // type: S - statement, P - portal
@@ -950,35 +982,33 @@ namespace pg_proxy {
         }
 
         // create message with dependencies/provides
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_CLOSE, qs);
-
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_CLOSE, qs, seq_id);
         if (dep_stmt != nullptr) {
             msg->add_dependency(dep_stmt);
         }
 
         // notify server session
-        _select_session(qs->is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, qs->is_read_safe);
     }
 
     void
-    ClientSession::_handle_sync(BufferPtr buffer)
+    ClientSession::_handle_sync(BufferPtr buffer, uint64_t seq_id)
     {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Sync request");
         if (get_associated_session() == nullptr) {
             // this is a weird case as it doesn't make sense to issue
             // a sync without a set of other extended queries preceeding it
             // but we'll handle it anyway, just issue a sync to the server
-            _select_session(REPLICA);
+            _select_session(REPLICA, seq_id);
         }
 
         QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer,
             associated_session_type() == REPLICA);
-        queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs));
+        queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs, seq_id));
     }
 
     void
-    ClientSession::_handle_simple_query(BufferPtr buffer)
+    ClientSession::_handle_simple_query(BufferPtr buffer, uint64_t seq_id)
     {
         std::string_view query = buffer->get_string();
 
@@ -998,16 +1028,59 @@ namespace pg_proxy {
         QueryStmtPtr qs = _parse_simple_query(buffer, query, dependencies);
 
         // create message for server for query
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, qs);
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY, qs, seq_id);
         msg->set_dependencies(std::move(dependencies));
 
         // select session and queue msg
-        _select_session(qs->is_read_safe ? REPLICA : PRIMARY);
-        queue_msg(msg);
+        _send_msg(msg, qs->is_read_safe);
+    }
+
+    void
+    ClientSession::_send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session)
+    {
+        // explicit session send, not usual
+        if (session) {
+            queue_msg(msg, session);
+            return;
+        }
+
+        // not in shadow mode or not readonly, send to single server
+        if (!_shadow_mode || !is_readonly) {
+            // select a server session and notify it of this message
+            session = _select_session(is_readonly ? REPLICA : PRIMARY, msg->seq_id());
+            queue_msg(msg);
+            return;
+        }
+
+        // both shadow mode and readonly; we send to both primary and replica
+        assert(_shadow_mode && is_readonly);
+
+        // make sure to send to primary first; so get PRIMARY session
+        session = _select_session(PRIMARY, msg->seq_id());
+        queue_msg(msg, session);
+
+        // then clone msg and get a replica session
+        // don't use _select_session() as it uses/sets the associated session
+        msg = msg->clone();
+        session = nullptr;
+        if (!_replica_session.expired()) {
+            // have a replica session use it
+            session = _replica_session.lock();
+        } else {
+            // create a new replica session; shouldn't be common to get here
+            session = _create_server_session(REPLICA, msg->seq_id());
+        }
+
+        assert (session != nullptr);
+        // make sure queue_msg doesn't set associated session
+        assert (get_associated_session() != nullptr);
+        queue_msg(msg, session);
+
+        return;
     }
 
     ServerSessionPtr
-    ClientSession::_select_session(Session::Type type)
+    ClientSession::_select_session(Session::Type type, uint64_t seq_id)
     {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Selecting server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
 
@@ -1030,23 +1103,26 @@ namespace pg_proxy {
         if (type == REPLICA && !_replica_session.expired()) {
             // use replica session
             session = _replica_session.lock();
+            assert (!_shadow_mode);
             set_associated_session(session);
             return session;
         }
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Creating new server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
-        session = _create_server_session(type);
+        session = _create_server_session(type, seq_id);
         assert (session != nullptr);
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new server session: id={}", session->id());
 
+        // set associated session
+        assert(!_shadow_mode || type == PRIMARY);
         set_associated_session(session);
 
         return session;
     }
 
     ServerSessionPtr
-    ClientSession::_create_server_session(Session::Type type)
+    ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
     {
         // get database instance from either primary or replica set
         DatabaseInstancePtr instance = nullptr;
@@ -1074,6 +1150,13 @@ namespace pg_proxy {
         } else {
             // store reference to replica session
             _replica_session = session;
+
+            // if client is in shadow mode, then the replica session
+            // becomes a shadow session, not returning results to the client
+            if (_shadow_mode) {
+                // set shadow mode on the session
+                session->set_shadow_mode(true);
+            }
         }
         session->pin_client_session(shared_from_this());
 
@@ -1087,7 +1170,7 @@ namespace pg_proxy {
         _server->register_session(session);
 
         // queue client startup message, response comes in _process_msg()
-        SessionMsgPtr startup_msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_STARTUP);
+        SessionMsgPtr startup_msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_STARTUP, seq_id);
         queue_msg(startup_msg, session);
 
         // at this point we'll return through process()

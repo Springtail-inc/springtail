@@ -13,8 +13,7 @@
 #include <proxy/auth/sha256.h>
 #include <proxy/auth/scram.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server,
@@ -31,6 +30,8 @@ namespace pg_proxy {
     void
     ServerSession::_process_msg(SessionMsgPtr msg)
     {
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Server session processing message: type: {:d}, seq_id: {}", (int8_t)msg->type(), msg->seq_id());
+
         // entry point for message processing from client session
         switch(msg->type()) {
         case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
@@ -62,6 +63,7 @@ namespace pg_proxy {
             BufferPtr buffer = msg->buffer();
             ssize_t n = _connection->write(buffer->data(), buffer->size());
             assert(n == buffer->size());
+            _log_buffer(false, '\0', buffer->size(), buffer->data(), msg->seq_id());
             break;
         }
 
@@ -126,6 +128,9 @@ namespace pg_proxy {
 
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Server session message: code={}, length={}", code, msg_length);
 
+        assert(_pending_queue.size() > 0);
+        SessionMsgPtr msg = _pending_queue.front()->msg;
+
         // first handle messages where we just need to forward to client
         switch(code) {
             // responses to extended query protocol
@@ -158,7 +163,7 @@ namespace pg_proxy {
             case 'D': // Data row
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
-                _stream_to_remote_session(code, msg_length);
+                _stream_to_remote_session(code, msg_length, msg->seq_id());
                 return;
         }
 
@@ -168,6 +173,9 @@ namespace pg_proxy {
         ssize_t n = _connection->read(buffer->data(), msg_length);
         assert(n == msg_length);
         buffer->set_size(msg_length);
+
+        // log the buffer
+        _log_buffer(true, code, msg_length, buffer->data(), msg->seq_id());
 
         switch(code) {
             case 'R': {
@@ -209,7 +217,7 @@ namespace pg_proxy {
                     // XXX may want to send these to client
                     break;
                 }
-                _send_to_remote_session(code, msg_length, buffer->data());
+                _send_to_remote_session(code, msg_length, buffer->data(), msg->seq_id());
 
                 break;
             }
@@ -226,7 +234,7 @@ namespace pg_proxy {
                 // Error response
                 // handle the error code, this determines if error is fatal
                 // it also sends the error response to the client
-                _handle_error_code(buffer);
+                _handle_error_code(buffer, msg->seq_id());
                 if (_state == ERROR) {
                     return;
                 }
@@ -261,7 +269,7 @@ namespace pg_proxy {
 
                 if (_state != DEPENDENCIES) {
                     // send ready for query to client
-                    _send_to_remote_session(code, 1, &status);
+                    _send_to_remote_session(code, 1, &status, msg->seq_id());
                 }
 
                 // handle the ready for query response
@@ -277,18 +285,6 @@ namespace pg_proxy {
         }
 
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Done msg handling");
-    }
-
-    void
-    ServerSession::_discard_msg(int32_t msg_length)
-    {
-        // discard message data
-        char buffer[1024];
-        while (msg_length > 0) {
-            int n = _connection->read(buffer, std::min(msg_length, 1024));
-            assert (n == std::min(msg_length, 1024));
-            msg_length -= n;
-        }
     }
 
     void
@@ -601,7 +597,7 @@ namespace pg_proxy {
     }
 
     void
-    ServerSession::_handle_simple_query(const std::string &query)
+    ServerSession::_send_simple_query(const std::string &query, uint64_t seq_id)
     {
         // Send simple query to server
         BufferPtr write_buffer = BufferPool::get_instance()->get(4 + query.size() + 2);
@@ -611,10 +607,13 @@ namespace pg_proxy {
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
+
+        // log the buffer
+        _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
     }
 
     void
-    ServerSession::_handle_error_code(BufferPtr buffer)
+    ServerSession::_handle_error_code(BufferPtr buffer, uint64_t seq_id)
     {
         // Error response
         SPDLOG_ERROR("Error response from server");
@@ -627,7 +626,7 @@ namespace pg_proxy {
         ProxyProtoError::decode_error(buffer, severity, text, code, message);
 
         // send error to client
-        _send_to_remote_session('E', buffer->capacity(), buffer->data());
+        _send_to_remote_session('E', buffer->capacity(), buffer->data(), seq_id);
 
         // depending on error, behavior is different
         // if text is "FATAL" or "PANIC" we should stop, sever connection
@@ -836,7 +835,7 @@ namespace pg_proxy {
                 continue;
             }
             query_status->dependency_count++;
-            _send_dependency(dep);
+            _send_dependency(dep, msg->seq_id());
         }
 
         // send the message to server
@@ -855,23 +854,28 @@ namespace pg_proxy {
         QueryStmtPtr qs = msg->data();
 
         if (qs->data_type == QueryStmt::DataType::SIMPLE) {
-            _handle_simple_query(qs->query());
+            // send the simple query using the query string
+            _send_simple_query(qs->query(), msg->seq_id());
         } else {
+            // send the data buffer
             assert (qs->data_type == QueryStmt::DataType::PACKET);
             BufferPtr buffer = qs->buffer();
             ssize_t n = _connection->write(buffer->data(), buffer->size());
             assert(n == buffer->size());
+
+            // log the buffer
+            _log_buffer(false, '\0', buffer->size(), buffer->data(), msg->seq_id());
         }
     }
 
     void
-    ServerSession::_send_dependency(const QueryStmtPtr query_stmt)
+    ServerSession::_send_dependency(const QueryStmtPtr query_stmt, uint64_t seq_id)
     {
         // check if we have a buffer to send or a simple query to send
         switch (query_stmt->data_type) {
             case QueryStmt::DataType::SIMPLE:
                 // send the simple query
-                _handle_simple_query(query_stmt->query());
+                _send_simple_query(query_stmt->query(), seq_id);
                 return;
 
             case QueryStmt::DataType::PACKET: {
@@ -879,6 +883,10 @@ namespace pg_proxy {
                 BufferPtr buffer = query_stmt->buffer();
                 ssize_t n = _connection->write(buffer->data(), buffer->size());
                 assert(n == buffer->size());
+
+
+                // log the buffer
+                _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
                 return;
             }
 
@@ -912,5 +920,4 @@ namespace pg_proxy {
 
         return std::make_shared<ServerSession>(connection, server, user, database, instance, type);
     }
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

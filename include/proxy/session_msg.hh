@@ -11,8 +11,7 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/history_cache.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** Messages between sessions */
     class SessionMsg {
@@ -43,21 +42,21 @@ namespace pg_proxy {
         };
 
         /** Constructor with data */
-        SessionMsg(Type type, QueryStmtPtr data)
-            : _type(type), _data(data)
+        SessionMsg(Type type, QueryStmtPtr data, uint64_t seq_id)
+            : _type(type), _data(data), _seq_id(seq_id)
         {}
 
         SessionMsg(Type type, MsgStatus &status)
             : _type(type), _status(status)
         {}
 
-        SessionMsg(Type type, BufferPtr buffer)
-            : _type(type), _buffer(buffer)
+        SessionMsg(Type type, BufferPtr buffer, uint64_t seq_id)
+            : _type(type), _buffer(buffer), _seq_id(seq_id)
         {}
 
         /** Constructor without data */
-        SessionMsg(Type type)
-            : _type(type)
+        SessionMsg(Type type, uint64_t seq_id=-1)
+            : _type(type), _seq_id(seq_id)
         {}
 
         /** Get type */
@@ -119,17 +118,36 @@ namespace pg_proxy {
             }
         }
 
+        /** Get number of completed queries */
         int completed() const {
             return _completed;
         }
 
-        /** Helper to create a session message */
-        static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr) {
-            return std::make_shared<SessionMsg>(type, data);
+        /** Get sequence id */
+        uint64_t seq_id() const {
+            return _seq_id;
         }
 
-        static std::shared_ptr<SessionMsg> create(Type type, BufferPtr data) {
-            return std::make_shared<SessionMsg>(type, data);
+        /** Clone the message */
+        std::shared_ptr<SessionMsg> clone() {
+            auto msg = std::make_shared<SessionMsg>(_type, _data, _seq_id);
+            msg->_status = _status;
+            msg->_completed = _completed;
+            msg->_dependencies = _dependencies;
+            return msg;
+        }
+
+        /** Helper to create a session message */
+        static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr, uint64_t seq_id=-1) {
+            return std::make_shared<SessionMsg>(type, data, seq_id);
+        }
+
+        static std::shared_ptr<SessionMsg> create(Type type, BufferPtr data, uint64_t seq_id) {
+            return std::make_shared<SessionMsg>(type, data, seq_id);
+        }
+
+        static std::shared_ptr<SessionMsg> create(Type type, uint64_t seq_id) {
+            return std::make_shared<SessionMsg>(type, seq_id);
         }
 
     private:
@@ -139,8 +157,8 @@ namespace pg_proxy {
         MsgStatus _status;                       ///< message status
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
+        uint64_t _seq_id=0;                      ///< sequence id for this message
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
-} // namespace springtail
-} // namespace pg_proxy
+} // namespace springtail::pg_proxy

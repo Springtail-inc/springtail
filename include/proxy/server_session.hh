@@ -5,8 +5,7 @@
 #include <proxy/user_mgr.hh>
 #include <proxy/buffer_pool.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     class ClientSession; ///< forward declaration
 
@@ -48,10 +47,18 @@ namespace pg_proxy {
 
         ~ServerSession() {};
 
+        /**
+         * @brief Pin this session to a client session
+         * @return true if pinned
+         */
         bool is_pinned() const {
             return _is_pinned;
         }
 
+        /**
+         * @brief Pin this session to a client session
+         * @param client_session client session to pin
+         */
         void pin_client_session(std::weak_ptr<ClientSession> client_session) {
             _client_session = client_session;
             _is_pinned = true;
@@ -72,12 +79,12 @@ namespace pg_proxy {
         void _process_msg(SessionMsgPtr msg) override;
 
         bool _is_pinned = false;
+        bool _is_shadow = false;   ///< true if this is a shadow session, replica shadowing primary
         std::weak_ptr<ClientSession> _client_session; ///< client session
 
         DatabaseInstancePtr _instance;             ///< database instance
 
         // message state for current client query
-        SessionMsgPtr _current_msg;                ///< current message being processed
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
         std::set<std::string> _stmts;              ///< completed prepared statement ids
@@ -95,9 +102,12 @@ namespace pg_proxy {
          * Send required statements to fulfil dependency
          * @param dependency dependency to fulfil
          */
-        void _send_dependency(const QueryStmtPtr dependency);
+        void _send_dependency(const QueryStmtPtr dependency, uint64_t seq_id);
 
         void _send_server_msg(QueryStatusPtr query_status);
+
+        /** Send simple query */
+        void _send_simple_query(const std::string &query, uint64_t seq_id);
 
         /** Handle SSL handshake */
         void _handle_ssl_handshake();
@@ -111,11 +121,8 @@ namespace pg_proxy {
         /** Handle replies from server */
         void _handle_message_from_server();
 
-        /** Handle simple query */
-        void _handle_simple_query(const std::string &query);
-
         /** Handle error code 'E' */
-        void _handle_error_code(BufferPtr buffer);
+        void _handle_error_code(BufferPtr buffer, uint64_t seq_id);
 
         /** Handle md5 auth send response */
         void _handle_auth_md5(BufferPtr buffer);
@@ -143,10 +150,6 @@ namespace pg_proxy {
 
         /** Handle ready for query message from server */
         void _handle_ready_for_query_response(char xact_status);
-
-        /** Discard message data */
-        void _discard_msg(int32_t msg_length);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

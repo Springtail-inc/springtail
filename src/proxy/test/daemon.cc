@@ -46,12 +46,14 @@ int main(int argc, char* argv[])
     std::filesystem::path key;
     int port;
     int num_threads;
-    bool enable_ssl;
+    bool enable_ssl = false;
+    bool shadow_mode = false;
 
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
-        ("ssl,s", boost::program_options::value<bool>(&enable_ssl)->default_value(true), "Enable SSL")
+        ("ssl,s", boost::program_options::value<bool>(&enable_ssl)->default_value(false), "Enable SSL")
+        ("shadow,S", boost::program_options::value<bool>(&shadow_mode)->default_value(false), "Shadow mode")
         ("port,p", boost::program_options::value<int>(&port)->default_value(8888), "Proxy port number")
         ("threads,n", boost::program_options::value<int>(&num_threads)->default_value(4), "Number of threads")
         ("cert,c", boost::program_options::value<std::filesystem::path>(&certificate)->default_value(std::filesystem::path("cert.pem")), "Certificate file")
@@ -73,7 +75,9 @@ int main(int argc, char* argv[])
 
     springtail_init();
 
-    ProxyServerPtr server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, enable_ssl);
+    LoggerPtr logger = std::make_shared<Logger>("/tmp/springtail/proxy.log", 1024*1024*100, 5);
+
+    ProxyServerPtr server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
 
     setup(server);
 

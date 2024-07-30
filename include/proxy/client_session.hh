@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <proxy/session.hh>
 #include <proxy/server_session.hh>
@@ -13,8 +14,7 @@
 #include <proxy/history_cache.hh>
 #include <proxy/parser.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
@@ -30,7 +30,8 @@ namespace pg_proxy {
 
         /** Construct a connection with the given socket. */
         ClientSession(ProxyConnectionPtr connection,
-                      ProxyServerPtr server);
+                      ProxyServerPtr server,
+                      bool shadow_mode=false);
 
         ~ClientSession();
 
@@ -61,7 +62,9 @@ namespace pg_proxy {
         std::weak_ptr<ServerSession> _primary_session; ///< primary server session
         std::weak_ptr<ServerSession> _replica_session; ///< replica server session
 
-        void _process_startup_msg(int32_t code, int32_t msg_length);
+        bool _shadow_mode = false; ///< shadow mode flag; if true, send to primary and replica
+
+        void _process_startup_msg(int32_t msg_length, uint64_t seq_id);
         void _process_ssl_request();
 
         void _encode_parameter_status(BufferPtr buffer, const std::string &key, const std::string &value);
@@ -73,25 +76,25 @@ namespace pg_proxy {
         void _handle_startup();
         void _handle_ssl_handshake();
         void _handle_auth();
-        void _handle_scram_auth(const std::string_view data);
-        void _handle_scram_auth_continue(const std::string_view data);
+        void _handle_scram_auth(const std::string_view data, uint64_t seq_id);
+        void _handle_scram_auth_continue(const std::string_view data, uint64_t seq_id);
         void _handle_server_error(const std::string_view msg);
 
-        void _handle_simple_query(BufferPtr buffer);
-        void _handle_parse(BufferPtr buffer);
-        void _handle_bind(BufferPtr buffer);
-        void _handle_describe(BufferPtr buffer);
-        void _handle_execute(BufferPtr buffer);
-        void _handle_close(BufferPtr buffer);
-        void _handle_sync(BufferPtr buffer);
-        void _handle_function_call(BufferPtr buffer);
+        void _handle_simple_query(BufferPtr buffer, uint64_t seq_id);
+        void _handle_parse(BufferPtr buffer, uint64_t seq_id);
+        void _handle_bind(BufferPtr buffer, uint64_t seq_id);
+        void _handle_describe(BufferPtr buffer, uint64_t seq_id);
+        void _handle_execute(BufferPtr buffer, uint64_t seq_id);
+        void _handle_close(BufferPtr buffer, uint64_t seq_id);
+        void _handle_sync(BufferPtr buffer, uint64_t seq_id);
+        void _handle_function_call(BufferPtr buffer, uint64_t seq_id);
 
-        void _forward_to_server(BufferPtr buffer);
+        void _forward_to_server(BufferPtr buffer, uint64_t seq_id);
 
-        void _send_auth_req();
-        void _send_auth_done();
+        void _send_auth_req(uint64_t seq_id);
+        void _send_auth_done(uint64_t seq_id);
 
-        ServerSessionPtr _create_server_session(Session::Type type);
+        ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
 
         /** Does primary server pool exist */
         bool _primary_pool_exists();
@@ -113,11 +116,13 @@ namespace pg_proxy {
         QueryStmt::Type _remap_parse_type(const Parser::StmtContextPtr context) const;
 
         /** Select a server session based on type */
-        ServerSessionPtr _select_session(Type type);
+        ServerSessionPtr _select_session(Type type, uint64_t seq_id);
 
         /** Release server session back to session pool */
         void _release_server_session();
+
+        /** Send message to session, if session is null, select session first */
+        void _send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session=nullptr);
     };
     using ClientSessionPtr = std::shared_ptr<ClientSession>;
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy
