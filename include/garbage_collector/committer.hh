@@ -91,12 +91,13 @@ namespace springtail::gc {
         /**
          * Worker helper function to process mutations to a given extent ID.
          */
-        void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid);
+        void _process_rows(MutableTablePtr table, uint64_t extent_id,
+                           uint64_t xid, uint64_t txid, uint64_t tlsn);
 
         /**
          * Applies a schema change to a cache page of a table.
          */
-        void _apply_schema_change(StorageCache::PagePtr page, const SchemaChange &change, uint64_t xid, uint64_t lsn);
+        StorageCache::PagePtr _apply_schema_changes(StorageCache::PagePtr page, uint64_t access_xid, uint64_t target_xid, uint64_t target_lsn);
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.

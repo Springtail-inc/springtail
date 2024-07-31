@@ -35,6 +35,7 @@ namespace springtail {
         LOG_CACHE = 0x200,
         LOG_SCHEMA = 0x400,
         LOG_GC = 0x800,
+        LOG_SYS_TBL_MGR = 0x1000,
         LOG_ALL = 0xFFFFFFFF
     };
 

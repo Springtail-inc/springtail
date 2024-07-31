@@ -109,13 +109,13 @@ namespace springtail {
     ExtentSchemaPtr
     Table::extent_schema() const
     {
-        return SchemaMgr::get_instance()->get_extent_schema(_id, _xid);
+        return SchemaMgr::get_instance()->get_extent_schema(_id, XidLsn(_xid));
     }
 
     SchemaPtr
     Table::schema(uint64_t extent_xid) const
     {
-        return SchemaMgr::get_instance()->get_schema(_id, extent_xid, _xid);
+        return SchemaMgr::get_instance()->get_schema(_id, XidLsn(extent_xid), XidLsn(_xid));
     }
 
     Table::Iterator
@@ -163,10 +163,15 @@ namespace springtail {
     Table::Iterator
     Table::inverse_lower_bound(TuplePtr search_key)
     {
+        // if the priamry index is empty, return end()
+        if (_primary_index->empty()) {
+            return end();
+        }
+
         // find the extent that could contain the inverse_lower_bound() key
         auto &&i = _primary_index->lower_bound(search_key);
         if (i == _primary_index->end()) {
-            return end();
+            --i;
         }
 
         // read the extent and find the inverse_lower_bound() of the key within it
@@ -175,8 +180,11 @@ namespace springtail {
         // find the inverse_lower_bound() of the key within the data extent
         auto &&j = page->inverse_lower_bound(search_key, _schema);
 
-        // note: the primary index indicates that there is a value <= the search_key in this page
-        assert(j != page->end());
+        // note: the index found this page, but if it's the first page in the table, the key may be
+        //       less than the first entry, meaning no such inverse_lower_bound() exists
+        if (j == page->end()) {
+            return end();
+        }
 
         return Iterator(this, _primary_index, i, page, j);
     }
@@ -324,7 +332,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             ++_stats.row_count;
         }
     }
@@ -350,7 +358,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (did_insert && _id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (did_insert && _id > constant::MAX_SYSTEM_TABLE_ID) {
             ++_stats.row_count;
         }
     }
@@ -372,7 +380,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             --_stats.row_count;
         }
     }
@@ -529,7 +537,7 @@ namespace springtail {
         }
 
         // update the roots and stats in the system tables for non-system tables
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             auto table_mgr = TableMgr::get_instance();
 
             // note: don't currently keep table roots or table stats for system tables

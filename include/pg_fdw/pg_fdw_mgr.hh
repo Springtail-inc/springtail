@@ -79,7 +79,7 @@ namespace pg_fdw {
             : table(table), tid(tid), xid(xid), stats(table->get_stats())
         {
             // fetch the columns and column IDs for the table
-            columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+            columns = SchemaMgr::get_instance()->get_columns(tid, { xid, constant::MAX_LSN });
 
             // populate pkey column ids
             int num_pkeys = 0;

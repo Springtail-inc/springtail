@@ -25,6 +25,8 @@ namespace springtail {
         static inline constexpr char STORAGE_CONFIG[] = "storage";
         /** Logging config section */
         static inline constexpr char LOGGING_CONFIG[] = "logging";
+        /** SysTbl mgr section */
+        static inline constexpr char SYS_TBL_MGR_CONFIG[] = "sys_tbl_mgr";
 
         /** Default properties file, defined by make -D option, or macro above */
         static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;

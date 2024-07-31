@@ -8,7 +8,7 @@ namespace springtail::sys_tbl {
      * The maximum ID of a system table.  Currently set to 100, but could be higher based on
      * Postgres behavior.
      */
-    constexpr uint32_t MAX_SYS_TBL_ID = 100;
+    constexpr uint32_t MAX_ID = 100;
 
     /**
      * Helper functions and constants for the table_names table.
@@ -47,22 +47,10 @@ namespace springtail::sys_tbl {
         };
 
         struct Primary {
-            static constexpr uint32_t NAMESPACE = 0;
-            static constexpr uint32_t NAME = 1;
-            static constexpr uint32_t XID = 2;
-            static constexpr uint32_t LSN = 3;
-            static constexpr uint32_t EXTENT_ID = 4;
-
-            static const std::vector<SchemaColumn> SCHEMA;
-            static const std::vector<std::string> KEY;
-        };
-
-        struct Secondary {
             static constexpr uint32_t TABLE_ID = 0;
             static constexpr uint32_t XID = 1;
             static constexpr uint32_t LSN = 2;
             static constexpr uint32_t EXTENT_ID = 3;
-            static constexpr uint32_t ROW_ID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
             static const std::vector<std::string> KEY;
@@ -78,6 +66,18 @@ namespace springtail::sys_tbl {
                 fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
                 return std::make_shared<FieldTuple>(fields, nullptr);
             }
+        };
+
+        struct Secondary {
+            static constexpr uint32_t NAMESPACE = 0;
+            static constexpr uint32_t NAME = 1;
+            static constexpr uint32_t XID = 2;
+            static constexpr uint32_t LSN = 3;
+            static constexpr uint32_t EXTENT_ID = 4;
+            static constexpr uint32_t ROW_ID = 5;
+
+            static const std::vector<SchemaColumn> SCHEMA;
+            static const std::vector<std::string> KEY;
         };
     };
 
@@ -142,8 +142,9 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t TABLE_ID = 0;
             static constexpr uint32_t INDEX_ID = 1;
             static constexpr uint32_t XID = 2;
-            static constexpr uint32_t POSITION = 3;
-            static constexpr uint32_t COLUMN_ID = 4;
+            static constexpr uint32_t LSN = 3;
+            static constexpr uint32_t POSITION = 4;
+            static constexpr uint32_t COLUMN_ID = 5;
 
             static const std::vector<SchemaColumn> SCHEMA;
 
@@ -151,13 +152,15 @@ namespace springtail::sys_tbl {
             fields(uint64_t table_id,
                    uint64_t index_id,
                    uint64_t xid,
+                   uint64_t lsn,
                    uint32_t position,
                    uint32_t column_id)
             {
-                auto fields = std::make_shared<FieldArray>(5);
+                auto fields = std::make_shared<FieldArray>(6);
                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
                 fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
                 fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
                 fields->at(COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(column_id);
                 return fields;
@@ -168,18 +171,20 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t TABLE_ID = 0;
             static constexpr uint32_t INDEX_ID = 1;
             static constexpr uint32_t XID = 2;
-            static constexpr uint32_t POSITION = 3;
-            static constexpr uint32_t EXTENT_ID = 4;
+            static constexpr uint32_t LSN = 3;
+            static constexpr uint32_t POSITION = 4;
+            static constexpr uint32_t EXTENT_ID = 5;
 
             static const std::vector<SchemaColumn> SCHEMA;
             static const std::vector<std::string> KEY;
 
             static TuplePtr
-            key_tuple(uint64_t table_id, uint64_t index_id, uint64_t xid, uint32_t position) {
-                auto key_fields = std::make_shared<FieldArray>(4);
+            key_tuple(uint64_t table_id, uint64_t index_id, uint64_t xid, uint64_t lsn, uint32_t position) {
+                auto key_fields = std::make_shared<FieldArray>(5);
                 key_fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 key_fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
                 key_fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                key_fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
                 key_fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
                 return std::make_shared<FieldTuple>(key_fields, nullptr);
             }

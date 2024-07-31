@@ -316,7 +316,7 @@ namespace springtail::gc {
                             // note: will load the message into the write cache to be applied by the
                             //       committer (GC-2) when rolling the XID forward
                             auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, rel_id);
+                                                                       _state->entry->xid, _state->lsn, table_msg.oid);
                             _parser_queue->push(entry);
                         }
                         break;
@@ -340,7 +340,7 @@ namespace springtail::gc {
 
                             // pass to the workers
                             auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, rel_id);
+                                                                       _state->entry->xid, _state->lsn, table_msg.oid);
                             _parser_queue->push(entry);
                         }
                         break;
@@ -359,15 +359,13 @@ namespace springtail::gc {
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();
-                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, drop_msg.oid);
-                            _parser_queue->push(entry);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
 
                             // pass to the workers
                             auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, rel_id);
+                                                                       _state->entry->xid, _state->lsn, drop_msg.oid);
                             _parser_queue->push(entry);
                         }
                         break;

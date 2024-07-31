@@ -113,7 +113,7 @@ dump_table(uint64_t tid, uint64_t xid)
 {
     TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
     ExtentSchemaPtr schema = table->extent_schema();
-    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, { xid, constant::MAX_LSN });
 
     auto fields = schema->get_fields();
     FormData_pg_attribute attrdata[fields->size()];

@@ -32,6 +32,8 @@ include(DSymUtil)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wno-sign-compare -fpic")
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 
 ## add checks for thread data races: https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual
@@ -45,6 +47,7 @@ find_package(cpptrace)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # Boost settings
 set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
@@ -77,6 +80,7 @@ add_subdirectory(src/benchmarks)
 add_subdirectory(src/garbage_collector)
 add_subdirectory(src/pg_repl)
 add_subdirectory(src/write_cache)
+add_subdirectory(src/sys_tbl_mgr)
 add_subdirectory(src/pg_log_mgr)
 add_subdirectory(src/xid_mgr)
 add_subdirectory(src/thrift)

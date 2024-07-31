@@ -10,6 +10,11 @@ namespace springtail {
 
     class ExtentType;
 
+    struct SchemaMetadata {
+        std::vector<SchemaColumn> columns;
+        std::vector<SchemaColumn> history;
+    };
+
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
@@ -30,7 +35,7 @@ namespace springtail {
          * Retrieve the column metadata for a given table at a given XID/LSN.
          * Map from column ID/column position to column metadata.
          */
-        std::map<uint32_t, SchemaColumn> get_columns(uint64_t table_id, uint64_t xid, uint64_t lsn);
+        std::map<uint32_t, SchemaColumn> get_columns(uint64_t table_id, const XidLsn &xid);
 
         /**
          * Retrieve the schema for a given table at a given point in time.
@@ -39,7 +44,7 @@ namespace springtail {
          * @param target_xid The XID that the query is executing at.
          * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
          */
-        std::shared_ptr<Schema> get_schema(uint64_t table_id, uint64_t extent_xid, uint64_t target_xid, uint64_t lsn=constant::MAX_LSN);
+        std::shared_ptr<Schema> get_schema(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
@@ -51,8 +56,7 @@ namespace springtail {
          * @param lsn The LSN that we need the schema at.  Defaults to the MAX_LSN, providing the
          *            schema at the point after all changes in the XID have been applied.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, uint64_t xid,
-                                                        uint64_t lsn = constant::MAX_LSN);
+        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, const XidLsn &xid);
 
         /**
          * Helper function to generate a SchemaUpdate that defines the change between the old and
@@ -65,7 +69,7 @@ namespace springtail {
          */
         SchemaColumn generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
                                      const std::map<uint32_t, SchemaColumn> &new_schema,
-                                     uint64_t xid, uint64_t lsn);
+                                     const XidLsn &xid);
 
     protected:
         static SchemaMgr *_instance; ///< static instance (singleton)
@@ -87,32 +91,22 @@ namespace springtail {
             SchemaInfo(uint64_t table_id);
 
             /**
-             * Retrieve the keys for an index of the table.
-             *
-             * @param index_id The index to retrieve the keys for.
-             * @param xid The XID at which to retrieve the keys.
-             */
-            std::vector<std::string> get_index_keys(uint64_t index_id, uint64_t xid);
-
-            /**
              * Retrieve the schema for an extent written at a specific XID.
              *
              * @param extent_xid The XID of the extent being processed.
              * @param lsn The LSN within the XID at which the schema should be constructed.
              */
-            std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t extent_xid, uint64_t lsn);
+            std::shared_ptr<ExtentSchema> get_extent_schema(const XidLsn &xidlsn);
 
             /**
              * Construct a VirtualSchema on top of an ExtentSchema that brings the schema forward to
              * the provided target XID and LSN so that data can be read from the extent as thought
              * it were at the target XID.
              *
-             * @param extent_xid The XID that the base extent was written at.
-             * @param target_xid The XID that the query is executing at.
-             * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
+             * @param access_xid The XID/LSN that the base extent was written at.
+             * @param target_xid The XID/LSN that the data is being used at.
              */
-            std::shared_ptr<VirtualSchema> get_virtual_schema(uint32_t extent_xid, uint64_t target_xid, uint64_t lsn=constant::MAX_LSN);
-
+            std::shared_ptr<VirtualSchema> get_virtual_schema(const XidLsn &access_xid, const XidLsn &target_xid);
 
             /**
              * Retrieve the set of columns that are valid at the provided XID/LSN.
@@ -123,19 +117,17 @@ namespace springtail {
         private:
             /**
              * Read the schema metadata for the table.  Pulls the full schema history so always need
-             * to read the latest available XID.
+             * to read the latest available XID of the Schema system table.
              * @param table_id The table to read schema information for.
              */
             void _read_schema_table(uint64_t table_id);
 
-            void _read_indexes_table(uint64_t table_id);
-
             /**
-             * Read the schema history for the table.  Pulls the full history of changes so always
-             * need to read the latest available XID.
-             * @param table_id The table to read schema history for.
+             * Read the index metadata for the table.  Pulls the full index history so always need
+             * to read the latest available XID of the Indexes system table.
+             * @param table_id The table to read schema information for.
              */
-            void _read_schema_history_table(uint64_t table_id);
+            void _read_indexes_table(uint64_t table_id);
 
         private:
             /**
@@ -146,15 +138,10 @@ namespace springtail {
              */
             std::map<uint32_t, std::map<XidLsn, SchemaColumn, std::greater<XidLsn>>> _column_map;
 
-            // std::map<uint32_t, std::map<uint64_t, std::vector<SchemaColumn>, std::greater<uint64_t>>> _column_map;
-
             /**
-             * A map from <xid> to <primary key>, where primary key is defined as an ordered set of
-             * columns that make up the primary index.
+             * A map of index ID -> xid/lsn -> column ID -> index key position.
              */
-            std::map<uint64_t, std::vector<uint32_t>, std::greater<uint64_t>> _primary_index;
-
-            std::map<uint64_t, std::map<uint64_t, std::vector<uint32_t>, std::greater<uint64_t>>> _secondary_indexes;
+            std::map<uint64_t, std::map<XidLsn, std::map<uint32_t, uint32_t>, std::greater<XidLsn>>> _indexes;
         };
 
     private:

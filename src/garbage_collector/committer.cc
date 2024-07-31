@@ -1,4 +1,6 @@
 #include <garbage_collector/committer.hh>
+
+#include <storage/constants.hh>
 #include <storage/table_mgr.hh>
 
 namespace springtail::gc {
@@ -53,7 +55,7 @@ namespace springtail::gc {
                         // if any of the changes are a truncate, then we will ignore all row
                         // mutations before the last truncate XID/LSN
                         // note: this assumes that the changes are coming back in XID/LSN order
-                        if (change.op == TableOp::TRUNCATE) {
+                        if (change.op == WriteCacheClient::TableOp::TRUNCATE) {
                             txid = change.xid;
                             tlsn = change.xid_seq;
                         }
@@ -64,7 +66,8 @@ namespace springtail::gc {
 
                     // check if we need to perform a table truncate
                     if (txid > 0) {
-                        table->truncate();
+                        // XXX
+                        // table->truncate();
                     }
 
                     boost::unique_lock lock(_mutex);
@@ -146,8 +149,8 @@ namespace springtail::gc {
             // note: if we want to implement roll-forward on query, then we could apply the schema
             //       changes after the data changes are written to the write cache
 
-            // pre-commit the XID
-            _xid_mgr->pre_commit_xid(xid);
+            // XXX pre-commit the XID
+            // _xid_mgr->pre_commit_xid(xid);
 
             // perform the schema mutations in the FDWs
 
@@ -190,7 +193,7 @@ namespace springtail::gc {
             if (entry->do_finalize) {
                 _process_finalize(entry->table, entry->xid);
             } else {
-                _process_rows(entry->table, entry->extent_id, entry->xid);
+                _process_rows(entry->table, entry->extent_id, entry->xid, entry->txid, entry->tlsn);
             }
 
             // reduce the number of outstanding extents for this table
@@ -254,11 +257,13 @@ namespace springtail::gc {
         std::vector<SchemaColumn> changes;
         if (mapped_eid != constant::UNKNOWN_EXTENT) {
             // 1) retrieve the XID at which the given extent was written
-            auto page = table->read_page(mapped_eid);
+            // XXX
+            // auto page = table->read_page(mapped_eid);
 
             // 2) apply all of the schema changes to the page
-            page->apply_schema_changes(_committed_xid, xid);
-            page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
+            // XXX
+            // page->apply_schema_changes(_committed_xid, xid);
+            // page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
         }
 
             // StorageCache::PagePtr page;
@@ -296,7 +301,7 @@ namespace springtail::gc {
             for (const auto &row : rows) {
                 // if this data is from before a truncate, ignore it
                 if (txid > 0) {
-                    if (row.xid < txid || (row.xid == txid && row.lsn < tlsn)) {
+                    if (row.xid < txid || (row.xid == txid && row.xid_seq < tlsn)) {
                         continue;
                     }
                 }
@@ -304,7 +309,7 @@ namespace springtail::gc {
                 // construct a tuple from the row data
                 // 2. apply data mutations by using the virtual schema on top of them
                 //    a. we need to unroll the virtual schema as we pass by each schema change
-                vschema = SchemaMgr::get_instance()->get_schema(table_id, row.xid, row.lsn, xid, constant::MAX_LSN);
+                auto vschema = SchemaMgr::get_instance()->get_schema(table->id(), { row.xid, row.xid_seq }, { xid, constant::MAX_LSN });
                 row_fields = vschema->get_fields();
                 key_fields = vschema->get_fields(schema->get_sort_keys());
 
@@ -353,23 +358,28 @@ namespace springtail::gc {
         }
     }
 
-    void
-    Committer::_apply_schema_changes(StorageCache::Page page,
+    StorageCache::PagePtr
+    Committer::_apply_schema_changes(StorageCache::PagePtr page,
                                      uint64_t access_xid,
                                      uint64_t target_xid,
                                      uint64_t target_lsn)
     {
+        // XXX
+        uint64_t table_id = 0;
+        std::filesystem::path file = "";
+
         // get a clean page at the target XID
-        auto new_page = StorageCache::get_instance()->get(page->_file, constant::UNKNOWN_EXTENT, target_xid);
+        auto new_page = StorageCache::get_instance()->get(file, constant::UNKNOWN_EXTENT, target_xid);
 
         // construct a virtual schema to transform the original page's data to the schema at the target XID
-        auto vschema = SchemaMgr::get_instance()->get_schema(table_id, access_xid, target_xid, target_lsn);
+        auto vschema = SchemaMgr::get_instance()->get_schema(table_id, XidLsn(access_xid), { target_xid, target_lsn });
 
         // scan the current page and write it's contents to the new page
         auto vfields = vschema->get_fields();
-        for (auto &&row : *page) {
-            new_page->append(FieldTuple(vfields, row));
-        }
+        // XXX
+        // for (auto &&row : *page) {
+        //     new_page->append(FieldTuple(vfields, row));
+        // }
 
         return new_page;
     }

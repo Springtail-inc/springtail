@@ -682,7 +682,7 @@ namespace springtail
         uint64_t access_xid = xid - 1;
         TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
 
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, XidLsn(access_xid));
 
         // get a mutable table interface
         auto table_dir = base_dir / fmt::format("{}", _schema.table_oid);

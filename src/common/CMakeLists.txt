@@ -1,6 +1,7 @@
 # Common library
 find_package(redis++ CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc tracking_allocator.cc)
 
@@ -11,6 +12,7 @@ target_link_libraries(springtail_common
          spdlog::spdlog
          fmt::fmt
          redis++::redis++_static
+	 nlohmann_json::nlohmann_json
 )
 
 add_executable(test_thread test/test_thread.cc)

@@ -1,0 +1,298 @@
+#include <string>
+#include <string_view>
+#include <memory>
+#include <cassert>
+
+#include <nlohmann/json.hpp>
+
+#include <thrift/transport/TSocket.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/protocol/TCompactProtocol.h>
+
+#include <common/properties.hh>
+#include <common/logging.hh>
+#include <common/json.hh>
+#include <common/object_cache.hh>
+#include <common/common.hh>
+#include <common/exception.hh>
+
+#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h>
+
+#include <sys_tbl_mgr/exception.hh>
+#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
+#include <sys_tbl_mgr/sys_tbl_mgr_client_factory.hh>
+
+namespace springtail {
+    /* static initialization must happen outside of class */
+    SysTblMgrClient* SysTblMgrClient::_instance {nullptr};
+    std::mutex SysTblMgrClient::_instance_mutex;
+
+    SysTblMgrClient *
+    SysTblMgrClient::get_instance()
+    {
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new SysTblMgrClient();
+        }
+
+        return _instance;
+    }
+
+    SysTblMgrClient::SysTblMgrClient()
+    {
+        nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
+        nlohmann::json client_json;
+        nlohmann::json server_json;
+
+        // fetch properties for the write cache client
+        if (!Json::get_to(json, "client", client_json)) {
+            throw Error("Write cache client settings not found");
+        }
+
+        if (!Json::get_to(json, "server", server_json)) {
+            throw Error("Write cache server settings not found");
+        }
+
+        // init channel pool
+        int max_connections;
+        int port;
+        std::string server;
+        Json::get_to<int>(client_json, "connections", max_connections, 8);
+        Json::get_to<int>(server_json, "port", port, 55051);
+
+        if (!Json::get_to<std::string>(client_json, "server", server)) {
+            throw Error("Host not found in sys_tbl_mgr.server settings");
+        }
+
+        // construct the thrift client pool.
+        // First argument is a factory object that constructs a thrift clients
+        // using the host and port from above
+        _thrift_client_pool = std::make_shared<ObjectPool<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>>(
+            std::make_shared<SysTblMgrThriftObjectFactory>(server, port),
+            max_connections/2,
+            max_connections
+        );
+    }
+
+    void
+    SysTblMgrClient::shutdown()
+    {
+         std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
+    // exposed client service interface below
+
+    void
+    SysTblMgrClient::ping()
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        c.client->ping(result);
+
+        std::cout << "Ping got: " << result.message << std::endl;
+        return;
+    }
+
+    thrift::sys_tbl_mgr::TableRequest
+    _gen_table_request(const XidLsn &xid,
+                       const PgMsgTable &msg)
+    {
+        thrift::sys_tbl_mgr::TableRequest request;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.table.id = msg.oid;
+        request.table.schema = msg.schema;
+        request.table.name = msg.table;
+        for (const auto &col : msg.columns) {
+            thrift::sys_tbl_mgr::TableColumn column;
+            column.__set_name(col.column_name);
+            column.__set_type(col.type);
+            column.__set_pg_type(col.pg_type);
+            column.__set_position(col.position);
+            column.__set_is_nullable(col.is_nullable);
+            column.__set_is_generated(col.is_generated);
+            if (col.is_pkey) {
+                column.__set_pk_position(col.pk_position);
+            }
+            if (col.default_value) {
+                column.__set_default_value(*col.default_value);
+            }
+
+            request.table.columns.push_back(column);
+        }
+
+        return request;
+    }
+
+    void
+    SysTblMgrClient::create_table(const XidLsn &xid,
+                                  const PgMsgTable &msg)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        auto &&request = _gen_table_request(xid, msg);
+        c.client->create_table(result, request);
+
+        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+    void
+    SysTblMgrClient::alter_table(const XidLsn &xid,
+                                 const PgMsgTable &msg)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        auto &&request = _gen_table_request(xid, msg);
+        c.client->alter_table(result, request);
+
+        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+    void
+    SysTblMgrClient::drop_table(const XidLsn &xid,
+                                 const PgMsgDropTable &msg)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        thrift::sys_tbl_mgr::DropTableRequest request;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.table_id = msg.oid;
+        request.schema = msg.schema;
+        request.name = msg.table;
+
+        c.client->drop_table(result, request);
+
+        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+    void
+    SysTblMgrClient::update_roots(uint64_t table_id,
+                                  uint64_t xid,
+                                  const std::vector<uint64_t> &roots,
+                                  uint64_t row_count)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        thrift::sys_tbl_mgr::UpdateRootsRequest request;
+        request.xid = xid;
+        request.table_id = table_id;
+        request.roots.insert(request.roots.end(), roots.begin(), roots.end());
+        request.stats.row_count = row_count;
+
+        c.client->update_roots(result, request);
+
+        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+    void
+    SysTblMgrClient::finalize(uint64_t xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::Status result;
+
+        thrift::sys_tbl_mgr::FinalizeRequest request;
+        request.xid = xid;
+
+        c.client->finalize(result, request);
+
+        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+    TableMetadata
+    SysTblMgrClient::get_roots(uint64_t table_id,
+                               uint64_t xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::GetRootsResponse result;
+
+        thrift::sys_tbl_mgr::GetRootsRequest request;
+        request.xid = xid;
+        request.table_id = table_id;
+
+        c.client->get_roots(result, request);
+
+        TableMetadata metadata;
+        metadata.roots.insert(metadata.roots.end(),
+                              result.roots.begin(), result.roots.end());
+        metadata.stats.row_count = result.stats.row_count;
+
+        return metadata;
+    }
+
+    SchemaMetadata
+    SysTblMgrClient::get_schema_info(uint64_t table_id,
+                                     const XidLsn &xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::GetSchemaInfoResponse result;
+
+        thrift::sys_tbl_mgr::GetSchemaInfoRequest request;
+        request.table_id = table_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+
+        c.client->get_schema_info(result, request);
+
+        SchemaMetadata metadata;
+        for (auto column : result.columns) {
+            SchemaColumn value(column.name,
+                               column.position,
+                               static_cast<SchemaType>(column.type),
+                               column.pg_type,
+                               column.is_nullable);
+            if (column.__isset.pk_position) {
+                value.pkey_position = column.pk_position;
+            }
+            if (column.__isset.default_value) {
+                value.default_value = column.default_value;
+            }
+
+            metadata.columns.push_back(value);
+        }
+
+        for (auto history : result.history) {
+            SchemaColumn value(history.xid,
+                               history.lsn,
+                               history.column.name,
+                               history.column.position,
+                               static_cast<SchemaType>(history.column.type),
+                               history.column.pg_type,
+                               history.exists,
+                               history.column.is_nullable);
+            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+            if (history.column.__isset.pk_position) {
+                value.pkey_position = history.column.pk_position;
+            }
+            if (history.column.__isset.default_value) {
+                value.default_value = history.column.default_value;
+            }
+
+            metadata.history.push_back(value);
+        }
+
+        return metadata;
+    }
+
+} // namespace

@@ -19,6 +19,14 @@ namespace springtail {
     };
 
     /**
+     * Structure to hold table metadata required to create a table.
+     */
+    struct TableMetadata {
+        std::vector<uint64_t> roots;
+        TableStats stats;
+    };
+
+    /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */

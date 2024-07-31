@@ -10,6 +10,11 @@ namespace springtail {
      * Singleton for managing the table metadata.  Handles table metadata mutations and provides
      * interfaces for retrieving a table object at a given XID as well as a mutable table object for
      * applying data mutations.
+     *
+     * To make sure that the system tables are accurate for use in GC-2 or roll-forward, we must
+     * ensure that all system table mutations (aside from table stats) are performed and finalized
+     * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
+     * read-only Table interfaces using the target XID.
      */
     class TableMgr {
     public:
@@ -33,6 +38,8 @@ namespace springtail {
          * Returns the MutableTable interface for the requested table ID.
          */
         MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+
+        // Functions for managing system metadata
 
         /**
          * Create a new table.
@@ -59,6 +66,10 @@ namespace springtail {
          */
         void update_stats(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const TableStats &stats);
 
+        /**
+         * Finalize all outstanding system metadata mutations.
+         */
+        void finalize_metadata();
 
     private:
         static TableMgr *_instance; ///< static instance (singleton)
@@ -101,5 +112,8 @@ namespace springtail {
 
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.
+
+        uint64_t _system_xid; ///< The current XID of the system tables.
+        std::map<uint64_t, MutableTablePtr> _system_tables; ///< Cache of open system tables.
     };
 }

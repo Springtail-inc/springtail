@@ -46,6 +46,16 @@
             "server" : "localhost"
         }
     },
+    "sys_tbl_mgr": {
+        "server" : {
+            "port" : 55053,
+            "worker_threads": 8
+        },
+        "client": {
+            "connections": 8,
+            "server" : "localhost"
+        }
+    },
     "storage": {
 	"table_dir": "/tmp/springtail/table"
     }

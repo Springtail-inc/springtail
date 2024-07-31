@@ -17,6 +17,9 @@ namespace springtail::constant {
     /** Represents an invalid table ID. */
     static constexpr uint64_t INVALID_TABLE = 0;
 
+    /** Represents the table ID cut-off for system tables. */
+    static constexpr uint64_t MAX_SYSTEM_TABLE_ID = 512;
+
     /** The target maximum extent size. */
     static constexpr uint64_t MAX_EXTENT_SIZE = 64 * 1024;
 
