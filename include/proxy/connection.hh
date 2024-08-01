@@ -11,8 +11,9 @@
 
 #include <openssl/ssl.h>
 
-namespace springtail {
-namespace pg_proxy {
+#include <proxy/logging.hh>
+
+namespace springtail::pg_proxy {
 
     /** Connection object */
     class ProxyConnection : public std::enable_shared_from_this<ProxyConnection> {
@@ -23,7 +24,7 @@ namespace pg_proxy {
         {}
 
         ~ProxyConnection() {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Destroying connection to {}", _socket);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Destroying connection to {}", _socket);
             close();
         }
 
@@ -104,5 +105,4 @@ namespace pg_proxy {
         void _handle_ssl_error(int rc);
     };
     using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

@@ -40,7 +40,7 @@ namespace springtail::pg_proxy {
         };
 
     public:
-        enum MSG_TYPE : uint8_t {
+        enum LogMsgType : uint8_t {
             FROM_CLIENT=1,
             FROM_REPLICA=2,
             FROM_PRIMARY=3,
@@ -63,7 +63,7 @@ namespace springtail::pg_proxy {
             _file_sink->set_level(spdlog::level::info);
         }
 
-        void log_data(MSG_TYPE type, uint32_t session_id, uint64_t seq_id,
+        void log_data(LogMsgType type, uint32_t session_id, uint64_t seq_id,
                       char code, int32_t data_length,
                       const char *data, bool final=true)
         {

@@ -84,19 +84,24 @@ namespace springtail::pg_proxy {
 
         DatabaseInstancePtr _instance;             ///< database instance
 
-        // message state for current client query
+        uint64_t _seq_id = 0;                      ///< sequence id for msg awaiting response
+
+        // message state for current client query (for state=QUERY)
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
         std::set<std::string> _stmts;              ///< completed prepared statement ids
 
         /** Send startup message */
-        void _send_startup_msg();
+        void _send_startup_msg(uint64_t seq_id);
 
         /** Initial setup, SSL negotiation */
-        void _send_ssl_req();
+        void _send_ssl_req(uint64_t seq_id);
 
         /** Send SSL handshake */
-        void _send_ssl_handshake();
+        void _send_ssl_handshake(uint64_t seq_id);
+
+        /** Wrapper around sending a buffer to the server */
+        void _send_buffer(BufferPtr buffer, uint64_t seq_id);
 
         /**
          * Send required statements to fulfil dependency
@@ -110,7 +115,7 @@ namespace springtail::pg_proxy {
         void _send_simple_query(const std::string &query, uint64_t seq_id);
 
         /** Handle SSL handshake */
-        void _handle_ssl_handshake();
+        void _handle_ssl_handshake(uint64_t seq_id);
 
         /** Handle ssl response */
         void _handle_ssl_response();

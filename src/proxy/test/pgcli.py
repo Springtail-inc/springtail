@@ -4,7 +4,7 @@ import time
 import argparse
 import json
 
-def send_startup(conn):
+def send_startup(conn, database):
     bytes = bytearray()
     # Startup message
     # The first 4 bytes are the length of the message
@@ -17,7 +17,9 @@ def send_startup(conn):
     bytes += b'user' + b'\x00'
     bytes += b'test_md5' + b'\x00'
     bytes += b'database' + b'\x00'
-    bytes += b'postgres' + b'\x00'
+    bytes.extend(database.encode('utf-8'))
+    bytes += b'\x00'
+#    bytes += b'postgres' + b'\x00'
     bytes += b'client_encoding' + b'\x00'
     bytes += b'UTF8' + b'\x00'
     bytes += b'\x00'
@@ -59,12 +61,33 @@ def read_auth_response(conn):
     while pos < len(bytes):
         code = bytes[pos:pos+1].decode("utf-8")
         length = int.from_bytes(bytes[pos+1:pos+5], 'big')
-        pos += length+1
 
-        print ("code={}, length={}".format(code, length))
+        # print ("code={}, length={}".format(code, length))
+
+        if (code == 'R'):
+            auth_type = int.from_bytes(bytes[pos+5:pos+9], 'big')
+            print("Auth type: ", auth_type)
+            if (auth_type == 0):
+                print("  Authentication OK")
+            elif (auth_type == 5):
+                print("  MD5 authentication required")
+
+        if (code == 'S'):
+            # decode the parameter status
+            name, end = decode_string(bytes[pos+5:])
+            value, end = decode_string(bytes[pos+5+end+1:])
+            print("  Parameter status: name={}, value={}".format(name, value))
 
         if code == 'Z':
-            return bytes[pos+5:pos+6].decode("utf-8")
+            ready_for_query = bytes[pos+5:pos+6].decode("utf-8")
+            print("Ready for query: status={}".format(ready_for_query))
+            return ready_for_query
+
+        pos += length+1
+
+def decode_string(bytes):
+    end = bytes.find(b'\x00')
+    return (bytes[:end].decode('utf-8'), end)
 
 def send_parse_message(conn, statement_name: str, query: str):
     buf = bytearray()
@@ -174,7 +197,7 @@ def read_response(conn):
     bytes = read_connection(conn)
 
     read_len = len(bytes)
-    print ("Read response: {} bytes".format(read_len))
+    # print ("Read response: {} bytes".format(read_len))
 
     if read_len == 0:
         # Connection closed, return error
@@ -190,7 +213,7 @@ def read_response(conn):
 
         if (length > read_len - pos):
             # read more data
-            print("Reading more data")
+            # print("Reading more data")
             bytes += read_connection(conn)
             read_len = len(bytes)
 
@@ -209,6 +232,7 @@ def read_response(conn):
             ready_for_query = True
         elif code == 'E':
             print('Error response')
+            decode_error(bytes[pos:])
         elif code == 't':
             print('Parameter description')
         elif code == '1':
@@ -217,6 +241,8 @@ def read_response(conn):
             print('Bind complete')
         elif code == 'n':
             print('No data')
+        else:
+            print('Unknown code: {}'.format(code))
 
         pos += length+1
 
@@ -236,6 +262,34 @@ def send_simple_query(conn, query: str):
     buf[1:5] = message_length.to_bytes(4, byteorder='big')
 
     conn.send(buf)
+
+def decode_error(message):
+    offset = 0
+
+    # Convert message to bytearray for easier manipulation
+    message = bytearray(message)
+
+    # Read the message type and length
+    message_type = chr(message[offset])
+    offset += 1
+    message_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+    offset += 4
+
+    if message_type != 'E':
+        raise ValueError(f"Unexpected message type: {message_type}")
+
+    error_fields = {}
+
+    while offset < message_length:
+        field_type = chr(message[offset])
+        offset += 1
+
+        field_value = message[offset:message.find(b'\x00', offset)].decode('utf-8')
+        offset += len(field_value) + 1
+
+        error_fields[field_type] = field_value
+
+    print("Error Fields: S:{}, V:{}, C:{}; {}".format(error_fields.get('S', ''), error_fields.get('V', ''), error_fields.get('C', ''), error_fields.get('M', '')))
 
 def decode_row_description(message):
     offset = 0
@@ -340,12 +394,13 @@ def decode_data_row(message):
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Parse database connection parameters.")
 
-    parser.add_argument('--hostname', type=str, default='127.0.0.1', help="The hostname of the database server")
-    parser.add_argument('--port', type=int, default=5432, help="The port number on which the database server is listening")
-    parser.add_argument('--username', type=str, default='test', required=True, help="The username for connecting to the database")
-    parser.add_argument('--password', type=str, required=True, help="The password for connecting to the database")
-    parser.add_argument('--requires_ssl', action='store_true', help="Flag to indicate if SSL is required")
-    parser.add_argument('--filename', type=str, help="The name of the file containing the SQL commands to execute")
+    parser.add_argument('-H', '--hostname', type=str, default='127.0.0.1', help="The hostname of the database server")
+    parser.add_argument('-p', '--port', type=int, default=5432, help="The port number on which the database server is listening")
+    parser.add_argument('-U', '--username', type=str, default='test', required=True, help="The username for connecting to the database")
+    parser.add_argument('-P', '--password', type=str, required=True, help="The password for connecting to the database")
+    parser.add_argument('-s', '--requires_ssl', action='store_true', help="Flag to indicate if SSL is required")
+    parser.add_argument('-f', '--filename', type=str, help="The name of the file containing the SQL commands to execute")
+    parser.add_argument('-d', '--database', type=str, default='postgres', required=True, help="The name of the database to connect to")
 
     args = parser.parse_args()
     return args
@@ -366,11 +421,11 @@ def read_commands_from_json(file_path):
 
     return json_objects
 
-def connect_to_postgres(host, port, username, password, requires_ssl):
+def connect_to_postgres(host, port, username, password, database, requires_ssl):
     conn = socket.socket()
     conn.connect((host, port))
 
-    send_startup(conn)
+    send_startup(conn, database)
     code, length, salt = read_startup(conn)
     send_md5(conn, username, password, salt)
     ready_status = read_auth_response(conn)
@@ -380,8 +435,11 @@ def connect_to_postgres(host, port, username, password, requires_ssl):
 def main():
     # Parse command line arguments
     args = parse_arguments()
+
     # Connect to the PostgreSQL server
-    conn = connect_to_postgres(args.hostname, args.port, args.username, args.password, args.requires_ssl)
+    conn = connect_to_postgres(args.hostname, args.port, args.username, args.password, args.database, args.requires_ssl)
+    print("Connected to PostgreSQL server")
+
     # Read commands from json file
     commands = read_commands_from_json(args.filename);
 
@@ -395,22 +453,27 @@ def main():
         if command_name == 'parse' and len(command_args) == 2:
             statement_name = command_args[0]
             query = command_args[1]
+            print(f"Sending parse message for statement: {statement_name} and query: {query}")
             send_parse_message(conn, statement_name, query)
 
         elif command_name == 'bind' and len(command_args) == 2:
             portal_name = command_args[0]
             statement_name = command_args[1]
+            print(f"Sending bind message for portal: {portal_name} and statement: {statement_name}")
             send_bind_message(conn, portal_name, statement_name)
 
         elif command_name == 'execute' and len(command_args) == 1:
             portal_name = command_args[0]
+            print(f"Sending execute message for portal: {portal_name}")
             send_execute_message(conn, portal_name)
 
         elif command_name == 'sync':
+            print("Sending sync message")
             send_sync_message(conn)
 
         elif command_name == 'query' and len(command_args) == 1:
             query = command_args[0]
+            print(f"Sending query: {query}")
             send_simple_query(conn, query)
 
         else:

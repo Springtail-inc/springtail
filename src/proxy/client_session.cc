@@ -16,12 +16,13 @@
 #include <proxy/server.hh>
 #include <proxy/exception.hh>
 #include <proxy/parser.hh>
+#include <proxy/buffer_pool.hh>
+#include <proxy/logging.hh>
 
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server,
@@ -31,7 +32,7 @@ namespace pg_proxy {
           _stmt_cache(STATEMENT_CACHE_SIZE),
           _shadow_mode(shadow_mode)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected: endpoint={}, id={}", connection->endpoint(), _id);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
         // initialize pid and key for cancellation
         get_random_bytes(reinterpret_cast<uint8_t*>(&_pid), 4);
@@ -58,7 +59,7 @@ namespace pg_proxy {
         ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
         assert(server_session != nullptr);
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Releasing server session: id={}", server_session->id());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Releasing server session: id={}", _id, server_session->id());
 
         // clear associated session from the client session
         clear_associated_session();
@@ -79,12 +80,12 @@ namespace pg_proxy {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got message from server session: {:d}", (int8_t)msg->type());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got message from server session: {}", _id, msg->type_str());
 
         // entry point for messages from server session
         switch(msg->type()) {
             case SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got auth done from server session");
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got auth done from server session", _id);
                 if (_state == READY) {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
@@ -98,12 +99,15 @@ namespace pg_proxy {
 
                 // if in shadow mode, then create the replica session now
                 if (_shadow_mode && _replica_session.expired()) {
-                    _create_server_session(Session::Type::REPLICA, _gen_seq_id());
+                    uint64_t seq_id = _gen_seq_id();
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating replica session in shadow mode: seq_id={}", _id, seq_id);
+                    _create_server_session(Session::Type::REPLICA, seq_id);
                 }
+
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got fatal error from server session");
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got fatal error from server session", _id);
                 throw ProxyServerError();
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_SUCCESS:
@@ -117,8 +121,8 @@ namespace pg_proxy {
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session got ready from server session: status={}",
-                             msg->status().transaction_status);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got ready from server session: status={}",
+                            _id, msg->status().transaction_status);
 
                 // check if we are in/still in a transaction
                 SessionMsg::MsgStatus status = msg->status();
@@ -146,7 +150,7 @@ namespace pg_proxy {
             }
 
             default:
-                SPDLOG_WARN("Invalid message recevied by client session: {:d}", (int8_t)msg->type());
+                SPDLOG_WARN("Invalid message recevied by client session: {}", msg->type_str());
                 break;
         }
 
@@ -164,7 +168,7 @@ namespace pg_proxy {
     ClientSession::_process_connection()
     {
         // entry point for network connection message
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Processing packet, client session: state={:d}", (int8_t)_state);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Processing packet, client session: state={:d}", _id, (int8_t)_state);
 
         // main entry point for thread processing
         // resume from where we left off
@@ -199,11 +203,11 @@ namespace pg_proxy {
         // this will return 1 on success, -1 if more data is needed; throws exception on fatal error
         int rc = _connection->SSL_accept();
         if (rc < 0) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL client handshake in progress, need more data");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake in progress, need more data", _id);
             return;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL client handshake complete");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] SSL client handshake complete", _id);
 
         _state = STARTUP;
     }
@@ -220,11 +224,11 @@ namespace pg_proxy {
 
         uint64_t seq_id = _gen_seq_id();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Startup message: msg_length={}, code={}, seq_id={}", msg_length, code, seq_id);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Startup message: msg_length={}, code={}, seq_id={}", _id, msg_length, code, seq_id);
 
         switch (code) {
             case MSG_SSLREQ:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL negotiation requested");
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] SSL negotiation requested", _id);
                 _process_ssl_request();
                 break;
 
@@ -248,7 +252,7 @@ namespace pg_proxy {
     void
     ClientSession::_process_startup_msg(int32_t remaining, uint64_t seq_id)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Proto version 3.0 requested");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Proto version 3.0 requested", _id);
 
         // read parameter strings
         std::string key;
@@ -271,7 +275,7 @@ namespace pg_proxy {
             key = read_buffer.get_string();
             value = read_buffer.get_string();
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parameter: {}={}", key, value);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Parameter: {}={}", _id, key, value);
 
             if (key == "user") {
                 username = value;
@@ -341,17 +345,17 @@ namespace pg_proxy {
 
         switch(_login->_type) {
             case TRUST:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticated with trust", _user->username());
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticated with trust", _id, _user->username());
                 _create_server_session(Session::Type::PRIMARY, seq_id);
                 return; // did send above so we return here
 
             case MD5:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticating with md5", _user->username());
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with md5", _id, _user->username());
                 _encode_auth_md5(buffer);
                 break;
 
             case SCRAM:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "User {} authenticating with scram", _user->username());
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticating with scram", _id, _user->username());
                 _encode_auth_scram(buffer);
                 break;
 
@@ -390,7 +394,7 @@ namespace pg_proxy {
             // log buffer
             _log_buffer(true, code, msg_length, buffer->data() + 5, seq_id);
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Auth continue: msg_length={}, seq_id={}", msg_length, seq_id);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Auth continue: msg_length={}, seq_id={}", _id, msg_length, seq_id);
 
             switch(_login->_type) {
                 case MD5: {
@@ -422,7 +426,7 @@ namespace pg_proxy {
                         throw ProxyAuthError();
                     }
 
-                    SPDLOG_DEBUG_MODULE(LOG_PROXY, "MD5 password match");
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] MD5 password match", _id);
 
                     // auth successful on client side
                     // see if we need to create a server session
@@ -434,7 +438,7 @@ namespace pg_proxy {
                 case SCRAM: {
                     // see if this is the first or second message
                     if (_login->scram_state.server_nonce == nullptr) {
-                        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling SCRAM SASL initial response");
+                        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL initial response", _id);
 
                         // process as SASLInitialResponse
                         std::string_view scram_type = buffer->get_string();
@@ -447,7 +451,7 @@ namespace pg_proxy {
                         std::string_view data = buffer->get_bytes(len);
                         _handle_scram_auth(data, seq_id);
                     } else {
-                        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling SCRAM SASL response");
+                        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Handling SCRAM SASL response", _id);
                         // process as SASLResponse
                         std::string_view data = buffer->get_bytes(msg_length);
                         _handle_scram_auth_continue(data, seq_id);
@@ -631,7 +635,7 @@ namespace pg_proxy {
         // set state to ready
         _state = READY;
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client session auth done, ready for queries");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session auth done, ready for queries", _id);
     }
 
     void
@@ -681,7 +685,7 @@ namespace pg_proxy {
             int32_t len = buffer->get32();
             uint64_t seq_id = _gen_seq_id();
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client got request code: {}, seq_id: {}", code, seq_id);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client got request code: {}, seq_id: {}", _id, code, seq_id);
 
             _log_buffer(true, code, len, buffer->data(), seq_id);
 
@@ -784,7 +788,7 @@ namespace pg_proxy {
         // query string
         std::string_view query = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parse: stmt={}, query={}", stmt, query);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Parse: stmt={}, query={}", _id, stmt, query);
 
         // parse the query
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query);
@@ -820,7 +824,7 @@ namespace pg_proxy {
         // statement string -- prepared name
         std::string_view stmt = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Bind: prepared={}, portal={}", stmt, portal);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Bind: prepared={}, portal={}", _id, stmt, portal);
 
         // get the prepared statement from the cache
         std::pair<QueryStmtPtr, bool> lookup_result = _stmt_cache.lookup_prepared(stmt);
@@ -860,7 +864,7 @@ namespace pg_proxy {
         // portal or statement name
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Describe request: type={}, name={}", stmt_type, name);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Describe request: type={}, name={}", _id, stmt_type, name);
 
         // get the statement from the cache
         std::pair<QueryStmtPtr, bool> lookup_result;
@@ -905,7 +909,7 @@ namespace pg_proxy {
         // portal name
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Describe request: name={}", name);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Execute request: name={}", _id, name);
 
         // find the dependency
         QueryStmt::Type qs_type = QueryStmt::ANONYMOUS;
@@ -955,7 +959,7 @@ namespace pg_proxy {
         // portal or statement
         std::string_view name = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Close request: type={}, name={}", stmt_type, name);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Close request: type={}, name={}", _id, stmt_type, name);
 
         // cache the close packet for the transaction
         if (!_in_transaction) {
@@ -994,7 +998,7 @@ namespace pg_proxy {
     void
     ClientSession::_handle_sync(BufferPtr buffer, uint64_t seq_id)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Sync request");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Sync request", _id);
         if (get_associated_session() == nullptr) {
             // this is a weird case as it doesn't make sense to issue
             // a sync without a set of other extended queries preceeding it
@@ -1012,7 +1016,7 @@ namespace pg_proxy {
     {
         std::string_view query = buffer->get_string();
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Simple Query: {}", query);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Simple Query: {}", _id, query);
 
         // parse the query and determine if it is a read or write query
         if (!_in_transaction) {
@@ -1082,12 +1086,12 @@ namespace pg_proxy {
     ServerSessionPtr
     ClientSession::_select_session(Session::Type type, uint64_t seq_id)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Selecting server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
         // if we have an associated session use it (typically in a transaction)
         if (get_associated_session() != nullptr) {
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Using associated session: id={}", session->id());
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Using associated session: id={}", _id, session->id());
             return session;
         }
 
@@ -1109,10 +1113,10 @@ namespace pg_proxy {
         }
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Creating new server session: type={}", type == PRIMARY ? "PRIMARY" : "REPLICA");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating new server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
         session = _create_server_session(type, seq_id);
         assert (session != nullptr);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new server session: id={}", session->id());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Created new server session: id={}", _id, session->id());
 
         // set associated session
         assert(!_shadow_mode || type == PRIMARY);
@@ -1139,10 +1143,10 @@ namespace pg_proxy {
         ServerSessionPtr session = instance->get_session(_database, _user->username());
         if (session == nullptr) {
             // need to allocate a new session
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Allocating new server session: {}:{}", _database, _user->username());
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
             session = instance->allocate_session(_server, _user, _database);
         }
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Got server session: id={}, is_ready={}", session->id(), session->is_ready());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 
         if (type == PRIMARY) {
             // store reference to primary session
@@ -1328,5 +1332,4 @@ namespace pg_proxy {
         return qs;
     }
 
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

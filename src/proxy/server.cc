@@ -20,8 +20,12 @@
 #include <proxy/client_session.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
+#include <proxy/logging.hh>
 
 namespace springtail::pg_proxy {
+
+    /** Default log level for the proxy server */
+    LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
     /**
      * @brief Construct a new Proxy Server object.
@@ -123,31 +127,31 @@ namespace springtail::pg_proxy {
         }
 
         if (where & SSL_CB_HANDSHAKE_START) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_STARTED): fd={}", fd);
         } else if (where & SSL_CB_HANDSHAKE_DONE) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_HANDSHAKE_DONE): fd={}", fd);
         } else if (where & SSL_CB_LOOP) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_LOOP): fd={}, {}:{}", fd, str, SSL_state_string_long(s));
         } else if (where & SSL_CB_ALERT) {
             str = (where & SSL_CB_READ) ? "read" : "write";
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_ALERT): fd={}, SSL3 alert {}:{}:{}", fd, str,
                          SSL_alert_type_string_long(ret),
                          SSL_alert_desc_string_long(ret));
        } else if (where & SSL_CB_EXIT) {
             if (ret == 0) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_EXIT): fd={}, {}:failed in {}", fd, str, SSL_state_string_long(s));
             } else if (ret < 0) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info (CB_EXIT): fd={}, {}:error in {}", fd, str, SSL_state_string_long(s));
             }
         } else {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL info callback: fd={}, where={:#X}, ret={}", fd, where, ret);
         }
     }
 
     static int
     ssl_verify_callback(int preverify_ok, X509_STORE_CTX *x509_ctx)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "SSL verify callback: preverify_ok={}", preverify_ok);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "SSL verify callback: preverify_ok={}", preverify_ok);
         return 1; // no verification
     }
 
@@ -213,7 +217,7 @@ namespace springtail::pg_proxy {
     ProxyServer::_do_accept()
     {
         while (true) { // accept is non-blocking and will return when no more connections
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Accepting new connection");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
 
             struct sockaddr_in client_address;
             socklen_t client_address_size = sizeof(client_address);
@@ -238,7 +242,7 @@ namespace springtail::pg_proxy {
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Client connected from: {} on socket {}", client_ip, client_socket);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Client connected from: {} on socket {}", client_ip, client_socket);
 
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
             ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this(), _shadow_mode);
@@ -268,7 +272,7 @@ namespace springtail::pg_proxy {
 
             int i = 2;
             for (auto &session_socket : _waiting_sessions) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding socket to poll list: {}", session_socket);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Adding socket to poll list: {}", session_socket);
                 fds[i].fd = session_socket;
                 fds[i].events = POLLIN;
                 i++;
@@ -276,7 +280,7 @@ namespace springtail::pg_proxy {
 
             lock.unlock();
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Polling for sockets: size={}", _waiting_sessions.size());
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Polling for sockets: size={}", _waiting_sessions.size());
 
             int n = poll(fds, i, -1);
             if (n == -1) {
@@ -287,7 +291,7 @@ namespace springtail::pg_proxy {
                 }
                 break;
             }
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Poll returned: {}", n);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Poll returned: {}", n);
 
             // handle any new accepts
             if (fds[0].revents & POLLIN) {
@@ -312,7 +316,7 @@ namespace springtail::pg_proxy {
             for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
                     auto session = _sessions.find(fds[i].fd);
-                    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Socket {} is now runnable", fds[i].fd);
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fds[i].fd);
                     if (session != _sessions.end()) {
                         runnable_sessions.insert(session->second);
                         _waiting_sessions.erase(fds[i].fd);
@@ -326,7 +330,7 @@ namespace springtail::pg_proxy {
             lock2.unlock();
 
             // queue the sessions that are now runnable
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Queueing {} sessions", runnable_sessions.size());
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
                 _thread_pool.queue(session);
             }
@@ -358,7 +362,7 @@ namespace springtail::pg_proxy {
         char buf[1] = {0};
         write(_pipe[1], buf, 1);
 
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Signaled server waiting on socket {}", connection->get_socket());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", connection->get_socket());
     }
 
     void

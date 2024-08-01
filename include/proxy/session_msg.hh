@@ -20,6 +20,7 @@ namespace springtail::pg_proxy {
             char transaction_status; ///< transaction status 'I', 'T', 'E'
         };
 
+        /** message types -- add string defn to session.cc type_map */
         enum Type : int8_t {
             ///// client to server messages
             MSG_CLIENT_SERVER_STARTUP=0,      ///< startup; do auth, etc.; no data
@@ -41,6 +42,9 @@ namespace springtail::pg_proxy {
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
 
+        /** type to string map -- defined in session.cc */
+        static const std::map<Type, std::string> type_map;
+
         /** Constructor with data */
         SessionMsg(Type type, QueryStmtPtr data, uint64_t seq_id)
             : _type(type), _data(data), _seq_id(seq_id)
@@ -61,6 +65,10 @@ namespace springtail::pg_proxy {
 
         /** Get type */
         Type type() const { return _type; }
+
+        std::string const type_str() const {
+            return type_map.at(_type);
+        }
 
         const QueryStmtPtr data() const {
             return _data;
