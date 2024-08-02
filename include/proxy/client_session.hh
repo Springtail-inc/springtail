@@ -38,6 +38,17 @@ namespace springtail::pg_proxy {
         /** notification from pool indicating server is free to use */
         void notify_server_available(SessionPtr server);
 
+        bool is_shadow_mode() const {
+            return _shadow_mode;
+        }
+
+        ServerSessionPtr get_shadow_session() {
+            if (_shadow_mode && !_replica_session.expired()) {
+                return _replica_session.lock();
+            }
+            return nullptr;
+        }
+
         std::shared_ptr<ClientSession> shared_from_this() {
             return std::static_pointer_cast<ClientSession>(Session::shared_from_this());
         }

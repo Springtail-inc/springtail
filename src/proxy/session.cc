@@ -11,6 +11,7 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/logging.hh>
 #include <proxy/session_msg.hh>
+#include <proxy/client_session.hh>
 
 namespace springtail::pg_proxy {
 
@@ -95,6 +96,16 @@ namespace springtail::pg_proxy {
                 _associated_session->_internal_process_msgs(true);
             }
 
+            // if this is a client session with a shadow replica then process those messages
+            if (_type == CLIENT) {
+                ClientSession *client = static_cast<ClientSession*>(this);
+                ServerSessionPtr shadow = client->get_shadow_session();
+                assert (shadow == nullptr || shadow != _associated_session);
+                if (shadow != nullptr && shadow != _associated_session) {
+                    shadow->_internal_process_msgs(true);
+                }
+            }
+
             if (_waiting_on_session) {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Waiting on external session", (_type == CLIENT ? 'C': 'S'), _id);
                 // note: this will not add the connection back to the server
@@ -131,7 +142,7 @@ namespace springtail::pg_proxy {
             }
 
             // send message to session
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing message: type={}", (_type == CLIENT ? 'C': 'S'), _id, msg->type_str());
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing message: type: {}", (_type == CLIENT ? 'C': 'S'), _id, msg->type_str());
 
             try {
                 _process_msg(msg);
@@ -242,7 +253,7 @@ namespace springtail::pg_proxy {
     void
     Session::_stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id)
     {
-        assert(_associated_session != nullptr);
+        assert(_is_shadow || _associated_session != nullptr);
         char buffer[4096];
 
         // first write the header, add 4 to msg length for size of length field
@@ -264,12 +275,16 @@ namespace springtail::pg_proxy {
             int n = _connection->read(buffer, std::min(msg_length, 4096));
             assert (n == std::min(msg_length, 4096));
 
-            // log the buffer
-            _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
+            // log the buffer as incoming
+            _log_buffer(true, code, n, buffer, seq_id, n == msg_length);
 
             if (!_is_shadow) {
                 int m = _associated_session->get_connection()->write(buffer, n);
                 assert (m == n);
+
+                // log the buffer as outgoing from associated session
+                _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
+
                 PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed {} bytes to remote session", (_type == CLIENT ? 'C': 'S'), _id, m);
             }
 
@@ -280,7 +295,7 @@ namespace springtail::pg_proxy {
     void
     Session::_send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id)
     {
-        assert(_associated_session != nullptr);
+        assert(_is_shadow || _associated_session != nullptr);
         char buffer[5];
 
         // first write the header, add 4 to msg length for size of length field
@@ -288,15 +303,17 @@ namespace springtail::pg_proxy {
         sendint32(msg_length+4, buffer + 1);
 
         if (!_is_shadow) {
+            // send header
             int n = _associated_session->get_connection()->write(buffer, 5);
             assert (n == 5);
 
+            // send data
             n = _associated_session->get_connection()->write(data, msg_length);
             assert(n == msg_length);
-        }
 
-        // log the buffer
-        _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);
+            // log the buffer as outgoing from associated session
+            _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);
+        }
     }
 
     void

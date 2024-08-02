@@ -1076,7 +1076,8 @@ namespace springtail::pg_proxy {
         }
 
         assert (session != nullptr);
-        // make sure queue_msg doesn't set associated session
+        // make sure queue_msg doesn't set associated session;
+        // if set prior to this call it won't get reset
         assert (get_associated_session() != nullptr);
         queue_msg(msg, session);
 
