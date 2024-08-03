@@ -637,16 +637,18 @@ namespace springtail {
         }
 
         // go through the history and apply any changes up through the provided XID/LSN
-        for (auto &history : schema_i->second) {
-            if (xid < XidLsn(history.xid, history.lsn)) {
-                break; // stop applying changes
-            }
+        for (auto &column : schema_i->second) {
+            for (auto &history : column.second) {
+                if (xid < XidLsn(history.xid, history.lsn)) {
+                    break; // stop applying changes
+                }
 
-            // apply the recorded change
-            if (history.exists) {
-                columns[history.column.position] = history.column;
-            } else {
-                columns.erase(history.column.position);
+                // apply the recorded change
+                if (history.exists) {
+                    columns[history.column.position] = history.column;
+                } else {
+                    columns.erase(history.column.position);
+                }
             }
         }
     }
@@ -732,18 +734,20 @@ namespace springtail {
         }
 
         // go through the history and capture any changes up through the provided XID/LSN
-        for (auto &entry : schema_i->second) {
-            XidLsn xid(entry.xid, entry.lsn);
+        for (auto &column : schema_i->second) {
+            for (auto &entry : column.second) {
+                XidLsn xid(entry.xid, entry.lsn);
 
-            if (xid < access_xid) {
-                continue; // already applied these changes
+                if (xid < access_xid) {
+                    continue; // already applied these changes
+                }
+
+                if (target_xid < xid) {
+                    break; // stop capturing changes
+                }
+
+                history.push_back(entry);
             }
-
-            if (target_xid < xid) {
-                break; // stop capturing changes
-            }
-
-            history.push_back(entry);
         }
 
         return history;
@@ -758,8 +762,8 @@ namespace springtail {
 
         // add the column change history to the cache
         for (auto &history : columns) {
-            // XXX do we need to enforce ordering somehow here?  are we guaranteed to apply these in xid order?
-            _schema_cache[table_id].push_back(history);
+            // XXX do we need to enforce XID ordering somehow here?  are we guaranteed to apply these in xid order?
+            _schema_cache[table_id][history.column.position].push_back(history);
 
             // write the column data to the schemas table
             std::optional<std::string> value;

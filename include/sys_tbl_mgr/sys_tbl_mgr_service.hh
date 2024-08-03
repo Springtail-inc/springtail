@@ -140,10 +140,10 @@ namespace springtail {
 
         /**
          * Cache of unapplied schema changes.
-         * Stored as a map of Table ID -> vector<ColumnHistory> (in ascending XID/LSN order)
+         * Stored as a map of Table ID -> Column ID -> vector<ColumnHistory> (in ascending XID/LSN order)
          * Using vector because there may be multiple entries at the same XID/LSN on table create.
          */
-        std::map<uint64_t, std::vector<thrift::sys_tbl_mgr::ColumnHistory>> _schema_cache;
+        std::map<uint64_t, std::map<uint32_t, std::vector<thrift::sys_tbl_mgr::ColumnHistory>>> _schema_cache;
     };
 
 
