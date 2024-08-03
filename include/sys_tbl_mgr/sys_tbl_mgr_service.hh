@@ -54,6 +54,9 @@ namespace springtail {
         void get_schema_info(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
                              const thrift::sys_tbl_mgr::GetSchemaInfoRequest &request) override;
 
+        void get_schema_info_with_target(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
+                                         const thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest &request) override;
+
     private:
         struct TableInfo {
             uint64_t id;

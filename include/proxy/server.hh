@@ -13,13 +13,15 @@
 #include <common/thread_pool.hh>
 
 #include <proxy/connection.hh>
-#include <proxy/request_handler.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
 
+#include <proxy/buffer_pool.hh>
 #include <proxy/database.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
         ProxyServer(int port,
@@ -112,8 +114,6 @@ namespace springtail {
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
 
-        ProxyRequestHandlerPtr _request_handler;
-
         UserMgrPtr _user_mgr;                ///< user manager object
 
         ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
@@ -141,5 +141,5 @@ namespace springtail {
                                     const std::filesystem::path &key_file={});
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-
-}
+} // namespace pg_proxy
+} // namespace springtail

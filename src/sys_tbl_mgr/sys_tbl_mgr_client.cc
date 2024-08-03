@@ -295,4 +295,61 @@ namespace springtail {
         return metadata;
     }
 
+    SchemaMetadata
+    SysTblMgrClient::get_schema_info_with_target(uint64_t table_id,
+                                                 const XidLsn &access_xid,
+                                                 const XidLsn &target_xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::sys_tbl_mgr::GetSchemaInfoResponse result;
+
+        thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest request;
+        request.table_id = table_id;
+        request.access_xid = access_xid.xid;
+        request.access_lsn = access_xid.lsn;
+        request.target_xid = target_xid.xid;
+        request.target_lsn = target_xid.lsn;
+
+        c.client->get_schema_info_with_target(result, request);
+
+        SchemaMetadata metadata;
+        for (auto column : result.columns) {
+            SchemaColumn value(column.name,
+                               column.position,
+                               static_cast<SchemaType>(column.type),
+                               column.pg_type,
+                               column.is_nullable);
+            if (column.__isset.pk_position) {
+                value.pkey_position = column.pk_position;
+            }
+            if (column.__isset.default_value) {
+                value.default_value = column.default_value;
+            }
+
+            metadata.columns.push_back(value);
+        }
+
+        for (auto history : result.history) {
+            SchemaColumn value(history.xid,
+                               history.lsn,
+                               history.column.name,
+                               history.column.position,
+                               static_cast<SchemaType>(history.column.type),
+                               history.column.pg_type,
+                               history.exists,
+                               history.column.is_nullable);
+            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+            if (history.column.__isset.pk_position) {
+                value.pkey_position = history.column.pk_position;
+            }
+            if (history.column.__isset.default_value) {
+                value.default_value = history.column.default_value;
+            }
+
+            metadata.history.push_back(value);
+        }
+
+        return metadata;
+    }
+
 } // namespace

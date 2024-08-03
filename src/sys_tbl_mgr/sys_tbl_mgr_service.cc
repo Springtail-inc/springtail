@@ -272,9 +272,22 @@ namespace springtail {
     {
         boost::shared_lock lock(_read_mutex);
 
-        // XXX does the request need to contain both access and target XIDs?
         XidLsn xid(request.xid, request.lsn);
         auto info = _get_schema_info(request.table_id, xid, xid);
+        
+        _return = *info;
+    }
+
+    void
+    ThriftSysTblMgrService::get_schema_info_with_target(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
+                                                        const thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest &request)
+    {
+        boost::shared_lock lock(_read_mutex);
+
+        XidLsn access_xid(request.access_xid, request.access_lsn);
+        XidLsn target_xid(request.target_xid, request.target_lsn);
+
+        auto info = _get_schema_info(request.table_id, access_xid, target_xid);
         
         _return = *info;
     }
@@ -657,7 +670,7 @@ namespace springtail {
 
         // find the valid column metadata for the provided access_xid
         auto table_i = schemas_t->lower_bound(search_key);
-        while (table_i != schemas_t->end()) {
+        for (; table_i != schemas_t->end(); ++table_i) {
             auto &row = *table_i;
 
             // get the table_id from the entry

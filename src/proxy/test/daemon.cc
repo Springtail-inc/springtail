@@ -6,16 +6,18 @@
 #include <proxy/server.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/auth/md5.h>
+#include <proxy/session.hh>
 
 using namespace springtail;
+using namespace springtail::pg_proxy;
 
 void setup(ProxyServerPtr server)
 {
     // add primary
-    server->set_primary(std::make_shared<DatabaseInstance>("localhost", 5432));
+    server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, "localhost", 5432));
 
     // add replica
-    server->add_replica(std::make_shared<DatabaseInstance>("localhost", 5432));
+    server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, "localhost", 5432));
 
     // add replicated database
     server->add_replicated_database("test");
@@ -31,7 +33,7 @@ void setup(ProxyServerPtr server)
     md5[35] = '\0'; // null terminate
     uint32_t salt;
     get_random_bytes((uint8_t*)&salt, 4);
-    SPDLOG_DEBUG("Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
+    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
     server->add_user("test_md5", md5, salt);
 
     // add user for test db with scram

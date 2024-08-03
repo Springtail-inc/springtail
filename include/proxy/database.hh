@@ -17,6 +17,7 @@
 #include <proxy/server_session.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     class DatabasePool {
     public:
@@ -66,7 +67,7 @@ namespace springtail {
             std::unique_lock lock(_mutex);
             _free_sessions.push_back(session);
             _active_count--;
-            SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_count);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session released: {:d}, active={}", session->id(), _active_count);
         }
 
         /**
@@ -112,10 +113,11 @@ namespace springtail {
     /** Database instance class, contains hostname, port etc. */
     class DatabaseInstance : public std::enable_shared_from_this<DatabaseInstance> {
     public:
-        DatabaseInstance(const std::string &hostname,
+        DatabaseInstance(const Session::Type type,
+                         const std::string &hostname,
                          int port=5432,
                          int max_sessions=100)
-            : _hostname(hostname), _port(port), _max_sessions(max_sessions)
+            : _type(type), _hostname(hostname), _port(port), _max_sessions(max_sessions)
         {}
 
         /** get hostname */
@@ -173,20 +175,26 @@ namespace springtail {
          * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param dbname std::string database name
-         * @param type Session::Type type (replica or primary)
          * @return ServerSessionPtr session
          */
         ServerSessionPtr allocate_session(ProxyServerPtr server,
                                           UserPtr user,
-                                          const std::string &dbname,
-                                          Session::Type type);
+                                          const std::string &dbname);
 
 
+        /**
+         * @brief Get total count of sessions associated with this instance.
+         * @return int total sessions: sum of lru list and active sessions
+         */
         int total_count() const {
             std::shared_lock lock(_mutex);
             return _sessions_lru.size() + _active_sessions;
         }
 
+        /**
+         * @brief Get count of active (in use) sessions associated with this instance.
+         * @return int number of active sessions
+         */
         int active_count() const {
             std::shared_lock lock(_mutex);
             return _active_sessions;
@@ -194,6 +202,7 @@ namespace springtail {
 
     private:
         mutable std::shared_mutex _mutex;
+        Session::Type _type;
         std::string _hostname;
         int _port;
         int _max_sessions;
@@ -201,11 +210,15 @@ namespace springtail {
 
         /** map of dbname, username to database pool */
         std::map<std::pair<std::string, std::string>, DatabasePoolPtr> _sessions;
+
+        /** lru list of sessions that are not in use */
         std::list<ServerSessionPtr> _sessions_lru;
 
+        /** Internal call to get a session, assumes lock is held */
         ServerSessionPtr _internal_get_session(const std::string &dbname,
-                                         const std::string &username);
+                                               const std::string &username);
 
+        /** Internal call to evict a session, assumes lock is held */
         ServerSessionPtr _internal_evict_session();
 
     };
@@ -347,3 +360,4 @@ namespace springtail {
 
 
 } // namespace springtail
+} // namespace pg_proxy

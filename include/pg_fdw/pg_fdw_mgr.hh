@@ -228,7 +228,7 @@ namespace pg_fdw {
         static void _handle_exception(const Error &e);
 
         /** Helper to determine if a type can be used in a where clause */
-        static bool _is_type_sortable(Oid pg_type);
+        static bool _is_type_sortable(Oid pg_type, QualOpName op);
 
         /** Helper to setup quals and scan iterator in state, called from begin_scan */
         static void _init_quals(PgFdwState *state, List *qual_list);

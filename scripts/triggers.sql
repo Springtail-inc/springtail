@@ -49,7 +49,7 @@ BEGIN
             JOIN information_schema.columns
             ON column_name=pga.attname
             LEFT OUTER JOIN pg_index pgi
-            ON pga.attrelid=pgi.indrelid
+            ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
             WHERE pga.attrelid=obj.objid
               AND table_schema || '.' || table_name = obj.object_identity
             ORDER BY ordinal_position

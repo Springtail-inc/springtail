@@ -5,6 +5,7 @@
 #include <proxy/auth/scram.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     User::User(UserMgrPtr user_mgr,
                const std::string &username,
@@ -74,4 +75,5 @@ namespace springtail {
             _scram_keys->server_key_set = true;
         }
     }
-}
+} // namespace pg_proxy
+} // namespace springtail

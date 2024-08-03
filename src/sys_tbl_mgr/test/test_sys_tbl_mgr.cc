@@ -238,7 +238,7 @@ namespace {
         // finalize
         client->finalize(_xid.xid);
         ++_xid.xid;
-        _xid.lsn = 0;
+        _xid.lsn = 1;
 
         // alter the table
         alter_msg.oid = tid;
@@ -351,5 +351,35 @@ namespace {
         assert(schema_meta.columns.size() == 0);
 
         // verify the virtual schema creation at various combinations of access and target XID
+        XidLsn access_xid(check_xid - 4);
+        XidLsn target_xid(check_xid);
+        schema_meta = client->get_schema_info_with_target(tid, access_xid, target_xid);
+
+        assert(schema_meta.columns.size() == 2);
+        assert(schema_meta.columns[0].name == "col1");
+        assert(schema_meta.columns[1].name == "col2");
+
+        assert(schema_meta.history.size() == 5);
+
+        assert(schema_meta.history[0].update_type == SchemaUpdateType::REMOVE_COLUMN);
+        assert(schema_meta.history[0].name == "col1");
+        assert(schema_meta.history[0].xid == check_xid);
+
+        assert(schema_meta.history[1].update_type == SchemaUpdateType::NAME_CHANGE);
+        assert(schema_meta.history[1].name == "coltwo");
+        assert(schema_meta.history[1].xid == check_xid - 2);
+
+        assert(schema_meta.history[2].update_type == SchemaUpdateType::REMOVE_COLUMN);
+        assert(schema_meta.history[2].name == "coltwo");
+        assert(schema_meta.history[2].xid == check_xid);
+
+        assert(schema_meta.history[3].update_type == SchemaUpdateType::NEW_COLUMN);
+        assert(schema_meta.history[3].name == "col3");
+        assert(schema_meta.history[3].xid == check_xid - 1);
+        assert(schema_meta.history[3].lsn == 1);
+
+        assert(schema_meta.history[4].update_type == SchemaUpdateType::REMOVE_COLUMN);
+        assert(schema_meta.history[4].name == "col3");
+        assert(schema_meta.history[4].xid == check_xid);
     }
 }

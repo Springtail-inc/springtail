@@ -30,6 +30,7 @@ namespace springtail
         int32_t table_oid;
         std::vector<PgColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
+        std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
     };
 
 
@@ -56,52 +57,87 @@ namespace springtail
 
         PgTableSchema _schema;
 
-        std::FILE *_file = nullptr;
+        /**
+         * @brief Extract schema from table and store in internal _schema object
+         * @details Uses atttypid from pg_attribute table for identifier of the type.
+         *          Saves the column name, ordinal position, default value (as string), column type
+         *          and is_nullable flag for each table column.  Requires getTableOid() first.
+         *
+         */
+        void _get_schema();
 
-        // helper functions
-        // write to file
-        void write_int32(const int32_t val);
-        void write_string(const std::string &str);
-        void write_string(const char *str, unsigned len);
-        void write_string(const std::optional<std::string> str);
-        void write_bool(const bool val);
+        /**
+         * @brief Get transaction ids for current transaction snapshot
+         * @details calls: SELECT txid_current_snapshot() returns string
+         *          in format: "xid_min:xid_max:xid,xid,xid" showing set of
+         *          transactions overlapping with current transaction
+         *
+         * @throws PgQueryError
+         */
+        void _get_xact_xids();
 
-        // read from file
-        int64_t read_int64();
-        int32_t read_int32();
-        int16_t read_int16();
-        char read_char();
-        bool read_bool();
-        std::optional<std::string> read_string_optional();
-        std::string read_string();
-        std::string read_string(int length);
+        /**
+         * @brief Get table's oid based on schema / table, store in schema
+         */
+        void _get_table_oid();
 
-        // retrieve schema, write out schema and copy data
-        void get_schema();
-        void get_xact_xids();
-        void get_table_oid();
-        void get_pkeys();
-        void write_schema();
-        void copy_data();
+        /**
+         * @brief Get secondary index columns for table by oid
+         */
+        void _get_secondary_indexes();
 
-        // functions used to implement copy_data()
-        void prepare_copy();
-        std::optional<std::string_view> get_next_data();
-        void release_data();
+        /**
+         * @brief Execute copy query
+         */
+        void _prepare_copy();
 
-        // functions used to implement copy_to_springtail()
+        /**
+         * @brief Get copy data from connection using copy buffer
+         * Copy buffer should be released with _release_data()
+         * @return std::optional<std::string_view> buffer containing data
+         */
+        std::optional<std::string_view> _get_next_data();
+
+        /**
+         * @brief Free the copy buffer from _get_next_data()
+         */
+        void _release_data();
+
+        /**
+         * @brief Convert pg columns to internal pg msg schema columns
+         * @param pg_columns input pg columns
+         * @param pkeys primary keys
+         * @return std::vector<PgMsgSchemaColumn>
+         */
         std::vector<PgMsgSchemaColumn> _map_to_pg_msg(const std::vector<PgColumn> pg_columns,
                                                       const std::vector<std::string> pkeys);
+
+        /**
+         * find element in vector and get distance from begin iterator
+         * used to find primary key position
+         */
         int _get_vec_pos(const std::vector<std::string> vec, const std::string element);
-        FieldArrayPtr parse_row(const std::string_view &row, size_t &pos);
 
-        // read in schema, copy header, copy data
-        int32_t verify_copy_header(const std::string_view &header);
-        void read_header();
-        void read_schema();
-        void read_copy_data();
+        /**
+         * @brief Parse row received from copy table command
+         * @param row input row (copy buffer)
+         * @param pos position in row to start parsing (in/out)
+         */
+        FieldArrayPtr _parse_row(const std::string_view &row, size_t &pos);
 
-        SchemaType convert_pg_type(int32_t pg_type);
+        /**
+         * Validate copy header
+         * @details Header contents:
+         *          11B signature starts with COPY_SIGNATURE
+         *           4B flags; bit 16 oid flag
+         *           4B header extension length
+         */
+        int32_t _verify_copy_header(const std::string_view &header);
+
+        /**
+         * @brief Convert pg type to internal schema type
+         */
+        SchemaType _convert_pg_type(int32_t pg_type);
 
     public:
 
@@ -156,24 +192,9 @@ namespace springtail
         void disconnect();
 
         /**
-         * @brief Copy remote table data to file
-         *        add schema of table to header
-         *
-         * @param filename name of file to write data to
-         */
-        void copy_to_file(const std::filesystem::path &filename);
-
-        /**
          * @brief Copy remote table data into Springtail starting at a given internal XID
          * @param xid The XID at which the table is to become available.
          */
         int32_t copy_to_springtail(const std::filesystem::path &base_dir, uint64_t xid);
-
-        /**
-         * @brief Decode data written to file by copyToFile()
-         *
-         * @param filename name of file to read data from
-         */
-        void decode_file(const std::filesystem::path &filename);
     };
 }

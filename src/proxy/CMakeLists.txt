@@ -3,6 +3,7 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 
 # source files
 set(PROXY_SOURCES
@@ -13,8 +14,9 @@ set(PROXY_SOURCES
     client_session.cc
     server_session.cc
     user_mgr.cc
-    request_handler.cc
-    #parser.cc
+    parser.cc
+    buffer_pool.cc
+    history_cache.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
@@ -34,19 +36,37 @@ target_link_libraries(springtail_proxy
     PRIVATE auth
     PRIVATE OpenSSL::SSL
     PRIVATE OpenSSL::Crypto
+    PRIVATE xxHash::xxhash
 )
 
 # test parser executable
-add_executable(parser test/test_parser.cc)
-target_include_directories(parser
+add_executable(test_parser test/test_parser.cc)
+target_include_directories(test_parser
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
 )
-target_link_libraries(parser PRIVATE pg_query)
-add_dsymutil_command(parser)
+target_link_libraries(test_parser
+    PRIVATE springtail_proxy
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_parser)
+gtest_discover_tests(test_parser)
 
+# test server daemon executable
+add_executable(parsing test/parsing.cc)
+target_include_directories(parsing
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+)
+target_link_libraries(parsing
+    PUBLIC springtail_proxy
+)
 
 # test server daemon executable
 add_executable(daemon test/daemon.cc)

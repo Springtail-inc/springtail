@@ -1,9 +1,14 @@
 #pragma once
 
 #include <string>
-#include <proxy/buffer.hh>
+#include <proxy/buffer_pool.hh>
 
 namespace springtail {
+namespace pg_proxy {
+
+    /**
+     * @brief Class for encoding and decoding error messages from postgres
+     */
     class ProxyProtoError {
     public:
         // for full error codes: https://www.postgresql.org/docs/16/errcodes-appendix.html
@@ -12,23 +17,23 @@ namespace springtail {
         constexpr static std::string_view PERMISSION_DENIED = "42501";
 
         static inline void
-        encode_error(ProxyBuffer &buffer,
+        encode_error(BufferPtr buffer,
                      const std::string_view error_code,
                      const std::string_view error_message)
         {
-            buffer.put('E');
-            buffer.put32(23 + error_code.size() + error_message.size());
-            buffer.putString("SERROR");
-            buffer.putString("VERROR");
-            buffer.put('C');
-            buffer.putString(error_code);
-            buffer.put('M');
-            buffer.putString(error_message);
-            buffer.put(0);
+            buffer->put('E');
+            buffer->put32(23 + error_code.size() + error_message.size());
+            buffer->put_string("SERROR");
+            buffer->put_string("VERROR");
+            buffer->put('C');
+            buffer->put_string(error_code);
+            buffer->put('M');
+            buffer->put_string(error_message);
+            buffer->put(0);
         }
 
         static inline void
-        decode_error(ProxyBuffer &buffer,
+        decode_error(BufferPtr &buffer,
                      std::string &severity,
                      std::string &text,
                      std::string &error_code,
@@ -36,28 +41,28 @@ namespace springtail {
         {
             char type = '\0';
             do {
-                type = buffer.get();
+                type = buffer->get();
                 switch (type) {
                 case 'S':
-                    severity = buffer.getString();
+                    severity = buffer->get_string();
                     break;
                 case 'V':
-                    text = buffer.getString();
+                    text = buffer->get_string();
                     break;
                 case 'C':
-                    error_code = buffer.getString();
+                    error_code = buffer->get_string();
                     break;
                 case 'M':
-                    error_message = buffer.getString();
+                    error_message = buffer->get_string();
                     break;
                 case '\0':
                     break;
                 default:
-                    buffer.getString();
+                    buffer->get_string();
                     break;
                 }
             } while (type != '\0');
         }
     };
-
-}
+} // namespace pg_proxy
+} // namespace springtail

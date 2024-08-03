@@ -10,6 +10,7 @@
 #include <proxy/server_session.hh>
 
 namespace springtail {
+namespace pg_proxy {
 
     ServerSessionPtr
     DatabaseInstance::evict_session() {
@@ -19,7 +20,7 @@ namespace springtail {
 
     DatabasePoolPtr
     DatabaseInstance::get_pool(const std::string &dbname,
-                                const std::string &username) const
+                               const std::string &username) const
     {
         std::shared_lock lock(_mutex);
         // get size of pool based on dbname and username
@@ -51,14 +52,14 @@ namespace springtail {
         std::unique_lock lock(_mutex);
         auto it = _sessions.find({session->database(), session->username()});
         if (it == _sessions.end()) {
-            SPDLOG_WARN("Session not found in pool: {:d}", session->id());
+            SPDLOG_WARN("Database pool not found for: {}:{}", session->database(), session->username());
             return;
         }
 
         it->second->release_session(session);
         _active_sessions--;
         assert(_active_sessions >= 0);
-        SPDLOG_DEBUG("Session released: {:d}, active={}", session->id(), _active_sessions);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session released: {:d}, active={}", session->id(), _active_sessions);
     }
 
     void
@@ -78,8 +79,7 @@ namespace springtail {
     ServerSessionPtr
     DatabaseInstance::allocate_session(ProxyServerPtr server,
                                        UserPtr user,
-                                       const std::string &database,
-                                       Session::Type type)
+                                       const std::string &database)
     {
         std::unique_lock lock(_mutex);
 
@@ -123,7 +123,7 @@ namespace springtail {
         lock.unlock();
 
         // create a new session
-        session = ServerSession::create(server, user, database, shared_from_this(), type);
+        session = ServerSession::create(server, user, database, shared_from_this(), _type);
 
         return session;
     }
@@ -170,3 +170,4 @@ namespace springtail {
     }
 
 } // namespace springtail
+} // namespace pg_proxy
