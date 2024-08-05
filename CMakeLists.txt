@@ -86,6 +86,7 @@ add_subdirectory(src/xid_mgr)
 add_subdirectory(src/thrift)
 add_subdirectory(src/proxy)
 add_subdirectory(src/pg_fdw)
+add_subdirectory(src/test)
 
 
 ## Messages keep at end of file

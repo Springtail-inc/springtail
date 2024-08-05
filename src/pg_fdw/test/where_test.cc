@@ -150,7 +150,7 @@ namespace {
             create_msg.table = "test_table";
             create_msg.columns = _columns;
 
-            TableMgr::get_instance()->create_table(xid, 0, create_msg);
+            TableMgr::get_instance()->create_table({ xid, 0 }, create_msg);
         }
 
         std::shared_ptr<Tuple>

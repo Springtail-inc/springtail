@@ -10,11 +10,11 @@
 #include <common/threaded_test.hh>
 
 #include <storage/schema.hh>
+#include <storage/xid.hh>
 
 #include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
 
-#include <xid_mgr/xid_mgr_server.hh>
+#include <test/services.hh>
 
 using namespace springtail;
 
@@ -27,43 +27,18 @@ namespace {
         static void SetUpTestSuite() {
             springtail_init();
 
-            auto json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir,
-                                                "/tmp/springtail/table");
-            std::filesystem::remove_all(_table_dir);
-
-            json = Properties::get(Properties::XID_MGR_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "base_path", _xid_dir, "/tmp/xid_mgr");
-            std::filesystem::remove_all(_xid_dir);
-
-            _systbl_thread = std::thread([]{
-                SysTblMgrServer::startup();
-            });
-
-            _xidmgr_thread = std::thread([]{
-                XidMgrServer::startup();
-            });
+            _services.init(true);
         }
 
         static void TearDownTestSuite() {
-            SysTblMgrServer::shutdown();
-            _systbl_thread.join();
-
-            XidMgrServer::shutdown();
-            _xidmgr_thread.join();
-
-            std::filesystem::remove_all(_table_dir);
+            _services.shutdown();
         }
 
-        static std::filesystem::path _table_dir, _xid_dir;
-        static std::thread _systbl_thread, _xidmgr_thread;
+        static test::Services _services;
         static XidLsn _xid;
     };
 
-    std::filesystem::path SysTblMgr_Test::_table_dir;
-    std::filesystem::path SysTblMgr_Test::_xid_dir;
-    std::thread SysTblMgr_Test::_systbl_thread;
-    std::thread SysTblMgr_Test::_xidmgr_thread;
+    test::Services SysTblMgr_Test::_services(true, true, false);
     XidLsn SysTblMgr_Test::_xid(1, 0);
 
     // Tests the schema modification paths

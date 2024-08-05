@@ -4,6 +4,8 @@
 #include <storage/table_mgr.hh>
 #include <storage/system_tables.hh>
 
+#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
+
 namespace springtail {
 
     /* static member initialization must happen outside of class */
@@ -57,77 +59,14 @@ namespace springtail {
             return table;
         }
 
-        // retrieve the roots of the table
-        auto &&roots = _find_roots(table_id, xid);
-
-        // retrieve the table stats
-        auto &&stats = _find_stats(table_id, xid);
+        // retrieve the roots and stats of the table
+        auto &&tbl_meta = SysTblMgrClient::get_instance()->get_roots(table_id, xid);
 
         // construct the table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, {xid, lsn});
         return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
                                        schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
-                                       roots, schema, stats);
-    }
-
-    std::vector<uint64_t>
-    TableMgr::_find_roots(uint64_t table_id,
-                          uint64_t xid)
-    {
-        std::vector<uint64_t> roots;
-
-        // get the root of the table's primary index
-        auto roots_t = _get_system_table(sys_tbl::TableRoots::ID, xid);
-        auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
-
-        auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid);
-
-        auto it = roots_t->inverse_lower_bound(search_key);
-
-        // need to confirm that the table ID and index ID match, but the XID may not match
-        auto table_id_f = roots_t->extent_schema()->get_field("table_id");
-        auto index_id_f = roots_t->extent_schema()->get_field("index_id");
-        if (it == roots_t->end() ||
-            table_id_f->get_uint64(*it) != table_id ||
-            index_id_f->get_uint64(*it) != constant::INDEX_PRIMARY) {
-            // no roots?  try to find it in the roots file by returning empty roots
-            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}", table_id, xid);
-            return roots;
-        }
-
-        // retrieve the root extent ID of the primary
-        auto eid_f = roots_t->extent_schema()->get_field("extent_id");
-        roots.push_back(eid_f->get_uint64(*it));
-
-        return roots;
-    }
-
-    TableStats
-    TableMgr::_find_stats(uint64_t table_id,
-                          uint64_t xid)
-    {
-        TableStats stats;
-
-        // get the root of the table's primary index
-        auto stats_t = _get_system_table(sys_tbl::TableStats::ID, xid);
-        auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
-
-        auto search_key = sys_tbl::TableStats::Primary::key_tuple(table_id, xid);
-
-        auto it = stats_t->inverse_lower_bound(search_key);
-
-        // need to confirm that the table ID matches, but the XID may not match
-        auto table_id_f = stats_t->extent_schema()->get_field("table_id");
-        if (it == stats_t->end() || table_id_f->get_uint64(*it) != table_id) {
-            // no stats for this table?  seems like a potential error
-            SPDLOG_WARN("Couldn't find table_stats entry for {}@{}", table_id, xid);
-            return stats;
-        }
-
-        // retrieve the stats from the row
-        auto row_count_f = stats_t->extent_schema()->get_field("row_count");
-        stats.row_count = row_count_f->get_uint64(*it);
-        return stats;
+                                       tbl_meta.roots, schema, tbl_meta.stats);
     }
 
     MutableTablePtr
@@ -144,169 +83,45 @@ namespace springtail {
             return table;
         }
 
-        // retrieve the roots of the table
-        auto &&roots = _find_roots(table_id, access_xid);
-
-        // retrieve the table stats
-        auto &&stats = _find_stats(table_id, access_xid);
+        // retrieve the roots and stats of the table
+        auto &&tbl_meta = SysTblMgrClient::get_instance()->get_roots(table_id, access_xid);
 
         // construct the mutable table and return it
         XidLsn xid(access_xid);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
 
-        return std::make_shared<MutableTable>(table_id, access_xid, target_xid, roots,
+        return std::make_shared<MutableTable>(table_id, access_xid, target_xid, tbl_meta.roots,
                                               _table_base / fmt::format("{}", table_id),
                                               schema->get_sort_keys(),
                                               std::vector<std::vector<std::string>>{},
-                                              schema, stats, for_gc);
+                                              schema, tbl_meta.stats, for_gc);
     }
 
     void
-    TableMgr::create_table(uint64_t xid,
-                           uint64_t lsn,
+    TableMgr::create_table(const XidLsn &xid,
                            const PgMsgTable &msg)
     {
-        uint64_t access_xid = xid - 1;
-
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Creating table {}.{}@{} {} - {}", msg.schema, msg.table, xid, msg.oid, lsn);
-
-        // 1) add a table -> name mapping that starts the table at the given XID/LSN
-        auto table_names_t = _get_mutable_system_table(sys_tbl::TableNames::ID, access_xid, xid);
-        auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
-        table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-        // add a table_id -> UNKNOWN extent ID mapping that indicates an empty primary index at the given XID/LSN
-
-        // note: we perform an upsert() because the table records at the XID level and there may
-        //       have been an earlier DROP in the same XID, and we can't insert the same entry twice
-        auto table_roots_t = _get_mutable_system_table(sys_tbl::TableRoots::ID, access_xid, xid);
-        tuple = sys_tbl::TableRoots::Data::tuple(msg.oid, 0, xid, constant::UNKNOWN_EXTENT);
-        table_roots_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-        // track the primary index keys using an ordered map of position -> column_id
-        std::map<uint32_t, uint32_t> primary_keys;
-
-        // 2) add a row to "schemas" for each column
-        auto schemas_t = _get_mutable_system_table(sys_tbl::Schemas::ID, access_xid, xid);
-        for (auto &&column : msg.columns) {
-            // insert an entry into the schemas table
-            auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, column.position, xid, lsn,
-                                                       true, // exists
-                                                       column.column_name,
-                                                       column.type,
-                                                       column.pg_type, // pg type oid
-                                                       column.is_nullable, column.default_value,
-                                                       static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN));
-            schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-            // record the primary key columns and order
-            if (column.is_pkey) {
-                primary_keys[column.pk_position] = column.position;
-            }
-        }
-
-        // 3) if there's a primary key, add a row to "indexes" for each key column of the primary key
-        if (!primary_keys.empty()) {
-            auto indexes_t = _get_mutable_system_table(sys_tbl::Indexes::ID, access_xid, xid);
-            auto fields = sys_tbl::Indexes::Data::fields(msg.oid, 0, xid, lsn, 0, 0);
-
-            for (auto &&entry : primary_keys) {
-                fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
-                fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
-
-                indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr), xid, constant::UNKNOWN_EXTENT);
-            }
-        }
-
-        // 4) create an entry with the table statistics -- currently just a row_count of zero
-        auto table_stats_t = _get_mutable_system_table(sys_tbl::TableStats::ID, access_xid, xid);
-        tuple = sys_tbl::TableStats::Data::tuple(msg.oid, xid, 0);
-        table_stats_t->upsert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-        // XXX 4) Secondary indexes??  unclear when to create them.
-
-        // XXX notify the schema manager of the new schema?
-
-        // XXX create the table's directory?  create empty index files?
+        SysTblMgrClient::get_instance()->create_table(xid, msg);
     }
 
     void
-    TableMgr::alter_table(uint64_t xid,
-                          uint64_t lsn,
+    TableMgr::alter_table(const XidLsn &xid,
                           const PgMsgTable &msg)
     {
-        // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
-        uint64_t access_xid = xid - 1;
-
-        // retrieve the current name of the table
-        auto &&old_name = _get_table_name(msg.oid, xid, lsn);
-
-        if (old_name.first != msg.schema || old_name.second != msg.table) {
-            // 1) if the table name is changed, add two rows to the "tables" -- one with the new name, and one to remove the old name
-            auto table_names_t = _get_mutable_system_table(sys_tbl::TableNames::ID, access_xid, xid);
-
-            // insert the new name with this oid
-            auto new_tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, true);
-            table_names_t->insert(new_tuple, xid, constant::UNKNOWN_EXTENT);
-
-            // insert the old name with exists = false
-            auto old_tuple = sys_tbl::TableNames::Data::tuple(old_name.first, old_name.second, msg.oid, xid, lsn, false);
-            table_names_t->insert(old_tuple, xid, constant::UNKNOWN_EXTENT);
-
-            // sync the changes to disk
-            table_names_t->finalize();
-        } else {
-            // 2) determine the set of changes between the provided schema and the prior schema
-            auto &&old_columns = SchemaMgr::get_instance()->get_columns(msg.oid, {xid, lsn});
-
-            std::map<uint32_t, SchemaColumn> new_columns;
-            for (const auto &col : msg.columns) {
-                new_columns[col.position] = SchemaColumn(xid, lsn, col.column_name, col.position,
-                                                         SchemaType(col.type),
-                                                         col.pg_type,
-                                                         true, col.is_nullable,
-                                                         col.is_pkey ? col.pk_position : std::optional<uint32_t>(),
-                                                         col.default_value);
-            }
-
-            auto update = SchemaMgr::get_instance()->generate_update(old_columns, new_columns, {xid, lsn});
-            auto &col = new_columns[update.position];
-
-            // apply the changes to the schemas table
-            auto schemas_t = _get_mutable_system_table(sys_tbl::Schemas::ID, access_xid, xid);
-            auto tuple = sys_tbl::Schemas::Data::tuple(msg.oid, update.position, xid, lsn,
-                                                       (update.update_type != SchemaUpdateType::REMOVE_COLUMN), // exists
-                                                       col.name, static_cast<uint8_t>(col.type), col.pg_type,
-                                                       col.nullable, col.default_value, static_cast<uint8_t>(update.update_type));
-            schemas_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-            // XXX notify the schema manager somehow to update it's cached schema information?
-
-            // 5) XXX if there's a primary key change, what do we do?  we'll need to re-build the entire table
-        }
+        SysTblMgrClient::get_instance()->alter_table(xid, msg);
     }
 
     void
-    TableMgr::drop_table(uint64_t xid,
-                         uint64_t lsn,
+    TableMgr::drop_table(const XidLsn &xid,
                          const PgMsgDropTable &msg)
     {
-        // XXX we need to think if it's safe to just use the previous XID as the access XID when performing these operations
-        uint64_t access_xid = xid - 1;
+        SysTblMgrClient::get_instance()->drop_table(xid, msg);
+    }
 
-        // 1) update the "table_names" with a drop entry
-        //    note: the GC-3 should evict these entries once the data has been brought forward and
-        //          we can assume the table_id won't be re-used until that operation is complete
-        auto table_names_t = _get_mutable_system_table(sys_tbl::TableNames::ID, access_xid, xid);
-        auto tuple = sys_tbl::TableNames::Data::tuple(msg.schema, msg.table, msg.oid, xid, lsn, false);
-        table_names_t->insert(tuple, xid, constant::UNKNOWN_EXTENT);
-
-        // note: we don't update the "table_roots" with a null entry because a truncate will utilize
-        //       an empty extent as the root.  This allows us to maintain the reverse linking of
-        //       historical roots.
-
-        // XXX do we need to clear the schemas table at the XID/LSN?
-        // XXX do we need to clear the indexes table at the XID/LSN?
+    void
+    TableMgr::finalize_metadata(uint64_t xid)
+    {
+        SysTblMgrClient::get_instance()->finalize(xid);
     }
 
     TablePtr
@@ -395,32 +210,11 @@ namespace springtail {
 
     void
     TableMgr::update_roots(uint64_t table_id,
-                           uint64_t access_xid,
                            uint64_t target_xid,
-                           const std::vector<uint64_t> &roots)
-    {
-        // modify the table_roots table
-        auto roots_t = _get_mutable_system_table(sys_tbl::TableRoots::ID, access_xid, target_xid);
-        for (uint64_t idx = 0; idx < roots.size(); ++idx) {
-            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, idx, target_xid, roots[idx]);
-            roots_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
-
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{} {} - {}", table_id, target_xid, idx, roots[idx]);
-        }
-    }
-
-    void
-    TableMgr::update_stats(uint64_t table_id,
-                           uint64_t access_xid,
-                           uint64_t target_xid,
+                           const std::vector<uint64_t> &roots,
                            const TableStats &stats)
     {
-        // modify the table_stats table
-        auto stats_t = _get_mutable_system_table(sys_tbl::TableStats::ID, access_xid, target_xid);
-        auto tuple = sys_tbl::TableStats::Data::tuple(table_id, target_xid, stats.row_count);
-        stats_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
-
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated stats {}@{} - {}", table_id, target_xid, stats.row_count);
+        SysTblMgrClient::get_instance()->update_roots(table_id, target_xid, roots, stats.row_count);
     }
 
     MutableTablePtr
@@ -428,14 +222,6 @@ namespace springtail {
                                         uint64_t access_xid,
                                         uint64_t target_xid)
     {
-#if 0
-        // check if we already have the table open
-        auto sys_i = _system_tables.find(table_id);
-        if (sys_i != _system_tables.end()) {
-            return sys_i->second;
-        }
-#endif
-
         // initialize the system tables using the look-aside root files
         std::vector<uint64_t> roots;
         std::vector<std::vector<std::string>> secondary_keys;
@@ -529,40 +315,6 @@ namespace springtail {
             throw SchemaError();
         }
 
-#if 0
-        // save the mutable table into the cache
-        _system_tables[table_id] = sys_table;
-#endif
-
         return sys_table;
-    }
-
-    std::pair<std::string, std::string>
-    TableMgr::_get_table_name(uint64_t table_id,
-                              uint64_t xid,
-                              uint64_t lsn)
-    {
-        // XXX check a cache of the names?
-
-        // XXX need to make sure that the system tables are flushed to use the read interface, otherwise we would need to have a way to search the MutableBTree
-        // get "tables" system table
-        auto table_names_t = get_table(sys_tbl::TableNames::ID, xid, lsn);
-        auto schema = table_names_t->schema(xid);
-        auto fields = schema->get_fields();
-
-        auto search_key = sys_tbl::TableNames::Primary::key_tuple(table_id, xid, lsn);
-
-        // find the row that matches the name of the table_id at the given XID/LSN
-        auto row_i = table_names_t->inverse_lower_bound(search_key);
-        if (row_i == table_names_t->end() ||
-            schema->get_field("table_id")->get_uint64(*row_i) != table_id ||
-            schema->get_field("exists")->get_bool(*row_i) == false) {
-            // XXX error -- table_id doesn't exist at the provided XID
-        }
-
-        // read the row from the extent and retrieve the FQN
-        std::string_view &&old_name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row_i);
-        std::string_view &&old_namespace = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row_i);
-        return { std::string(old_namespace), std::string(old_name) };
     }
 }

@@ -307,7 +307,7 @@ namespace springtail::gc {
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->create_table(_state->entry->xid, _state->lsn, table_msg);
+                            TableMgr::get_instance()->create_table({ _state->entry->xid, _state->lsn }, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -333,7 +333,7 @@ namespace springtail::gc {
                             // XXX need to stall the pipeline in some cases, eg type change
 
                             // apply the schema change
-                            TableMgr::get_instance()->alter_table(_state->entry->xid, _state->lsn, table_msg);
+                            TableMgr::get_instance()->alter_table({ _state->entry->xid, _state->lsn }, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       committed since there might be additional schema changes
@@ -355,7 +355,7 @@ namespace springtail::gc {
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->drop_table(_state->entry->pg_xid, _state->lsn, drop_msg);
+                            TableMgr::get_instance()->drop_table({ _state->entry->pg_xid, _state->lsn }, drop_msg);
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();

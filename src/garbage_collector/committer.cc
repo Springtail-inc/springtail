@@ -216,9 +216,6 @@ namespace springtail::gc {
 
         // finalize the table
         auto roots = table->finalize();
-
-        // record the new roots into the system table
-        TableMgr::get_instance()->update_roots(table->id(), _committed_xid, xid, roots);
     }
 
     void

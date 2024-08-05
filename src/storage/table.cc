@@ -541,8 +541,7 @@ namespace springtail {
             auto table_mgr = TableMgr::get_instance();
 
             // note: don't currently keep table roots or table stats for system tables
-            table_mgr->update_roots(_id, _access_xid, _target_xid, roots);
-            table_mgr->update_stats(_id, _access_xid, _target_xid, _stats);
+            table_mgr->update_roots(_id, _target_xid, roots, _stats);
         }
 
         // store the roots into a look-aside root file

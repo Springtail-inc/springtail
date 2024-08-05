@@ -32,7 +32,7 @@ add_dsymutil_command(read_branch)
 
 add_executable(dump_system_tables test/dump_system_tables.cc)
 target_include_directories(dump_system_tables PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(dump_system_tables PUBLIC springtail_storage)
+target_link_libraries(dump_system_tables PUBLIC springtail_storage springtail_sys_tbl_mgr)
 add_dsymutil_command(dump_system_tables)
 
 add_executable(dump_headers test/dump_headers.cc)
@@ -71,7 +71,7 @@ add_executable(test_table test/test_table.cc)
 target_include_directories(test_table PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_table PRIVATE "--coverage")
 target_link_libraries(test_table
-    PUBLIC springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage springtail_test GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
 add_dsymutil_command(test_table)
 
@@ -80,7 +80,7 @@ add_executable(test_table_mgr test/test_table_mgr.cc)
 target_include_directories(test_table_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_table_mgr PRIVATE "--coverage")
 target_link_libraries(test_table_mgr
-    PUBLIC springtail_storage GTest::gtest_main
+    PUBLIC springtail_storage springtail_test GTest::gtest_main
     PRIVATE unofficial::vincentlaucsb-csv-parser::csv ${GCOV_LIB})
 add_dsymutil_command(test_table_mgr)
 

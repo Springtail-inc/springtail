@@ -374,7 +374,7 @@ namespace springtail
         // note: we create the system metadata at the previous XID
         // XXX need to fix this
         uint64_t access_xid = xid - 1;
-        TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
+        TableMgr::get_instance()->create_table({ access_xid, 0 }, create_msg);
 
         auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, XidLsn(access_xid));
         auto table = TableMgr::get_instance()->get_mutable_table(_schema.table_oid, access_xid, xid);
@@ -422,7 +422,7 @@ namespace springtail
         auto roots = table->finalize();
 
         // store the roots into the system table
-        TableMgr::get_instance()->update_roots(_schema.table_oid, access_xid, xid, roots);
+        TableMgr::get_instance()->update_roots(_schema.table_oid, xid, roots, {});
 
         return _schema.table_oid;
     }

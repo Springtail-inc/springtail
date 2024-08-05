@@ -109,7 +109,7 @@ target_include_directories(test_pgcopy
     PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
 target_link_libraries(test_pgcopy
-    PUBLIC springtail_storage springtail_pg
+    PUBLIC springtail_storage springtail_pg springtail_sys_tbl_mgr
     PRIVATE GTest::gtest_main
 )
 add_dsymutil_command(test_pgcopy)

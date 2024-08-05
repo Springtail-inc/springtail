@@ -7,6 +7,8 @@
 #include <storage/csv_field.hh>
 #include <storage/table.hh>
 
+#include <test/services.hh>
+
 using namespace springtail;
 
 namespace {
@@ -18,6 +20,7 @@ namespace {
     protected:
         void SetUp() override {
             springtail_init();
+            _services.init(true);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -48,9 +51,13 @@ namespace {
         }
 
         void TearDown() override {
+            _services.shutdown();
+
             // remove any files created during the run
             std::filesystem::remove_all(_base_dir);
         }
+
+        test::Services _services{true, true, false};
 
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
