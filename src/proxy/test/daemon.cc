@@ -1,4 +1,5 @@
 #include <iostream>
+#include <csignal>
 #include <boost/program_options.hpp>
 
 // springtail includes
@@ -11,7 +12,17 @@
 using namespace springtail;
 using namespace springtail::pg_proxy;
 
-void setup(ProxyServerPtr server)
+static ProxyServerPtr server = nullptr;
+
+static void
+handle_sigint(int signal)
+{
+    if (server != nullptr) {
+        server->shutdown();
+    }
+}
+
+static void setup(ProxyServerPtr server)
 {
     // add primary
     server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, "localhost", 5432));
@@ -59,7 +70,8 @@ int main(int argc, char* argv[])
         ("threads,n", boost::program_options::value<int>(&num_threads)->default_value(4), "Number of threads")
         ("cert,c", boost::program_options::value<std::filesystem::path>(&certificate)->default_value(std::filesystem::path("cert.pem")), "Certificate file")
         ("key,k", boost::program_options::value<std::filesystem::path>(&key)->default_value(std::filesystem::path("key.pem")), "Key file")
-        ("log,l", boost::program_options::value<std::filesystem::path>(&log)->default_value(std::filesystem::path("/tmp/springtail/proxy.log")), "Log file");
+        ("log,l", boost::program_options::value<std::filesystem::path>(&log)->default_value(std::filesystem::path("/tmp/springtail/proxy.log")), "Log file")
+        ("daemonize", "Start the server as a daemon");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -77,12 +89,21 @@ int main(int argc, char* argv[])
 
     springtail_init();
 
+    // daemonize the process
+    if (vm.count("daemonize")) {
+        common::daemonize("/var/springtail/proxy.pid");
+    }
+
+    // register the SIGINT handler
+    std::signal(SIGINT, handle_sigint);
+
+
+    std::cout << "Logging initialized to: " << log << std::endl;
     LoggerPtr logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
 
-    ProxyServerPtr server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
+    server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
 
     setup(server);
 
     server->run();
 }
-

@@ -16,7 +16,7 @@
 namespace springtail::pg_proxy {
 
     /** unique session id counter */
-    static std::atomic<uint64_t> session_id(0);
+    static std::atomic<uint64_t> session_id(1);
 
     /** map of message type to string */
     const std::map<SessionMsg::Type, std::string> SessionMsg::type_map = {

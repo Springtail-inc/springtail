@@ -1,0 +1,4 @@
+{"name":"query","args":["drop table if exists test"]}
+{"name":"query","args":["create table test (id int, name text)"]}
+{"name":"query","args":["insert into test values (1, 'test'), (2, 'two'), (3, 'three')"]}
+{"name":"query","args":["select * from test"]}

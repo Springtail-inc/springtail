@@ -101,7 +101,7 @@ namespace springtail::pg_proxy {
         void _send_ssl_handshake(uint64_t seq_id);
 
         /** Wrapper around sending a buffer to the server */
-        void _send_buffer(BufferPtr buffer, uint64_t seq_id);
+        void _send_buffer(BufferPtr buffer, uint64_t seq_id, char code='\0');
 
         /**
          * Send required statements to fulfil dependency

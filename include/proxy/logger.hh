@@ -61,6 +61,7 @@ namespace springtail::pg_proxy {
             auto binary_formatter = std::make_unique<BinaryFormatter>();
             _file_sink->set_formatter(std::move(binary_formatter));
             _file_sink->set_level(spdlog::level::info);
+            spdlog::flush_every(std::chrono::seconds(3));
         }
 
         void log_data(LogMsgType type, uint32_t session_id, uint64_t seq_id,

@@ -256,9 +256,20 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ProxyServer::shutdown()
+    {
+        // send signal to shutdown
+        _shutdown = true;
+        char buf[1] = {0};
+        write(_pipe[1], buf, 1);
+
+        // other cleanup is down after while loop in run()
+    }
+
+    void
     ProxyServer::run()
     {
-        while (true) {
+        while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
             std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
@@ -336,6 +347,7 @@ namespace springtail::pg_proxy {
             }
         }
 
+        // do cleanup
         SPDLOG_INFO("Proxy server shutting down");
 
         // close socket
@@ -349,6 +361,11 @@ namespace springtail::pg_proxy {
         if (_enable_ssl) {
             ::SSL_CTX_free(_ssl_ctx_server);
             ::SSL_CTX_free(_ssl_ctx_client);
+        }
+
+        // flush logger
+        if (_logger) {
+            _logger->flush();
         }
     }
 

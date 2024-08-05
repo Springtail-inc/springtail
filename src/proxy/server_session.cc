@@ -385,7 +385,7 @@ namespace springtail::pg_proxy {
         buffer->put_string("UTF8");
         buffer->put(0); // null terminator
 
-        _send_buffer(buffer, seq_id);
+        _send_buffer(buffer, seq_id, '?');
 
         _state = AUTH;
     }
@@ -862,14 +862,14 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_send_buffer(BufferPtr buffer, uint64_t seq_id)
+    ServerSession::_send_buffer(BufferPtr buffer, uint64_t seq_id, char code)
     {
         // send the buffer to the server
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         assert(n == buffer->size());
 
         // log the buffer
-        _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
+        _log_buffer(false, code, buffer->size(), buffer->data(), seq_id);
     }
 
     void

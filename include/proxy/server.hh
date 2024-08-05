@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <map>
@@ -117,6 +118,9 @@ namespace springtail::pg_proxy {
             return _logger;
         }
 
+        /** Shutdown server */
+        void shutdown();
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
@@ -141,6 +145,7 @@ namespace springtail::pg_proxy {
         std::set<std::string> _replicated_databases; ///< list of authorized databases
 
         bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
+        std::atomic<bool> _shutdown = false;    ///< true if server is shutting down
 
         LoggerPtr _logger;         ///< logger object (may be null)
 
