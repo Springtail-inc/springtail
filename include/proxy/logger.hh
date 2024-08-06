@@ -57,11 +57,15 @@ namespace springtail::pg_proxy {
          */
         Logger(const std::string &log_path, int max_size, int max_files)
         {
+            // create the file sink and binary/null formatter
             _file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path, max_size, max_files);
             auto binary_formatter = std::make_unique<BinaryFormatter>();
             _file_sink->set_formatter(std::move(binary_formatter));
-            _file_sink->set_level(spdlog::level::info);
-            spdlog::flush_every(std::chrono::seconds(3));
+
+            // create a logger with the file sink and register it with spdlog
+            _logger = std::make_shared<spdlog::logger>("proxy_logger", _file_sink);
+            _logger->set_level(spdlog::level::info);
+            spdlog::register_logger(_logger);
         }
 
         void log_data(LogMsgType type, uint32_t session_id, uint64_t seq_id,
@@ -132,6 +136,7 @@ namespace springtail::pg_proxy {
     private:
         /** File sink */
         std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> _file_sink;
+        std::shared_ptr<spdlog::logger> _logger;
         std::mutex _mutex;
     };
     using LoggerPtr = std::shared_ptr<Logger>;

@@ -63,7 +63,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
   set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gdwarf-3 -g -O0")
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
 endif()
