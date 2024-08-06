@@ -6,6 +6,7 @@
 
 #include <proxy/parser.hh>
 #include <proxy/pg_functions.hh>
+#include <proxy/logging.hh>
 
 extern "C" {
     #include "pg_query.h"
@@ -13,8 +14,7 @@ extern "C" {
     #include "nodes/nodeFuncs.h"
 }
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /* XXX to shutdown we should call:  pg_query_exit(); */
 
@@ -110,7 +110,7 @@ namespace pg_proxy {
         // if we have a single statement, we can return early
         if (context.stmts.size() == 1) {
             context.stmts[0]->is_read_safe = _is_query_readonly(*context.stmts[0]);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Single query is_read_safe: {}", context.stmts[0]->is_read_safe);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Single query is_read_safe: {}", context.stmts[0]->is_read_safe);
             return context.stmts;
         }
 
@@ -248,7 +248,7 @@ namespace pg_proxy {
 
         case T_RawStmt: { // raw stmt, first node in the parse tree; contains the actual statement
             RawStmt *stmt = (RawStmt*)node;
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: rawstmt: location={}, len={}", stmt->stmt_location, stmt->stmt_len);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: rawstmt: location={}, len={}", stmt->stmt_location, stmt->stmt_len);
 
             // in a raw stmt allocate a new stmt context
             context = std::make_shared<StmtContext>(stmt->stmt_location, stmt->stmt_len);
@@ -264,7 +264,7 @@ namespace pg_proxy {
         }
 
         case T_SelectStmt: // select stmt
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: selectstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: selectstmt");
             if (context->type == StmtContext::INVALID) {
                 context->type = StmtContext::SELECT_STMT;
             } else {
@@ -273,9 +273,9 @@ namespace pg_proxy {
             break;
 
         case T_VariableSetStmt: { // set variable statement; may be local set or not
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: variablesetstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: variablesetstmt");
             VariableSetStmt *stmt = (VariableSetStmt*)node;
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: name {}, is_local={}, kind={}",
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: name {}, is_local={}, kind={}",
                          stmt->name, stmt->is_local, (int)stmt->kind);
 
             context->has_is_local = stmt->is_local;
@@ -323,7 +323,7 @@ namespace pg_proxy {
         case T_PrepareStmt: { // prepare statement
             PrepareStmt *stmt = (PrepareStmt*)node;
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: preparestmt, name={} query node tag={}", stmt->name, (int)nodeTag(stmt->query));
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: preparestmt, name={} query node tag={}", stmt->name, (int)nodeTag(stmt->query));
 
             context->type = StmtContext::PREPARE_STMT;
             _set_string(stmt->name, context->name);
@@ -342,13 +342,13 @@ namespace pg_proxy {
         }
 
         case T_ExecuteStmt: // execute statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: executestmt: name={}", ((ExecuteStmt*)node)->name);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: executestmt: name={}", ((ExecuteStmt*)node)->name);
             context->type = StmtContext::EXECUTE_STMT;
             _set_string(((ExecuteStmt*)node)->name, context->name);
             return false;
 
         case T_DeallocateStmt: // deallocate statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: deallocatestmt: name={}", ((DeallocateStmt*)node)->name);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: deallocatestmt: name={}", ((DeallocateStmt*)node)->name);
             context->type = StmtContext::DEALLOCATE_STMT;
             // null name means deallocate all
             _set_string(((DeallocateStmt*)node)->name, context->name);
@@ -356,7 +356,7 @@ namespace pg_proxy {
 
         case T_DiscardStmt: {
             // discard statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: discardstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: discardstmt");
             DiscardStmt *stmt = (DiscardStmt*)node;
             context->type = StmtContext::DISCARD_STMT;
             switch (stmt->target) {
@@ -372,7 +372,7 @@ namespace pg_proxy {
 
         case T_DeclareCursorStmt: {
             // declare cursor statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: declarecursorstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: declarecursorstmt");
             DeclareCursorStmt *stmt = (DeclareCursorStmt*)node;
             context->type = StmtContext::DECLARE_STMT;
             if (stmt->options & CURSOR_OPT_HOLD) {
@@ -385,7 +385,7 @@ namespace pg_proxy {
 
         case T_ClosePortalStmt: {
             // close portal statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: closeportalstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: closeportalstmt");
             ClosePortalStmt *stmt = (ClosePortalStmt*)node;
             context->type = StmtContext::CLOSE_STMT;
             // null name means close all portals
@@ -395,7 +395,7 @@ namespace pg_proxy {
 
         case T_ListenStmt: {
             // listen statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: listenstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: listenstmt");
             ListenStmt *stmt = (ListenStmt*)node;
             context->type = StmtContext::LISTEN_STMT;
             _set_string(stmt->conditionname, context->name);
@@ -404,7 +404,7 @@ namespace pg_proxy {
 
         case T_UnlistenStmt: {
             // unlisten statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: unlistenstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: unlistenstmt");
             UnlistenStmt *stmt = (UnlistenStmt*)node;
             context->type = StmtContext::UNLISTEN_STMT;
             _set_string(stmt->conditionname, context->name);
@@ -413,7 +413,7 @@ namespace pg_proxy {
 
         case T_CopyStmt: {
             // copy statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: copystmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: copystmt");
             CopyStmt *stmt = (CopyStmt*)node;
             if (!stmt->is_from && stmt->filename == nullptr) {
                 context->type = StmtContext::COPY_TO_STDOUT_STMT;
@@ -424,7 +424,7 @@ namespace pg_proxy {
         }
 
         case T_TransactionStmt: { // transaction statement
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: transactionstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: transactionstmt");
             TransactionStmt *stmt = (TransactionStmt *)node;
             switch (stmt->kind) {
                 case TRANS_STMT_BEGIN:
@@ -463,7 +463,7 @@ namespace pg_proxy {
 
         case T_FetchStmt: {
             // fetch statement or move if stmt->ismove is true, but we don't care
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: fetchstmt");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: fetchstmt");
             FetchStmt *stmt = (FetchStmt*)node;
             context->type = StmtContext::FETCH_STMT;
             _set_string(stmt->portalname, context->name);
@@ -475,7 +475,7 @@ namespace pg_proxy {
             char *schema = ((RangeVar*)node)->schemaname;
             char *relname = ((RangeVar*)node)->relname;
 
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: rangevar: db={}, schema={}, relname={}",
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: rangevar: db={}, schema={}, relname={}",
                 catalog == nullptr ? "" : std::string(catalog),
                 schema == nullptr ? "" : std::string(schema),
                 relname == nullptr ? "" : std::string(relname));
@@ -487,17 +487,17 @@ namespace pg_proxy {
 
         case T_IntoClause:
             // select into does an update
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: intoclause");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: intoclause");
             context->has_into = true;
             return false;
 
         case T_LockingClause:
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: lockingclause");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: lockingclause");
             context->has_locking = true;
             return false;
 
         case T_FuncCall:
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: funccall");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: funccall");
             parse_context->in_funccall = true;
             raw_expression_tree_walker_impl((Node*)(((FuncCall *)node)->funcname), _node_walker, ctx);
             parse_context->in_funccall = false;
@@ -508,7 +508,7 @@ namespace pg_proxy {
         case T_String:
             if (parse_context->in_funccall) {
                 // see if we are in a function call; if so this is the function name
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: funccall string {}", ((String*)node)->sval);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: funccall string {}", ((String*)node)->sval);
                 char *funcname = ((String*)node)->sval;
                 // seen multiple function names in the FuncCall.
                 // like: pg_catalog extract
@@ -523,9 +523,9 @@ namespace pg_proxy {
             break;
 
         case T_DefElem: {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: defelem");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: defelem");
             DefElem *elem = (DefElem*)node;
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: name={}, action={}, argtype={}", elem->defname, (int)elem->defaction, (int)nodeTag(elem->arg));
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: name={}, action={}, argtype={}", elem->defname, (int)elem->defaction, (int)nodeTag(elem->arg));
 
             if (context->type != StmtContext::VAR_SET_TRANSACTION_ISOLATION_STMT &&
                 context->type != StmtContext::TRANSACTION_BEGIN_STMT) {
@@ -542,7 +542,7 @@ namespace pg_proxy {
 
                 // decode the argument as a string
                 if (nodeTag(&aconst->val) == T_String) {
-                    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: defelem arg string: {}", aconst->val.sval.sval);
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: defelem arg string: {}", aconst->val.sval.sval);
                     _set_string(aconst->val.sval.sval, context->name);
                 }
             } else {
@@ -554,7 +554,7 @@ namespace pg_proxy {
         }
 
         case T_A_Const: {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: aconst");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: aconst");
             A_Const *aconst = (A_Const*)node;
 
             if (context->type != StmtContext::VAR_SET_TRANSACTION_SNAPSHOT_STMT) {
@@ -562,7 +562,7 @@ namespace pg_proxy {
             }
 
             if (nodeTag(&aconst->val) == T_String) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: aconst string: {}", aconst->val.sval.sval);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: aconst string: {}", aconst->val.sval.sval);
                 _set_string(aconst->val.sval.sval, context->name);
             }
 
@@ -570,12 +570,12 @@ namespace pg_proxy {
         }
 
         case T_ParamRef:
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: paramref");
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: paramref");
             context->has_param_ref = true;
             break;
 
         default:
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser node: node {}", (int)nodeTag(node));
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser node: node {}", (int)nodeTag(node));
             break;
         }
 
@@ -630,9 +630,8 @@ namespace pg_proxy {
             case T_AlterTableStmt:
             // NOTE: this list is not exhaustive, thus the fall through
             default:
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Parser: rejecting statement type {}", (int)nodeTag(node));
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Parser: rejecting statement type {}", (int)nodeTag(node));
                 return false;
         }
     }
-} // namespace springtail
-} // namespace pg_proxy
+} // namespace springtail::pg_proxy
