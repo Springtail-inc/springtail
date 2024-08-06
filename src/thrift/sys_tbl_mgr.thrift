@@ -69,13 +69,13 @@ struct GetRootsResponse {
     2: TableStats stats
 }
 
-struct GetSchemaInfoRequest {
+struct GetSchemaRequest {
     1: i64 table_id,
     2: i64 xid,
     3: i64 lsn
 }
 
-struct GetSchemaInfoWithTargetRequest {
+struct GetTargetSchemaRequest {
     1: i64 table_id,
     2: i64 access_xid,
     3: i64 access_lsn,
@@ -91,7 +91,7 @@ struct ColumnHistory {
     5: TableColumn column
 }
 
-struct GetSchemaInfoResponse {
+struct GetSchemaResponse {
     1: list<TableColumn> columns,
     2: list<ColumnHistory> history
 }
@@ -119,8 +119,8 @@ service ThriftSysTblMgr {
     GetRootsResponse get_roots(1: GetRootsRequest request),
 
     // retrieve the schema information for a given table at a given xid/lsn
-    GetSchemaInfoResponse get_schema_info(1: GetSchemaInfoRequest request)
+    GetSchemaResponse get_schema(1: GetSchemaRequest request)
 
     // retrieve the schema information for a given table at a given xid/lsn with changes up to the target xid/lsn
-    GetSchemaInfoResponse get_schema_info_with_target(1: GetSchemaInfoWithTargetRequest request)
+    GetSchemaResponse get_target_schema(1: GetTargetSchemaRequest request)
 }

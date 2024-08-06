@@ -35,7 +35,8 @@ namespace springtail {
         /**
          * Finds the set of new extent IDs that were generated through a roll-forward so that the
          * changes can be correctly applied to them instead of to the extent ID provided by the
-         * write cache from GC-1.
+         * write cache from GC-1.  If no changes exist for the given extent, will return a vector
+         * with a single entry containing the provided extent_id.
          */
         std::vector<uint64_t> forward_map(uint64_t target_xid, uint64_t extent_id);
 

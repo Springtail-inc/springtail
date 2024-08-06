@@ -95,9 +95,17 @@ namespace springtail::gc {
                            uint64_t xid, uint64_t txid, uint64_t tlsn);
 
         /**
-         * Applies a schema change to a cache page of a table.
+         * Helper function to find the enclosing page for a key given an ordered set of contiguous
+         * pages.
          */
-        StorageCache::PagePtr _apply_schema_changes(StorageCache::PagePtr page, uint64_t access_xid, uint64_t target_xid, uint64_t target_lsn);
+        StorageCache::PagePtr _find_page(std::vector<StorageCache::PagePtr> pages,
+                                         TuplePtr key, ExtentSchemaPtr schema);
+
+        /**
+         * Shifts the provided metadata to start at the new future XID.  Returns true if the
+         * metadata was modified, false otherwise.
+         */
+        bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.

@@ -67,14 +67,14 @@ namespace springtail {
         TableMetadata get_roots(uint64_t table_id, uint64_t xid);
 
         /**
-         * Call get_schema_info() on the SysTblMgr.
+         * Call get_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_schema_info(uint64_t table_id, const XidLsn &xid);
+        SchemaMetadata get_schema(uint64_t table_id, const XidLsn &xid);
 
         /**
-         * Call get_schema_info_with_target() on the SysTblMgr.
+         * Call get_target_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_schema_info_with_target(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        SchemaMetadata get_target_schema(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
     protected:
         /** Singleton write cache client instance */

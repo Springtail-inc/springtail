@@ -310,14 +310,14 @@ namespace springtail::gc {
                             TableMgr::get_instance()->create_table({ _state->entry->xid, _state->lsn }, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
-                            //       committed since there might be additional schema changes
+                            //       processed since there might be additional schema changes
 
-                            // pass the schema change to the workers
-                            // note: will load the message into the write cache to be applied by the
-                            //       committer (GC-2) when rolling the XID forward
-                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, table_msg.oid);
-                            _parser_queue->push(entry);
+                            // XXX the SysTblMgr has the history of changes, so GC-2 will get them from there
+                            // // pass the schema change to the workers
+                            // // note: will load the message into the write cache to track when schema changes
+                            // auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
+                            //                                            _state->entry->xid, _state->lsn, table_msg.oid);
+                            // _parser_queue->push(entry);
                         }
                         break;
                     }
@@ -335,13 +335,14 @@ namespace springtail::gc {
                             // apply the schema change
                             TableMgr::get_instance()->alter_table({ _state->entry->xid, _state->lsn }, table_msg);
 
-                            // note: we don't notify the backlog until the entire XID is
-                            //       committed since there might be additional schema changes
+                            // XXX the SysTblMgr has the history of changes, so GC-2 will get them from there
+                            // // note: we don't notify the backlog until the entire XID is
+                            // //       committed since there might be additional schema changes
 
-                            // pass to the workers
-                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, table_msg.oid);
-                            _parser_queue->push(entry);
+                            // // pass to the workers
+                            // auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
+                            //                                            _state->entry->xid, _state->lsn, table_msg.oid);
+                            // _parser_queue->push(entry);
                         }
                         break;
                     }
@@ -361,7 +362,7 @@ namespace springtail::gc {
                             _state->mutation_count->increment();
 
                             // note: we don't notify the backlog until the entire XID is
-                            //       committed since there might be additional schema changes
+                            //       processed since there might be additional schema changes
 
                             // pass to the workers
                             auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
@@ -539,6 +540,8 @@ namespace springtail::gc {
             auto table = TableMgr::get_instance()->get_table(entry->table_id, entry->xid, entry->lsn);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
+            // note: this should be safe, even in the face of schema changes, since a primary key
+            //       change will result in a full table re-sync, so won't go down this code path
             if (table->has_primary()) {
                 switch (msg->msg_type) {
                 case PgMsgEnum::INSERT: {
@@ -677,11 +680,11 @@ namespace springtail::gc {
                 case PgMsgEnum::CREATE_TABLE:
                 case PgMsgEnum::ALTER_TABLE:
                 case PgMsgEnum::DROP_TABLE: {
-                    // XXX need to record the details about the change...
-                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
-                                                          WriteCacheClient::TableOp::SCHEMA_CHANGE };
+                    // XXX need to record the details about the change?  should be able to retrieve from the SysTblMgr directly
+                    // WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                    //                                       WriteCacheClient::TableOp::SCHEMA_CHANGE };
 
-                    _write_cache->add_table_change(table->id(), change);
+                    // _write_cache->add_table_change(table->id(), change);
                     break;
                 }
                 default:
@@ -695,83 +698,10 @@ namespace springtail::gc {
                 // note: it might make sense to special-case tables without primary keys?  No need to do
                 //       the lookup until we are making the actual mutation, would be better for a
                 //       reader to scan the mutations to see if they impact the query
-                uint64_t extent_id = constant::UNKNOWN_EXTENT;
+                // uint64_t extent_id = constant::UNKNOWN_EXTENT;
 
                 // XXX currently not supported
                 assert(0);
-
-                if (msg->msg_type == PgMsgEnum::INSERT) {
-                    // get the message details
-                    auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
-
-                    // generate an extent with a row holding the PG tuple data
-                    auto schema = table->extent_schema();
-                    auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto tuple = _pack_extent(extent, insert_msg.new_tuple, schema);
-
-                    // send the insert to the write cache
-                    WriteCacheClient::RowData data;
-                    data.xid = entry->xid;
-                    data.xid_seq = entry->lsn;
-                    data.data = extent->serialize();
-                    data.op = WriteCacheClient::RowOp::INSERT;
-
-                    _write_cache->add_rows(table->id(), extent_id, { data });
-
-                } else if (msg->msg_type == PgMsgEnum::DELETE) {
-                    // get the message details
-                    auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
-
-                    // generate an extent with a row holding the PG tuple data
-                    auto schema = table->extent_schema();
-                    auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto tuple = _pack_extent(extent, delete_msg.tuple, schema);
-
-                    WriteCacheClient::RowData delete_data;
-                    delete_data.xid = entry->xid;
-                    delete_data.xid_seq = entry->lsn;
-                    delete_data.pkey = extent->serialize();
-                    delete_data.op = WriteCacheClient::RowOp::DELETE;
-
-                    // send the delete to the write cache
-                    _write_cache->add_rows(table->id(), extent_id, { delete_data });
-
-                } else if (msg->msg_type == PgMsgEnum::UPDATE) {
-                    // get the message details
-                    auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
-
-                    // generate an extent with a row holding the PG tuple data for the delete and the insert
-                    auto schema = table->extent_schema();
-                    auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto old_tuple = _pack_extent(old_extent, update_msg.old_tuple, schema);
-
-                    auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto new_tuple = _pack_extent(old_extent, update_msg.new_tuple, schema);
-
-                    WriteCacheClient::RowData delete_data;
-                    delete_data.xid = entry->xid;
-                    delete_data.xid_seq = entry->lsn;
-                    delete_data.pkey = old_extent->serialize();
-                    delete_data.op = WriteCacheClient::RowOp::DELETE;
-
-                    WriteCacheClient::RowData insert_data;
-                    insert_data.xid = entry->xid;
-                    insert_data.xid_seq = entry->lsn;
-                    insert_data.data = new_extent->serialize();
-                    insert_data.op = WriteCacheClient::RowOp::INSERT;
-
-                    // do an insert and a delete
-                    _write_cache->add_rows(table->id(), extent_id, { delete_data, insert_data });
-
-                } else if (msg->msg_type == PgMsgEnum::TRUNCATE) {
-                    // record the truncate into the write cache look-aside
-                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
-                                                          WriteCacheClient::TableOp::TRUNCATE };
-                    _write_cache->add_table_change(table->id(), change);
-                } else {
-                    // XXX invalid message type
-                    SPDLOG_ERROR("Invalid message type: {}", static_cast<uint8_t>(msg->msg_type));
-                }
             }
 
             // decrement the outstanding work counter

@@ -3,6 +3,8 @@
 #include <storage/constants.hh>
 #include <storage/table_mgr.hh>
 
+#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
+
 namespace springtail::gc {
 
     void
@@ -66,8 +68,7 @@ namespace springtail::gc {
 
                     // check if we need to perform a table truncate
                     if (txid > 0) {
-                        // XXX
-                        // table->truncate();
+                        table->truncate();
                     }
 
                     boost::unique_lock lock(_mutex);
@@ -142,19 +143,17 @@ namespace springtail::gc {
 
             // XXX This is where we need to implement the schema changes in the FDW.  We need to
             //     perform the following actions:
-            //     1. pre-commit the XID -- this will block the FDW operation for new queries
-            //     2. connect to each FDW and perform the schema+metadata changes for this XID
-            //     3. commit the XID -- mark the XID as ready in the XID mgr which unblocks the FDWs
+            //     1. Generate a set of DDL statements to apply to the FDW to utilize this XID
+            //     2. Store them into Redis keyed on the XID
+            //     3. commit the XID along with a marker that the XID contains schema changes
+            //
+            //     When the FDW sees the changes in Redis, it can apply them to move it's XID
+            //     forward.  When it requests an XID from the XidMgr, it needs to provide it's
+            //     current "schema" XID so that the XidMgr can tell it the most recent XID that it
+            //     is safe to operate at.
 
-            // note: if we want to implement roll-forward on query, then we could apply the schema
-            //       changes after the data changes are written to the write cache
+            // XXX generate the schema mutations for the FDWs
 
-            // XXX pre-commit the XID
-            // _xid_mgr->pre_commit_xid(xid);
-
-            // perform the schema mutations in the FDWs
-
-            
             // commit the completed XID
             _xid_mgr->commit_xid(xid);
             _committed_xid = xid;
@@ -218,6 +217,60 @@ namespace springtail::gc {
         auto roots = table->finalize();
     }
 
+    StorageCache::PagePtr
+    Committer::_find_page(std::vector<StorageCache::PagePtr> pages,
+                          TuplePtr key,
+                          ExtentSchemaPtr schema)
+    {
+        // if only one page, return it
+        if (pages.size() == 1) {
+            return pages[0];
+        }
+
+        // otherwise, use the key to find the appropriate page
+        auto page_i = std::lower_bound(pages.begin(), pages.end(), *key,
+                                       [&schema](const StorageCache::PagePtr &page, const Tuple &key) {
+                                           return FieldTuple(schema->get_sort_fields(), *(page->last())).less_than(key);
+                                       });
+
+        // return the correct page
+        if (page_i == pages.end()) {
+            return pages.back();
+        }
+        return *page_i;
+    }
+
+    bool
+    Committer::_shift_to_xid(SchemaMetadata &meta,
+                             const XidLsn &xid)
+    {
+        // loop through the history to remove any entries that are behind the provided XID
+        auto history_i = meta.history.begin();
+        for (; history_i != meta.history.end(); ++history_i) {
+            XidLsn hxid(history_i->xid, history_i->lsn);
+            if (hxid > xid) {
+                break;
+            }
+
+            // we need to update the base columns to reflect this schema change
+            for (int i = 0; i < meta.columns.size(); i++) {
+                if (meta.columns[i].position == history_i->position) {
+                    meta.columns[i] = *history_i;
+                }
+            }
+        }
+
+        // if no history changes were applied, return false
+        if (history_i == meta.history.begin()) {
+            return false;
+        }
+
+        // remove the processed history entries
+        meta.history.erase(meta.history.begin(), history_i);
+
+        return true;
+    }
+
     void
     Committer::_process_rows(MutableTablePtr table,
                              uint64_t extent_id,
@@ -226,54 +279,68 @@ namespace springtail::gc {
                              uint64_t tlsn)
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows for {}:{}@{}", table->id(), extent_id, xid);
+        auto schema_mgr = SchemaMgr::get_instance();
+        auto sys_tbl_mgr = SysTblMgrClient::get_instance();
 
         // save the schema
         auto schema = table->schema();
 
         // determine if the provided extent_id needs to be forward mapped
-        uint64_t mapped_eid = extent_id;
         auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
-        if (extent_ids.empty()) {
-            // no mapping, use provided extent_id
-            if (txid > 0) {
-                // in the case of a truncate, we don't know the extent ID
-                mapped_eid = constant::UNKNOWN_EXTENT;
+
+        // in the case of a truncate, we will have to create a new extent for any mutations
+        if (txid > 0) {
+            extent_ids.clear();
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {} extents -- first is {}",
+                            extent_id, extent_ids.size(),
+                            extent_ids.empty() ? "unknown" : std::to_string(extent_ids[0]));
+
+        // get the schema information
+        XidLsn target_xid(xid);
+        auto target_schema = schema_mgr->get_extent_schema(table->id(), target_xid);
+
+        // retrieve the pages that may be impacted
+        std::vector<StorageCache::PagePtr> pages;
+        for (auto extent_id : extent_ids) {
+            auto page = table->read_page(extent_id);
+            auto header = page->header();
+            XidLsn access_xid(header.xid);
+
+            // convert this page to a new schema if needed
+            auto &&meta = sys_tbl_mgr->get_target_schema(table->id(), access_xid, target_xid);
+            if (!meta.history.empty()) {
+                auto source_schema = std::make_shared<VirtualSchema>(meta);
+                page->convert(source_schema, target_schema);
             }
-        } else if (extent_ids.size() == 1) {
-            // single extent output, use it
-            mapped_eid = extent_ids.front();
-        } else {
-            // XXX need to create a list of key -> extent_id to figure out which extent a given row
-            // should be applied to
-            assert(0);
+
+            pages.push_back(page);
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Extent remapped from {} to {}", extent_id, mapped_eid);
-
-        StorageCache::PagePtr page;
-        std::vector<SchemaColumn> changes;
-        if (mapped_eid != constant::UNKNOWN_EXTENT) {
-            // 1) retrieve the XID at which the given extent was written
-            // XXX
-            // auto page = table->read_page(mapped_eid);
-
-            // 2) apply all of the schema changes to the page
-            // XXX
-            // page->apply_schema_changes(_committed_xid, xid);
-            // page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
+        if (pages.empty()) {
+            pages.push_back(table->read_page(constant::UNKNOWN_EXTENT));
+        } else if (pages.size() > 1) {
+            // sort the pages by primary key of the last entry so we can use lower_bound() to find
+            // the correct page for modification later
+            std::sort(pages.begin(), pages.end(),
+                      [&target_schema](const auto &lhs, const auto &rhs) {
+                          auto sort_fields = target_schema->get_sort_fields();
+                          FieldTuple ltup(sort_fields, *(lhs->last()));
+                          FieldTuple rtup(sort_fields, *(rhs->last()));
+                          return ltup.less_than(rtup);
+                      });
         }
 
-            // StorageCache::PagePtr page;
-            // std::vector<SchemaColumn> changes;
-            // if (mapped_eid != constant::UNKNOWN_EXTENT) {
-            //     // 1) retrieve the XID at which the given extent was written
-            //     auto page = table->read_page(mapped_eid);
+        // note: at this point we've got a sorted list of pages that could be mutated, all at the
+        //       correct schema for the target XID
 
-            //     // 2) apply all of the schema changes to the page
-            //     page = _apply_schema_changes(page, _committed_xid, xid, constant::MAX_LSN);
-
-            // }
-            // auto change_i = changes.begin();
+        // construct a virtual schema from the prevous commit XID to the target XID
+        XidLsn access_xid(_committed_xid);
+        auto &&meta = sys_tbl_mgr->get_target_schema(table->id(), access_xid, target_xid);
+        auto vschema = std::make_shared<VirtualSchema>(meta);
+        auto row_fields = vschema->get_fields();
+        auto key_fields = vschema->get_fields(schema->get_sort_keys());
 
         uint64_t cursor = 0;
         bool done = false;
@@ -288,13 +355,7 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}:{}@{}", rows.size(), table->id(), extent_id, xid);
 
-            // apply the changes to the extent
-            // XXX It would be more efficient to retrieve the page and apply all of the changes
-            //     at once rather than looking it up every time.  This would require changes to
-            //     the MutableTable interfaces.
-            auto row_fields = schema->get_fields();
-            auto key_fields = schema->get_fields(schema->get_sort_keys());
-
+            // apply the changes to the pages
             for (const auto &row : rows) {
                 // if this data is from before a truncate, ignore it
                 if (txid > 0) {
@@ -306,9 +367,16 @@ namespace springtail::gc {
                 // construct a tuple from the row data
                 // 2. apply data mutations by using the virtual schema on top of them
                 //    a. we need to unroll the virtual schema as we pass by each schema change
-                auto vschema = SchemaMgr::get_instance()->get_schema(table->id(), { row.xid, row.xid_seq }, { xid, constant::MAX_LSN });
-                row_fields = vschema->get_fields();
-                key_fields = vschema->get_fields(schema->get_sort_keys());
+
+                // check if we need to update the schema metadata
+                access_xid = { row.xid, row.xid_seq };
+                bool did_shift = _shift_to_xid(meta, access_xid);
+                if (did_shift) {
+                    // update the virtual schema based on the corrected metadata
+                    vschema = std::make_shared<VirtualSchema>(meta);
+                    row_fields = vschema->get_fields();
+                    key_fields = vschema->get_fields(schema->get_sort_keys());
+                }
 
                 // XXX seems like we've got more copies here than strictly necessary... we could
                 //     instead construct a read-only extent via pointers into the existing data
@@ -324,8 +392,13 @@ namespace springtail::gc {
                     extent.deserialize(row.data);
 
                     auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                    SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), mapped_eid, xid);
-                    table->insert(value, xid, mapped_eid);
+                    auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
+                    SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
+
+                    // insert into the appropriate page
+                    auto page = _find_page(pages, key, target_schema);
+                    page->insert(value, target_schema);
+
                     break;
                 }
 
@@ -335,7 +408,13 @@ namespace springtail::gc {
                     extent.deserialize(row.data);
 
                     auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
-                    table->update(value, xid, mapped_eid);
+                    auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
+                    SPDLOG_DEBUG("Update row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
+
+                    // update in the appropriate page
+                    auto page = _find_page(pages, key, target_schema);
+                    page->update(value, target_schema);
+
                     break;
                 }
 
@@ -346,38 +425,21 @@ namespace springtail::gc {
 
                     extent.deserialize(row.pkey);
                     auto key = std::make_shared<FieldTuple>(key_fields, extent.back());
-                    table->remove(key, xid, mapped_eid);
+                    SPDLOG_DEBUG("Remove row {} for {}:{}@{}", key->to_string(), table->id(), extent_id, xid);
+
+                    // remove from the appropriate page
+                    auto page = _find_page(pages, key, target_schema);
+                    page->remove(key, target_schema);
+
                     break;
                 }
 
                 }
             }
         }
-    }
 
-    StorageCache::PagePtr
-    Committer::_apply_schema_changes(StorageCache::PagePtr page,
-                                     uint64_t access_xid,
-                                     uint64_t target_xid,
-                                     uint64_t target_lsn)
-    {
-        // XXX
-        uint64_t table_id = 0;
-        std::filesystem::path file = "";
-
-        // get a clean page at the target XID
-        auto new_page = StorageCache::get_instance()->get(file, constant::UNKNOWN_EXTENT, target_xid);
-
-        // construct a virtual schema to transform the original page's data to the schema at the target XID
-        auto vschema = SchemaMgr::get_instance()->get_schema(table_id, XidLsn(access_xid), { target_xid, target_lsn });
-
-        // scan the current page and write it's contents to the new page
-        auto vfields = vschema->get_fields();
-        // XXX
-        // for (auto &&row : *page) {
-        //     new_page->append(FieldTuple(vfields, row));
-        // }
-
-        return new_page;
+        // now that we've applied all of the mutations, we need to release these pages back to the
+        // cache via the table so that the appropriate callbacks are made when the pages are flushed
+        table->release_pages(pages);
     }
 }

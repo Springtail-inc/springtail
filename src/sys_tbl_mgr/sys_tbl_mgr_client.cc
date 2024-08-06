@@ -242,18 +242,18 @@ namespace springtail {
     }
 
     SchemaMetadata
-    SysTblMgrClient::get_schema_info(uint64_t table_id,
-                                     const XidLsn &xid)
+    SysTblMgrClient::get_schema(uint64_t table_id,
+                                const XidLsn &xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::GetSchemaInfoResponse result;
+        thrift::sys_tbl_mgr::GetSchemaResponse result;
 
-        thrift::sys_tbl_mgr::GetSchemaInfoRequest request;
+        thrift::sys_tbl_mgr::GetSchemaRequest request;
         request.table_id = table_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
 
-        c.client->get_schema_info(result, request);
+        c.client->get_schema(result, request);
 
         SchemaMetadata metadata;
         for (auto column : result.columns) {
@@ -296,21 +296,21 @@ namespace springtail {
     }
 
     SchemaMetadata
-    SysTblMgrClient::get_schema_info_with_target(uint64_t table_id,
-                                                 const XidLsn &access_xid,
-                                                 const XidLsn &target_xid)
+    SysTblMgrClient::get_target_schema(uint64_t table_id,
+                                       const XidLsn &access_xid,
+                                       const XidLsn &target_xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::GetSchemaInfoResponse result;
+        thrift::sys_tbl_mgr::GetSchemaResponse result;
 
-        thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest request;
+        thrift::sys_tbl_mgr::GetTargetSchemaRequest request;
         request.table_id = table_id;
         request.access_xid = access_xid.xid;
         request.access_lsn = access_xid.lsn;
         request.target_xid = target_xid.xid;
         request.target_lsn = target_xid.lsn;
 
-        c.client->get_schema_info_with_target(result, request);
+        c.client->get_target_schema(result, request);
 
         SchemaMetadata metadata;
         for (auto column : result.columns) {

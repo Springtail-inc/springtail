@@ -118,6 +118,13 @@ namespace springtail {
         _page_cache->flush_file(file);
     }
 
+    void
+    StorageCache::drop_for_truncate(const std::filesystem::path &file)
+    {
+        _page_cache->drop_file(file);
+    }
+
+
     StorageCache::PagePtr
     StorageCache::PageCache::get(const std::filesystem::path &file,
                                  uint64_t extent_id,
@@ -237,6 +244,54 @@ namespace springtail {
         _flush_list.erase(file);
     }
 
+    void
+    StorageCache::PageCache::drop_file(const std::filesystem::path &file)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // go through the dirty page list for the file
+        auto file_i = _flush_list.find(file);
+        if (file_i == _flush_list.end()) {
+            return; // no dirty pages
+        }
+        auto &drop_pages = file_i->second;
+
+        bool done = false;
+        auto page_i = drop_pages.begin();
+
+        // if the list is empty, remove it from the map and return
+        if (page_i == drop_pages.end()) {
+            _flush_list.erase(file_i);
+            return;
+        }
+
+        auto data_cache = StorageCache::get_instance()->_data_cache;
+        while (!done) {
+            auto page = *page_i;
+
+            // clear the associated dirty extents from the cache
+            for (auto &ref : page->_extents) {
+                if (ref.second) {
+                    auto extent = data_cache->get(ref.first);
+                    data_cache->drop_dirty(extent);
+                    data_cache->put(extent);
+                }
+            }
+
+            // remove the page from the flush list
+            drop_pages.erase(page->_flush_pos);
+
+            // get the next dirty page
+            page_i = drop_pages.begin();
+            if (page_i == drop_pages.end()) {
+                _flush_list.erase(file);
+                done = true; // no more dirty pages, exit the loop
+            }
+        }
+
+        // flush list for the file must be empty, so remove it
+        _flush_list.erase(file);
+    }
 
     void
     StorageCache::PageCache::_put(PagePtr page)
@@ -668,7 +723,7 @@ namespace springtail {
     StorageCache::Page::upsert(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // if the page is empty, create an empty extent to back it
@@ -738,7 +793,7 @@ namespace springtail {
     StorageCache::Page::update(TuplePtr tuple,
                                ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // extract the key to find the insert position
@@ -779,7 +834,7 @@ namespace springtail {
     StorageCache::Page::remove(TuplePtr key,
                                ExtentSchemaPtr schema)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // find the extent to modify via lower_bound
@@ -811,7 +866,7 @@ namespace springtail {
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {
-            StorageCache::get_instance()->_data_cache->remove_empty(*extent);
+            StorageCache::get_instance()->_data_cache->drop_dirty(*extent);
             _extents.erase(extent_i);
         }
     }
@@ -819,7 +874,7 @@ namespace springtail {
     void
     StorageCache::Page::remove(const Iterator &pos)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
         _is_dirty = true;
 
         // make sure that we've got a mutable version of the extent
@@ -830,9 +885,48 @@ namespace springtail {
 
         // if the extent has become empty, remove it from the page
         if ((*extent)->empty()) {
-            StorageCache::get_instance()->_data_cache->remove_empty(*extent);
+            StorageCache::get_instance()->_data_cache->drop_dirty(*extent);
             _extents.erase(pos._extent_i);
         }
+    }
+
+    void
+    StorageCache::Page::convert(VirtualSchemaPtr schema,
+                                ExtentSchemaPtr target_schema)
+    {
+        boost::unique_lock lock(_mutex);
+        _is_dirty = true;
+
+        auto cache = StorageCache::get_instance();
+
+        auto target_fields = target_schema->get_mutable_fields();
+        auto source_fields = schema->get_fields();
+
+        // go through each extent within the page and create a copy of it based on the new schema
+        std::vector<ExtentRef> new_extents;
+        for (auto &ref : _extents) {
+            // get a new extent
+            auto new_extent = cache->_data_cache->get_empty(_file, header());
+
+            // get the old extent
+            SafeExtent old_extent(_file, ref);
+
+            // copy the data
+            for (auto &row : **old_extent) {
+                FieldTuple source_tuple(source_fields, row);
+
+                auto new_row = new_extent->append();
+                MutableTuple(target_fields, new_row).assign(source_tuple);
+            }
+
+            new_extents.push_back({ new_extent->cache_id(), true });
+
+            // release the new extent back to the cache
+            cache->_data_cache->put(new_extent);
+        }
+
+        // replace the old extent with the new one in the page
+        _extents = std::move(new_extents);
     }
 
     void
@@ -1078,12 +1172,11 @@ namespace springtail {
     }
 
     void
-    StorageCache::DataCache::remove_empty(CacheExtentPtr extent)
+    StorageCache::DataCache::drop_dirty(CacheExtentPtr extent)
     {
         boost::unique_lock lock(_mutex);
 
-        // note: extent must be empty and dirty for this to be a valid operation
-        assert(extent->empty());
+        // note: extent must be dirty for this to be a valid operation
         assert(extent->_state == CacheExtent::State::DIRTY);
 
         // evict the extent from the cache
@@ -1091,6 +1184,7 @@ namespace springtail {
         _cache_id_map.erase(extent->_cache_id);
 
         // mark the extent as no longer valid to ensure it doesn't get released back into the cache
+        // by a concurrent user
         extent->_state = CacheExtent::State::INVALID;
     }
 

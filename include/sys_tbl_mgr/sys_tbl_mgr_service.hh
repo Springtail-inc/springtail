@@ -51,11 +51,11 @@ namespace springtail {
         void get_roots(thrift::sys_tbl_mgr::GetRootsResponse& _return,
                        const thrift::sys_tbl_mgr::GetRootsRequest &request) override;
 
-        void get_schema_info(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
-                             const thrift::sys_tbl_mgr::GetSchemaInfoRequest &request) override;
+        void get_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
+                        const thrift::sys_tbl_mgr::GetSchemaRequest &request) override;
 
-        void get_schema_info_with_target(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
-                                         const thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest &request) override;
+        void get_target_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
+                               const thrift::sys_tbl_mgr::GetTargetSchemaRequest &request) override;
 
     private:
         struct TableInfo {
@@ -69,7 +69,7 @@ namespace springtail {
         using TableInfoPtr = std::shared_ptr<TableInfo>;
 
         using RootsInfoPtr = std::shared_ptr<thrift::sys_tbl_mgr::GetRootsResponse>;
-        using SchemaInfoPtr = std::shared_ptr<thrift::sys_tbl_mgr::GetSchemaInfoResponse>;
+        using SchemaInfoPtr = std::shared_ptr<thrift::sys_tbl_mgr::GetSchemaResponse>;
 
     private:
         TableInfoPtr _get_table_info(uint64_t table_id, const XidLsn &xid);

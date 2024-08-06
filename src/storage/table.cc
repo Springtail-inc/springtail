@@ -1,6 +1,7 @@
 #include <storage/system_tables.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
+#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {
@@ -400,6 +401,44 @@ namespace springtail {
         }
 
         // note: no change in the stats.row_count
+    }
+
+    void
+    MutableTable::truncate()
+    {
+        // remove any dirty cached pages for this table since they don't need to be written
+        StorageCache::get_instance()->drop_for_truncate(_data_file);
+
+        // clear the indexes
+        std::vector<uint64_t> roots{constant::UNKNOWN_EXTENT};
+        _primary_index->truncate();
+
+        for (auto secondary : _secondary_indexes) {
+            roots.push_back(constant::UNKNOWN_EXTENT);
+            secondary->truncate();
+        }
+
+        // update the roots and stats
+        SysTblMgrClient::get_instance()->update_roots(_id, _target_xid, roots, 0);
+    }
+
+    StorageCache::PagePtr
+    MutableTable::read_page(uint64_t extent_id) const
+    {
+        return StorageCache::get_instance()->get(_data_file, extent_id,
+                                                 _access_xid, _target_xid);
+    }
+
+    void
+    MutableTable::release_pages(const std::vector<StorageCache::PagePtr> &pages)
+    {
+        auto cache = StorageCache::get_instance();
+
+        // need to release the dirty pages back to the cache with the appropriate callback
+        for (auto &page : pages) {
+            cache->put(page, std::bind(&MutableTable::_flush_handler,
+                                       this, std::placeholders::_1));
+        }
     }
 
     bool

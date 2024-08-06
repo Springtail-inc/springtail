@@ -80,16 +80,16 @@ namespace {
         assert(metadata.roots.size() == 0);
         assert(metadata.stats.row_count == 0);
 
-        auto &&schema_meta = client->get_schema_info(tid, { 0, constant::MAX_LSN });
+        auto &&schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
-        schema_meta = client->get_schema_info(tid, { 1, 0 });
+        schema_meta = client->get_schema(tid, { 1, 0 });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 1, 1 });
+        schema_meta = client->get_schema(tid, { 1, 1 });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 1, 3 });
+        schema_meta = client->get_schema(tid, { 1, 3 });
         assert(schema_meta.columns.size() == 2);
 
         // verify correctness after finalize
@@ -100,16 +100,16 @@ namespace {
         assert(metadata.roots[0] == constant::UNKNOWN_EXTENT);
         assert(metadata.stats.row_count == 0);
 
-        schema_meta = client->get_schema_info(tid, { 0, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
-        schema_meta = client->get_schema_info(tid, { 1, 0 });
+        schema_meta = client->get_schema(tid, { 1, 0 });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 1, 1 });
+        schema_meta = client->get_schema(tid, { 1, 1 });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 1, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
 
         // drop the table
@@ -129,16 +129,16 @@ namespace {
         assert(metadata.roots[0] == constant::UNKNOWN_EXTENT);
         assert(metadata.stats.row_count == 0);
 
-        schema_meta = client->get_schema_info(tid, { 0, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
-        schema_meta = client->get_schema_info(tid, { 1, 1 });
+        schema_meta = client->get_schema(tid, { 1, 1 });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 1, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 2, 0 });
+        schema_meta = client->get_schema(tid, { 2, 0 });
         assert(schema_meta.columns.size() == 0);
 
         // verify correctness after finalize
@@ -146,13 +146,13 @@ namespace {
         ++_xid.xid;
         _xid.lsn = 0;
 
-        schema_meta = client->get_schema_info(tid, { 0, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
-        schema_meta = client->get_schema_info(tid, { 1, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
 
-        schema_meta = client->get_schema_info(tid, { 2, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { 2, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
         metadata = client->get_roots(tid, 1);
@@ -252,7 +252,7 @@ namespace {
         ++_xid.lsn;
 
         // verify the virtual schema creation from the cache prior to finalize
-        auto &&schema_check = client->get_schema_info_with_target(tid, { _xid.xid - 1, constant::MAX_LSN }, _xid);
+        auto &&schema_check = client->get_target_schema(tid, { _xid.xid - 1, constant::MAX_LSN }, _xid);
         assert(schema_check.history.size() == 2);
         assert(schema_check.history[0].update_type == SchemaUpdateType::NULLABLE_CHANGE);
         assert(schema_check.history[1].update_type == SchemaUpdateType::NEW_COLUMN);
@@ -278,7 +278,7 @@ namespace {
         // verify the data at each step
 
         // XID 0
-        auto &&schema_meta = client->get_schema_info(tid, { check_xid - 1,
+        auto &&schema_meta = client->get_schema(tid, { check_xid - 1,
                                                             constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
@@ -288,7 +288,7 @@ namespace {
         assert(metadata.roots[0] == 0);
         assert(metadata.stats.row_count == 15);
 
-        schema_meta = client->get_schema_info(tid, { check_xid, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
         assert(schema_meta.columns[0].name == "col1");
         assert(schema_meta.columns[1].name == "col2");
@@ -301,7 +301,7 @@ namespace {
         assert(metadata.roots[0] == 100);
         assert(metadata.stats.row_count == 30);
 
-        schema_meta = client->get_schema_info(tid, { check_xid, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
         assert(schema_meta.columns[0].name == "col1");
         assert(schema_meta.columns[1].name == "col2");
@@ -314,7 +314,7 @@ namespace {
         assert(metadata.roots[0] == 100);
         assert(metadata.stats.row_count == 30);
 
-        schema_meta = client->get_schema_info(tid, { check_xid, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 2);
         assert(schema_meta.columns[0].name == "col1");
         assert(schema_meta.columns[1].name == "coltwo");
@@ -327,7 +327,7 @@ namespace {
         assert(metadata.roots[0] == 100);
         assert(metadata.stats.row_count == 30);
 
-        schema_meta = client->get_schema_info(tid, { check_xid, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 3);
         assert(schema_meta.columns[0].name == "col1");
         assert(schema_meta.columns[1].name == "coltwo");
@@ -340,13 +340,13 @@ namespace {
         assert(metadata.roots.size() == 0);
         assert(metadata.stats.row_count == 0);
 
-        schema_meta = client->get_schema_info(tid, { check_xid, constant::MAX_LSN });
+        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
         assert(schema_meta.columns.size() == 0);
 
         // verify the virtual schema creation at various combinations of access and target XID
         XidLsn access_xid(check_xid - 4);
         XidLsn target_xid(check_xid);
-        schema_meta = client->get_schema_info_with_target(tid, access_xid, target_xid);
+        schema_meta = client->get_target_schema(tid, access_xid, target_xid);
 
         assert(schema_meta.columns.size() == 2);
         assert(schema_meta.columns[0].name == "col1");

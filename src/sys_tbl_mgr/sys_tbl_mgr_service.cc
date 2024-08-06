@@ -267,8 +267,8 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::get_schema_info(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
-                                            const thrift::sys_tbl_mgr::GetSchemaInfoRequest &request)
+    ThriftSysTblMgrService::get_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
+                                       const thrift::sys_tbl_mgr::GetSchemaRequest &request)
     {
         boost::shared_lock lock(_read_mutex);
 
@@ -279,8 +279,8 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::get_schema_info_with_target(thrift::sys_tbl_mgr::GetSchemaInfoResponse& _return,
-                                                        const thrift::sys_tbl_mgr::GetSchemaInfoWithTargetRequest &request)
+    ThriftSysTblMgrService::get_target_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
+                                              const thrift::sys_tbl_mgr::GetTargetSchemaRequest &request)
     {
         boost::shared_lock lock(_read_mutex);
 
@@ -475,7 +475,7 @@ namespace springtail {
                                              const XidLsn &access_xid,
                                              const XidLsn &target_xid)
     {
-        auto info = std::make_shared<thrift::sys_tbl_mgr::GetSchemaInfoResponse>();
+        auto info = std::make_shared<thrift::sys_tbl_mgr::GetSchemaResponse>();
 
         // first read the columns from the schemas table
         XidLsn xid = std::min(access_xid, _access_xid);

@@ -10,11 +10,6 @@ namespace springtail {
 
     class ExtentType;
 
-    struct SchemaMetadata {
-        std::vector<SchemaColumn> columns;
-        std::vector<SchemaColumn> history;
-    };
-
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
@@ -58,19 +53,6 @@ namespace springtail {
          */
         std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, const XidLsn &xid);
 
-        /**
-         * Helper function to generate a SchemaUpdate that defines the change between the old and
-         * new schema.  The old and new schema must be guaranteed to be the result of only a single
-         * schema modification.
-         * @param old_schema The columns of the previous version of the schema.
-         * @param new_schema The columns of the new version of the schema.
-         * @param xid The XID that the modification occurred at.
-         * @param lsn The LSN in the PG log of the modification to ensure correct ordering when applying changes.
-         */
-        SchemaColumn generate_update(const std::map<uint32_t, SchemaColumn> &old_schema,
-                                     const std::map<uint32_t, SchemaColumn> &new_schema,
-                                     const XidLsn &xid);
-
     protected:
         static SchemaMgr *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
@@ -79,70 +61,6 @@ namespace springtail {
          * @brief Construct a new SchemaMgr object
          */
         SchemaMgr();
-
-    private:
-        /** A helper class that holds all of the information about a table schema in-memory. */
-        class SchemaInfo {
-        public:
-            /**
-             * SchemaInfo constructor.  Reads the schema metadata from the system tables and
-             * populates its internal structures.
-             */
-            SchemaInfo(uint64_t table_id);
-
-            /**
-             * Retrieve the schema for an extent written at a specific XID.
-             *
-             * @param extent_xid The XID of the extent being processed.
-             * @param lsn The LSN within the XID at which the schema should be constructed.
-             */
-            std::shared_ptr<ExtentSchema> get_extent_schema(const XidLsn &xidlsn);
-
-            /**
-             * Construct a VirtualSchema on top of an ExtentSchema that brings the schema forward to
-             * the provided target XID and LSN so that data can be read from the extent as thought
-             * it were at the target XID.
-             *
-             * @param access_xid The XID/LSN that the base extent was written at.
-             * @param target_xid The XID/LSN that the data is being used at.
-             */
-            std::shared_ptr<VirtualSchema> get_virtual_schema(const XidLsn &access_xid, const XidLsn &target_xid);
-
-            /**
-             * Retrieve the set of columns that are valid at the provided XID/LSN.
-             * @param xidlsn The XID/LSN that the schema should be generated for.
-             */
-            std::map<uint32_t, SchemaColumn> get_columns(const XidLsn &xidlsn);
-
-        private:
-            /**
-             * Read the schema metadata for the table.  Pulls the full schema history so always need
-             * to read the latest available XID of the Schema system table.
-             * @param table_id The table to read schema information for.
-             */
-            void _read_schema_table(uint64_t table_id);
-
-            /**
-             * Read the index metadata for the table.  Pulls the full index history so always need
-             * to read the latest available XID of the Indexes system table.
-             * @param table_id The table to read schema information for.
-             */
-            void _read_indexes_table(uint64_t table_id);
-
-        private:
-            /**
-             * A map from <position, xid> -> list of schema columns.  The map's XID is ordered in
-             * reverse xid order to quickly find which SchemaColumn list should be used for a given
-             * xid using upper_bound.  The list is the ordered column definitions by LSN within the
-             * XID.
-             */
-            std::map<uint32_t, std::map<XidLsn, SchemaColumn, std::greater<XidLsn>>> _column_map;
-
-            /**
-             * A map of index ID -> xid/lsn -> column ID -> index key position.
-             */
-            std::map<uint64_t, std::map<XidLsn, std::map<uint32_t, uint32_t>, std::greater<XidLsn>>> _indexes;
-        };
 
     private:
         /**
@@ -181,11 +99,8 @@ namespace springtail {
         /** A map of fixed system schemas.  Maps from System Table ID to the ExtentSchema for that table. */
         std::unordered_map<SystemKey, std::shared_ptr<ExtentSchema>, boost::hash<SystemKey>> _system_cache;
 
-        /** A cache of SchemaInfo objects. */
-        LruObjectCache<uint64_t, SchemaInfo> _cache;
-
         /** Helper to convert schema column to map */
-        std::map<uint32_t, SchemaColumn> _get_columns_for_system_tables(const std::vector<SchemaColumn> &columns);
+        std::map<uint32_t, SchemaColumn> _convert_columns(const std::vector<SchemaColumn> &columns);
     };
 
 }

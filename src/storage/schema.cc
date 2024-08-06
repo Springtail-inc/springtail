@@ -383,21 +383,21 @@ namespace springtail {
         }
     }
 
-    VirtualSchema::VirtualSchema(std::shared_ptr<ExtentSchema> extent_schema,
-                                 const std::map<uint32_t, SchemaColumn> &columns,
-                                 const std::vector<SchemaColumn> &updates)
-        : _extent_schema(extent_schema)
+    VirtualSchema::VirtualSchema(const SchemaMetadata &meta)
     {
         std::map<uint32_t, std::string> name_map;
 
+        // generate the extent schema from the base columns
+        _extent_schema = std::make_shared<ExtentSchema>(meta.columns);
+
         // get a copy of the fields from the extent schema
-        for (auto &&column : columns) {
-            _field_map[column.second.name] = extent_schema->get_field(column.second.name);
-            name_map[column.second.position] = column.second.name;
+        for (auto &&column : meta.columns) {
+            _field_map[column.name] = _extent_schema->get_field(column.name);
+            name_map[column.position] = column.name;
         }
 
         // loop through each update and apply it to the field map
-        for (auto &&update : updates) {
+        for (auto &&update : meta.history) {
             // apply the change to the field set based on the kind of update being performed
             switch(update.update_type) {
             case (SchemaUpdateType::NEW_COLUMN):
@@ -453,5 +453,4 @@ namespace springtail {
 
         return fields;
     }
-
 }

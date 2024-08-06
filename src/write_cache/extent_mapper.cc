@@ -68,8 +68,8 @@ namespace springtail {
         // find the extent ID to see if there are changes to it prior to the target XID
         auto it = _forward_map.find(extent_id);
         if (it == _forward_map.end()) {
-            // no changes at all, return empty vector
-            return {};
+            // no changes at all, return a vector with the original extent ID
+            return { extent_id };
         }
 
         // note: forward mapping is always done from the latest GC-2 checkpoint, so the XID of the

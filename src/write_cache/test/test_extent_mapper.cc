@@ -90,7 +90,8 @@ namespace {
         _gc1(tid, 4);
         
         auto &&m = _gc2(tid, 1);
-        ASSERT_TRUE(m.empty());
+        ASSERT_EQ(m.size(), 1);
+        ASSERT_EQ(m[0], 100);
 
         m = _gc2(tid, 2);
         ASSERT_EQ(m.size(), 1);
