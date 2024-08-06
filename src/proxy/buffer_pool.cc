@@ -3,8 +3,7 @@
 
 #include <proxy/buffer_pool.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /* static initialization must happen outside of class */
     BufferPool* BufferPool::_instance{nullptr};
@@ -66,5 +65,4 @@ namespace pg_proxy {
         waiter->done = true;
         waiter->cv.notify_one();
     }
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

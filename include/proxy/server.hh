@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <map>
@@ -18,9 +19,9 @@
 
 #include <proxy/buffer_pool.hh>
 #include <proxy/database.hh>
+#include <proxy/logger.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
@@ -28,7 +29,9 @@ namespace pg_proxy {
                     int thread_pool_size,
                     const std::filesystem::path &cert_file,
                     const std::filesystem::path &key_file,
-                    bool enable_ssl=true);
+                    bool shadow_mode=false,
+                    bool enable_ssl=false,
+                    LoggerPtr logger=nullptr);
 
         /** Start server main loop */
         void run();
@@ -110,6 +113,14 @@ namespace pg_proxy {
             _replica_set.add_replica(instance);
         }
 
+        /** Get the logger object */
+        LoggerPtr get_logger() {
+            return _logger;
+        }
+
+        /** Shutdown server */
+        void shutdown();
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
@@ -125,13 +136,18 @@ namespace pg_proxy {
         SSL_CTX *_ssl_ctx_server = nullptr;  ///< SSL context for server
         SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
 
-        bool _enable_ssl;                    ///< true if SSL is enabled
+        bool _enable_ssl = false;            ///< true if SSL is enabled
 
         DatabasePrimarySet _primary_database; ///< set of primary databases
         DatabaseReplicaSet _replica_set;      ///< set of replica databases
 
         std::shared_mutex _db_mutex;
         std::set<std::string> _replicated_databases; ///< list of authorized databases
+
+        bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
+        std::atomic<bool> _shutdown = false;    ///< true if server is shutting down
+
+        LoggerPtr _logger;         ///< logger object (may be null)
 
         /** Accept handler -- called from poll loop */
         void _do_accept();
@@ -141,5 +157,5 @@ namespace pg_proxy {
                                     const std::filesystem::path &key_file={});
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-} // namespace pg_proxy
-} // namespace springtail
+
+} // namespace springtail::pg_proxy

@@ -9,8 +9,9 @@
 #include <proxy/client_session.hh>
 #include <proxy/server_session.hh>
 
-namespace springtail {
-namespace pg_proxy {
+#include <proxy/logging.hh>
+
+namespace springtail::pg_proxy {
 
     ServerSessionPtr
     DatabaseInstance::evict_session() {
@@ -59,7 +60,7 @@ namespace pg_proxy {
         it->second->release_session(session);
         _active_sessions--;
         assert(_active_sessions >= 0);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session released: {:d}, active={}", session->id(), _active_sessions);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session released: {:d}, active={}", session->id(), _active_sessions);
     }
 
     void
@@ -168,6 +169,4 @@ namespace pg_proxy {
 
         return session;
     }
-
-} // namespace springtail
-} // namespace pg_proxy
+} // namespace springtail::pg_proxy

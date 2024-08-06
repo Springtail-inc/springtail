@@ -11,8 +11,7 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/history_cache.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** Messages between sessions */
     class SessionMsg {
@@ -21,6 +20,7 @@ namespace pg_proxy {
             char transaction_status; ///< transaction status 'I', 'T', 'E'
         };
 
+        /** message types -- add string defn to session.cc type_map */
         enum Type : int8_t {
             ///// client to server messages
             MSG_CLIENT_SERVER_STARTUP=0,      ///< startup; do auth, etc.; no data
@@ -42,26 +42,33 @@ namespace pg_proxy {
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
 
+        /** type to string map -- defined in session.cc */
+        static const std::map<Type, std::string> type_map;
+
         /** Constructor with data */
-        SessionMsg(Type type, QueryStmtPtr data)
-            : _type(type), _data(data)
+        SessionMsg(Type type, QueryStmtPtr data, uint64_t seq_id)
+            : _type(type), _data(data), _seq_id(seq_id)
         {}
 
         SessionMsg(Type type, MsgStatus &status)
             : _type(type), _status(status)
         {}
 
-        SessionMsg(Type type, BufferPtr buffer)
-            : _type(type), _buffer(buffer)
+        SessionMsg(Type type, BufferPtr buffer, uint64_t seq_id)
+            : _type(type), _buffer(buffer), _seq_id(seq_id)
         {}
 
         /** Constructor without data */
-        SessionMsg(Type type)
-            : _type(type)
+        SessionMsg(Type type, uint64_t seq_id=-1)
+            : _type(type), _seq_id(seq_id)
         {}
 
         /** Get type */
         Type type() const { return _type; }
+
+        std::string const type_str() const {
+            return type_map.at(_type);
+        }
 
         const QueryStmtPtr data() const {
             return _data;
@@ -119,17 +126,36 @@ namespace pg_proxy {
             }
         }
 
+        /** Get number of completed queries */
         int completed() const {
             return _completed;
         }
 
-        /** Helper to create a session message */
-        static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr) {
-            return std::make_shared<SessionMsg>(type, data);
+        /** Get sequence id */
+        uint64_t seq_id() const {
+            return _seq_id;
         }
 
-        static std::shared_ptr<SessionMsg> create(Type type, BufferPtr data) {
-            return std::make_shared<SessionMsg>(type, data);
+        /** Clone the message */
+        std::shared_ptr<SessionMsg> clone() {
+            auto msg = std::make_shared<SessionMsg>(_type, _data, _seq_id);
+            msg->_status = _status;
+            msg->_completed = _completed;
+            msg->_dependencies = _dependencies;
+            return msg;
+        }
+
+        /** Helper to create a session message */
+        static std::shared_ptr<SessionMsg> create(Type type, QueryStmtPtr data=nullptr, uint64_t seq_id=-1) {
+            return std::make_shared<SessionMsg>(type, data, seq_id);
+        }
+
+        static std::shared_ptr<SessionMsg> create(Type type, BufferPtr data, uint64_t seq_id) {
+            return std::make_shared<SessionMsg>(type, data, seq_id);
+        }
+
+        static std::shared_ptr<SessionMsg> create(Type type, uint64_t seq_id) {
+            return std::make_shared<SessionMsg>(type, seq_id);
         }
 
     private:
@@ -139,8 +165,8 @@ namespace pg_proxy {
         MsgStatus _status;                       ///< message status
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
+        uint64_t _seq_id=0;                      ///< sequence id for this message
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
-} // namespace springtail
-} // namespace pg_proxy
+} // namespace springtail::pg_proxy
