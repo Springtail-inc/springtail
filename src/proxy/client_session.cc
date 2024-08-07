@@ -392,7 +392,7 @@ namespace springtail::pg_proxy {
             uint64_t seq_id = _gen_seq_id();
 
             // log buffer
-            _log_buffer(true, code, msg_length, buffer->data() + 5, seq_id);
+            _log_buffer(true, code, msg_length, buffer->current_data(), seq_id);
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Auth continue: msg_length={}, seq_id={}", _id, msg_length, seq_id);
 
@@ -687,7 +687,8 @@ namespace springtail::pg_proxy {
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client got request code: {}, seq_id: {}", _id, code, seq_id);
 
-            _log_buffer(true, code, len, buffer->data(), seq_id);
+            // log buffer, skipping the header
+            _log_buffer(true, code, len, buffer->current_data(), seq_id);
 
             // handle request
             switch (code) {

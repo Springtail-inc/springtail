@@ -50,6 +50,74 @@ def send_md5(conn, username, password, salt):
 
     conn.send(bytes)
 
+def decode_auth_response(bytes):
+    auth_type = int.from_bytes(bytes[5:9], 'big')
+    return auth_type
+
+def auth_type_to_string(auth_type):
+    if (auth_type == 0):
+        return "Authentication OK"
+    elif (auth_type == 2):
+        return "KerberosV5 authentication"
+    elif (auth_type == 3):
+        return "Cleartext authentication"
+    elif (auth_type == 5):
+        return "MD5 authentication"
+    elif (auth_type == 7):
+        return "GSSAPI authentication"
+    elif (auth_type == 8):
+        return "GSS continue"
+    elif (auth_type == 9):
+        return "SSPI authentication"
+    elif (auth_type == 10):
+        return "SCRAM-SHA-256 authentication"
+    elif (auth_type == 11):
+        return "SASL continue"
+    elif (auth_type == 12):
+        return "SASL final"
+    else:
+        return "Unknown authentication type: {}".format(auth_type)
+
+def decode_parameter_status(bytes):
+    name, end = decode_string(bytes[5:])
+    value, end = decode_string(bytes[5+end+1:])
+    return name, value
+
+def decode_backend_key_data(bytes):
+    pid = int.from_bytes(bytes[5:9], 'big')
+    secret = int.from_bytes(bytes[9:13], 'big')
+    return pid, secret
+
+def decode_ready_for_query(bytes):
+    return bytes[5:6].decode("utf-8")
+
+def decode_close_request(bytes):
+    type = bytes[5:6].decode("utf-8")
+    name, end = decode_string(bytes[6:])
+    return type, name
+
+def decode_describe_request(bytes):
+    type = bytes[5:6].decode("utf-8")
+    name, end = decode_string(bytes[6:])
+    return type, name
+
+def decode_string(bytes):
+    end = bytes.find(b'\x00')
+    return (bytes[:end].decode('utf-8'), end)
+
+def decode_parse_request(bytes):
+    stmt, end = decode_string(bytes[5:])
+    return stmt
+
+def decode_bind_request(bytes):
+    portal, end = decode_string(bytes[5:])
+    stmt, end = decode_string(bytes[5+end+1:])
+    return portal, stmt
+
+def decode_execute_request(bytes):
+    portal, end = decode_string(bytes[5:])
+    return portal
+
 def read_auth_response(conn):
     bytes = conn.recv(1000)
     pos = 0
@@ -61,29 +129,21 @@ def read_auth_response(conn):
         # print ("code={}, length={}".format(code, length))
 
         if (code == 'R'):
-            auth_type = int.from_bytes(bytes[pos+5:pos+9], 'big')
-            print("Auth type: ", auth_type)
-            if (auth_type == 0):
-                print("  Authentication OK")
-            elif (auth_type == 5):
-                print("  MD5 authentication required")
+            auth_type = decode_auth_response(bytes[pos:])
+            print("Auth type: ", auth_type_to_string(auth_type))
 
         if (code == 'S'):
             # decode the parameter status
-            name, end = decode_string(bytes[pos+5:])
-            value, end = decode_string(bytes[pos+5+end+1:])
+            name, value = decode_parameter_status(bytes[pos:])
             print("  Parameter status: name={}, value={}".format(name, value))
 
         if code == 'Z':
-            ready_for_query = bytes[pos+5:pos+6].decode("utf-8")
+            ready_for_query = decode_ready_for_query(bytes[pos:])
             print("Ready for query: status={}".format(ready_for_query))
             return ready_for_query
 
         pos += length+1
 
-def decode_string(bytes):
-    end = bytes.find(b'\x00')
-    return (bytes[:end].decode('utf-8'), end)
 
 def send_parse_message(conn, statement_name: str, query: str):
     buf = bytearray()
@@ -218,12 +278,23 @@ def read_response(conn):
             print('Command complete')
         elif code == 'T':
             print('Row description')
-            decode_row_description(bytes[pos:])
+            fields = decode_row_description(bytes[pos:])
+            for field in fields:
+                print(f"Field name: {field['field_name']}")
+                print(f"  Table OID: {field['table_oid']}")
+                print(f"  Column Attribute Number: {field['column_attr_num']}")
+                print(f"  Data Type OID: {field['data_type_oid']}")
+                print(f"  Data Type Size: {field['data_type_size']}")
+                print(f"  Type Modifier: {field['type_modifier']}")
+                print(f"  Format Code: {field['format_code']}")
         elif code == 'D':
             print('Data row')
-            decode_data_row(bytes[pos:])
+            columns = decode_data_row(bytes[pos:])
+            print("Number of columns: ", len(columns))
+            for i, column in enumerate(columns):
+                print(f"Column {i + 1}: {column}")
         elif code == 'Z':
-            status = bytes[pos+5:pos+6].decode("utf-8")
+            status = decode_ready_for_query(bytes[pos:])
             print('Ready for query: status={}'.format(status))
             ready_for_query = True
         elif code == 'E':
@@ -308,8 +379,6 @@ def decode_row_description(message):
     num_fields = int.from_bytes(message[offset:offset+2], byteorder='big')
     offset += 2
 
-    print(f"Number of fields: {num_fields}")
-
     fields = []
 
     for _ in range(num_fields):
@@ -341,14 +410,7 @@ def decode_row_description(message):
             'format_code': format_code
         })
 
-    for field in fields:
-        print(f"Field name: {field['field_name']}")
-        print(f"  Table OID: {field['table_oid']}")
-        print(f"  Column Attribute Number: {field['column_attr_num']}")
-        print(f"  Data Type OID: {field['data_type_oid']}")
-        print(f"  Data Type Size: {field['data_type_size']}")
-        print(f"  Type Modifier: {field['type_modifier']}")
-        print(f"  Format Code: {field['format_code']}")
+    return fields
 
 def decode_data_row(message):
     offset = 0
@@ -366,12 +428,9 @@ def decode_data_row(message):
         raise ValueError(f"Unexpected message type: {message_type}")
 
     # Read the number of columns
+    columns = []
     num_columns = int.from_bytes(message[offset:offset+2], byteorder='big')
     offset += 2
-
-    print(f"Number of columns: {num_columns}")
-
-    columns = []
 
     for _ in range(num_columns):
         # Read the length of the column value
@@ -386,7 +445,40 @@ def decode_data_row(message):
 
         columns.append(column_value)
 
-    for i, column in enumerate(columns):
-        print(f"Column {i + 1}: {column}")
-
     return columns
+
+def decode_startup_message(message, has_proto=False):
+    offset = 0
+
+    # Convert message to bytearray for easier manipulation
+    message = bytearray(message)
+
+    # Read the message type and length
+    message_type = chr(message[offset])
+    offset += 1
+    message_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+    offset += 4
+
+    if message_type != '?':
+        raise ValueError(f"Unexpected message type: {message_type}")
+
+    # NOTE: no protocol version is in the logged message, so we'll assume it's 3.0
+    if not has_proto:
+        proto_major = 3
+        proto_minor = 0
+    else:
+        proto_major = int.from_bytes(message[offset:offset+2], byteorder='big')
+        offset += 2
+        proto_minor = int.from_bytes(message[offset:offset+2], byteorder='big')
+        offset += 2
+
+    params = []
+    while message[offset] != 0:
+        name, end = decode_string(message[offset:])
+        offset += end + 1
+        value, end = decode_string(message[offset:])
+        offset += end + 1
+
+        params.append((name, value))
+
+    return proto_major, proto_minor, params
