@@ -16,30 +16,30 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 
-#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h>
+#include <thrift/sys_tbl_mgr/Service.h>
 
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
 #include <sys_tbl_mgr/sys_tbl_mgr_client_factory.hh>
 
-namespace springtail {
+namespace springtail::sys_tbl_mgr {
     /* static initialization must happen outside of class */
-    SysTblMgrClient* SysTblMgrClient::_instance {nullptr};
-    std::mutex SysTblMgrClient::_instance_mutex;
+    Client* Client::_instance {nullptr};
+    std::mutex Client::_instance_mutex;
 
-    SysTblMgrClient *
-    SysTblMgrClient::get_instance()
+    Client *
+    Client::get_instance()
     {
         std::scoped_lock<std::mutex> lock(_instance_mutex);
 
         if (_instance == nullptr) {
-            _instance = new SysTblMgrClient();
+            _instance = new Client();
         }
 
         return _instance;
     }
 
-    SysTblMgrClient::SysTblMgrClient()
+    Client::Client()
     {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
         nlohmann::json client_json;
@@ -68,15 +68,15 @@ namespace springtail {
         // construct the thrift client pool.
         // First argument is a factory object that constructs a thrift clients
         // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>>(
-            std::make_shared<SysTblMgrThriftObjectFactory>(server, port),
+        _thrift_client_pool = std::make_shared<ObjectPool<ServiceClient>>(
+            std::make_shared<ObjectFactory>(server, port),
             max_connections/2,
             max_connections
         );
     }
 
     void
-    SysTblMgrClient::shutdown()
+    Client::shutdown()
     {
          std::scoped_lock<std::mutex> lock(_instance_mutex);
 
@@ -89,10 +89,10 @@ namespace springtail {
     // exposed client service interface below
 
     void
-    SysTblMgrClient::ping()
+    Client::ping()
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
         c.client->ping(result);
 
@@ -100,18 +100,18 @@ namespace springtail {
         return;
     }
 
-    thrift::sys_tbl_mgr::TableRequest
+    TableRequest
     _gen_table_request(const XidLsn &xid,
                        const PgMsgTable &msg)
     {
-        thrift::sys_tbl_mgr::TableRequest request;
+        TableRequest request;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table.id = msg.oid;
         request.table.schema = msg.schema;
         request.table.name = msg.table;
         for (const auto &col : msg.columns) {
-            thrift::sys_tbl_mgr::TableColumn column;
+            TableColumn column;
             column.__set_name(col.column_name);
             column.__set_type(col.type);
             column.__set_pg_type(col.pg_type);
@@ -132,43 +132,43 @@ namespace springtail {
     }
 
     void
-    SysTblMgrClient::create_table(const XidLsn &xid,
-                                  const PgMsgTable &msg)
+    Client::create_table(const XidLsn &xid,
+                         const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
         auto &&request = _gen_table_request(xid, msg);
         c.client->create_table(result, request);
 
-        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+        if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
     }
 
     void
-    SysTblMgrClient::alter_table(const XidLsn &xid,
-                                 const PgMsgTable &msg)
+    Client::alter_table(const XidLsn &xid,
+                        const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
         auto &&request = _gen_table_request(xid, msg);
         c.client->alter_table(result, request);
 
-        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+        if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
     }
 
     void
-    SysTblMgrClient::drop_table(const XidLsn &xid,
-                                 const PgMsgDropTable &msg)
+    Client::drop_table(const XidLsn &xid,
+                       const PgMsgDropTable &msg)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
-        thrift::sys_tbl_mgr::DropTableRequest request;
+        DropTableRequest request;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table_id = msg.oid;
@@ -177,21 +177,21 @@ namespace springtail {
 
         c.client->drop_table(result, request);
 
-        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+        if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
     }
 
     void
-    SysTblMgrClient::update_roots(uint64_t table_id,
-                                  uint64_t xid,
-                                  const std::vector<uint64_t> &roots,
-                                  uint64_t row_count)
+    Client::update_roots(uint64_t table_id,
+                         uint64_t xid,
+                         const std::vector<uint64_t> &roots,
+                         uint64_t row_count)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
-        thrift::sys_tbl_mgr::UpdateRootsRequest request;
+        UpdateRootsRequest request;
         request.xid = xid;
         request.table_id = table_id;
         request.roots.insert(request.roots.end(), roots.begin(), roots.end());
@@ -199,35 +199,35 @@ namespace springtail {
 
         c.client->update_roots(result, request);
 
-        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+        if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
     }
 
     void
-    SysTblMgrClient::finalize(uint64_t xid)
+    Client::finalize(uint64_t xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::Status result;
+        Status result;
 
-        thrift::sys_tbl_mgr::FinalizeRequest request;
+        FinalizeRequest request;
         request.xid = xid;
 
         c.client->finalize(result, request);
 
-        if (result.status != thrift::sys_tbl_mgr::StatusCode::SUCCESS) {
+        if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
     }
 
     TableMetadata
-    SysTblMgrClient::get_roots(uint64_t table_id,
-                               uint64_t xid)
+    Client::get_roots(uint64_t table_id,
+                      uint64_t xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::GetRootsResponse result;
+        GetRootsResponse result;
 
-        thrift::sys_tbl_mgr::GetRootsRequest request;
+        GetRootsRequest request;
         request.xid = xid;
         request.table_id = table_id;
 
@@ -242,13 +242,13 @@ namespace springtail {
     }
 
     SchemaMetadata
-    SysTblMgrClient::get_schema(uint64_t table_id,
-                                const XidLsn &xid)
+    Client::get_schema(uint64_t table_id,
+                       const XidLsn &xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::GetSchemaResponse result;
+        GetSchemaResponse result;
 
-        thrift::sys_tbl_mgr::GetSchemaRequest request;
+        GetSchemaRequest request;
         request.table_id = table_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
@@ -296,14 +296,14 @@ namespace springtail {
     }
 
     SchemaMetadata
-    SysTblMgrClient::get_target_schema(uint64_t table_id,
-                                       const XidLsn &access_xid,
-                                       const XidLsn &target_xid)
+    Client::get_target_schema(uint64_t table_id,
+                              const XidLsn &access_xid,
+                              const XidLsn &target_xid)
     {
         ThriftClient c = _get_client();
-        thrift::sys_tbl_mgr::GetSchemaResponse result;
+        GetSchemaResponse result;
 
-        thrift::sys_tbl_mgr::GetTargetSchemaRequest request;
+        GetTargetSchemaRequest request;
         request.table_id = table_id;
         request.access_xid = access_xid.xid;
         request.access_lsn = access_xid.lsn;

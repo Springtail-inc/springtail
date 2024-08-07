@@ -9,16 +9,16 @@
 
 #include <common/object_pool.hh>
 
-#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h>
+#include <thrift/sys_tbl_mgr/Service.h>
 
-namespace springtail {
+namespace springtail::sys_tbl_mgr {
     /**
      * @brief Object pool factory for thrift cache client objects
      */
-    class SysTblMgrThriftObjectFactory : public ObjectPoolFactory<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>
+    class ObjectFactory : public ObjectPoolFactory<ServiceClient>
     {
     public:
-        SysTblMgrThriftObjectFactory(const std::string &server, int port)
+        ObjectFactory(const std::string &server, int port)
             : _server(server), _port(port)
         {}
 
@@ -26,21 +26,17 @@ namespace springtail {
          * @brief Allocate a new client; transport is not connected
          * @return std::shared_ptr<thrift::ThriftSysTblMgrClient>
          */
-        std::shared_ptr<thrift::sys_tbl_mgr::ThriftSysTblMgrClient> allocate() override
+        std::shared_ptr<ServiceClient> allocate() override
         {
-            std::shared_ptr<apache::thrift::transport::TSocket> socket =
-                std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
+            auto socket = std::make_shared<apache::thrift::transport::TSocket>(_server, _port);
 
             socket->setKeepAlive(true); // set keepalive
             socket->setNoDelay(true);   // should be on by default
             // can also set connTimeout, sendTimeout, recvTimeout (default is disabled)
 
-            std::shared_ptr<apache::thrift::transport::TTransport> transport =
-                std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
-            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol =
-                std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
-            std::shared_ptr<thrift::sys_tbl_mgr::ThriftSysTblMgrClient> client =
-                std::make_shared<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>(protocol);
+            auto transport = std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
+            auto protocol = std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
+            std::shared_ptr<ServiceClient> client = std::make_shared<ServiceClient>(protocol);
 
             return client;
         }
@@ -50,10 +46,10 @@ namespace springtail {
          *        before returning.
          * @param client
          */
-        void get_cb(std::shared_ptr<thrift::sys_tbl_mgr::ThriftSysTblMgrClient> client) override
+        void get_cb(std::shared_ptr<ServiceClient> client) override
         {
             // validate that the transport is connected
-            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
+            auto proto = client->getOutputProtocol();
             if (proto->getTransport()->isOpen()) {
                 return;
             }

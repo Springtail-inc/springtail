@@ -88,7 +88,7 @@ namespace springtail {
         }
 
         // non-system tables
-        auto &&meta = SysTblMgrClient::get_instance()->get_schema(table_id, xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table_id, xid);
         return _convert_columns(meta.columns);
     }
 
@@ -106,7 +106,7 @@ namespace springtail {
         // XXX keep some kind of local cache?
 
         // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = SysTblMgrClient::get_instance()->get_target_schema(table_id, access_xid, target_xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(table_id, access_xid, target_xid);
 
         // construct the schema object
         if (meta.history.empty()) {
@@ -129,7 +129,7 @@ namespace springtail {
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
 
         // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = SysTblMgrClient::get_instance()->get_schema(table_id, xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table_id, xid);
 
         // construct the schema from the provided schema metadata
         return std::make_shared<ExtentSchema>(meta.columns);

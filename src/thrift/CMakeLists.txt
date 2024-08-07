@@ -52,6 +52,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
     # Regular expression to match a word after "service " (with optional whitespace)
     set(THRIFT_SERVICE "")
     string(REGEX REPLACE  "^[ ]*service[ ]+(.*)[ ]+{" "\\1" THRIFT_SERVICE "${EXTRACTED_SERVICE_NAME}")
+    MESSAGE(STATUS "Found service ${EXTRACTED_SERVICE_NAME} for ${THRIFT_FILE}")
 
     # set the generated files
     set(THRIFT_GEN_FILES

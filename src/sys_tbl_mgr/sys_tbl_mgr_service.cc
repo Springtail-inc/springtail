@@ -1,4 +1,4 @@
-#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h>
+#include <thrift/sys_tbl_mgr/Service.h> // generated file
 
 #include <sys_tbl_mgr/sys_tbl_mgr_service.hh>
 #include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
@@ -8,25 +8,25 @@
 #include <storage/table_mgr.hh>
 #include <storage/system_tables.hh>
 
-namespace springtail {
+namespace springtail::sys_tbl_mgr {
     /* static member initialization must happen outside of class */
-    ThriftSysTblMgrService* ThriftSysTblMgrService::_instance {nullptr};
-    boost::mutex ThriftSysTblMgrService::_instance_mutex;
+    Service* Service::_instance {nullptr};
+    boost::mutex Service::_instance_mutex;
 
-    ThriftSysTblMgrService *
-    ThriftSysTblMgrService::get_instance()
+    Service *
+    Service::get_instance()
     {
         boost::unique_lock lock(_instance_mutex);
 
         if (_instance == nullptr) {
-            _instance = new ThriftSysTblMgrService();
+            _instance = new Service();
         }
 
         return _instance;
     }
 
     void
-    ThriftSysTblMgrService::shutdown()
+    Service::shutdown()
     {
         boost::unique_lock lock(_instance_mutex);
 
@@ -36,7 +36,7 @@ namespace springtail {
         }
     }
 
-    ThriftSysTblMgrService::ThriftSysTblMgrService()
+    Service::Service()
     {
         // call into the XID Mgr to get the latest committed XID
         auto xid_mgr = XidMgrClient::get_instance();
@@ -47,15 +47,15 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::ping(thrift::sys_tbl_mgr::Status& _return)
+    Service::ping(Status& _return)
     {
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
         _return.__set_message("PONG");
     }
 
     void
-    ThriftSysTblMgrService::create_table(thrift::sys_tbl_mgr::Status& _return,
-                                         const thrift::sys_tbl_mgr::TableRequest &request)
+    Service::create_table(Status& _return,
+                          const TableRequest &request)
     {
         // 1. acquire a shared lock to ensure no one is doing a finalize?
         boost::shared_lock lock(_write_mutex);
@@ -69,15 +69,15 @@ namespace springtail {
         _set_table_info(table_info);
 
         // add roots and stats entry -- may get overwritten later if data is added to the table
-        auto roots_info = std::make_shared<thrift::sys_tbl_mgr::GetRootsResponse>();
+        auto roots_info = std::make_shared<GetRootsResponse>();
         roots_info->roots.push_back(constant::UNKNOWN_EXTENT);
         _set_roots_info(request.table.id, xid, roots_info);
 
         // add schemas entries for each column
-        std::vector<thrift::sys_tbl_mgr::ColumnHistory> columns;
+        std::vector<ColumnHistory> columns;
         std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         for (const auto &column : request.table.columns) {
-            thrift::sys_tbl_mgr::ColumnHistory history;
+            ColumnHistory history;
             history.xid = xid.xid;
             history.lsn = xid.lsn;
             history.exists = true;
@@ -115,12 +115,12 @@ namespace springtail {
 
         //    f. XXX anything to do for secondary indexes?
 
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
-    ThriftSysTblMgrService::alter_table(thrift::sys_tbl_mgr::Status& _return,
-                                        const thrift::sys_tbl_mgr::TableRequest &request)
+    Service::alter_table(Status& _return,
+                         const TableRequest &request)
     {
         boost::shared_lock lock(_write_mutex);
 
@@ -155,12 +155,12 @@ namespace springtail {
             _set_schema_info(request.table.id, { history });
         }
 
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
-    ThriftSysTblMgrService::drop_table(thrift::sys_tbl_mgr::Status& _return,
-                                       const thrift::sys_tbl_mgr::DropTableRequest &request)
+    Service::drop_table(Status& _return,
+                        const DropTableRequest &request)
     {
         boost::shared_lock lock(_write_mutex);
 
@@ -178,9 +178,9 @@ namespace springtail {
         auto info = _get_schema_info(request.table_id, xid, xid);
 
         // remove all of the schema columns
-        std::vector<thrift::sys_tbl_mgr::ColumnHistory> changes;
+        std::vector<ColumnHistory> changes;
         for (auto &column : info->columns) {
-            thrift::sys_tbl_mgr::ColumnHistory change;
+            ColumnHistory change;
             change.xid = request.xid;
             change.lsn = request.lsn;
             change.exists = false;
@@ -191,29 +191,29 @@ namespace springtail {
         }
         _set_schema_info(request.table_id, changes);
 
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
-    ThriftSysTblMgrService::update_roots(thrift::sys_tbl_mgr::Status& _return,
-                                         const thrift::sys_tbl_mgr::UpdateRootsRequest &request)
+    Service::update_roots(Status& _return,
+                          const UpdateRootsRequest &request)
     {
         boost::shared_lock lock(_write_mutex);
 
         XidLsn xid(request.xid);
 
-        auto info = std::make_shared<thrift::sys_tbl_mgr::GetRootsResponse>();
+        auto info = std::make_shared<GetRootsResponse>();
         info->roots = request.roots;
         info->stats = request.stats;
 
         _set_roots_info(request.table_id, xid, info);
 
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
-    ThriftSysTblMgrService::finalize(thrift::sys_tbl_mgr::Status& _return,
-                                     const thrift::sys_tbl_mgr::FinalizeRequest &request)
+    Service::finalize(Status& _return,
+                      const FinalizeRequest &request)
     {
         // block all mutations
         boost::unique_lock wlock(_write_mutex);
@@ -242,12 +242,12 @@ namespace springtail {
         _clear_roots_info();
         _clear_schema_info();
 
-        _return.__set_status(thrift::sys_tbl_mgr::StatusCode::SUCCESS);
+        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
-    ThriftSysTblMgrService::get_roots(thrift::sys_tbl_mgr::GetRootsResponse& _return,
-                                      const thrift::sys_tbl_mgr::GetRootsRequest &request)
+    Service::get_roots(GetRootsResponse& _return,
+                       const GetRootsRequest &request)
     {
         boost::shared_lock lock(_read_mutex);
 
@@ -267,8 +267,8 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::get_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
-                                       const thrift::sys_tbl_mgr::GetSchemaRequest &request)
+    Service::get_schema(GetSchemaResponse& _return,
+                        const GetSchemaRequest &request)
     {
         boost::shared_lock lock(_read_mutex);
 
@@ -279,8 +279,8 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::get_target_schema(thrift::sys_tbl_mgr::GetSchemaResponse& _return,
-                                              const thrift::sys_tbl_mgr::GetTargetSchemaRequest &request)
+    Service::get_target_schema(GetSchemaResponse& _return,
+                               const GetTargetSchemaRequest &request)
     {
         boost::shared_lock lock(_read_mutex);
 
@@ -292,8 +292,8 @@ namespace springtail {
         _return = *info;
     }
 
-    ThriftSysTblMgrService::TableInfoPtr
-    ThriftSysTblMgrService::_get_table_info(uint64_t table_id,
+    Service::TableInfoPtr
+    Service::_get_table_info(uint64_t table_id,
                                             const XidLsn &xid)
     {
         // check the cache
@@ -344,7 +344,7 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_set_table_info(TableInfoPtr table_info)
+    Service::_set_table_info(TableInfoPtr table_info)
     {
         XidLsn xid(table_info->xid, table_info->lsn);
 
@@ -363,14 +363,14 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_clear_table_info()
+    Service::_clear_table_info()
     {
         // clear the table cache since it only contains un-finalized entries
         _table_cache.clear();
     }
 
-    ThriftSysTblMgrService::RootsInfoPtr
-    ThriftSysTblMgrService::_get_roots_info(uint64_t table_id,
+    Service::RootsInfoPtr
+    Service::_get_roots_info(uint64_t table_id,
                                             const XidLsn &xid)
     {
         // first check the cache
@@ -382,7 +382,7 @@ namespace springtail {
             }
         }
 
-        auto roots_info = std::make_shared<thrift::sys_tbl_mgr::GetRootsResponse>();
+        auto roots_info = std::make_shared<GetRootsResponse>();
 
         // read from the tables
         auto roots_t = _get_system_table(sys_tbl::TableRoots::ID);
@@ -436,7 +436,7 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_set_roots_info(uint64_t table_id,
+    Service::_set_roots_info(uint64_t table_id,
                                             const XidLsn &xid,
                                             RootsInfoPtr roots_info)
     {
@@ -464,18 +464,18 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_clear_roots_info()
+    Service::_clear_roots_info()
     {
         // note: we clear everything because the cache only contains un-finalized data
         _roots_cache.clear();
     }
 
-    ThriftSysTblMgrService::SchemaInfoPtr
-    ThriftSysTblMgrService::_get_schema_info(uint64_t table_id,
+    Service::SchemaInfoPtr
+    Service::_get_schema_info(uint64_t table_id,
                                              const XidLsn &access_xid,
                                              const XidLsn &target_xid)
     {
-        auto info = std::make_shared<thrift::sys_tbl_mgr::GetSchemaResponse>();
+        auto info = std::make_shared<GetSchemaResponse>();
 
         // first read the columns from the schemas table
         XidLsn xid = std::min(access_xid, _access_xid);
@@ -514,11 +514,11 @@ namespace springtail {
         return info;
     }
 
-    std::map<uint32_t, thrift::sys_tbl_mgr::TableColumn>
-    ThriftSysTblMgrService::_read_schema_columns(uint64_t table_id,
+    std::map<uint32_t, TableColumn>
+    Service::_read_schema_columns(uint64_t table_id,
                                                  const XidLsn &access_xid)
     {
-        std::map<uint32_t, thrift::sys_tbl_mgr::TableColumn> columns;
+        std::map<uint32_t, TableColumn> columns;
 
         // get an accessor for the schema table
         auto schemas_t = _get_system_table(sys_tbl::Schemas::ID);
@@ -556,7 +556,7 @@ namespace springtail {
                 columns.erase(position);
             } else {
                 // construct a column from the row
-                thrift::sys_tbl_mgr::TableColumn column;
+                TableColumn column;
                 column.name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
                 column.type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
                 column.pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row);
@@ -626,9 +626,9 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_apply_schema_cache_history(uint64_t table_id,
-                                                        const XidLsn &xid,
-                                                        std::map<uint32_t, thrift::sys_tbl_mgr::TableColumn> &columns)
+    Service::_apply_schema_cache_history(uint64_t table_id,
+                                         const XidLsn &xid,
+                                         std::map<uint32_t, TableColumn> &columns)
     {
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache.find(table_id);
@@ -653,12 +653,12 @@ namespace springtail {
         }
     }
 
-    std::vector<thrift::sys_tbl_mgr::ColumnHistory>
-    ThriftSysTblMgrService::_read_schema_history(uint64_t table_id,
-                                                 const XidLsn &access_xid,
-                                                 const XidLsn &target_xid)
+    std::vector<ColumnHistory>
+    Service::_read_schema_history(uint64_t table_id,
+                                  const XidLsn &access_xid,
+                                  const XidLsn &target_xid)
     {
-        std::vector<thrift::sys_tbl_mgr::ColumnHistory> history;
+        std::vector<ColumnHistory> history;
 
         // get an accessor for the schema table
         auto schemas_t = _get_system_table(sys_tbl::Schemas::ID);
@@ -697,7 +697,7 @@ namespace springtail {
             }
 
             // store the entry into the history
-            thrift::sys_tbl_mgr::ColumnHistory entry;
+            ColumnHistory entry;
             entry.xid = xid;
             entry.lsn = lsn;
             entry.exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);;
@@ -719,13 +719,13 @@ namespace springtail {
         return history;
     }
 
-    std::vector<thrift::sys_tbl_mgr::ColumnHistory>
-    ThriftSysTblMgrService::_get_schema_cache_history(uint64_t table_id,
-                                                      const XidLsn &access_xid,
-                                                      const XidLsn &target_xid)
+    std::vector<ColumnHistory>
+    Service::_get_schema_cache_history(uint64_t table_id,
+                                       const XidLsn &access_xid,
+                                       const XidLsn &target_xid)
 
     {
-        std::vector<thrift::sys_tbl_mgr::ColumnHistory> history;
+        std::vector<ColumnHistory> history;
 
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache.find(table_id);
@@ -754,8 +754,8 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_set_schema_info(uint64_t table_id,
-                                             const std::vector<thrift::sys_tbl_mgr::ColumnHistory> &columns)
+    Service::_set_schema_info(uint64_t table_id,
+                              const std::vector<ColumnHistory> &columns)
     {
         std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         auto schemas_t = _get_mutable_system_table(sys_tbl::Schemas::ID);
@@ -787,13 +787,13 @@ namespace springtail {
     }
 
     void
-    ThriftSysTblMgrService::_clear_schema_info()
+    Service::_clear_schema_info()
     {
         _schema_cache.clear();
     }
 
     TablePtr
-    ThriftSysTblMgrService::_get_system_table(uint64_t table_id)
+    Service::_get_system_table(uint64_t table_id)
     {
         boost::unique_lock lock(_mutex);
 
@@ -812,7 +812,7 @@ namespace springtail {
     }
 
     MutableTablePtr
-    ThriftSysTblMgrService::_get_mutable_system_table(uint64_t table_id)
+    Service::_get_mutable_system_table(uint64_t table_id)
     {
         // check if we already have the table open
         auto table_i = _write.find(table_id);
@@ -828,18 +828,18 @@ namespace springtail {
         return table;
     }
 
-    thrift::sys_tbl_mgr::ColumnHistory
-    ThriftSysTblMgrService::_generate_update(const std::vector<thrift::sys_tbl_mgr::TableColumn> &old_schema,
-                                             const std::vector<thrift::sys_tbl_mgr::TableColumn> &new_schema,
-                                             const XidLsn &xid)
+    ColumnHistory
+    Service::_generate_update(const std::vector<TableColumn> &old_schema,
+                              const std::vector<TableColumn> &new_schema,
+                              const XidLsn &xid)
     {
-        thrift::sys_tbl_mgr::ColumnHistory update;
+        ColumnHistory update;
         update.xid = xid.xid;
         update.lsn = xid.lsn;
 
         // if the old schema has more columns, then a column was removed
         if (old_schema.size() > new_schema.size()) {
-            std::map<uint32_t, const thrift::sys_tbl_mgr::TableColumn *> lookup;
+            std::map<uint32_t, const TableColumn *> lookup;
             for (auto &column : new_schema) {
                 lookup[column.position] = &column;
             }
@@ -865,7 +865,7 @@ namespace springtail {
 
         // if the old schema has fewer columns, then a column was added
         if (old_schema.size() < new_schema.size()) {
-            std::map<uint32_t, const thrift::sys_tbl_mgr::TableColumn *> lookup;
+            std::map<uint32_t, const TableColumn *> lookup;
             for (auto &column : old_schema) {
                 lookup[column.position] = &column;
             }
@@ -888,7 +888,7 @@ namespace springtail {
             assert(0);
         }
 
-        std::map<uint32_t, const thrift::sys_tbl_mgr::TableColumn *> lookup;
+        std::map<uint32_t, const TableColumn *> lookup;
         for (auto &column : new_schema) {
             lookup[column.position] = &column;
         }

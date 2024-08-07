@@ -12,18 +12,18 @@
 #include <storage/table.hh>
 #include <storage/xid.hh>
 
-#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h> // generated file
+#include <thrift/sys_tbl_mgr/Service.h> // generated file
 
-namespace springtail {
+namespace springtail::sys_tbl_mgr {
 
-    class SysTblMgrClient
+    class Client
     {
     public:
         /**
          * @brief Get the singleton write cache client instance object
-         * @return SysTblMgrClient *
+         * @return Client *
          */
-        static SysTblMgrClient *get_instance();
+        static Client *get_instance();
 
         /**
          * @brief Shutdown cache
@@ -78,7 +78,7 @@ namespace springtail {
 
     protected:
         /** Singleton write cache client instance */
-        static SysTblMgrClient *_instance;
+        static Client *_instance;
 
         /** Mutex protecting _instance in get_instance() */
         static std::mutex _instance_mutex;
@@ -86,28 +86,29 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Client object
          */
-        SysTblMgrClient();
+        Client();
 
         /**
          * @brief Destroy the Write Cache Client object; shouldn't be called directly use shutdown()
          */
-        ~SysTblMgrClient() {}
+        ~Client() {}
 
     private:
         // delete copy constructor
-        SysTblMgrClient(const SysTblMgrClient &) = delete;
-        void operator=(const SysTblMgrClient &)   = delete;
+        Client(const Client &) = delete;
+        void operator=(const Client &)   = delete;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool
 
         /** Thrift client object pool */
-        std::shared_ptr<ObjectPool<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>> _thrift_client_pool;
+        std::shared_ptr<ObjectPool<ServiceClient>> _thrift_client_pool;
 
         /** Struct to wrap the client pool and client object to ensure it gets release back */
         struct ThriftClient {
-            std::shared_ptr<ObjectPool<thrift::sys_tbl_mgr::ThriftSysTblMgrClient>> pool;
-            std::shared_ptr<thrift::sys_tbl_mgr::ThriftSysTblMgrClient> client;
+            std::shared_ptr<ObjectPool<ServiceClient>> pool;
+            std::shared_ptr<ServiceClient> client;
+
             ~ThriftClient() {
                 pool->put(client);
             }
@@ -119,7 +120,7 @@ namespace springtail {
          */
         inline ThriftClient _get_client()
         {
-            std::shared_ptr<thrift::sys_tbl_mgr::ThriftSysTblMgrClient> client = _thrift_client_pool->get();
+            std::shared_ptr<ServiceClient> client = _thrift_client_pool->get();
             ThriftClient c = { _thrift_client_pool, client };
             return c;
         }

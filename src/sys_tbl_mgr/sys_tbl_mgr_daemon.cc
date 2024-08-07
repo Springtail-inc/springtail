@@ -11,7 +11,7 @@ namespace {
     void
     handle_sigint(int signal)
     {
-        SysTblMgrServer::shutdown();
+        sys_tbl_mgr::Server::shutdown();
     }
 }
 
@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
     std::signal(SIGINT, handle_sigint);
 
     // start the server
-    SysTblMgrServer::startup();
+    sys_tbl_mgr::Server::startup();
 
     return 0;
 }

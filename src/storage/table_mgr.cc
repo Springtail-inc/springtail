@@ -60,7 +60,7 @@ namespace springtail {
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = SysTblMgrClient::get_instance()->get_roots(table_id, xid);
+        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(table_id, xid);
 
         // construct the table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, {xid, lsn});
@@ -84,7 +84,7 @@ namespace springtail {
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = SysTblMgrClient::get_instance()->get_roots(table_id, access_xid);
+        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(table_id, access_xid);
 
         // construct the mutable table and return it
         XidLsn xid(access_xid);
@@ -101,27 +101,27 @@ namespace springtail {
     TableMgr::create_table(const XidLsn &xid,
                            const PgMsgTable &msg)
     {
-        SysTblMgrClient::get_instance()->create_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->create_table(xid, msg);
     }
 
     void
     TableMgr::alter_table(const XidLsn &xid,
                           const PgMsgTable &msg)
     {
-        SysTblMgrClient::get_instance()->alter_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->alter_table(xid, msg);
     }
 
     void
     TableMgr::drop_table(const XidLsn &xid,
                          const PgMsgDropTable &msg)
     {
-        SysTblMgrClient::get_instance()->drop_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->drop_table(xid, msg);
     }
 
     void
     TableMgr::finalize_metadata(uint64_t xid)
     {
-        SysTblMgrClient::get_instance()->finalize(xid);
+        sys_tbl_mgr::Client::get_instance()->finalize(xid);
     }
 
     TablePtr
@@ -214,7 +214,7 @@ namespace springtail {
                            const std::vector<uint64_t> &roots,
                            const TableStats &stats)
     {
-        SysTblMgrClient::get_instance()->update_roots(table_id, target_xid, roots, stats.row_count);
+        sys_tbl_mgr::Client::get_instance()->update_roots(table_id, target_xid, roots, stats.row_count);
     }
 
     MutableTablePtr

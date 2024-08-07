@@ -1,4 +1,4 @@
-namespace cpp springtail.thrift.sys_tbl_mgr
+namespace cpp springtail.sys_tbl_mgr
 
 // status code and optional message
 struct Status {
@@ -23,7 +23,7 @@ struct TableColumn {
     8: optional string default_value,
 }
 
-struct TableMetadata {
+struct TableInfo {
     1: i64 id,
     2: string schema,
     3: string name,
@@ -33,7 +33,7 @@ struct TableMetadata {
 struct TableRequest {
     1: i64 xid,
     2: i64 lsn,
-    3: TableMetadata table
+    3: TableInfo table
 }
 
 struct DropTableRequest {
@@ -97,7 +97,7 @@ struct GetSchemaResponse {
 }
 
 // the interface for managing the system tables
-service ThriftSysTblMgr {
+service Service {
     Status ping(),
 
     // creates a new data table at the given xid/lsn

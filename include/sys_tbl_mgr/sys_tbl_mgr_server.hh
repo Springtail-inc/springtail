@@ -8,24 +8,24 @@
 
 #include <thrift/server/TServer.h>
 
-namespace springtail {
+namespace springtail::sys_tbl_mgr {
 
-    class SysTblMgrServer
+    class Server
     {
     public:
         /**
          * @brief Get the singleton write cache server instance object
          * @return SysTblMgrServer *
          */
-        static SysTblMgrServer *get_instance() {
-            std::call_once(_init_flag, &SysTblMgrServer::_init);
+        static Server *get_instance() {
+            std::call_once(_init_flag, &Server::_init);
             return _instance;
         }
         /**
          * @brief Shutdown cache
          */
         static void shutdown() {
-            std::call_once(_shutdown_flag, &SysTblMgrServer::_shutdown);
+            std::call_once(_shutdown_flag, &Server::_shutdown);
         }
 
         /**
@@ -41,22 +41,22 @@ namespace springtail {
         }
 
         // delete copy constructor
-        SysTblMgrServer(const SysTblMgrServer &) = delete;
-        void operator=(const SysTblMgrServer &)   = delete;
+        Server(const Server &) = delete;
+        void operator=(const Server &)   = delete;
 
     private:
         /**
          * @brief Construct a new Write Cache Server object
          */
-        SysTblMgrServer();
+        Server();
 
         /**
          * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
          */
-         ~SysTblMgrServer() {}
+         ~Server() {}
 
         /** init from get_instance, called once */
-        static SysTblMgrServer *_init();
+        static Server *_init();
 
         /** shutdown from shutdown(), called once */
         static void _shutdown();
@@ -65,7 +65,7 @@ namespace springtail {
         void _startup();
 
         /** Singleton write cache server instance */
-        static SysTblMgrServer *_instance;
+        static Server *_instance;
 
         /** init flag */
         static std::once_flag _init_flag;

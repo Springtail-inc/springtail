@@ -280,7 +280,7 @@ namespace springtail::gc {
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows for {}:{}@{}", table->id(), extent_id, xid);
         auto schema_mgr = SchemaMgr::get_instance();
-        auto sys_tbl_mgr = SysTblMgrClient::get_instance();
+        auto sys_tbl_mgr = sys_tbl_mgr::Client::get_instance();
 
         // save the schema
         auto schema = table->schema();

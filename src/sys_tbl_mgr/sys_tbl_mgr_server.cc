@@ -14,27 +14,29 @@
 #include <common/properties.hh>
 #include <common/json.hh>
 
-#include <thrift/sys_tbl_mgr/ThriftSysTblMgr.h>
+#include <thrift/sys_tbl_mgr/Service.h>
 
 #include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
 #include <sys_tbl_mgr/sys_tbl_mgr_service.hh>
 
-namespace springtail {
+namespace at = apache::thrift;
+
+namespace springtail::sys_tbl_mgr {
 
     /* static initialization must happen outside of class */
-    SysTblMgrServer* SysTblMgrServer::_instance {nullptr};
+    Server* Server::_instance {nullptr};
 
-    std::once_flag SysTblMgrServer::_init_flag;
-    std::once_flag SysTblMgrServer::_shutdown_flag;
+    std::once_flag Server::_init_flag;
+    std::once_flag Server::_shutdown_flag;
 
-    SysTblMgrServer *
-    SysTblMgrServer::_init()
+    Server *
+    Server::_init()
     {
-        _instance = new SysTblMgrServer();
+        _instance = new Server();
         return _instance;
     }
 
-    SysTblMgrServer::SysTblMgrServer()
+    Server::Server()
     {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
         nlohmann::json client_json;
@@ -52,20 +54,20 @@ namespace springtail {
      * Startup thrift threaded server
      */
     void
-    SysTblMgrServer::_startup()
+    Server::_startup()
     {
         // create a thread manager with right number of worker threads
-        std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
-          apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
+        std::shared_ptr<at::concurrency::ThreadManager> threadManager =
+            at::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
 
-        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
+        threadManager->threadFactory(std::make_shared<at::concurrency::ThreadFactory>());
         threadManager->start();
 
-        _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
-            std::make_shared<thrift::sys_tbl_mgr::ThriftSysTblMgrProcessorFactory>(std::make_shared<ThriftSysTblMgrCloneFactory>()),
-            std::make_shared<apache::thrift::transport::TServerSocket>(_port),
-            std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
-            std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
+        _server = std::make_shared<at::server::TThreadPoolServer>(
+            std::make_shared<ServiceProcessorFactory>(std::make_shared<ServiceCloneFactory>()),
+            std::make_shared<at::transport::TServerSocket>(_port),
+            std::make_shared<at::transport::TFramedTransportFactory>(),
+            std::make_shared<at::protocol::TCompactProtocolFactory>(),
             threadManager
         );
 
@@ -73,7 +75,7 @@ namespace springtail {
     }
 
     void
-    SysTblMgrServer::_shutdown()
+    Server::_shutdown()
     {
         if (_instance != nullptr) {
             _instance->_server->stop();

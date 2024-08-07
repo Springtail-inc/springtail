@@ -419,7 +419,7 @@ namespace springtail {
         }
 
         // update the roots and stats
-        SysTblMgrClient::get_instance()->update_roots(_id, _target_xid, roots, 0);
+        sys_tbl_mgr::Client::get_instance()->update_roots(_id, _target_xid, roots, 0);
     }
 
     StorageCache::PagePtr

@@ -43,13 +43,13 @@ namespace {
 
     // Tests the schema modification paths
     TEST_F(SysTblMgr_Test, Basic) {
-        auto client = SysTblMgrClient::get_instance();
+        auto client = sys_tbl_mgr::Client::get_instance();
         client->ping();
     }
 
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop) {
-        auto client = SysTblMgrClient::get_instance();
+        auto client = sys_tbl_mgr::Client::get_instance();
         
         // create the table
         uint64_t tid = 100000;
@@ -167,7 +167,7 @@ namespace {
 
     // Tests interleaving of DDL and DML interactions with the system tables
     TEST_F(SysTblMgr_Test, Complex) {
-        auto client = SysTblMgrClient::get_instance();
+        auto client = sys_tbl_mgr::Client::get_instance();
 
         // create table
         uint64_t check_xid = _xid.xid;
