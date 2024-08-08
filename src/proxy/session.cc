@@ -372,7 +372,7 @@ namespace springtail::pg_proxy {
             log_type = incoming ? Logger::LogMsgType::FROM_REPLICA : Logger::LogMsgType::TO_REPLICA;
         }
 
-        logger->log_data(log_type, _id, seq_id, code, len, data, final);
+        logger->log_data(log_type, _server->id(), _id, seq_id, code, len, data, final);
     }
 
 } // namespace springtail::pg_proxy

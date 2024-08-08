@@ -44,7 +44,8 @@ namespace springtail::pg_proxy {
                              bool shadow_mode,
                              bool enable_ssl,
                              LoggerPtr logger)
-      : _user_mgr(std::make_shared<UserMgr>()),
+      : _id(arc4random()),
+        _user_mgr(std::make_shared<UserMgr>()),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl),
         _shadow_mode(shadow_mode),
@@ -214,15 +215,73 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ProxyServer::_log_connect(SessionPtr session)
+    {
+        if (!_logger) {
+            return;
+        }
+        // log the connection
+        std::string endpoint = session->get_connection()->endpoint();
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "{} connected from: {} on socket {}",
+                    (session->type() == Session::Type::CLIENT ? "Client" : "Server"), endpoint, session->get_connection()->get_socket());
+
+        Logger::LogMsgType type;
+        switch (session->type()) {
+            case Session::Type::CLIENT:
+                type = Logger::LogMsgType::FROM_CLIENT;
+                break;
+            case Session::Type::REPLICA:
+                type = Logger::LogMsgType::FROM_REPLICA;
+                break;
+            case Session::Type::PRIMARY:
+                type = Logger::LogMsgType::FROM_PRIMARY;
+                break;
+        }
+
+        _logger->log_data(type, _id, session->id(), 0, '*', endpoint.length()+1, endpoint.c_str());
+    }
+
+    void
+    ProxyServer::_log_disconnect(SessionPtr session)
+    {
+        if (!_logger) {
+            return;
+        }
+
+        // log the connection
+        std::string endpoint = session->get_connection()->endpoint();
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "{} disconnected from: {} on socket {}",
+                    (session->type() == Session::Type::CLIENT ? "Client" : "Server"), endpoint, session->get_connection()->get_socket());
+
+        Logger::LogMsgType type;
+        switch (session->type()) {
+            case Session::Type::CLIENT:
+                type = Logger::LogMsgType::FROM_CLIENT;
+                break;
+            case Session::Type::REPLICA:
+                type = Logger::LogMsgType::FROM_REPLICA;
+                break;
+            case Session::Type::PRIMARY:
+                type = Logger::LogMsgType::FROM_PRIMARY;
+                break;
+        }
+
+        _logger->log_data(type, _id, session->id(), 0, '!', 0, nullptr);
+    }
+
+    void
     ProxyServer::_do_accept()
     {
-        while (true) { // accept is non-blocking and will return when no more connections
+        while (true) {
+            // accept is non-blocking and will return when no more connections
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
 
             struct sockaddr_in client_address;
             socklen_t client_address_size = sizeof(client_address);
 
-            // Accept a new connection
+            // accept a new connection
             int client_socket = accept(_socket, (struct sockaddr*)&client_address, &client_address_size);
             if (client_socket == -1) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -238,20 +297,13 @@ namespace springtail::pg_proxy {
                 return;
             }
 
-            // Get client IP address
-            char client_ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
-
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Client connected from: {} on socket {}", client_ip, client_socket);
-
+            // create the connection and attach it to a client session
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
             ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this(), _shadow_mode);
 
-            // add session to the waiting sessions list and to the session map
-            std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-            _sessions.insert(std::make_pair(client_socket, session));
-            _waiting_sessions.insert(client_socket);
-            lock.unlock();
+            // add session to the waiting sessions list
+            // and to the session map
+            register_session(session, true);
         }
     }
 
@@ -386,15 +438,25 @@ namespace springtail::pg_proxy {
     ProxyServer::shutdown_session(SessionPtr session)
     {
         int socket = session->get_connection()->get_socket();
+        _log_disconnect(session);
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.erase(socket);
         _waiting_sessions.erase(socket);
     }
 
     void
-    ProxyServer::register_session(SessionPtr session)
+    ProxyServer::register_session(SessionPtr session,
+                                  bool waiting_session_insert)
     {
+        // all new sessions must be registered, so good place to log it
+        _log_connect(session);
+
+        // add the session to the list of sessions
+        int socket = session->get_connection()->get_socket();
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _sessions.insert(std::make_pair(session->get_connection()->get_socket(), session));
+        _sessions.insert(std::make_pair(socket, session));
+        if (waiting_session_insert) {
+            _waiting_sessions.insert(socket);
+        }
     }
 } // namespace springtail::pg_proxy

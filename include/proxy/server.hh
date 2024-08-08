@@ -40,7 +40,8 @@ namespace springtail::pg_proxy {
         void signal(ProxyConnectionPtr connection);
 
         /** Register a new session, add to <socket, session> to _sessions map*/
-        void register_session(SessionPtr session);
+        void register_session(SessionPtr session,
+                              bool waiting_session_insert=false);
 
         /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
         void shutdown_session(SessionPtr session);
@@ -121,9 +122,16 @@ namespace springtail::pg_proxy {
         /** Shutdown server */
         void shutdown();
 
+        /** Get the proxy id */
+        uint32_t id() {
+            return _id;
+        }
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
+
+        uint32_t _id;  ///< unique id for this proxy server
 
         UserMgrPtr _user_mgr;                ///< user manager object
 
@@ -155,6 +163,13 @@ namespace springtail::pg_proxy {
         /** Setup and configure SSL context; pass in certificate and private key */
         SSL_CTX *_setup_SSL_context(const std::filesystem::path &cert_file={},
                                     const std::filesystem::path &key_file={});
+
+        /** Log new connection */
+        void _log_connect(SessionPtr session);
+
+        /** Log disconnect */
+        void _log_disconnect(SessionPtr session);
+
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
