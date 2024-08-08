@@ -25,11 +25,17 @@ def send_startup(conn, database):
 
     conn.send(bytes)
 
-def md5_hash(username, password, salt):
+def md5_hash_user_pass(username, password, salt):
     up = hashlib.md5(password.encode() + username.encode()).hexdigest()
     hasher = hashlib.md5()
     hasher.update(up.encode())
     hasher.update(salt)
+    return hasher.hexdigest()
+
+def md5_hash(strs):
+    hasher = hashlib.md5()
+    for str in strs:
+        hasher.update(str.encode())
     return hasher.hexdigest()
 
 def read_startup(conn):
@@ -40,7 +46,7 @@ def read_startup(conn):
     return code, length, salt
 
 def send_md5(conn, username, password, salt):
-    md5 = 'md5' + md5_hash(username, password, salt)
+    md5 = 'md5' + md5_hash_user_pass(username, password, salt)
     bytes = bytearray()
     bytes.extend(b'\x70') # 'p'
     length = 40

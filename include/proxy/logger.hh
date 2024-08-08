@@ -68,11 +68,12 @@ namespace springtail::pg_proxy {
             spdlog::register_logger(_logger);
         }
 
-        void log_data(LogMsgType type, uint32_t session_id, uint64_t seq_id,
+        void log_data(LogMsgType type, uint32_t proxy_id,
+                      uint32_t session_id, uint64_t seq_id,
                       char code, int32_t data_length,
                       const char *data, bool final=true)
         {
-            char header[4 + 8 + 8 + 4 + 4];
+            char header[4 + 8 + 8 + 4 + 4 + 4];
             auto ts = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
             int64_t timestamp = ts.count();
 
@@ -83,6 +84,7 @@ namespace springtail::pg_proxy {
             // 1B: padding unused
             // 8B: timestamp
             // 8B: sequence id
+            // 4B: proxy id
             // 4B: session id
             // 4B: length of the message (buffer)
             int off = 0;
@@ -99,6 +101,8 @@ namespace springtail::pg_proxy {
             off += 8;
             std::copy_n(reinterpret_cast<char *>(&seq_id), 8, header + off);
             off += 8;
+            std::copy_n(reinterpret_cast<char *>(&proxy_id), 4, header + off);
+            off += 4;
             std::copy_n(reinterpret_cast<char *>(&session_id), 4, header + off);
             off += 4;
             std::copy_n(reinterpret_cast<char *>(&data_length), 4, header + off);
@@ -107,7 +111,10 @@ namespace springtail::pg_proxy {
             // write out the header and then the buffer
             std::vector<std::string_view> parts;
             parts.push_back(std::string_view(header, sizeof(header)));
-            parts.push_back(std::string_view(data, data_length));
+
+            if (data_length > 0) {
+                parts.push_back(std::string_view(data, data_length));
+            }
             log(parts);
         }
 

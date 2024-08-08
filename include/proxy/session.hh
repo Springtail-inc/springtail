@@ -245,6 +245,11 @@ namespace springtail::pg_proxy {
             return _id;
         }
 
+        /** Get session type */
+        Type type() const {
+            return _type;
+        }
+
         /**
          * @brief Set shadow flag
          * @param shadow true if this is a shadow session

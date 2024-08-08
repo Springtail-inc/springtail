@@ -2,6 +2,9 @@ import argparse
 import struct
 import datetime
 import logging, sys
+import psycopg2
+from psycopg2.extras import LoggingConnection
+
 import pglib
 
 TYPE_MAP = {
@@ -23,8 +26,111 @@ TYPE_REQ_RESP_MAP = {
     6: "Request"
 }
 
+# map of session_id to partial data (in extended query)
 PARTIAL_DATA_MAP = {
 }
+
+# map of session_id to id in sessions table (sessions.id)
+SESSION_ID_MAP = {
+}
+
+def connect_to_postgres(hostname, port, username, password, database, requires_ssl=False):
+    """Connect to the PostgreSQL server."""
+    conn = psycopg2.connect(
+        host=hostname,
+        port=port,
+        user=username,
+        password=password,
+        database=database,
+        sslmode='require' if requires_ssl else 'prefer',
+        connection_factory=LoggingConnection
+    )
+
+    return conn
+
+def db_truncate_tables(conn):
+    """Truncate the tables in the database."""
+    if conn is None:
+        return
+
+    cursor = conn.cursor()
+
+    cursor.execute("TRUNCATE TABLE messages")
+    cursor.execute("TRUNCATE TABLE sessions")
+
+    conn.commit()
+
+def db_insert_session(conn, header, endpoint):
+    """Insert a session into the database."""
+    if conn is None:
+        return
+
+    cursor = conn.cursor()
+
+    # Insert the session into the database
+
+    cursor.execute(
+        """INSERT INTO sessions (server_id, session_id, session_type, customer_id, endpoint, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        (header['server_id'], header['session_id'], header['type_str'],
+         0, endpoint, header['timestamp'])
+    )
+
+    id = cursor.fetchone()[0]
+    conn.commit()
+
+    SESSION_ID_MAP[header['session_id']] = id
+
+
+def db_update_session_disconnect(conn, header):
+    """Update the session in the database to indicate disconnect."""
+    if conn is None:
+        return
+
+    if header['session_id'] not in SESSION_ID_MAP:
+        logging.error("Session ID not found in map: {}".format(header['session_id']))
+        raise Exception("Session ID not found in map: {}".format(header['session_id']))
+        return
+
+    cursor = conn.cursor()
+
+    id = SESSION_ID_MAP[header['session_id']]
+
+    # Update the session in the database
+    cursor.execute(
+        """UPDATE sessions SET disconnected_at = %s WHERE id = %s AND server_id = %s""",
+        (header['timestamp'], id, header['server_id'])
+    )
+
+    conn.commit()
+
+    del SESSION_ID_MAP[header['session_id']]
+
+
+def db_insert_msg(conn, header, code, message, data_row=None):
+    """Insert a message into the database."""
+    if conn is None:
+        return
+
+    if header['session_id'] not in SESSION_ID_MAP:
+        logging.error("Session ID not found in map: {}".format(header['session_id']))
+        raise Exception("Session ID not found in map: {}".format(header['session_id']))
+        return
+
+    id = SESSION_ID_MAP[header['session_id']]
+
+    cursor = conn.cursor()
+
+    # Insert the message into the database
+    cursor.execute(
+        """INSERT INTO messages (sessions_id_pkey, server_id, session_id,
+               type, client_session_id, seq_num, code, message, data_row_hash, timestamp)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (id, header['server_id'], header['session_id'], header['type_str'], header['seq_id_client_id'],
+         header['seq_id_seq_id'], code, message, data_row, header['timestamp'])
+    )
+
+    conn.commit()
 
 def dump_hex(data):
     """Dump the data in hex format."""
@@ -40,7 +146,7 @@ def decode_header(file):
     The seqID is split into two parts: the client session ID, and the seq ID.
     """
     # Define the format string according to the specified structure
-    format_str = '<BBcBQLLLL' # little-endian format
+    format_str = '<BBcBQLLLLL' # little-endian format
 
     # Calculate the size of the header based on the format string
     header_size = struct.calcsize(format_str)
@@ -66,8 +172,9 @@ def decode_header(file):
         'timestamp_str': datetime.datetime.fromtimestamp(unpacked_data[4]/1000).strftime('%Y-%m-%d %H:%M:%S'),
         'seq_id_seq_id': unpacked_data[5],
         'seq_id_client_id': unpacked_data[6],
-        'session_id': unpacked_data[7],
-        'length': unpacked_data[8]
+        'server_id': unpacked_data[7],
+        'session_id': unpacked_data[8],
+        'length': unpacked_data[9]
     }
 
     return header
@@ -118,11 +225,13 @@ def decode_extended_data(header, data, data_len):
 
     return (None, None, None)
 
-def decode_data(data_with_header, header):
+
+def decode_data(data_with_header, header, db_conn=None):
     """Decode data.
 
     data contains code, length, and the actual data.
     """
+    # decode the code and length
     (code,pkt_len) = struct.unpack('>cL', data_with_header[0:5])
     data = data_with_header[5:] # strip out code and length
     code = code.decode("utf-8")
@@ -131,107 +240,128 @@ def decode_data(data_with_header, header):
           .format(header['type_str'], header['seq_id_client_id'],
                   header['session_id'], header['seq_id_seq_id'], code, pkt_len))
 
+    # get request or response type
     req_resp_type = TYPE_REQ_RESP_MAP[header['type_flag']]
+
+    if code == '*':
+        # session connect
+        endpoint, _ = pglib.decode_string(data)
+        print("Session connect: endpoint={}, session_id={}".format(endpoint, header['session_id']))
+        db_insert_session(db_conn, header, endpoint)
+        return
+
+    if code == '!':
+        #session disconnect
+        print("Session disconnect: session_id={}".format(header['session_id']))
+        db_update_session_disconnect(db_conn, header)
+        return
+
+    msg = None
+    data_row = None
 
     if code == 'D' and req_resp_type == 'Response':
         # data row
         columns = pglib.decode_data_row(data_with_header)
-        print("Data Row: columns={}".format(len(columns)))
-        for i, column in enumerate(columns):
-            print(f"Column {i + 1}: {column}")
+        data_row = pglib.md5_hash(columns)
+        msg = "Data Row: columns={}, hash={}".format(len(columns), data_row)
+        # for (i, column) in enumerate(columns):
+        #    msg += "\nColumn {}: {}".format(i+1, column)
     elif code == 'D' and req_resp_type == 'Request':
         # describe
         type, name = pglib.decode_describe(data_with_header)
-        print("Describe: type={}, name={}".format(type, name))
+        msg = "Describe: type={}, name={}".format(type, name)
     elif code == 'Q':
         # simple query
         query, _ = pglib.decode_string(data)
-        print ("Simple Query: {}".format(query))
-        if query.startswith('Q'):
-            dump_hex(data_with_header)
+        msg = "Simple Query: {}".format(query)
     elif code == 'C' and req_resp_type == 'Response':
         # command complete
         command, _ = pglib.decode_string(data)
-        print ("Command Complete: {}".format(command))
+        msg = "Command Complete: {}".format(command)
     elif code == 'C' and req_resp_type == 'Request':
         # close command
         type, name = pglib.decode_close_command(data_with_header)
-        print("Close command: type={}, name={}".format(type, name))
+        msg = "Close command: type={}, name={}".format(type, name)
     elif code == 'E' and req_resp_type == 'Response':
         # error response
         error = pglib.decode_error_response(data_with_header)
-        print ("Error: {}".format(error))
+        msg = "Error: {}".format(error)
     elif code == 'R':
         auth_type = pglib.decode_auth_response(data_with_header)
-        print ("Authentication response: auth_type={}".format(pglib.auth_type_to_string(auth_type)))
+        msg = "Authentication response: auth_type={}".format(pglib.auth_type_to_string(auth_type))
     elif code == 'S':
         # parameter status
         name, value = pglib.decode_parameter_status(data_with_header)
-        print ("Parameter Status: name={}, value={}".format(name, value))
+        msg = "Parameter Status: name={}, value={}".format(name, value)
     elif code == 'Z':
         # ready for query
         status = pglib.decode_ready_for_query(data_with_header)
-        print ("Ready for query: status={}".format(status))
+        msg = "Ready for query: status={}".format(status)
     elif code == 'K':
         # backend key data
         pid, secret = pglib.decode_backend_key_data(data_with_header)
-        print ("Backend Key: pid={}, secret={}".format(pid, secret))
+        msg = "Backend Key: pid={}, secret={}".format(pid, secret)
     elif code == 't':
         # parameter description
-        print('Parameter description')
+        msg = "Parameter description"
     elif code == 'P':
         # parse request
-        print("Parse: stmt={}".format(pglib.decode_parse_request(data_with_header)))
+        msg = "Parse: stmt={}".format(pglib.decode_parse_request(data_with_header))
     elif code == 'B':
         # bind request
         portal, stmt = pglib.decode_bind_request(data_with_header)
-        print('Bind: portal={}, stmt={}'.format(portal, stmt))
+        msg = "Bind: portal={}, stmt={}".format(portal, stmt)
     elif code == 'E' and req_resp_type == 'Request':
         # execute request
         portal = pglib.decode_execute_request(data_with_header)
-        print('Execute request: portal={}'.format(portal))
+        msg = "Execute request: portal={}".format(portal)
     elif code == '1':
         # parse complete
-        print('Parse complete')
+        msg = "Parse complete"
     elif code == '2':
         # bind complete
-        print('Bind complete')
+        msg = "Bind complete"
     elif code == '3':
         # close complete
-        print('Close complete')
+        msg = "Close complete"
     elif code == 'n':
         # no data
-        print('No data')
+        msg = "No data"
     elif code == 'I':
         # empty query response
-        print("Empty query response")
+        msg = "Empty query response"
     elif code == 'p':
         # password message/response
         if req_resp_type == 'Request':
-            print("Password message")
+            msg = "Password message"
         else:
-            print("Password response")
+            msg = "Password response"
     elif code == '?':
         # startup message
         proto_major, proto_minor, params = pglib.decode_startup_message(data_with_header)
-        print("Startup message: proto_major={}, proto_minor={}".format(proto_major, proto_minor))
+        msg = "Startup message: proto_major={}, proto_minor={}".format(proto_major, proto_minor)
         for param in params:
-            print("Param: {}={}".format(param[0], param[1]))
+            msg += "\nParam: {}={}".format(param[0], param[1])
     elif code == 'T':
         # row description
         fields = pglib.decode_row_description(data_with_header)
-        print("Row description: fields={}".format(len(fields)))
+        msg = "Row description: fields={}".format(len(fields))
         for i, field in enumerate(fields):
-            print("Field {}: name={}, type_oid={}".format(i+1, field['field_name'], field['data_type_oid']))
+            msg += "\nField {}: name={}, type_oid={}".format(i+1, field['field_name'], field['data_type_oid'])
     else:
-        print("Unhandled code: {}".format(code))
+        msg = "Unhandled code: {}".format(code)
 
+    print(msg)
     print()
 
+    # insert message into database; if db_conn == None, it will do nothing
+    db_insert_msg(db_conn, header, code, msg, data_row)
 
-def handle_data(header, data):
+def handle_data(header, data, db_conn=None):
     """Handle the data based on the header."""
     if header['code'] == '\x00':
+        # extended data, code and length are encoded in the data packet;
+        # multiple packets can be concatenated together
         length = header['length']
         offset = 0
         while length > 0:
@@ -239,24 +369,33 @@ def handle_data(header, data):
             if not buffer:
                 break
 
-            decode_data(buffer, header)
+            decode_data(buffer, header, db_conn)
             length -= len_consumed
             offset += len_consumed
 
     else:
+        # non-extended data, code and length are in the header
         if header['final_flag'] == 0:
-            raise Exception("Final flag not set for non-extended data")
+            raise Exception("Final flag must be set for non-extended data")
 
         # add header to data; length includes length field but not code field
         data = struct.pack('>cL', header['code'].encode("utf-8"), header['length']+4) + data
-        decode_data(data, header)
+        decode_data(data, header, db_conn)
 
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Decode log file.")
     parser.add_argument('-f', '--filename', type=str, help="The name of the file containing the SQL commands to execute")
-    parser.add_argument('-d', '--debug', action='store_true', help="The name of the file containing the SQL commands to execute")
+    parser.add_argument('-D', '--debug', action='store_true', help="The name of the file containing the SQL commands to execute")
+    parser.add_argument('--db', action='store_true', help="Import messages to the database")
+
+    parser.add_argument('-H', '--hostname', type=str, default='127.0.0.1', help="The hostname of the database server")
+    parser.add_argument('-p', '--port', type=int, default=5432, help="The port number on which the database server is listening")
+    parser.add_argument('-U', '--username', type=str, default='postgres', help="The username for connecting to the database")
+    parser.add_argument('-P', '--password', type=str, default='postgres', help="The password for connecting to the database")
+    parser.add_argument('-s', '--requires_ssl', action='store_true', help="Flag to indicate if SSL is required")
+    parser.add_argument('-d', '--database', type=str, default='proxy_logs', help="The name of the database to connect to")
 
     args = parser.parse_args()
     return args
@@ -274,6 +413,18 @@ def main():
         log_level = logging.INFO
 
     logging.basicConfig(stream=sys.stderr, level=log_level)
+    logger = logging.getLogger(__name__)
+
+
+    conn = None
+    if args.db:
+        # Connect to the PostgreSQL server
+        conn = connect_to_postgres(args.hostname, args.port, args.username, args.password, args.database, args.requires_ssl)
+        logging.info("Connected to PostgreSQL server")
+        conn.initialize(logger)
+
+        # For testing: truncate the tables in the database
+        db_truncate_tables(conn)
 
     # open log file in binary mode
     with open(args.filename, 'rb') as file:
@@ -288,7 +439,7 @@ def main():
             # read in file data based on the length
             data = file.read(header['length'])
 
-            handle_data(header, data)
+            handle_data(header, data, conn)
 
 
 if __name__ == '__main__':
