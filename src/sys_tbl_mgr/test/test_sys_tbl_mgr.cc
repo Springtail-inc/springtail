@@ -1,6 +1,9 @@
 /*
  * Tests the interfaces of the SysTblMgr service.
  */
+#include <algorithm>
+#include <barrier>
+
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
@@ -374,28 +377,78 @@ namespace {
         ASSERT_EQ(schema_meta.history[5].xid, check_xid);
     }
 
-#if 0
     // Threaded test with interleaving of DDL and DML interactions with the system tables along with
     // metadata retrievals
     TEST_F(SysTblMgr_Test, Threaded) {
         // initialize some schema history for two tables
-        uint64_t tid1 = 100000, tid2 = 200000;
+        std::vector<uint64_t> tids = { 100000, 200000 };
 
-        auto t1msg = _create_table(tid1, "x");
-        auto t2msg = _create_table(tid2, "y");
+        auto t1msg = _create_table(tids[0], "x");
+        auto t2msg = _create_table(tids[1], "y");
 
         _finalize();
 
-        // save the starting XID
-        uint64_t check_xid = _xid.xid;
-
-        auto mutate = [this](uint64_t alter_tid, uint64_t create_tid, PgMsgTable &msg) {
-            _create_table(create_tid);
-
-            _drop_table(create_tid);
+        auto on_completion = [this]() noexcept {
+            _finalize();
         };
 
-        // construct four threads -- two for updating tables and two for reading tables
+        std::barrier sync_point(tids.size() * 2, on_completion);
+        int loop_count = 50;
+
+        auto work_fn = [&](uint64_t tid, PgMsgTable &msg) {
+            for (int i = 0; i < loop_count; i++) {
+                msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
+                _alter_table(msg);
+
+                msg.columns.back().column_name = "colthree";
+                _alter_table(msg);
+
+                msg.columns.back().is_nullable = false;
+                msg.columns.back().default_value = "0";
+                _alter_table(msg);
+
+                msg.columns.back().column_name = "colIII";
+                _alter_table(msg);
+
+                msg.columns.pop_back();
+                _alter_table(msg);
+
+                sync_point.arrive_and_wait();
+            }
+        };
+
+        auto get_fn = [&](uint64_t tid) {
+            for (int i = 0; i < loop_count; i++) {
+                XidLsn access_xid(_xid.xid - 1);
+
+                auto &&result = _client->get_schema(tid, access_xid);
+                for (int j = 0; j < 10; ++j) {
+                    auto &&result = _client->get_target_schema(tid, access_xid, { _xid.xid, std::max(_xid.lsn - 1, (uint64_t)0) });
+                }
+
+                sync_point.arrive_and_wait();
+            }
+        };
+
+        // construct two threads that will operate on the two tables concurrently and two that will
+        // continuously retrieve the schema
+        std::vector<std::thread> threads;
+        threads.reserve(4);
+        threads.emplace_back(std::thread([&]() {
+            work_fn(tids[0], t1msg);
+        }));
+        threads.emplace_back(std::thread([&]() {
+            work_fn(tids[1], t2msg);
+        }));
+        threads.emplace_back(std::thread([&]() {
+            get_fn(tids[0]);
+        }));
+        threads.emplace_back(std::thread([&]() {
+            get_fn(tids[1]);
+        }));
+
+        for (auto &thread : threads) {
+            thread.join();
+        }
     }
-#endif
 }
