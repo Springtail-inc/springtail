@@ -2,9 +2,9 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 
 # source files
 set(SYS_TBL_MGR_SOURCES
-    sys_tbl_mgr_client.cc
-    sys_tbl_mgr_server.cc
-    sys_tbl_mgr_service.cc
+    client.cc
+    server.cc
+    service.cc
 )
 
 # add the library target
@@ -16,7 +16,7 @@ target_link_libraries(springtail_sys_tbl_mgr
   PRIVATE Boost::thread)
 
 # daemon executable
-add_executable(sys_tbl_mgr_daemon sys_tbl_mgr_daemon.cc)
+add_executable(sys_tbl_mgr_daemon daemon.cc)
 target_include_directories(sys_tbl_mgr_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(sys_tbl_mgr_daemon
   PUBLIC springtail_sys_tbl_mgr

@@ -4,7 +4,7 @@
 #include <storage/table_mgr.hh>
 #include <storage/system_tables.hh>
 
-#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
+#include <sys_tbl_mgr/client.hh>
 
 namespace springtail {
 

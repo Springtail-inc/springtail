@@ -1,7 +1,7 @@
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 
-#include <sys_tbl_mgr/sys_tbl_mgr_service.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
+#include <sys_tbl_mgr/service.hh>
+#include <sys_tbl_mgr/server.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 

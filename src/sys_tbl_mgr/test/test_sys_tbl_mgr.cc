@@ -12,7 +12,7 @@
 #include <storage/schema.hh>
 #include <storage/xid.hh>
 
-#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
+#include <sys_tbl_mgr/client.hh>
 
 #include <test/services.hh>
 

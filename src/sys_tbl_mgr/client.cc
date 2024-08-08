@@ -19,8 +19,8 @@
 #include <thrift/sys_tbl_mgr/Service.h>
 
 #include <sys_tbl_mgr/exception.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_client.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_client_factory.hh>
+#include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/client_factory.hh>
 
 namespace springtail::sys_tbl_mgr {
     /* static initialization must happen outside of class */

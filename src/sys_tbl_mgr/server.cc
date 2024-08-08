@@ -16,8 +16,8 @@
 
 #include <thrift/sys_tbl_mgr/Service.h>
 
-#include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_service.hh>
+#include <sys_tbl_mgr/server.hh>
+#include <sys_tbl_mgr/service.hh>
 
 namespace at = apache::thrift;
 

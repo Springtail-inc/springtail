@@ -3,7 +3,7 @@
 #include <boost/program_options.hpp>
 
 #include <common/common.hh>
-#include <sys_tbl_mgr/sys_tbl_mgr_server.hh>
+#include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
 
