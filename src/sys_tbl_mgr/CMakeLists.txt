@@ -33,3 +33,7 @@ target_link_libraries(test_sys_tbl_mgr
   PRIVATE GTest::gtest_main
 )
 add_dsymutil_command(test_sys_tbl_mgr)
+
+
+# hook tests into gtest framework
+gtest_discover_tests(test_sys_tbl_mgr)

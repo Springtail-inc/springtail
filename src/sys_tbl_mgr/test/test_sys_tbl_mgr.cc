@@ -35,349 +35,367 @@ namespace {
         }
 
         static test::Services _services;
+        static std::mutex _mutex;
         static XidLsn _xid;
+
+    protected:
+        XidLsn _next_xid();
+        XidLsn _next_lsn();
+
+        void _finalize();
+        PgMsgTable _create_table(uint64_t tid, const std::string &name);
+        void _drop_table(uint64_t tid, const std::string &name);
+        void _alter_table(const PgMsgTable &msg);
+
+        sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
     };
 
     test::Services SysTblMgr_Test::_services(true, true, false);
     XidLsn SysTblMgr_Test::_xid(1, 0);
+    std::mutex SysTblMgr_Test::_mutex;
+
+    XidLsn
+    SysTblMgr_Test::_next_xid()
+    {
+        std::unique_lock lock(_mutex);
+        XidLsn xid = _xid;
+
+        ++_xid.xid;
+        _xid.lsn = 0;
+
+        return xid;
+    }
+
+    XidLsn
+    SysTblMgr_Test::_next_lsn()
+    {
+        std::unique_lock lock(_mutex);
+        XidLsn xid = _xid;
+
+        ++_xid.lsn;
+
+        return xid;
+    }
+
+    void
+    SysTblMgr_Test::_finalize()
+    {
+        auto xid = _next_xid();
+
+        // finalize
+        _client->finalize(xid.xid);
+    }
+
+    PgMsgTable
+    SysTblMgr_Test::_create_table(uint64_t tid,
+                                  const std::string &name)
+    {
+        auto xid = _next_lsn();
+
+        PgMsgTable create_msg;
+        create_msg.oid = tid;
+        create_msg.schema = "public";
+        create_msg.table = name;
+        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
+        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
+
+        _client->create_table(xid, create_msg);
+
+        return create_msg;
+    }
+
+    void
+    SysTblMgr_Test::_drop_table(uint64_t tid,
+                                const std::string &name)
+    {
+        auto xid = _next_lsn();
+
+        // drop the table
+        PgMsgDropTable drop_msg;
+        drop_msg.oid = tid;
+        drop_msg.schema = "public";
+        drop_msg.table = name;
+
+        _client->drop_table(xid, drop_msg);
+    }
+
+    void
+    SysTblMgr_Test::_alter_table(const PgMsgTable &msg)
+    {
+        auto xid = _next_lsn();
+        _client->alter_table(xid, msg);
+    }
 
     // Tests the schema modification paths
     TEST_F(SysTblMgr_Test, Basic) {
-        auto client = sys_tbl_mgr::Client::get_instance();
-        client->ping();
+        _client->ping();
     }
 
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop) {
-        auto client = sys_tbl_mgr::Client::get_instance();
-        
-        // create the table
         uint64_t tid = 100000;
 
-        PgMsgTable create_msg;
-        create_msg.oid = tid;
-        create_msg.schema = "public";
-        create_msg.table = "x";
-        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
+        // create the table
+        PgMsgTable &&msg = _create_table(tid, "x");
 
-        client->create_table(_xid, create_msg);
-
-        // alter the table's schema
-        ++_xid.lsn;
-
-        PgMsgTable alter_msg;
-        alter_msg.oid = tid;
-        alter_msg.schema = "public";
-        alter_msg.table = "x";
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        alter_msg.columns.push_back({"colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
-
-        client->alter_table(_xid, alter_msg);
+        // rename col2 => colnew
+        msg.columns[1].column_name = "colnew";
+        _alter_table(msg);
 
         // verify system table correctness before finalize
-        auto &&metadata = client->get_roots(tid, 0);
-        assert(metadata.roots.size() == 0);
-        assert(metadata.stats.row_count == 0);
+        auto &&metadata = _client->get_roots(tid, 0);
+        ASSERT_EQ(metadata.roots.size(), 0);
+        ASSERT_EQ(metadata.stats.row_count, 0);
 
-        auto &&schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        auto &&schema_meta = _client->get_schema(tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = client->get_schema(tid, { 1, 0 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 0 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 1, 1 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 1 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 1, 3 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 3 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
         // verify correctness after finalize
-        client->finalize(_xid.xid);
+        _finalize();
 
-        metadata = client->get_roots(tid, 1);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == constant::UNKNOWN_EXTENT);
-        assert(metadata.stats.row_count == 0);
+        metadata = _client->get_roots(tid, 1);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.stats.row_count, 0);
 
-        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = client->get_schema(tid, { 1, 0 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 0 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 1, 1 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 1 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
         // drop the table
-        ++_xid.xid;
-        _xid.lsn = 0;
-
-        PgMsgDropTable drop_msg;
-        drop_msg.oid = tid;
-        drop_msg.schema = "public";
-        drop_msg.table = "x";
-
-        client->drop_table(_xid, drop_msg);
+        _drop_table(tid, "x");
 
         // verify system table correctness before finalize
-        metadata = client->get_roots(tid, 1);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == constant::UNKNOWN_EXTENT);
-        assert(metadata.stats.row_count == 0);
+        metadata = _client->get_roots(tid, 1);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.stats.row_count, 0);
 
-        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = client->get_schema(tid, { 1, 1 });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, 1 });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 2, 0 });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { 2, 0 });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
         // verify correctness after finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 0;
+        _finalize();
 
-        schema_meta = client->get_schema(tid, { 0, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = client->get_schema(tid, { 1, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
+        schema_meta = _client->get_schema(tid, { 1, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = client->get_schema(tid, { 2, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { 2, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        metadata = client->get_roots(tid, 1);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == constant::UNKNOWN_EXTENT);
-        assert(metadata.stats.row_count == 0);
+        metadata = _client->get_roots(tid, 1);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.stats.row_count, 0);
 
-        metadata = client->get_roots(tid, 2);
-        assert(metadata.roots.size() == 0);
-        assert(metadata.stats.row_count == 0);
+        metadata = _client->get_roots(tid, 2);
+        ASSERT_EQ(metadata.roots.size(), 0);
+        ASSERT_EQ(metadata.stats.row_count, 0);
     }
 
     // Tests interleaving of DDL and DML interactions with the system tables
     TEST_F(SysTblMgr_Test, Complex) {
-        auto client = sys_tbl_mgr::Client::get_instance();
-
-        // create table
         uint64_t check_xid = _xid.xid;
         uint64_t tid = 100001;
 
-        PgMsgTable create_msg;
-        create_msg.oid = tid;
-        create_msg.schema = "public";
-        create_msg.table = "x";
-        create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
-
-        client->create_table(_xid, create_msg);
-        ++_xid.lsn;
+        // create table
+        PgMsgTable &&msg = _create_table(tid, "x");
 
         // "add data" to the table
-        client->update_roots(tid, _xid.xid, { 0 }, 15);
-
-        // finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 0;
+        _client->update_roots(tid, _xid.xid, { 0 }, 15);
+        _finalize();
 
         // add more data to the table
-        client->update_roots(tid, _xid.xid, { 100 }, 30);
+        _client->update_roots(tid, _xid.xid, { 100 }, 30);
+        _finalize();
 
-        // finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 0;
+        // rename col2 => coltwo
+        msg.columns[1].column_name = "coltwo";
+        _alter_table(msg);
 
-        // alter the table
-        PgMsgTable alter_msg;
-        alter_msg.oid = tid;
-        alter_msg.schema = "public";
-        alter_msg.table = "x";
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        alter_msg.columns.push_back({"coltwo", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
+        _finalize();
 
-        client->alter_table(_xid, alter_msg);
-        ++_xid.lsn;
+        // add a column col3
+        msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
+        _alter_table(msg);
 
-        // finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 1;
+        // rename the table x => y
+        msg.table = "y";
+        _alter_table(msg);
 
-        // alter the table
-        alter_msg.oid = tid;
-        alter_msg.schema = "public";
-        alter_msg.table = "x";
-        alter_msg.columns.clear();
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        alter_msg.columns.push_back({"coltwo", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
-        alter_msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
-
-        client->alter_table(_xid, alter_msg);
-        ++_xid.lsn;
-
-        // alter the table
-        alter_msg.oid = tid;
-        alter_msg.schema = "public";
-        alter_msg.table = "y";
-        alter_msg.columns.clear();
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        alter_msg.columns.push_back({"coltwo", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
-        alter_msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
-
-        client->alter_table(_xid, alter_msg);
-        ++_xid.lsn;
-
-        // alter the table
-        alter_msg.oid = tid;
-        alter_msg.schema = "public";
-        alter_msg.table = "y";
-        alter_msg.columns.clear();
-        alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
-        alter_msg.columns.push_back({"coltwo", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, false, false});
-        alter_msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, "0", 3, 0, true, false});
-
-        client->alter_table(_xid, alter_msg);
-        ++_xid.lsn;
+        // set default value for col3
+        msg.columns[2].default_value = "0";
+        msg.columns[2].is_nullable = false;
+        _alter_table(msg);
 
         // verify the virtual schema creation from the cache prior to finalize
-        auto &&schema_check = client->get_target_schema(tid, { _xid.xid - 1, constant::MAX_LSN }, _xid);
-        assert(schema_check.history.size() == 2);
-        assert(schema_check.history[0].update_type == SchemaUpdateType::NULLABLE_CHANGE);
-        assert(schema_check.history[1].update_type == SchemaUpdateType::NEW_COLUMN);
+        auto &&schema_check = _client->get_target_schema(tid, { _xid.xid - 1, constant::MAX_LSN }, _xid);
+        ASSERT_EQ(schema_check.history.size(), 2);
+        ASSERT_EQ(schema_check.history[0].update_type, SchemaUpdateType::NEW_COLUMN);
+        ASSERT_EQ(schema_check.history[1].update_type, SchemaUpdateType::NULLABLE_CHANGE);
 
-        // finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 0;
+        _finalize();
 
         // drop the table
-        PgMsgDropTable drop_msg;
-        drop_msg.oid = tid;
-        drop_msg.schema = "public";
-        drop_msg.table = "y";
-
-        client->drop_table(_xid, drop_msg);
-
-        // finalize
-        client->finalize(_xid.xid);
-        ++_xid.xid;
-        _xid.lsn = 0;
+        _drop_table(tid, "y");
+        _finalize();
 
         // verify the data at each step
 
         // XID 0
-        auto &&schema_meta = client->get_schema(tid, { check_xid - 1,
-                                                            constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        auto &&schema_meta = _client->get_schema(tid, { check_xid - 1, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
         // XID 1
-        auto &&metadata = client->get_roots(tid, check_xid);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == 0);
-        assert(metadata.stats.row_count == 15);
+        auto &&metadata = _client->get_roots(tid, check_xid);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], 0);
+        ASSERT_EQ(metadata.stats.row_count, 15);
 
-        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
-        assert(schema_meta.columns[0].name == "col1");
-        assert(schema_meta.columns[1].name == "col2");
+        schema_meta = _client->get_schema(tid, { check_xid, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
+        ASSERT_EQ(schema_meta.columns[0].name, "col1");
+        ASSERT_EQ(schema_meta.columns[1].name, "col2");
 
         // XID 2
         ++check_xid;
 
-        metadata = client->get_roots(tid, check_xid);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == 100);
-        assert(metadata.stats.row_count == 30);
+        metadata = _client->get_roots(tid, check_xid);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.stats.row_count, 30);
 
-        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
-        assert(schema_meta.columns[0].name == "col1");
-        assert(schema_meta.columns[1].name == "col2");
+        schema_meta = _client->get_schema(tid, { check_xid, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
+        ASSERT_EQ(schema_meta.columns[0].name, "col1");
+        ASSERT_EQ(schema_meta.columns[1].name, "col2");
 
         // XID 3
         ++check_xid;
 
-        metadata = client->get_roots(tid, check_xid);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == 100);
-        assert(metadata.stats.row_count == 30);
+        metadata = _client->get_roots(tid, check_xid);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.stats.row_count, 30);
 
-        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 2);
-        assert(schema_meta.columns[0].name == "col1");
-        assert(schema_meta.columns[1].name == "coltwo");
+        schema_meta = _client->get_schema(tid, { check_xid, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 2);
+        ASSERT_EQ(schema_meta.columns[0].name, "col1");
+        ASSERT_EQ(schema_meta.columns[1].name, "coltwo");
 
         // XID 4
         ++check_xid;
 
-        metadata = client->get_roots(tid, check_xid);
-        assert(metadata.roots.size() == 1);
-        assert(metadata.roots[0] == 100);
-        assert(metadata.stats.row_count == 30);
+        metadata = _client->get_roots(tid, check_xid);
+        ASSERT_EQ(metadata.roots.size(), 1);
+        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.stats.row_count, 30);
 
-        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 3);
-        assert(schema_meta.columns[0].name == "col1");
-        assert(schema_meta.columns[1].name == "coltwo");
-        assert(schema_meta.columns[2].name == "col3");
+        schema_meta = _client->get_schema(tid, { check_xid, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 3);
+        ASSERT_EQ(schema_meta.columns[0].name, "col1");
+        ASSERT_EQ(schema_meta.columns[1].name, "coltwo");
+        ASSERT_EQ(schema_meta.columns[2].name, "col3");
 
         // XID 5
         ++check_xid;
 
-        metadata = client->get_roots(tid, check_xid);
-        assert(metadata.roots.size() == 0);
-        assert(metadata.stats.row_count == 0);
+        metadata = _client->get_roots(tid, check_xid);
+        ASSERT_EQ(metadata.roots.size(), 0);
+        ASSERT_EQ(metadata.stats.row_count, 0);
 
-        schema_meta = client->get_schema(tid, { check_xid, constant::MAX_LSN });
-        assert(schema_meta.columns.size() == 0);
+        schema_meta = _client->get_schema(tid, { check_xid, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.columns.size(), 0);
 
         // verify the virtual schema creation at various combinations of access and target XID
         XidLsn access_xid(check_xid - 4);
         XidLsn target_xid(check_xid);
-        schema_meta = client->get_target_schema(tid, access_xid, target_xid);
+        schema_meta = _client->get_target_schema(tid, access_xid, target_xid);
 
-        assert(schema_meta.columns.size() == 2);
-        assert(schema_meta.columns[0].name == "col1");
-        assert(schema_meta.columns[1].name == "col2");
+        ASSERT_EQ(schema_meta.columns.size(), 2);
+        ASSERT_EQ(schema_meta.columns[0].name, "col1");
+        ASSERT_EQ(schema_meta.columns[1].name, "col2");
 
-        assert(schema_meta.history.size() == 6);
+        ASSERT_EQ(schema_meta.history.size(), 6);
 
-        assert(schema_meta.history[0].update_type == SchemaUpdateType::REMOVE_COLUMN);
-        assert(schema_meta.history[0].name == "col1");
-        assert(schema_meta.history[0].xid == check_xid);
+        ASSERT_EQ(schema_meta.history[0].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta.history[0].name, "col1");
+        ASSERT_EQ(schema_meta.history[0].xid, check_xid);
 
-        assert(schema_meta.history[1].update_type == SchemaUpdateType::NAME_CHANGE);
-        assert(schema_meta.history[1].name == "coltwo");
-        assert(schema_meta.history[1].xid == check_xid - 2);
+        ASSERT_EQ(schema_meta.history[1].update_type, SchemaUpdateType::NAME_CHANGE);
+        ASSERT_EQ(schema_meta.history[1].name, "coltwo");
+        ASSERT_EQ(schema_meta.history[1].xid, check_xid - 2);
 
-        assert(schema_meta.history[2].update_type == SchemaUpdateType::NULLABLE_CHANGE);
-        assert(schema_meta.history[2].name == "coltwo");
-        assert(schema_meta.history[2].xid == check_xid - 1);
-        assert(schema_meta.history[2].lsn == 3);
+        ASSERT_EQ(schema_meta.history[2].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta.history[2].name, "coltwo");
+        ASSERT_EQ(schema_meta.history[2].xid, check_xid);
 
-        assert(schema_meta.history[3].update_type == SchemaUpdateType::REMOVE_COLUMN);
-        assert(schema_meta.history[3].name == "coltwo");
-        assert(schema_meta.history[3].xid == check_xid);
+        ASSERT_EQ(schema_meta.history[3].update_type, SchemaUpdateType::NEW_COLUMN);
+        ASSERT_EQ(schema_meta.history[3].name, "col3");
+        ASSERT_EQ(schema_meta.history[3].xid, check_xid - 1);
+        ASSERT_EQ(schema_meta.history[3].lsn, 0);
 
-        assert(schema_meta.history[4].update_type == SchemaUpdateType::NEW_COLUMN);
-        assert(schema_meta.history[4].name == "col3");
-        assert(schema_meta.history[4].xid == check_xid - 1);
-        assert(schema_meta.history[4].lsn == 1);
+        ASSERT_EQ(schema_meta.history[4].update_type, SchemaUpdateType::NULLABLE_CHANGE);
+        ASSERT_EQ(schema_meta.history[4].name, "col3");
+        ASSERT_EQ(schema_meta.history[4].xid, check_xid - 1);
+        ASSERT_EQ(schema_meta.history[4].lsn, 2);
 
-        assert(schema_meta.history[5].update_type == SchemaUpdateType::REMOVE_COLUMN);
-        assert(schema_meta.history[5].name == "col3");
-        assert(schema_meta.history[5].xid == check_xid);
+        ASSERT_EQ(schema_meta.history[5].update_type, SchemaUpdateType::REMOVE_COLUMN);
+        ASSERT_EQ(schema_meta.history[5].name, "col3");
+        ASSERT_EQ(schema_meta.history[5].xid, check_xid);
     }
+
+#if 0
+    // Threaded test with interleaving of DDL and DML interactions with the system tables along with
+    // metadata retrievals
+    TEST_F(SysTblMgr_Test, Threaded) {
+        // initialize some schema history for two tables
+        uint64_t tid1 = 100000, tid2 = 200000;
+
+        auto t1msg = _create_table(tid1, "x");
+        auto t2msg = _create_table(tid2, "y");
+
+        _finalize();
+
+        // save the starting XID
+        uint64_t check_xid = _xid.xid;
+
+        auto mutate = [this](uint64_t alter_tid, uint64_t create_tid, PgMsgTable &msg) {
+            _create_table(create_tid);
+
+            _drop_table(create_tid);
+        };
+
+        // construct four threads -- two for updating tables and two for reading tables
+    }
+#endif
 }

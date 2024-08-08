@@ -297,6 +297,7 @@ namespace springtail::sys_tbl_mgr {
                                             const XidLsn &xid)
     {
         // check the cache
+        boost::shared_lock lock(_mutex);
         auto table_i = _table_cache.find(table_id);
         if (table_i != _table_cache.end()) {
             // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
@@ -305,6 +306,7 @@ namespace springtail::sys_tbl_mgr {
                 return info_i->second;
             }
         }
+        lock.unlock();
 
         // not present, read from disk
         auto table_names_t = _get_system_table(sys_tbl::TableNames::ID);
@@ -349,7 +351,9 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(table_info->xid, table_info->lsn);
 
         // update the cache
+        boost::unique_lock lock(_mutex);
         _table_cache[table_info->id][xid] = table_info;
+        lock.unlock();
 
         // record the change to the system table
         auto table_names_t = _get_mutable_system_table(sys_tbl::TableNames::ID);
@@ -366,6 +370,7 @@ namespace springtail::sys_tbl_mgr {
     Service::_clear_table_info()
     {
         // clear the table cache since it only contains un-finalized entries
+        boost::unique_lock lock(_mutex);
         _table_cache.clear();
     }
 
@@ -374,6 +379,7 @@ namespace springtail::sys_tbl_mgr {
                                             const XidLsn &xid)
     {
         // first check the cache
+        boost::shared_lock lock(_mutex);
         auto roots_i = _roots_cache.find(table_id);
         if (roots_i != _roots_cache.end()) {
             auto info_i = roots_i->second.lower_bound(xid);
@@ -381,6 +387,7 @@ namespace springtail::sys_tbl_mgr {
                 return info_i->second;
             }
         }
+        lock.unlock();
 
         auto roots_info = std::make_shared<GetRootsResponse>();
 
@@ -441,7 +448,9 @@ namespace springtail::sys_tbl_mgr {
                                             RootsInfoPtr roots_info)
     {
         // cache the roots info
+        boost::unique_lock lock(_mutex);
         _roots_cache[table_id][xid] = roots_info;
+        lock.unlock();
 
         // update the table_roots
         auto table_roots_t = _get_mutable_system_table(sys_tbl::TableRoots::ID);
@@ -467,6 +476,7 @@ namespace springtail::sys_tbl_mgr {
     Service::_clear_roots_info()
     {
         // note: we clear everything because the cache only contains un-finalized data
+        boost::unique_lock lock(_mutex);
         _roots_cache.clear();
     }
 
@@ -630,6 +640,8 @@ namespace springtail::sys_tbl_mgr {
                                          const XidLsn &xid,
                                          std::map<uint32_t, TableColumn> &columns)
     {
+        boost::shared_lock lock(_mutex);
+
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache.find(table_id);
         if (schema_i == _schema_cache.end()) {
@@ -726,6 +738,7 @@ namespace springtail::sys_tbl_mgr {
 
     {
         std::vector<ColumnHistory> history;
+        boost::shared_lock lock(_mutex);
 
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache.find(table_id);
@@ -763,7 +776,9 @@ namespace springtail::sys_tbl_mgr {
         // add the column change history to the cache
         for (auto &history : columns) {
             // XXX do we need to enforce XID ordering somehow here?  are we guaranteed to apply these in xid order?
+            boost::unique_lock lock(_mutex);
             _schema_cache[table_id][history.column.position].push_back(history);
+            lock.unlock();
 
             // write the column data to the schemas table
             std::optional<std::string> value;
@@ -789,6 +804,7 @@ namespace springtail::sys_tbl_mgr {
     void
     Service::_clear_schema_info()
     {
+        boost::unique_lock lock(_mutex);
         _schema_cache.clear();
     }
 
@@ -814,6 +830,8 @@ namespace springtail::sys_tbl_mgr {
     MutableTablePtr
     Service::_get_mutable_system_table(uint64_t table_id)
     {
+        boost::unique_lock lock(_mutex);
+
         // check if we already have the table open
         auto table_i = _write.find(table_id);
         if (table_i != _write.end()) {
