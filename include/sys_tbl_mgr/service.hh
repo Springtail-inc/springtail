@@ -10,9 +10,14 @@
 namespace springtail::sys_tbl_mgr {
 
     /**
-     * @brief This is the implementation of the ThriftSysTblMgrIf that is generated
-     *        from the .thrift file.  It contains the service (handler) for actually
-     *        implementing the remote procedure calls.
+     * This is the implementation of the ThriftSysTblMgrIf that is generated from the .thrift file.
+     * It contains the service (handler) for actually implementing the remote procedure calls.
+     *
+     * The Service object maintains specialized caches of system metadata for uncommitted changes to
+     * the system tables that are used to retrieve uncommitted metadata changes needed by in-flight
+     * data mutations since there is currently no way to query a MutableTable.  We currently don't
+     * cache any metadata once it's written to disk, instead relying on the StorageCache to keep
+     * table extents in-memory for fast retrieval.
      */
     class Service : public ServiceIf
     {
@@ -31,63 +36,196 @@ namespace springtail::sys_tbl_mgr {
     public:
         Service();
 
+        /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
 
+        /** Creates a table within the system tables. */
         void create_table(Status& _return, const TableRequest &request) override;
 
+        /** Alters a table within the system tables. */
         void alter_table(Status& _return, const TableRequest &request) override;
 
+        /** Drops a table within the system tables.  Note that this will not update the roots of the
+            table, just the metadata to indicate that a drop occurred at the given XID/LSN. */
         void drop_table(Status& _return, const DropTableRequest &request) override;
 
+        /** Updates the roots extents of the indexes of the table as well as the table stats. */
         void update_roots(Status& _return, const UpdateRootsRequest &request) override;
 
+        /** Finalizes the metadata to disk up to at least the provided XID.  Note: may contain
+            changes from later XIDs as well, which is fine given we always query the metadata at a
+            specific point in the XID/LSN stream. */
         void finalize(Status& _return, const FinalizeRequest &request) override;
 
+        /** Retrieve the root extents and stats for a given table. */
         void get_roots(GetRootsResponse& _return, const GetRootsRequest &request) override;
 
+        /** Retrieve the schema information for a given table at a given XID/LSN. */
         void get_schema(GetSchemaResponse& _return, const GetSchemaRequest &request) override;
 
+        /** Retrieve the schema information for a given table at a given XID/LSN along with the
+            history of any changes to bring it to a target XID/LSN. */
         void get_target_schema(GetSchemaResponse& _return, const GetTargetSchemaRequest &request) override;
 
     private:
+        // CACHE FOR NAMES
+
+        /**
+         * An in-memory representation of the table_names system table used for caching.
+         */
         struct TableInfo {
-            uint64_t id;
-            uint64_t xid;
-            uint64_t lsn;
-            std::string schema;
-            std::string name;
-            bool exists;
+            uint64_t id; ///< The table ID.
+            uint64_t xid; ///< The XID at which this entry becomes valid.
+            uint64_t lsn; ///< The LSN at which this entry becomes valid.
+            std::string schema; ///< The schema/namespace of the table.
+            std::string name; ///< The name of the table.
+            bool exists; ///< A flag indicating if the table exists at this point.
         };
         using TableInfoPtr = std::shared_ptr<TableInfo>;
 
-        using RootsInfoPtr = std::shared_ptr<GetRootsResponse>;
-        using SchemaInfoPtr = std::shared_ptr<GetSchemaResponse>;
-
-    private:
+        /**
+         * Retrieve the TableInfo either from the cache or from the system tables if not available.
+         * @param table_id The ID of the table.
+         * @param xid The XID/LSN at which we are querying.
+         */
         TableInfoPtr _get_table_info(uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Stores the TableInfo, performing a write-through in the cache and the system tables.  We
+         * don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
+         * from the cache is not evicted until _clear_table_info() is called.
+         * @param table_info The metadata to update.
+         */
         void _set_table_info(TableInfoPtr table_info);
+
+        /**
+         * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
+         * all committed to disk.
+         */
         void _clear_table_info();
 
+
+        // CACHE FOR ROOTS / STATS
+
+        /** We use the thrift object response as the cache data for the roots/stats. */
+        using RootsInfoPtr = std::shared_ptr<GetRootsResponse>;
+
+        /**
+         * Retrieve the RootsInfo either from the cache or from the system tables if not available.
+         * @param table_id The ID of the table.
+         * @param xid The XID/LSN at which we are querying.
+         */
         RootsInfoPtr _get_roots_info(uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Stores the RootsInfo, performing a write-through in the cache and the system tables.  We
+         * don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
+         * from the cache is not evicted until _clear_roots_info() is called.
+         * @param table_info The metadata to update.
+         */
         void _set_roots_info(uint64_t table_id, const XidLsn &xid, RootsInfoPtr roots_info);
+
+        /**
+         * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
+         * all committed to disk.
+         */
         void _clear_roots_info();
 
+
+        // CACHE FOR SCHEMA
+
+        /** We use the thrift object response as the cache data for the Schema information. */
+        using SchemaInfoPtr = std::shared_ptr<GetSchemaResponse>;
+
+        /**
+         * Retrieve the SchemaInfo either from the cache or from the system tables if not available.
+         * @param table_id The ID of the table.
+         * @param access_xid The XID/LSN at which we are querying.
+         * @param target_xid The XID/LSN up to which we should return a history of changes from the access_xid.
+         */
         SchemaInfoPtr _get_schema_info(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
-        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t table_id, const XidLsn &access_xid);
-        void _apply_schema_cache_history(uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
-        std::vector<ColumnHistory> _read_schema_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
-        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+
+        /**
+         * Records the provided column data, performing a write-through in the cache and the system
+         * tables.  We don't finalize the system tables so they may remain dirty in the
+         * StorageCache.  Nothing from the cache is not evicted until _clear_schema_info() is
+         * called.
+         * @param table_id The table that the schema is for.
+         * @param columns The set of column data to record.
+         */
         void _set_schema_info(uint64_t table_id, const std::vector<ColumnHistory> &columns);
+
+        /**
+         * Clears the cache of schema data.  Called by finalize() once the system tables are
+         * all committed to disk.
+         */
         void _clear_schema_info();
+
+        /**
+         * Helper function to read the full set of columns for a table from the on-disk system tables.
+         * @param table_id The table for which we are constructing a schema.
+         * @param access_xid The XID/LSN at which we are querying the schema.
+         */
+        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t table_id, const XidLsn &access_xid);
+
+        /**
+         * Helper function to apply any in-memory changes to the schema columns that might be
+         * required to bring them up-to-date to the provided XID/LSN.
+         * @param table_id The table for which we are constructing a schema.
+         * @param xid The XID/LSN at which we are querying the schema.
+         * @param columns A set of columns already constructed by calling _read_schema_columns()
+         *                that will be updated by this function.
+         */
+        void _apply_schema_cache_history(uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
+
+        /**
+         * Helper function to read any schema changes recorded between the provided access_xid and
+         * target_xid from the on-disk system tables.
+         * @param table_id The table for which we are constructing a schema.
+         * @param access_xid The XID/LSN at which we are constructing a schema.
+         * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
+         */
+        std::vector<ColumnHistory> _read_schema_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+
+        /**
+         * Helper function to read any schema changes recorded between the provided access_xid and
+         * target_xid from the in-memory cache.  Note: this should never overlap with the on-disk
+         * structures since we drop the cache once the system tables are finalized.
+         * @param table_id The table for which we are constructing a schema.
+         * @param access_xid The XID/LSN at which we are constructing a schema.
+         * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
+         */
+        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+
+        /**
+         * Helper function to extract a change entry for a schema by comparing the old and new
+         * schemas from before and after the ALTER TABLE statement.
+         * @param old_schema The schema before the alteration.
+         * @param new_schema The schema after the alteration.
+         * @param xid The XID/LSN at which the alteration occurred.
+         */
         ColumnHistory _generate_update(const std::vector<TableColumn> &old_schema,
                                        const std::vector<TableColumn> &new_schema,
                                        const XidLsn &xid);
 
 
+        // HELPER FUNCTIONS
+
+        /**
+         * Retrieves a read-only Table interface for a given system table.
+         * @param table_id The ID of the system table.
+         */
         TablePtr _get_system_table(uint64_t table_id);
+
+        /**
+         * Retrieves a write-only MutableTable interface for a given system table.
+         * @param table_id The ID of the system table.
+         */
         MutableTablePtr _get_mutable_system_table(uint64_t table_id);
 
-    private:
+
+        // VARIABLES
+
         static Service *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
