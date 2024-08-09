@@ -265,6 +265,11 @@ namespace springtail::gc {
             bool _process_mutation(uint64_t pg_xid, uint64_t xid, uint64_t rel_id, PgMsgPtr msg,
                                    const std::filesystem::path &file, uint64_t offset);
 
+            /**
+             * Records the DDL record into Redis to eventually pass to the FDW.
+             */
+            void _record_ddl(const XidLsn &xid, const std::string &ddl);
+
         private:
             /** The filter to use at the start of processing. */
             static const std::vector<char> START_FILTER;

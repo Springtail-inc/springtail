@@ -16,18 +16,20 @@ namespace springtail {
     }
 
     void
-    ThriftXidMgrService::commit_xid(thrift::xid_mgr::Status& _return, const thrift::xid_mgr::xid_t request)
+    ThriftXidMgrService::commit_xid(thrift::xid_mgr::Status& _return,
+                                    const thrift::xid_mgr::xid_t xid,
+                                    bool has_schema_changes)
     {
         XidMgrServer *server = XidMgrServer::get_instance();
-        server->commit_xid(request);
+        server->commit_xid(xid, has_schema_changes);
         _return.__set_status(thrift::xid_mgr::StatusCode::SUCCESS);
     }
 
     thrift::xid_mgr::xid_t
-    ThriftXidMgrService::get_committed_xid()
+    ThriftXidMgrService::get_committed_xid(const thrift::xid_mgr::xid_t schema_xid)
     {
         XidMgrServer *server = XidMgrServer::get_instance();
-        uint64_t xid = server->get_committed_xid();
+        uint64_t xid = server->get_committed_xid(schema_xid);
         return xid;
     }
 }

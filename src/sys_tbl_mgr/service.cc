@@ -40,7 +40,7 @@ namespace springtail::sys_tbl_mgr {
     {
         // call into the XID Mgr to get the latest committed XID
         auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid();
+        auto xid = xid_mgr->get_committed_xid(0);
 
         _access_xid = XidLsn(xid);
         _target_xid = xid + 1;
@@ -54,9 +54,15 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Service::create_table(Status& _return,
+    Service::create_table(DDLStatement& _return,
                           const TableRequest &request)
     {
+        nlohmann::json ddl;
+        ddl["action"] = "create";
+        ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
+        ddl["tid"] = request.table.id;
+        ddl["columns"] = nlohmann::json::array();
+
         // 1. acquire a shared lock to ensure no one is doing a finalize?
         boost::shared_lock lock(_write_mutex);
         XidLsn xid(request.xid, request.lsn);
@@ -90,6 +96,17 @@ namespace springtail::sys_tbl_mgr {
             if (column.__isset.pk_position) {
                 primary_keys[column.pk_position] = column.position;
             }
+
+            // store the column data into the json
+            nlohmann::json column_json;
+            column_json["name"] = column.name;
+            column_json["type"] = column.pg_type;
+            column_json["nullable"] = column.is_nullable;
+            if (column.__isset.default_value) {
+                column_json["default"] = column.default_value;
+            }
+
+            ddl["columns"].push_back(column_json);
         }
 
         _set_schema_info(request.table.id, columns);
@@ -115,13 +132,17 @@ namespace springtail::sys_tbl_mgr {
 
         //    f. XXX anything to do for secondary indexes?
 
-        _return.__set_status(StatusCode::SUCCESS);
+        _return.__set_statement(nlohmann::to_string(ddl));
     }
 
     void
-    Service::alter_table(Status& _return,
+    Service::alter_table(DDLStatement& _return,
                          const TableRequest &request)
     {
+        nlohmann::json ddl;
+        ddl["tid"] = request.table.id;
+        ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
+
         boost::shared_lock lock(_write_mutex);
 
         // retrieve the name of the table at the point of alteration
@@ -142,6 +163,10 @@ namespace springtail::sys_tbl_mgr {
                                                         true);
             _set_table_info(new_info);
 
+            // set the DDL statement
+            ddl["action"] = "rename";
+            ddl["old_table"] = fmt::format("{}.{}", table_info->schema, table_info->name);
+
         } else {
             XidLsn xid(request.xid, request.lsn);
 
@@ -149,19 +174,25 @@ namespace springtail::sys_tbl_mgr {
             auto info = _get_schema_info(request.table.id, xid, xid);
 
             // generate a tuple for the change
-            auto history = _generate_update(info->columns, request.table.columns, xid);
+            // note: _generate_update() sets the necessary elements of the ddl
+            auto history = _generate_update(info->columns, request.table.columns, xid, ddl);
 
             // write the column change to the schemas table and update the cache
             _set_schema_info(request.table.id, { history });
         }
 
-        _return.__set_status(StatusCode::SUCCESS);
+        _return.__set_statement(nlohmann::to_string(ddl));
     }
 
     void
-    Service::drop_table(Status& _return,
+    Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
+        nlohmann::json ddl;
+        ddl["action"] = "drop";
+        ddl["tid"] = request.table_id;
+        ddl["table"] = fmt::format("{}.{}", request.schema, request.name);
+
         boost::shared_lock lock(_write_mutex);
 
         // mark the table as dropped in the table_names
@@ -191,7 +222,7 @@ namespace springtail::sys_tbl_mgr {
         }
         _set_schema_info(request.table_id, changes);
 
-        _return.__set_status(StatusCode::SUCCESS);
+        _return.__set_statement(nlohmann::to_string(ddl));
     }
 
     void
@@ -849,7 +880,8 @@ namespace springtail::sys_tbl_mgr {
     ColumnHistory
     Service::_generate_update(const std::vector<TableColumn> &old_schema,
                               const std::vector<TableColumn> &new_schema,
-                              const XidLsn &xid)
+                              const XidLsn &xid,
+                              nlohmann::json &ddl)
     {
         ColumnHistory update;
         update.xid = xid.xid;
@@ -872,6 +904,10 @@ namespace springtail::sys_tbl_mgr {
                     // mark as a REMOVE_COLUMN update
                     update.update_type = static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN);
                     update.exists = false;
+
+                    // set the DDL statement
+                    ddl["action"] = "col_drop";
+                    ddl["column"] = update.column.name;
 
                     return update;
                 }
@@ -897,6 +933,15 @@ namespace springtail::sys_tbl_mgr {
                     // generate an ADD_COLUMN update
                     update.update_type = static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN);
                     update.exists = true;
+
+                    // set the DDL statement
+                    ddl["action"] = "col_add";
+                    ddl["column"]["name"] = update.column.name;
+                    ddl["column"]["type"] = update.column.pg_type;
+                    ddl["column"]["nullable"] = update.column.is_nullable;
+                    if (update.column.__isset.default_value) {
+                        ddl["column"]["default"] = update.column.default_value;
+                    }
 
                     return update;
                 }
@@ -929,6 +974,11 @@ namespace springtail::sys_tbl_mgr {
                 update.update_type = static_cast<int8_t>(SchemaUpdateType::NAME_CHANGE);
                 update.exists = true;
 
+                // set the DDL statement
+                ddl["action"] = "col_rename";
+                ddl["old_name"] = entry.name;
+                ddl["new_name"] = update.column.name;
+
                 return update;
             }
 
@@ -940,6 +990,11 @@ namespace springtail::sys_tbl_mgr {
                 update.update_type = static_cast<int8_t>(SchemaUpdateType::NULLABLE_CHANGE);
                 update.exists = true;
 
+                // set the DDL statement
+                ddl["action"] = "col_nullable";
+                ddl["column"]["name"] = update.column.name;
+                ddl["column"]["nullable"] = update.column.is_nullable;
+
                 return update;
             }
 
@@ -950,6 +1005,11 @@ namespace springtail::sys_tbl_mgr {
                 // mark them as a TYPE_CHANGE update
                 update.update_type = static_cast<int8_t>(SchemaUpdateType::TYPE_CHANGE);
                 update.exists = true;
+
+                // set the DDL statement
+                ddl["action"] = "col_type";
+                ddl["column"]["name"] = update.column.name;
+                ddl["column"]["type"] = update.column.type;
 
                 return update;
             }

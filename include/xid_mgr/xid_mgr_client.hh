@@ -36,13 +36,13 @@ namespace springtail {
          * @brief Commit xid, mark it as latest
          * @param xid xid to commit
          */
-        void commit_xid(uint64_t xid);
+        void commit_xid(uint64_t xid, bool has_schema_change);
 
         /**
          * @brief Get the latest committed xid
          * @return uint64_t latest committed xid
          */
-        uint64_t get_committed_xid();
+        uint64_t get_committed_xid(uint64_t schema_xid);
 
     private:
         XidMgrClient();

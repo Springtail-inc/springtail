@@ -90,6 +90,9 @@ namespace springtail {
             threadManager
         );
 
+        // read the current XID from disk before we start serving
+        _read_committed_xid();
+
         _server->serve();
     }
 
@@ -104,7 +107,6 @@ namespace springtail {
     void
     XidMgrServer::_write_committed_xid(uint64_t xid)
     {
-        std::unique_lock<std::shared_mutex> lock(_mutex);
         if (xid <= _committed_xid) {
             return;
         }
@@ -130,23 +132,43 @@ namespace springtail {
     }
 
     void
-    XidMgrServer::commit_xid(uint64_t xid)
+    XidMgrServer::commit_xid(uint64_t xid, bool has_schema_changes)
     {
+        std::unique_lock lock(_mutex);
+
+        // write the XID to disk
         _write_committed_xid(xid);
-        return;
+
+        // if the XID contains schema changes, add it to the history
+        if (has_schema_changes) {
+            _history.push_back(xid);
+        }
+
+        // XXX check if we can clean up history?  or do we need a background thread for that?
     }
 
     uint64_t
-    XidMgrServer::get_committed_xid()
+    XidMgrServer::get_committed_xid(uint64_t schema_xid)
     {
-        std::shared_lock<std::shared_mutex> lock(_mutex);
-        if (_committed_xid == -1) {
-            lock.unlock();
-            return _read_committed_xid();
+        std::shared_lock lock(_mutex);
+
+        // if schema XID is zero then we always return the most recent committed XID
+        if (schema_xid == 0) {
+            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: get committed xid: {}", _committed_xid);
+            return _committed_xid;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: get committed xid: {}", _committed_xid);
-        return _committed_xid;
+        // check the schema change history
+        auto pos_i = std::ranges::upper_bound(_history, schema_xid);
+        if (pos_i == _history.end()) {
+            // if the schema XID is ahead of the history, return the most recent commited XID
+            SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: get committed xid: {}", _committed_xid);
+            return _committed_xid;
+        }
+
+        // if we found an entry in the history, return the XID directly before that
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: xid limited by schema_xid: {}", (*pos_i) - 1);
+        return (*pos_i) - 1;
     }
 
 }

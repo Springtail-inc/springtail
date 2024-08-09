@@ -60,13 +60,13 @@ namespace springtail {
          * @brief commit up to and including given xid
          * @param xid
          */
-        void commit_xid(uint64_t xid);
+        void commit_xid(uint64_t xid, bool has_schema_changes);
 
         /**
          * @brief Get the latest committed xid object
          * @return uint64_t
          */
-        uint64_t get_committed_xid();
+        uint64_t get_committed_xid(uint64_t schema_xid);
 
     private:
         /**
@@ -102,6 +102,9 @@ namespace springtail {
 
         /** last committed xid */
         uint64_t _committed_xid = 0;
+
+        /** history of schema xids */
+        std::vector<uint64_t> _history;
 
         /** base path */
         std::filesystem::path _base_path;

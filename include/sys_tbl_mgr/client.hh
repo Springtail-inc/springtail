@@ -38,17 +38,17 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call create_table() on the SysTblMgr.
          */
-        void create_table(const XidLsn &xid, const PgMsgTable &msg);
+        std::string create_table(const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Call alter_table() on the SysTblMgr.
          */
-        void alter_table(const XidLsn &xid, const PgMsgTable &msg);
+        std::string alter_table(const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Call drop_table() on the SysTblMgr.
          */
-        void drop_table(const XidLsn &xid, const PgMsgDropTable &msg);
+        std::string drop_table(const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
          * Call update_roots() on the SysTblMgr.

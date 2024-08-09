@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     boost::program_options::notify(vm);
 
     if (vm.count("xid")) {
-        XidMgrServer::get_instance()->commit_xid(starting_xid);
+        XidMgrServer::get_instance()->commit_xid(starting_xid, false);
     }
 
     // daemonize the process

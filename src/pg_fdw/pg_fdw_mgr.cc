@@ -45,12 +45,13 @@ namespace pg_fdw {
     PgFdwMgr::fdw_create_state(uint64_t tid, uint64_t pg_xid)
     {
         uint64_t xid; // springtail xid
+        uint64_t schema_xid = 0; // XXX need to replace this with the schema XID from the server options
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
         auto it = _xid_map.find(pg_xid);
         if (it == _xid_map.end()) {
-            xid = XidMgrClient::get_instance()->get_committed_xid();
+            xid = XidMgrClient::get_instance()->get_committed_xid(schema_xid);
             _xid_map[pg_xid] = xid;
         } else {
             xid = it->second;

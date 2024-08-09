@@ -12,6 +12,10 @@ enum StatusCode {
     ERROR=1
 }
 
+struct DDLStatement {
+    1: string statement
+}
+
 struct TableColumn {
     1: string name,
     2: i8 type,
@@ -101,13 +105,13 @@ service Service {
     Status ping(),
 
     // creates a new data table at the given xid/lsn
-    Status create_table(1: TableRequest request),
+    DDLStatement create_table(1: TableRequest request),
 
     // alters the metadata of an existing data table at the given xid/lsn
-    Status alter_table(1: TableRequest request),
+    DDLStatement alter_table(1: TableRequest request),
 
     // drops an existing data table at the given xid/lsn
-    Status drop_table(1: DropTableRequest request),
+    DDLStatement drop_table(1: DropTableRequest request),
 
     // update the index root pointers and stats for a given table at a given xid
     Status update_roots(1: UpdateRootsRequest request),

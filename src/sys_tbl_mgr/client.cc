@@ -131,42 +131,46 @@ namespace springtail::sys_tbl_mgr {
         return request;
     }
 
-    void
+    std::string
     Client::create_table(const XidLsn &xid,
                          const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
-        Status result;
+        DDLStatement result;
 
         auto &&request = _gen_table_request(xid, msg);
         c.client->create_table(result, request);
 
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
         }
+
+        return result.statement;
     }
 
-    void
+    std::string
     Client::alter_table(const XidLsn &xid,
                         const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
-        Status result;
+        DDLStatement result;
 
         auto &&request = _gen_table_request(xid, msg);
         c.client->alter_table(result, request);
 
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
         }
+
+        return result.statement;
     }
 
-    void
+    std::string
     Client::drop_table(const XidLsn &xid,
                        const PgMsgDropTable &msg)
     {
         ThriftClient c = _get_client();
-        Status result;
+        DDLStatement result;
 
         DropTableRequest request;
         request.xid = xid.xid;
@@ -177,9 +181,11 @@ namespace springtail::sys_tbl_mgr {
 
         c.client->drop_table(result, request);
 
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
         }
+
+        return result.statement;
     }
 
     void

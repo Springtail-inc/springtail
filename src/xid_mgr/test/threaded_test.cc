@@ -45,8 +45,8 @@ namespace {
             SPDLOG_INFO("Thread: {}, running {} iterations", thread_id, iterations);
             for (int i = 0; i < iterations; i++) {
                 XidMgrClient *client = XidMgrClient::get_instance();
-                uint64_t xid = client->get_committed_xid();
-                client->commit_xid(xid + 1);
+                uint64_t xid = client->get_committed_xid(0);
+                client->commit_xid(xid + 1, false);
             }
             SPDLOG_INFO("Thread: {}, finished", thread_id);
         }

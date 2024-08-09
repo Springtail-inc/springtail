@@ -7,6 +7,8 @@
 #include <storage/constants.hh>
 #include <storage/table_mgr.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
 namespace springtail::gc {
 
     bool
@@ -145,6 +147,13 @@ namespace springtail::gc {
 
         // clear this XID from the list of blockers
         _xid_map.erase(i);
+    }
+
+    void
+    LogParser::Reader::_record_ddl(const XidLsn &xid,
+                                   const std::string &ddl)
+    {
+        // XXX store the DDL statement into Redis
     }
 
     void
@@ -307,17 +316,14 @@ namespace springtail::gc {
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->create_table({ _state->entry->xid, _state->lsn }, table_msg);
+                            XidLsn xid(_state->entry->xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_table(xid, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       processed since there might be additional schema changes
 
-                            // XXX the SysTblMgr has the history of changes, so GC-2 will get them from there
-                            // // pass the schema change to the workers
-                            // // note: will load the message into the write cache to track when schema changes
-                            // auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                            //                                            _state->entry->xid, _state->lsn, table_msg.oid);
-                            // _parser_queue->push(entry);
+                            // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                            _record_ddl(xid, ddl_stmt);
                         }
                         break;
                     }
@@ -333,16 +339,11 @@ namespace springtail::gc {
                             // XXX need to stall the pipeline in some cases, eg type change
 
                             // apply the schema change
-                            TableMgr::get_instance()->alter_table({ _state->entry->xid, _state->lsn }, table_msg);
+                            XidLsn xid(_state->entry->xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(xid, table_msg);
 
-                            // XXX the SysTblMgr has the history of changes, so GC-2 will get them from there
-                            // // note: we don't notify the backlog until the entire XID is
-                            // //       committed since there might be additional schema changes
-
-                            // // pass to the workers
-                            // auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                            //                                            _state->entry->xid, _state->lsn, table_msg.oid);
-                            // _parser_queue->push(entry);
+                            // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                            _record_ddl(xid, ddl_stmt);
                         }
                         break;
                     }
@@ -356,7 +357,8 @@ namespace springtail::gc {
                                                  _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            TableMgr::get_instance()->drop_table({ _state->entry->pg_xid, _state->lsn }, drop_msg);
+                            XidLsn xid(_state->entry->xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(xid, drop_msg);
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();
@@ -364,10 +366,8 @@ namespace springtail::gc {
                             // note: we don't notify the backlog until the entire XID is
                             //       processed since there might be additional schema changes
 
-                            // pass to the workers
-                            auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count,
-                                                                       _state->entry->xid, _state->lsn, drop_msg.oid);
-                            _parser_queue->push(entry);
+                            // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                            _record_ddl(xid, ddl_stmt);
                         }
                         break;
                     }
@@ -675,16 +675,6 @@ namespace springtail::gc {
                     WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
                                                           WriteCacheClient::TableOp::TRUNCATE };
                     _write_cache->add_table_change(table->id(), change);
-                    break;
-                }
-                case PgMsgEnum::CREATE_TABLE:
-                case PgMsgEnum::ALTER_TABLE:
-                case PgMsgEnum::DROP_TABLE: {
-                    // XXX need to record the details about the change?  should be able to retrieve from the SysTblMgr directly
-                    // WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
-                    //                                       WriteCacheClient::TableOp::SCHEMA_CHANGE };
-
-                    // _write_cache->add_table_change(table->id(), change);
                     break;
                 }
                 default:

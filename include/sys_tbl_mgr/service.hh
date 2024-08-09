@@ -40,14 +40,14 @@ namespace springtail::sys_tbl_mgr {
         void ping(Status& _return) override;
 
         /** Creates a table within the system tables. */
-        void create_table(Status& _return, const TableRequest &request) override;
+        void create_table(DDLStatement& _return, const TableRequest &request) override;
 
         /** Alters a table within the system tables. */
-        void alter_table(Status& _return, const TableRequest &request) override;
+        void alter_table(DDLStatement& _return, const TableRequest &request) override;
 
         /** Drops a table within the system tables.  Note that this will not update the roots of the
             table, just the metadata to indicate that a drop occurred at the given XID/LSN. */
-        void drop_table(Status& _return, const DropTableRequest &request) override;
+        void drop_table(DDLStatement& _return, const DropTableRequest &request) override;
 
         /** Updates the roots extents of the indexes of the table as well as the table stats. */
         void update_roots(Status& _return, const UpdateRootsRequest &request) override;
@@ -206,7 +206,8 @@ namespace springtail::sys_tbl_mgr {
          */
         ColumnHistory _generate_update(const std::vector<TableColumn> &old_schema,
                                        const std::vector<TableColumn> &new_schema,
-                                       const XidLsn &xid);
+                                       const XidLsn &xid,
+                                       nlohmann::json &ddl);
 
 
         // HELPER FUNCTIONS

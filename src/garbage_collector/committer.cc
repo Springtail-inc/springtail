@@ -16,7 +16,7 @@ namespace springtail::gc {
         }
 
         // get the most recent committed XID
-        _committed_xid = _xid_mgr->get_committed_xid();
+        _committed_xid = _xid_mgr->get_committed_xid(0);
 
         // enter a loop polling for data from the write cache
         // XXX we are currently processing XIDs one at a time, but we should bundle together XID
@@ -155,7 +155,7 @@ namespace springtail::gc {
             // XXX generate the schema mutations for the FDWs
 
             // commit the completed XID
-            _xid_mgr->commit_xid(xid);
+            _xid_mgr->commit_xid(xid, false);
             _committed_xid = xid;
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);
