@@ -46,7 +46,6 @@ find_package(cpptrace)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Boost settings
 set(Boost_USE_STATIC_LIBS        ON)  # only find static libs

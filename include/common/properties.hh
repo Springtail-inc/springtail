@@ -1,5 +1,4 @@
 #pragma once
-#include <iostream>
 #include <nlohmann/json.hpp>
 
 #ifndef SPRINGTAIL_PROPERTIES
