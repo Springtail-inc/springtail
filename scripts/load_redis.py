@@ -31,11 +31,11 @@ redis_db = 0 # 0 reserved for config db
 redis_user_db = system_json['redis']['db']
 
 # Clear the Redis user database
-r = redis.Redis(host=redis_host, port=redis_port, db=redis_user_db, password=redis_password)
+r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_user_db, password=redis_password, encoding="utf-8", decode_responses=True)
 r.flushdb()
 
 # Clear the Redis config database
-r = redis.Redis(host=redis_host, port=redis_port, db=redis_db, password=redis_password)
+r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db, password=redis_password, encoding="utf-8", decode_responses=True)
 r.flushdb()
 
 # Load the system settings into Redis
