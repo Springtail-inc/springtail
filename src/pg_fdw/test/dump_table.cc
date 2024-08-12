@@ -9,11 +9,11 @@
 #include <boost/program_options.hpp>
 
 #include <common/common.hh>
+#include <common/constants.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>

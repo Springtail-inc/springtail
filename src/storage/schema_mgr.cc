@@ -1,9 +1,9 @@
+#include <common/constants.hh>
 #include <storage/exception.hh>
 #include <storage/schema.hh>
 #include <storage/schema_mgr.hh>
 #include <storage/system_tables.hh>
 #include <storage/table_mgr.hh>
-#include <storage/constants.hh>
 #include <sys_tbl_mgr/client.hh>
 
 namespace springtail {

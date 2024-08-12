@@ -2,8 +2,8 @@
 
 #include <boost/thread.hpp>
 
+#include <common/constants.hh>
 #include <storage/schema.hh>
-#include <storage/constants.hh>
 #include <storage/xid.hh>
 
 namespace springtail {

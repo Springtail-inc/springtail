@@ -2,8 +2,8 @@
 
 #include <boost/thread.hpp>
 
+#include <common/constants.hh>
 #include <storage/cache.hh>
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>

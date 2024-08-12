@@ -7,6 +7,7 @@
 #include <common/concurrent_queue.hh>
 #include <common/counter.hh>
 #include <common/redis.hh>
+#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 
 #include <garbage_collector/xid_ready.hh>
@@ -307,6 +308,9 @@ namespace springtail::gc {
 
             /** State machine for processing an XID. */
             StatePtr _state;
+
+            /** For managing the DDL statements in Redis. */
+            RedisDDL _redis_ddl;
         };
         typedef std::shared_ptr<Reader> ReaderPtr;
 

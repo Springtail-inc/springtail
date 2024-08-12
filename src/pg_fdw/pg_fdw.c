@@ -29,7 +29,7 @@
 
 PG_MODULE_MAGIC;
 
-// define from storage/constants.hh
+// define from common/constants.hh
 #define INVALID_TABLE 0
 
 // exposed from and defined in multicorn_util.c

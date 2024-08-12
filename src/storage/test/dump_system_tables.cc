@@ -1,6 +1,6 @@
 #include <common/common.hh>
+#include <common/constants.hh>
 
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/table_mgr.hh>

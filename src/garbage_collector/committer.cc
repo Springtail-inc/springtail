@@ -1,8 +1,6 @@
+#include <common/constants.hh>
 #include <garbage_collector/committer.hh>
-
-#include <storage/constants.hh>
 #include <storage/table_mgr.hh>
-
 #include <sys_tbl_mgr/client.hh>
 
 namespace springtail::gc {
@@ -141,22 +139,17 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
-            // XXX This is where we need to implement the schema changes in the FDW.  We need to
-            //     perform the following actions:
-            //     1. Generate a set of DDL statements to apply to the FDW to utilize this XID
-            //     2. Store them into Redis keyed on the XID
-            //     3. commit the XID along with a marker that the XID contains schema changes
-            //
-            //     When the FDW sees the changes in Redis, it can apply them to move it's XID
-            //     forward.  When it requests an XID from the XidMgr, it needs to provide it's
-            //     current "schema" XID so that the XidMgr can tell it the most recent XID that it
-            //     is safe to operate at.
-
-            // XXX generate the schema mutations for the FDWs
+            // retrieve any schema changes available in Redis
+            auto &&ddls = _redis_ddl.get_ddls_xid(xid);
 
             // commit the completed XID
-            _xid_mgr->commit_xid(xid, false);
+            _xid_mgr->commit_xid(xid, !ddls.is_null());
             _committed_xid = xid;
+
+            // push any DDL changes to the FDWs
+            if (!ddls.is_null()) {
+                _redis_ddl.commit_ddl(xid, ddls);
+            }
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);
 

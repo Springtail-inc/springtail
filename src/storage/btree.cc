@@ -1,5 +1,5 @@
+#include <common/constants.hh>
 #include <storage/btree.hh>
-#include <storage/constants.hh>
 
 namespace springtail {
     BTree::BTree(const std::filesystem::path &file,

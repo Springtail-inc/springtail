@@ -8,12 +8,13 @@
 #include <boost/uuid/uuid_io.hpp>
 
 #include <common/concurrent_queue.hh>
+#include <common/constants.hh>
 #include <common/redis.hh>
+#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
-#include <storage/constants.hh>
 #include <storage/table.hh>
 #include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -112,6 +113,7 @@ namespace springtail::gc {
         WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
 
         RedisQueue<XidReady> _redis; ///< The redis queue to communicate between the LogParser and the Committer.
+        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
 
         uint32_t _worker_count;

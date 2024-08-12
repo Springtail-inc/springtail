@@ -3,7 +3,7 @@ find_package(redis++ CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc tracking_allocator.cc)
+set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc redis_ddl.cc tracking_allocator.cc)
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)

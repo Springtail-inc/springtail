@@ -5,7 +5,7 @@
 
 #include <boost/thread.hpp>
 
-#include <storage/constants.hh>
+#include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
 

@@ -1,10 +1,10 @@
+#include <common/constants.hh>
 #include <common/filesystem.hh>
 
 #include <garbage_collector/log_parser.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 
-#include <storage/constants.hh>
 #include <storage/table_mgr.hh>
 
 #include <sys_tbl_mgr/client.hh>
@@ -147,13 +147,6 @@ namespace springtail::gc {
 
         // clear this XID from the list of blockers
         _xid_map.erase(i);
-    }
-
-    void
-    LogParser::Reader::_record_ddl(const XidLsn &xid,
-                                   const std::string &ddl)
-    {
-        // XXX store the DDL statement into Redis
     }
 
     void
@@ -323,7 +316,7 @@ namespace springtail::gc {
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _record_ddl(xid, ddl_stmt);
+                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -343,7 +336,7 @@ namespace springtail::gc {
                             auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(xid, table_msg);
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _record_ddl(xid, ddl_stmt);
+                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -367,7 +360,7 @@ namespace springtail::gc {
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _record_ddl(xid, ddl_stmt);
+                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
                         }
                         break;
                     }

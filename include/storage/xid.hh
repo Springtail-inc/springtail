@@ -1,6 +1,6 @@
 #pragma once
 
-#include <storage/constants.hh>
+#include <common/constants.hh>
 
 namespace springtail {
     /**
