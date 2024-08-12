@@ -3,6 +3,7 @@
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include <common/redis_ddl.hh>
 
 #include <pg_fdw/pg_fdw_mgr.hh>
 
@@ -625,6 +626,109 @@ namespace pg_fdw {
 
         return create;
     }
+
+    std::string
+    PgFdwMgr::_gen_sql_from_json(const std::string &server_name,
+                                 nlohmann::json ddl)
+    {
+        assert(ddl.is_object());
+        assert(ddl.contains("action"));
+
+        auto &action = ddl.at("action");
+        if (action == "create") {
+            std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
+            for (auto &col : ddl.at("columns")) {
+                std::optional<std::string> default_value;
+                if (col.contains("default")) {
+                    default_value = col.at("default");
+                }
+                columns.push_back({
+                        col.at("name"), col.at("type"),
+                        col.at("nullable"), default_value
+                    });
+            }
+
+            return _gen_fdw_table_sql(server_name, ddl.at("table"), ddl.at("tid"), columns);
+        }
+
+        if (action == "rename") {
+            return fmt::format("ALTER FOREIGN TABLE {} RENAME TO {};",
+                               ddl.at("table").get<std::string>(),
+                               ddl.at("old_table").get<std::string>());
+        }
+
+        if (action == "drop") {
+            return fmt::format("DROP FOREIGN TABLE {};",
+                               ddl.at("table").get<std::string>());
+        }
+
+        if (action == "col_add") {
+            auto &col = ddl.at("column");
+
+            std::string constraints;
+            std::string null_constraint = col.at("nullable").get<bool>()
+                ? "NULL"
+                : "NOT NULL";
+            if (col.contains("default")) {
+                constraints = fmt::format("{} {}", null_constraint,
+                                         col.at("default").get<std::string>());
+            } else {
+                constraints = null_constraint;
+            }
+
+            return fmt::format("ALTER FOREIGN TABLE {} ADD COLUMN {} {} {};",
+                               ddl.at("table").get<std::string>(),
+                               col.at("name").get<std::string>(),
+                               col.at("type").get<std::string>(),
+                               constraints);
+        }
+
+        if (action == "col_drop") {
+            return fmt::format("ALTER FOREIGN TABLE {} DROP COLUMN {};",
+                               ddl.at("table").get<std::string>(),
+                               ddl.at("column").get<std::string>());
+        }
+
+        if (action == "col_rename") {
+            return fmt::format("ALTER FOREIGN TABLE {} RENAME COLUMN {} TO {};",
+                               ddl.at("table").get<std::string>(),
+                               ddl.at("old_name").get<std::string>(),
+                               ddl.at("new_name").get<std::string>());
+        }
+
+        if (action == "col_nullable") {
+            auto &col = ddl.at("column");
+            return fmt::format("ALTER FOREIGN TABLE {} ALTER COLUMN {} {} NOT NULL;",
+                               ddl.at("table").get<std::string>(),
+                               col.at("name").get<std::string>(),
+                               col.at("nullable").get<bool>() ? "DROP" : "SET");
+        }
+
+        // can't currently support other kinds of DDL mutations
+        assert(0);
+    }
+
+    void
+    PgFdwMgr::_update_schemas(const std::string &server_name,
+                              uint64_t fdw_id)
+    {
+        RedisDDL redis;
+        std::vector<std::string> txn;
+
+        auto ddls = redis.get_next_ddls(fdw_id);
+
+        // generate a DDL statement for each JSON in the transaction
+        for (auto ddl : ddls.at("ddls")) {
+            txn.push_back(_gen_sql_from_json(server_name, ddl));
+        }
+
+        // generate a statement to alter the server options with the schema XID
+        txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET schema_xid '{}');",
+                                  server_name, ddls.at("xid").get<uint64_t>()));
+
+        // XXX execute the set of statements
+    }
+    
 
     std::string
     PgFdwMgr::_gen_fdw_system_table(const std::string &server,

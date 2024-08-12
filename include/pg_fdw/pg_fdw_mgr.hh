@@ -213,6 +213,12 @@ namespace pg_fdw {
                                               uint64_t tid,
                                               std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns);
 
+        /** Helper to generate a DDL statement from the JSON provided from the ingest pipeline. */
+        static std::string _gen_sql_from_json(const std::string &server_name, nlohmann::json ddl);
+
+        /** Helper to apply outstanding DDL changes to the FDW tables. */
+        static void _update_schemas(const std::string &server_name, uint64_t fdw_id);
+
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
                                                  const std::string &table,
