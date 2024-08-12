@@ -41,10 +41,12 @@ set(CMAKE_SKIP_TEST_ALL_DEPENDENCY FALSE)
 ## Default location of properties file
 add_compile_definitions(SPRINGTAIL_PROPERTIES="${PROJECT_SOURCE_DIR}/system.json")
 
+## globally required packages
 find_package(cpptrace)
 find_package(spdlog)
 find_package(Boost REQUIRED thread)
 find_package(GTest CONFIG REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Boost settings
 set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
@@ -71,18 +73,30 @@ endif()
 include(ExternalProjects)
 
 ## source modules
-add_subdirectory(src/common)
-add_subdirectory(src/storage)
-add_subdirectory(src/benchmarks)
-add_subdirectory(src/garbage_collector)
-add_subdirectory(src/pg_repl)
-add_subdirectory(src/write_cache)
-add_subdirectory(src/pg_log_mgr)
-add_subdirectory(src/xid_mgr)
-add_subdirectory(src/thrift)
-add_subdirectory(src/proxy)
-add_subdirectory(src/pg_fdw)
+set(MODULES
+  common
+  storage
+  benchmarks
+  garbage_collector
+  pg_repl
+  write_cache
+  pg_log_mgr
+  xid_mgr
+  thrift
+  proxy
+  pg_fdw
+)
 
+## iterate over modules and add subdirectory
+## also configure CTestCustom.cmake for each module
+foreach(MODULE ${MODULES})
+  add_subdirectory(src/${MODULE})
+  set(MODULE_BIN_DIR ${CMAKE_BINARY_DIR}/src/${MODULE})
+  configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${MODULE_BIN_DIR}/CTestCustom.cmake @ONLY)
+endforeach(MODULE ${MODULES})
+
+## configure CTestCustom.cmake for top level
+configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINARY_DIR}/CTestCustom.cmake @ONLY)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})

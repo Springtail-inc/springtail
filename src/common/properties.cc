@@ -1,17 +1,22 @@
 #include <string>
-#include <fstream>
 #include <stdexcept>
+#include <fstream>
+#include <iostream>
 
 #include <nlohmann/json.hpp>
 
 #include <common/exception.hh>
+#include <common/environment.hh>
 #include <common/properties.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
+#include <common/json.hh>
 
 namespace springtail {
 
     Properties* Properties::_instance {nullptr};
 
-    nlohmann::json 
+    nlohmann::json
     Properties::get(const std::string &key)
     {
         if (_instance == nullptr) {
@@ -20,14 +25,117 @@ namespace springtail {
         return _instance->_json[key];
     }
 
-    Properties::Properties(const std::string &file)
+    void
+    Properties::_read_environment()
     {
-        // read the configuration file
-        std::ifstream ifs(file);
-        _json = nlohmann::json::parse(ifs);
+        // iterate through the environment and add to json config
+        for (auto &variable: environment::Variables) {
+            const char *env_var = std::getenv(std::get<0>(variable));
+            environment::Type type = std::get<1>(variable);
+            const char *json_obj_name = std::get<2>(variable);
+            const char *json_key_name = std::get<3>(variable);
+
+            if (env_var != nullptr) {
+                switch (type) {
+                    case environment::STR:
+                        _json[json_obj_name][json_key_name] = env_var;
+                        break;
+                    case environment::UINT32:
+                        _json[json_obj_name][json_key_name] = std::stoul(env_var);
+                        break;
+                    case environment::UINT64:
+                        _json[json_obj_name][json_key_name] = std::stoull(env_var);
+                        break;
+                }
+            } else {
+                _json[json_obj_name][json_key_name] = nullptr;
+            }
+        }
+    }
+
+    void
+    Properties::_read_redis_properties()
+    {
+        // verify we have the redis config
+        if (_json.contains(REDIS_CONFIG) == false) {
+            throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");
+        }
+
+        nlohmann::json redis_config = _json[REDIS_CONFIG];
+        if (redis_config.contains("host") == false ||
+            redis_config["host"].is_null() ||
+            redis_config.contains("port") == false ||
+            redis_config["port"].is_null() ||
+            redis_config.contains("db") == false ||
+            redis_config["db"].is_null()) {
+            throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
+        }
+
+        // extract redis config from json
+        std::string hostname = redis_config["host"];
+        int port = redis_config["port"];
+        std::string user = redis_config["user"];
+        std::string password = redis_config["password"];
+
+        // create connection options for config db
+        sw::redis::ConnectionOptions connect_options;
+        connect_options.host = hostname;
+        connect_options.port = port;
+        connect_options.user = user;
+        connect_options.password = password;
+        connect_options.db = 0; // config DB hard-coded to 0
+
+        // create redis client just for accessing config db
+        RedisClientPtr redis_client = std::make_shared<RedisClient>(connect_options);
+
+        // check for db_instance_id in org config and extract
+        // this is set by the environment variable
+        if (_json[ORG_CONFIG]["db_instance_id"].is_null()) {
+            throw Error("Error missing db_instance_id in redis");
+        }
+
+        uint64_t db_instance_id;
+        Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
+
+        // read the system properties from redis
+        std::string db_instance_key = redis::SYSTEM_PREFIX + std::to_string(db_instance_id);
+        std::string system_key = "system_settings";
+
+        // read the system properties from redis
+        std::optional<std::string> system_value = redis_client->hget(db_instance_key, system_key);
+        if (!system_value.has_value()) {
+            throw Error("Error missing system settings in redis");
+        }
+
+        // convert system_value to json and merge to _json
+        nlohmann::json system_json = nlohmann::json::parse(system_value.value());
+
+        _json.merge_patch(system_json);
+    }
+
+    Properties::Properties()
+    {
+        // read the base config from the environment
+        _read_environment();
+
+        // check for an override properties file;
+        // if it exists use it rather than reading the config from redis
+        const char *file = std::getenv(environment::PROPERTIES_FILE_OVERRIDE);
+
+        if (file != nullptr) {
+            std::cout << "Properties override file: " << file << std::endl;
+        }
+        if (file && std::filesystem::exists(std::filesystem::path(file))) {
+            // read the system properties from the configuration file
+            std::ifstream ifs(file);
+            _json.merge_patch(nlohmann::json::parse(ifs));
+        } else {
+            // read the system properties from redis
+            _read_redis_properties();
+        }
 
         // check for overrides in the environment variables
-        const char *var = std::getenv(SPRINGTAIL_ENV_VARIABLE);
+        const char *var = std::getenv(environment::ENV_OVERRIDE);
         if (var == nullptr) {
             return; // no overrides, exit
         }
@@ -72,10 +180,10 @@ namespace springtail {
     }
 
     void
-    Properties::init(const std::string &file)
+    Properties::init()
     {
         if (_instance == nullptr) {
-            _instance = new Properties(file);
+            _instance = new Properties();
         }
     }
 }

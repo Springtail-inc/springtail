@@ -1,5 +1,5 @@
 #pragma once
-
+#include <iostream>
 #include <nlohmann/json.hpp>
 
 #ifndef SPRINGTAIL_PROPERTIES
@@ -25,12 +25,10 @@ namespace springtail {
         static inline constexpr char STORAGE_CONFIG[] = "storage";
         /** Logging config section */
         static inline constexpr char LOGGING_CONFIG[] = "logging";
-
-        /** Default properties file, defined by make -D option, or macro above */
-        static inline constexpr char SPRINGTAIL_PROPERTIES_FILE[] = SPRINGTAIL_PROPERTIES;
-
-        /** Environment variable name for property overrides */
-        static inline constexpr char SPRINGTAIL_ENV_VARIABLE[] = "SPRINGTAIL_PROPERTIES";
+        /** Org configuration section */
+        static inline constexpr char ORG_CONFIG[] = "org";
+        /** FS configuration section */
+        static inline constexpr char FS_CONFIG[] = "fs";
 
         /**
          * @brief Get JSON object from a key
@@ -40,10 +38,33 @@ namespace springtail {
         static nlohmann::json get(const std::string &key);
 
         /**
-         * @brief Init _instance and read in properties file
-         * @param file file containing json properties
+         * @brief Init _instance and read from redis
          */
-        static void init(const std::string &file);
+        static void init();
+
+        /** Helper to get db instance id */
+        static uint64_t get_db_instance_id() {
+            assert (_instance != nullptr);
+            assert (_instance->_json.contains(ORG_CONFIG));
+            assert (_instance->_json[ORG_CONFIG].contains("db_instance_id"));
+            return _instance->_json[ORG_CONFIG]["db_instance_id"];
+        }
+
+        /** Helper to get fs mount point */
+        static std::string get_mount_point() {
+            assert (_instance != nullptr);
+            assert (_instance->_json.contains(FS_CONFIG));
+            assert (_instance->_json[FS_CONFIG].contains("mount_point"));
+            return _instance->_json[FS_CONFIG]["mount_point"];
+        }
+
+        /** Helper to convert relative path to absolute based on mount point */
+        static std::filesystem::path
+        make_absolute_path(const std::string &path) {
+            assert (_instance != nullptr);
+            assert (!get_mount_point().empty());
+            return std::filesystem::path(get_mount_point()) / path;
+        }
 
     private:
         /** static _instance singleton */
@@ -54,9 +75,18 @@ namespace springtail {
 
         /**
          * @brief Construct a new Properties object
-         * @param file string pointing to system.json file
          */
-        Properties(const std::string &file);
+        Properties();
+
+        /**
+         * @brief Read the environment variables into base config
+         */
+        void _read_environment();
+
+        /**
+         * @brief Read system properties from redis
+         */
+        void _read_redis_properties();
 
         // delete move constructor
         Properties(const Properties &)     = delete;

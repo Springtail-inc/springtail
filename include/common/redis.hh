@@ -39,9 +39,8 @@ namespace springtail {
                     sw::redis::ConnectionPoolOptions pool_options) :
             sw::redis::Redis(options, pool_options)
         {}
-
-
     };
+    using RedisClientPtr = std::shared_ptr<RedisClient>;
 
     /**
      * @brief Singleton redis client
@@ -63,7 +62,7 @@ namespace springtail {
          * @brief Get the redis client object
          * @return sw::redis::Redis
          */
-        inline std::shared_ptr<RedisClient> get_client() {
+        inline RedisClientPtr get_client() {
             return _redis;
         }
 
@@ -75,7 +74,7 @@ namespace springtail {
         static std::mutex _instance_mutex;
 
         /** Redis client wrapper around client object */
-        std::shared_ptr<RedisClient> _redis;
+        RedisClientPtr _redis;
 
         RedisMgr();
 
@@ -207,8 +206,8 @@ namespace springtail {
         }
 
     private:
-        std::string _key; ///< The unique key within Redis for this queue.
-        std::shared_ptr<RedisClient> _redis; ///< A connection to Redis.
+        std::string _key;       ///< The unique key within Redis for this queue.
+        RedisClientPtr _redis; ///< A connection to Redis.
     };
 
     /**
