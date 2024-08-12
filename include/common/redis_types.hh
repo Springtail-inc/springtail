@@ -9,4 +9,10 @@ namespace springtail::redis {
     static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids:";
 
     static constexpr char QUEUE_GC_XID_READY[] = "queue:gc_xid_ready:";
+
+    // Config for database instance: var db_instance_id
+    static constexpr char DB_INSTANCE_CONFIG[] = "instance_config:{}";
+
+    // Config for database within instance: var db_instance_id, db_config_id
+    static constexpr char DB_CONFIG[] = "db_config:{}:{}";
 }

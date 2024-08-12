@@ -65,6 +65,9 @@ namespace springtail {
             return std::filesystem::path(get_mount_point()) / path;
         }
 
+        /** Helper to get set of database names from Redis for this db instance */
+        static std::vector<std::string> get_database_names();
+
     private:
         /** static _instance singleton */
         static Properties *_instance;
