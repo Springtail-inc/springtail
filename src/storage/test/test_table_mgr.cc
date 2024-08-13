@@ -20,14 +20,7 @@ namespace {
     class TableMgr_Test : public testing::Test {
         void SetUp() override {
             springtail_init();
-
-            auto json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir);
-            _table_dir = Properties::make_absolute_path(_table_dir);
-
             _services.init(true);
-
-            std::filesystem::remove_all(_table_dir);
         }
 
         void TearDown() override {
