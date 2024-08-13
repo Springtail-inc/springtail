@@ -1,27 +1,34 @@
 #pragma once
 
-namespace springtail {
-    namespace redis {
-        // Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh
-        static constexpr char QUEUE_PG_TRANSACTIONS[] = "queue:pg_xact";
-        static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids";
+namespace springtail::redis {
+    // Redis system key prefix
+    static constexpr char SYSTEM_PREFIX[] = "instance_config:";
 
-        static constexpr char QUEUE_GC_XID_READY[] = "queue:gc_xid_ready";
+    // Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh
+    static constexpr char QUEUE_PG_TRANSACTIONS[] = "queue:pg_xact:";
+    static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids:";
 
-        static constexpr char MUTEX_SYS_TBL[] = "mutex:sys_tbl";
+    static constexpr char QUEUE_GC_XID_READY[] = "queue:gc_xid_ready:";
 
-        // args: <db instance id>
-        static constexpr char HASH_FDW[] = "fdw";
+    static constexpr char MUTEX_SYS_TBL[] = "mutex:sys_tbl";
 
-        //// For RedisDDL
+    // args: <db instance id>
+    static constexpr char HASH_FDW[] = "fdw";
 
-        // args: <xid>
-        static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}";
+    // Config for database instance: var db_instance_id
+    static constexpr char DB_INSTANCE_CONFIG[] = "instance_config:{}";
 
-        // args: <fdw_id>
-        static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}";
+    // Config for database within instance: var db_instance_id, db_config_id
+    static constexpr char DB_CONFIG[] = "db_config:{}:{}";
 
-        // args: none
-        static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw";
-    }
+    //// For RedisDDL
+
+    // args: <xid>
+    static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}";
+
+    // args: <fdw_id>
+    static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}";
+
+    // args: none
+    static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw";
 }

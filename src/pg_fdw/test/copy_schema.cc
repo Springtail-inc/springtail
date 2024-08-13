@@ -62,8 +62,8 @@ dump_tables_in_schema(const PostgresConnection &conn,
 
     // get the base directory for table data
     nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-    Json::get_to<std::filesystem::path>(json, "table_dir", base_dir,
-                                        "/opt/springtail/table");
+    Json::get_to<std::filesystem::path>(json, "table_dir", base_dir);
+    base_dir = Properties::make_absolute_path(base_dir);
 
     std::filesystem::create_directories(base_dir);
 

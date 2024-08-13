@@ -24,8 +24,8 @@ namespace {
             springtail_init();
 
             auto json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir,
-                                                "/tmp/springtail/table");
+            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir);
+            _table_dir = Properties::make_absolute_path(_table_dir);
             std::filesystem::remove_all(_table_dir);
 
             _base_dir = std::filesystem::temp_directory_path() / "test_fdw_table";

@@ -13,8 +13,7 @@
 #include <common/exception.hh>
 
 namespace springtail {
-    void springtail_init(uint32_t logging_mask = LOG_ALL,
-                         const std::string &properties = Properties::SPRINGTAIL_PROPERTIES_FILE);
+    void springtail_init(uint32_t logging_mask = LOG_ALL);
 
     namespace common {
         /**

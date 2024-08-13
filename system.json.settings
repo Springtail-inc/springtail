@@ -16,7 +16,7 @@
         "port": 6379,
         "user": "default",
         "password": null,
-        "db": 0,
+        "db": 1,
         "keep_alive_secs": 30,
         "pool" : {
             "connections" : 10,
@@ -39,7 +39,7 @@
         "server" : {
             "port" : 55052,
             "worker_threads": 32,
-            "base_path": "/tmp/xid_mgr"
+            "base_path": "xid_mgr"
         },
         "client": {
             "connections": 8,
@@ -57,6 +57,42 @@
         }
     },
     "storage": {
-	"table_dir": "/tmp/springtail/table"
+        "table_dir": "table"
+    },
+    "fs": {
+        "mount_point": "/tmp/springtail",
+        "mount_name": null,
+        "dns_name": null
+    },
+    "org": {
+        "organization_id": "abc-de-fgh",
+        "account_id": "123-45-678",
+        "db_instance_id": 1234
+    },
+    "db_instances": {
+        "1234": {
+            "primary_db_hostname": "localhost",
+            "primary_db_port": 5432,
+            "database_ids": [1]
+        }
+    },
+    "databases": {
+        "1": {
+            "name": "springtail",
+            "replication_slot": "springtail_slot",
+            "publication_name": "springtail_pub",
+            "schemas": {
+                "public": {
+                    "include": ["*"],
+                    "exclude": []
+                }
+            }
+        }
+    },
+    "fdws": {
+        "1": {
+            "host": "localhost",
+            "port": 8888
+        }
     }
 }

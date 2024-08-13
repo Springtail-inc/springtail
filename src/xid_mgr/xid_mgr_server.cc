@@ -54,8 +54,8 @@ namespace springtail {
         Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
 
         std::string base_path;
-        Json::get_to<std::string>(server_json, "base_path", base_path, "/xid_mgr");
-        _base_path = std::filesystem::path(base_path);
+        Json::get_to<std::string>(server_json, "base_path", base_path);
+        _base_path = Properties::make_absolute_path(base_path);
 
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
 
