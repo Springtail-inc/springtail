@@ -12,3 +12,4 @@ src/**/gen-cpp
 .scannerwork
 cmake-build-*
 compile_commands.json
+system.json.test

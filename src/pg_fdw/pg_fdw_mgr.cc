@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <fmt/core.h>
 
 #include <common/common.hh>
@@ -37,7 +38,11 @@ namespace pg_fdw {
     void
     PgFdwMgr::fdw_init(const char *config_file)
     {
-        springtail_init(LOG_ALL, config_file);
+        if (config_file != nullptr) {
+            // set env variable
+            setenv("SPRINGTAIL_PROPERTIES_FILE", config_file, 1);
+        }
+        springtail_init(LOG_ALL);
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing, config file: {}", config_file);
     }
 
