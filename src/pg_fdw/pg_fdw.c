@@ -192,6 +192,37 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
 }
 
 /**
+ * @brief Get the foreign server xid
+ * @param serverid
+ * @return uint64_t
+ */
+static uint64_t
+get_foreign_server_xid(Oid serverid)
+{
+    ForeignServer *server;
+    ListCell   *lc;
+
+    // Get the foreign server
+    server = GetForeignServer(serverid);
+
+    // Iterate over the options
+    foreach(lc, server->options)
+    {
+        DefElem    *def = (DefElem *) lfirst(lc);
+        if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0)
+        {
+            char *xidstr = defGetString(def);
+            elog(INFO, "XID: %s", xidstr);
+
+            return strtoull(xidstr, NULL, 10);
+        }
+
+        // Print or use the option key and value
+        elog(INFO, "Option key: %s, value: %s", def->defname, defGetString(def));
+    }
+}
+
+/**
  * @brief Update baserel->rows, and possibly baserel->reltarget->width and
  *        baserel->tuples, with an estimated result set size for a
  *        scan of baserel
@@ -248,6 +279,13 @@ springtail_GetForeignRelSize(PlannerInfo *root,
                             errmsg("invalid option \"oid\""),
                             errhint("Invalid oid for table from table options")));
     }
+
+    // Get the foreign server OID
+    Oid serverid = ft->serverid;
+    ForeignServer *server = GetForeignServer(serverid);
+
+    // get the foreign server xid
+    get_foreign_server_xid(serverid);
 
     // create the plan state
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
@@ -440,5 +478,29 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
         table_list = stmt->table_list;
     }
 
-    return fdw_import_foreign_schema(server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
+    // get foreign server and iterate through its options
+    server = GetForeignServer(serverOid);
+    ListCell   *lc;
+
+    // Iterate over the options to find the db_id, db_name and schema_xid
+    uint64_t db_id;
+    uint64_t schema_xid;
+    char *db_name = NULL;
+
+    foreach(lc, server->options) {
+        DefElem    *def = (DefElem *) lfirst(lc);
+        if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
+            char *db_id_str = defGetString(def);
+            db_id = strtoull(db_id_str, NULL, 10);
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_NAME_OPTION) == 0) {
+            db_name = defGetString(def);
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
+            char *schema_xid_str = defGetString(def);
+            schema_xid = strtoull(schema_xid_str, NULL, 10);
+        }
+    }
+
+    return fdw_import_foreign_schema(server->servername, stmt->remote_schema,
+                                     table_list, except_list, limit_to_list,
+                                     db_id, db_name, schema_xid);
 }

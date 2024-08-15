@@ -20,6 +20,13 @@ extern "C" {
 
 #define SPRINGTAIL_STARTUP_COST 100 ///< Default startup cost is 100, added to tuple cost
 
+#define SPRINGTAIL_FDW_SERVER_NAME "springtail_fdw_server"   ///< Name of foreign server on import schema
+#define SPRINGTAIL_FDW_CATALOG_SCHEMA "__springtail_catalog" ///< Name of catalog schema
+
+#define SPRINGTAIL_FDW_DB_ID_OPTION "db_id"                  ///< Option name for database id
+#define SPRINGTAIL_FDW_DB_NAME_OPTION "db_name"              ///< Option name for database name
+#define SPRINGTAIL_FDW_SCHEMA_XID_OPTION "schema_xid"        ///< Option name for schema xid
+
 /** Plan state created in get rel size */
 typedef struct SpringtailPlanState {
     uint64_t tid;

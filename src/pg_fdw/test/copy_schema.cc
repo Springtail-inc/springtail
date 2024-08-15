@@ -36,9 +36,6 @@ static constexpr char SCHEMA_TABLES_QUERY[] =
     "AND table_type = 'BASE TABLE' "
     "AND table_schema NOT IN ('pg_catalog', 'information_schema'); ";
 
-static constexpr char SERVER_NAME[] = "springtail_fdw_server";
-static constexpr char SPRINGTAIL_CATALOG_SCHEMA[] = "__springtail_catalog";
-
 void dump_table(const std::filesystem::path &base_dir,
                 const std::string &schema_name,
                 const std::string &table_name,

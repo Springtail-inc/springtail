@@ -88,7 +88,6 @@ set(MODULES
   thrift
   proxy
   pg_fdw
-  test
 )
 
 ## iterate over modules and add subdirectory

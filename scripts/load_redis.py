@@ -69,7 +69,7 @@ for db_id in db_instance_json['database_ids']:
     r.set(db_key, json.dumps(db_json))
 
 # create hset for fdws
-fdw_key = 'fdw_config:' + str(db_instance_id)
+fdw_key = 'fdw:' + str(db_instance_id)
 for fdw_id in system_json['fdws']:
     fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
     r.hset(fdw_key, fdw_id, fdw_json_str)
@@ -78,6 +78,7 @@ for fdw_id in system_json['fdws']:
 env_vars = {
     'ORGANIZATION_ID': system_json['org']['organization_id'],
     'ACCOUNT_ID': system_json['org']['account_id'],
+    'FDW_ID': system_json['org']['fdw_id'],
     'DATABASE_INSTANCE_ID': str(db_instance_id),
     'REDIS_HOSTNAME': redis_host,
     'REDIS_PORT': str(redis_port),

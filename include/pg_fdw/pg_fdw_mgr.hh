@@ -2,9 +2,13 @@
 
 #include <mutex>
 #include <memory>
+#include <shared_mutex>
 #include <optional>
+#include <thread>
 
 #include <common/constants.hh>
+#include <common/redis_ddl.hh>
+
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 #include <storage/field.hh>
@@ -29,8 +33,7 @@ extern "C" {
 
 #include <pg_fdw/pg_fdw_common.h>
 
-namespace springtail  {
-namespace pg_fdw {
+namespace springtail::pg_fdw {
 
     struct PgFdwSortGroup {
         std::string attname;
@@ -160,7 +163,10 @@ namespace pg_fdw {
                                         const std::string &schema,
                                         const List *table_list,
                                         bool exclude,
-                                        bool limit);
+                                        bool limit,
+                                        uint64_t db_id,
+                                        const std::string &db_name,
+                                        uint64_t schema_xid);
 
         /** Helper return list / subset of sortable columns if table is sortable by sort group
          *  Called from get_foreign_paths
@@ -189,9 +195,21 @@ namespace pg_fdw {
          */
         void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
+        /**
+         * @brief Get the fdw id object
+         * @return std::string
+         */
+        std::string get_fdw_id() const { return _fdw_id; }
+
+        /**
+         * @brief Get the foreign servername based on db_id
+         * @return std::string
+         */
+        std::string get_servername() const;
+
     private:
         /** Delete constructor */
-        PgFdwMgr() {}
+        PgFdwMgr() {};
         PgFdwMgr(const PgFdwMgr&) = delete;
         PgFdwMgr& operator=(const PgFdwMgr&) = delete;
 
@@ -199,7 +217,21 @@ namespace pg_fdw {
         static std::once_flag _init_flag;  ///< Initialization flag
         static PgFdwMgr* _init();          ///< Initialize singleton
 
+        std::shared_mutex _mutex;          ///< Mutex for thread safety
+
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
+        std::map<uint64_t, std::string> _db_map; ///< Map of db ID to db name
+
+        std::string _fdw_id;               ///< FDW ID for this instance
+        std::string _hostname="localhost"; ///< Hostname for fdw server
+        std::string _username="postgres";  ///< Username for fdw server
+        std::string _password="";          ///< Password for fdw server
+        int _port=5432;                    ///< Port for fdw server
+
+        std::thread _ddl_thread;           ///< Thread for DDL updates
+        std::thread _keep_alive_thread;    ///< Thread for keep alive
+
+        // static methods
 
         /** Helper to convert field to PG Datum */
         static Datum _get_datum_from_field(FieldPtr field,
@@ -215,9 +247,6 @@ namespace pg_fdw {
 
         /** Helper to generate a DDL statement from the JSON provided from the ingest pipeline. */
         static std::string _gen_sql_from_json(const std::string &server_name, nlohmann::json ddl);
-
-        /** Helper to apply outstanding DDL changes to the FDW tables. */
-        static void _update_schemas(const std::string &server_name, uint64_t fdw_id);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
@@ -257,6 +286,21 @@ namespace pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
+        /** Helper to apply outstanding DDL changes to the FDW tables. */
+        static void _update_schemas(RedisDDL &redis, nlohmann::json &ddls,
+                                    const std::string &servername,
+                                    const std::string &fdw_id);
+
+        /** DDL thread startup function */
+        static void _ddl_thread_func();
+
+        /** Keep alive thread startup function */
+        static void _keep_alive_thread_func();
+
+        // non-static methods
+
+        /** Helper to execute ddl statements for this db */
+        void _execute_ddl(const std::string &fdw_id, uint64_t db_id, const std::vector<std::string> &sql);
+
     };
-} // namespace pg_fdw
-} // namespace springtail
+} // namespace springtail::pg_fdw

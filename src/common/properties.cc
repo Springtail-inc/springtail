@@ -179,10 +179,10 @@ namespace springtail {
         }
     }
 
-    std::vector<std::string>
-    Properties::get_database_names()
+    std::map<uint64_t, std::string>
+    Properties::get_databases()
     {
-        std::vector<std::string> dbnames;
+        std::map<uint64_t, std::string> dbnames;
 
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
@@ -200,8 +200,9 @@ namespace springtail {
         nlohmann::json db_ids = nlohmann::json::parse(db_id_str.value());
 
         // iterate through the db_ids and get the db_config_id
-        for (auto &db_id: db_ids) {
-            std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id, db_id.get<uint64_t>());
+        for (auto &db_id_json: db_ids) {
+            uint64_t db_id = db_id_json.get<uint64_t>();
+            std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id, db_id);
             std::optional<std::string> db_config_str = redis->get(db_config_key);
             if (!db_config_str.has_value()) {
                 throw Error("Error missing db_config_id in redis");
@@ -209,10 +210,48 @@ namespace springtail {
 
             // convert to json
             nlohmann::json db_config = nlohmann::json::parse(db_config_str.value());
-            dbnames.push_back(db_config["name"]);
+            assert (db_config.contains("name"));
+            dbnames[db_id] = db_config["name"];
         }
 
         return dbnames;
+    }
+
+    std::string
+    Properties::get_db_name(uint64_t db_id)
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+        std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id, db_id);
+        std::optional<std::string> db_config_str = redis->get(db_config_key);
+        if (!db_config_str.has_value()) {
+            throw Error("Error missing db_config_id in redis");
+        }
+
+        // convert to json
+        nlohmann::json db_config = nlohmann::json::parse(db_config_str.value());
+        assert (db_config.contains("name"));
+
+        return db_config["name"];
+    }
+
+    std::vector<std::string>
+    Properties::get_fdw_ids()
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+        std::string fdw_key = std::format(redis::HASH_FDW, db_instance_id);
+
+        std::vector<std::string> fdw_ids;
+        redis->hkeys(fdw_key, std::back_inserter(fdw_ids));
+
+        return fdw_ids;
     }
 
     void

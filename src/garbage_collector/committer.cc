@@ -28,6 +28,8 @@ namespace springtail::gc {
             }
             uint64_t xid = result->xid();
 
+            uint64_t db_id = 1; // XXX get the DB ID from somewhere...
+
             SPDLOG_INFO("Commit XID: {}", xid);
 
             // find every table associated with this XID
@@ -148,7 +150,7 @@ namespace springtail::gc {
 
             // push any DDL changes to the FDWs
             if (!ddls.is_null()) {
-                _redis_ddl.commit_ddl(xid, ddls);
+                _redis_ddl.commit_ddl(db_id, xid, ddls);
             }
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);

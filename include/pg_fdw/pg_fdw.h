@@ -38,7 +38,8 @@ void fdw_reset_scan(void *state);
 
 /** Import foreign schema */
 List *fdw_import_foreign_schema(const char *server, const char *schema,
-                                const List *table_list, bool exclude, bool limit);
+                                const List *table_list, bool exclude, bool limit,
+                                uint64_t db_id, const char *db_name, uint64_t schema_xid);
 
 /** Commit or rollback a transaction, remove the XID mappings */
 void fdw_commit_rollback(uint64_t pg_xid, bool commit);

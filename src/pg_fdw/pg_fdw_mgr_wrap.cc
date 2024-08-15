@@ -70,9 +70,12 @@ extern "C" {
     /** Import foreign schema wrapper */
     List *
     fdw_import_foreign_schema(const char *server, const char *schema,
-                              const List *table_list, bool exclude, bool limit)
+                              const List *table_list, bool exclude, bool limit,
+                              uint64_t db_id, const char *db_name, uint64_t schema_xid)
     {
-        return get_fdw_mgr()->fdw_import_foreign_schema(server, schema, table_list, exclude, limit);
+        return get_fdw_mgr()->fdw_import_foreign_schema(server, schema,
+                                                        table_list, exclude, limit,
+                                                        db_id, db_name, schema_xid);
     }
 
     /** Helper return true if table is sortable by sort group */

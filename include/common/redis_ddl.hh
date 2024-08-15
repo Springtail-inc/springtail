@@ -38,10 +38,11 @@ namespace springtail {
 
         /**
          * Used by gc::Committer (GC-2) to provide the list of DDL statements to the FDWs.
+         * @param db_id The ID of the database instance we are updating.
          * @param xid The XID at which these DDL statements were applied.
          * @param ddls A JSON array of DDL statements to apply, retrieved from get_ddls_xid()
          */
-        void commit_ddl(uint64_t xid, nlohmann::json ddls);
+        void commit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls);
 
         /**
          * Used by the FDW to retrieve the next set of DDL statements that need to be applied.
@@ -49,14 +50,14 @@ namespace springtail {
          * @return A JSON object containing the XID at which the DDLs were applied and an array of
          *         the DDL statements themselves.
          */
-        nlohmann::json get_next_ddls(uint64_t fdw_id);
+        nlohmann::json get_next_ddls(const std::string &fdw_id);
 
         /**
          * Used by the FDW to record the latest schema XID that it has applied.
          * @param fdw_id The ID of the FDW we are updating.
          * @param schema_xid The XID from the last get_next_ddls() call that was applied.
          */
-        void update_schema_xid(uint64_t fdw_id, uint64_t schema_xid);
+        void update_schema_xid(const std::string &fdw_id, uint64_t schema_xid);
 
         /**
          * Used by the XidMgr to identify when it can remove XIDs from it's schema XID history.

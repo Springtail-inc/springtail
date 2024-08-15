@@ -68,7 +68,13 @@ namespace springtail {
         }
 
         /** Helper to get set of database names from Redis for this db instance */
-        static std::vector<std::string> get_database_names();
+        static std::map<uint64_t, std::string> get_databases();
+
+        /** Helper to get database name from Redis for db id */
+        static std::string get_db_name(uint64_t db_id);
+
+        /** Helper to get set of FDW ids from Redis */
+        static std::vector<std::string> get_fdw_ids();
 
     private:
         /** static _instance singleton */

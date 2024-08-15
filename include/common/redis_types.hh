@@ -12,8 +12,8 @@ namespace springtail::redis {
 
     static constexpr char MUTEX_SYS_TBL[] = "mutex:sys_tbl";
 
-    // args: <db instance id>
-    static constexpr char HASH_FDW[] = "fdw";
+    // FDW config args: <db instance id>
+    static constexpr char HASH_FDW[] = "fdw:{}";
 
     // Config for database instance: var db_instance_id
     static constexpr char DB_INSTANCE_CONFIG[] = "instance_config:{}";
@@ -23,12 +23,12 @@ namespace springtail::redis {
 
     //// For RedisDDL
 
-    // args: <xid>
-    static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}";
+    // args: <db_instance_id>, <xid>
+    static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}";
 
-    // args: <fdw_id>
-    static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}";
+    // args: <db_instance_id>, <fdw_id>
+    static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}:{}";
 
-    // args: none
-    static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw";
+    // Hashset, keys: fdw_ids args: <db_instance_id>
+    static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw:{}";
 }
