@@ -108,13 +108,13 @@ namespace springtail {
 
             assert(split.size() == 2);
 
-            xid = std::stoull(split[0]);
-            oid = std::stoull(split[1]);
+            oid = std::stoull(split[0]);
+            xid = std::stoull(split[1]);
         }
 
         std::string serialize() const
         {
-            return fmt::format("{}:{}", xid, oid);
+            return fmt::format("{}:{}", oid, xid);
         }
 
         uint64_t oid;

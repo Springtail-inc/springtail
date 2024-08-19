@@ -18,22 +18,6 @@ namespace springtail::gc {
         return _backlog.empty();
     }
 
-    void
-    LogParser::Backlog::add_db(uint64_t db_id)
-    {
-        boost::unique_lock lock(_mutex);
-
-        std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
-        _oid_set.emplace(db_id, RSSOidValue(key));
-    }
-
-    void
-    LogParser::Backlog::remove_db(uint64_t db_id)
-    {
-        boost::unique_lock lock(_mutex);
-        _oid_set.erase(db_id);
-    }
-
     bool
     LogParser::Backlog::check(uint64_t db_id,
                               uint64_t oid,
@@ -93,25 +77,35 @@ namespace springtail::gc {
     }
 
     void
-    LogParser::Backlog::update_deps()
+    LogParser::Backlog::update_deps(uint64_t db_id)
     {
         boost::unique_lock lock(_mutex);
 
-        // pull the dependencies from redis for each DB
-        for (auto &entry : _oid_set) {
-            uint64_t last_xid = _last_requested_xid[entry.first];
+        // pull the dependencies from redis for this db
+        uint64_t last_xid = _last_requested_xid[db_id];
 
-            auto &&values = entry.second.get_by_score(last_xid + 1);
-            if (!values.empty()) {
-                // update the dependency mappings
-                for (auto const &value : values) {
-                    _table_deps[{ entry.first, value.oid }].insert(value.xid);
-                    _xid_map[{ entry.first, value.xid }].insert(value.oid);
-                }
-
-                // save that we pulled data through the last seen XID
-                _last_requested_xid[entry.first] = values.back().xid;
+        auto set_i = _oid_set.find(db_id);
+        if (set_i == _oid_set.end()) {
+            std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
+            auto res = _oid_set.emplace(db_id, RSSOidValue(key));
+            if (!res.second) {
+                throw Error();
             }
+
+            set_i = res.first;
+        }
+        auto &oid_set = set_i->second;
+
+        auto &&values = oid_set.get_by_score(last_xid + 1);
+        if (!values.empty()) {
+            // update the dependency mappings
+            for (auto const &value : values) {
+                _table_deps[{ db_id, value.oid }].insert(value.xid);
+                _xid_map[{ db_id, value.xid }].insert(value.oid);
+            }
+
+            // save that we pulled data through the last seen XID
+            _last_requested_xid[db_id] = values.back().xid;
         }
     }
 
@@ -180,9 +174,6 @@ namespace springtail::gc {
             // check the backlog for an XID to process
             _state = _backlog->pop();
             if (_state == nullptr) {
-                // update the schema dependencies from Redis
-                _backlog->update_deps();
-
                 // if nothing ready in backlog, pull an XID from redis
                 // note: block for 1 second
                 auto entry = _pg_queue.pop(_worker_id, 1);
@@ -190,6 +181,9 @@ namespace springtail::gc {
                     // nothing ready, loop and try again
                     continue;
                 }
+
+                // update the schema dependencies from Redis
+                _backlog->update_deps(entry->db_id);
 
                 _state = std::make_shared<State>(entry);
             }

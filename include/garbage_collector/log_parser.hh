@@ -128,16 +128,6 @@ namespace springtail::gc {
             bool empty() const;
 
             /**
-             * Add a database to the set of tracked databases.
-             */
-            void add_db(uint64_t db_id);
-
-            /**
-             * Remove a database from the set of tracked databases.
-             */
-            void remove_db(uint64_t db_id);
-
-            /**
              * Checks if the given XID should block when mutating the given table OID.
              * @param db_id The DB of the table this request is accessing.
              * @param oid The OID of the table this request is accessing.
@@ -163,9 +153,9 @@ namespace springtail::gc {
             StatePtr pop();
 
             /**
-             * Updates the XID / table dependencies from Redis.
+             * Updates the XID / table dependencies for a given DB from Redis.
              */
-            void update_deps();
+            void update_deps(uint64_t db_id);
 
             /**
              * Clears any requests blocked on the provided XID.
