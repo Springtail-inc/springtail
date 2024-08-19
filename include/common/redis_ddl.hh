@@ -26,7 +26,7 @@ namespace springtail {
          * @param xid The XID at which this DDL statement needs to be applied.
          * @param ddl A JSON representation of the DDL statement.
          */
-        void add_ddl(uint64_t xid, const std::string &ddl);
+        void add_ddl(uint64_t db_id, uint64_t xid, const std::string &ddl);
 
         /**
          * Used by gc::Committer (GC-2) to retrieve the set of DDL statements recorded against the
@@ -34,7 +34,7 @@ namespace springtail {
          * @param xid The XID we are about to commit.
          * @return A JSON array containing the ordered set of DDLs to apply at each FDW.
          */
-        nlohmann::json get_ddls_xid(uint64_t xid);
+        nlohmann::json get_ddls_xid(uint64_t db_id, uint64_t xid);
 
         /**
          * Used by gc::Committer (GC-2) to provide the list of DDL statements to the FDWs.

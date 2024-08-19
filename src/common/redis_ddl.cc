@@ -6,19 +6,21 @@
 namespace springtail {
 
     void
-    RedisDDL::add_ddl(uint64_t xid,
+    RedisDDL::add_ddl(uint64_t db_id,
+                      uint64_t xid,
                       const std::string &ddl)
     {
-        std::string key = fmt::format(redis::QUEUE_DDL_XID, Properties::get_db_instance_id(), xid);
+        std::string key = fmt::format(redis::QUEUE_DDL_XID, db_id, xid);
 
         // RPUSH ddl_queue:xid ddl
         _redis->rpush(key, ddl);
     }
 
     nlohmann::json
-    RedisDDL::get_ddls_xid(uint64_t xid)
+    RedisDDL::get_ddls_xid(uint64_t db_id,
+                           uint64_t xid)
     {
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID, Properties::get_db_instance_id(), xid);
+        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID, db_id, xid);
 
         // retrieve the list of DDL operations for this XID
         std::vector<std::string> values;
@@ -36,9 +38,9 @@ namespace springtail {
     RedisDDL::commit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls)
     {
         nlohmann::json op;
+        op["db_id"] = db_id;
         op["xid"] = xid;
         op["ddls"] = ddls;
-        op["db_id"] = db_id;
 
         std::string value = nlohmann::to_string(op);
 

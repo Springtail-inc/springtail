@@ -23,12 +23,12 @@ namespace springtail::redis {
 
     //// For RedisDDL
 
-    // args: <db_instance_id>, <xid>
+    // args: <db_id>, <xid>
     static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}";
 
     // args: <db_instance_id>, <fdw_id>
     static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}:{}";
 
-    // Hashset, keys: fdw_ids args: <db_instance_id>
+    // args: <db_instance_id> -- hash key: fdw_id
     static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw:{}";
 }

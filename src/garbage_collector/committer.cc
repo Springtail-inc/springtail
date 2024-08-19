@@ -26,9 +26,8 @@ namespace springtail::gc {
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
+            uint64_t db_id = result->db_id();
             uint64_t xid = result->xid();
-
-            uint64_t db_id = 1; // XXX get the DB ID from somewhere...
 
             SPDLOG_INFO("Commit XID: {}", xid);
 
@@ -142,7 +141,7 @@ namespace springtail::gc {
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
             // retrieve any schema changes available in Redis
-            auto &&ddls = _redis_ddl.get_ddls_xid(xid);
+            auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
 
             // commit the completed XID
             _xid_mgr->commit_xid(xid, !ddls.is_null());

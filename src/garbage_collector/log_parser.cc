@@ -316,7 +316,7 @@ namespace springtail::gc {
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -336,7 +336,7 @@ namespace springtail::gc {
                             auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(xid, table_msg);
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -360,7 +360,7 @@ namespace springtail::gc {
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -412,7 +412,7 @@ namespace springtail::gc {
                 _backlog->clear_dep(_state->entry->xid);
                 _pg_queue.commit(_worker_id);
 
-                _gc_queue.push(XidReady(_state->entry->xid));
+                _gc_queue.push(XidReady(_state->entry->db_id, _state->entry->xid));
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", _state->entry->xid);
             }
         }
