@@ -2,6 +2,7 @@
 #include <garbage_collector/committer.hh>
 #include <storage/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <pg_log_mgr/pg_redis_xact.hh>
 
 namespace springtail::gc {
 
@@ -156,6 +157,11 @@ namespace springtail::gc {
 
             // mark the XID as complete in the redis queue
             _redis.commit(_worker_id);
+
+            // clear the DDL dependency data from the redis SortedSet
+            std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
+            RSSOidValue set(key);
+            set.remove_by_score(0, xid);
         }
 
         // join all of the worker threads

@@ -287,6 +287,12 @@ namespace springtail {
             return result;
         }
 
+        void remove_by_score(const uint64_t min, const uint64_t max=-1)
+        {
+            sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
+            RedisMgr::get_instance()->get_client()->zremrangebyscore(_key, interval);
+        }
+
     private:
         std::string _key; ///< The key of the sorted set.
     };
