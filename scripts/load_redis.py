@@ -91,6 +91,7 @@ env_vars = {
 print ("Loaded redis with contents from {}".format(file))
 
 print ("\nEnvironment variables (please set the following):")
+print ("unset SPRINGTAIL_PROPERTIES_FILE")
 for e in env_vars:
     print(f"export {e}={env_vars[e]}")
 

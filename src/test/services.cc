@@ -28,7 +28,7 @@ namespace springtail::test {
                 std::filesystem::path xid_dir;
 
                 auto json = Properties::get(Properties::XID_MGR_CONFIG);
-                Json::get_to<std::filesystem::path>(json, "base_path", xid_dir, "/tmp/xid_mgr");
+                Json::get_to<std::filesystem::path>(json, "base_path", xid_dir);
                 xid_dir = Properties::make_absolute_path(xid_dir);
                 std::filesystem::remove_all(xid_dir);
             }
@@ -44,8 +44,7 @@ namespace springtail::test {
                 std::filesystem::path table_dir;
 
                 auto json = Properties::get(Properties::STORAGE_CONFIG);
-                Json::get_to<std::filesystem::path>(json, "table_dir", table_dir,
-                                                    "/tmp/springtail/table");
+                Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
                 table_dir = Properties::make_absolute_path(table_dir);
                 std::filesystem::remove_all(table_dir);
             }

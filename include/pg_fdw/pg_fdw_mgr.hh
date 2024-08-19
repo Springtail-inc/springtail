@@ -8,6 +8,7 @@
 
 #include <common/constants.hh>
 #include <common/redis_ddl.hh>
+#include <common/concurrent_queue.hh>
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
@@ -122,8 +123,11 @@ namespace springtail::pg_fdw {
         /** Create state based on table ID
          * @param tid Table ID
          * @param pg_xid Postgres XID of current transaction
+         * @param schema_xid Schema XID optained from the foreign table import option
          */
-        PgFdwState *fdw_create_state(uint64_t tid, uint64_t pg_xid);
+        PgFdwState *fdw_create_state(uint64_t tid,
+                                     uint64_t pg_xid,
+                                     uint64_t schema_xid);
 
         /** Begin scan
          * @param state PgFdwState
@@ -202,10 +206,10 @@ namespace springtail::pg_fdw {
         std::string get_fdw_id() const { return _fdw_id; }
 
         /**
-         * @brief Get the foreign servername based on db_id
-         * @return std::string
+         * @brief Execute a function from SQL that calls into FDW
+         * @param command command to execute
          */
-        std::string get_servername() const;
+        void fdw_function_call(const std::string &command);
 
     private:
         /** Delete constructor */
@@ -217,10 +221,10 @@ namespace springtail::pg_fdw {
         static std::once_flag _init_flag;  ///< Initialization flag
         static PgFdwMgr* _init();          ///< Initialize singleton
 
-        std::shared_mutex _mutex;          ///< Mutex for thread safety
-
-        std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
-        std::map<uint64_t, std::string> _db_map; ///< Map of db ID to db name
+        std::shared_mutex _mutex;                     ///< Mutex for maps; latest schema XID
+        std::map<uint64_t, uint64_t> _xid_map;        ///< Map of pg XID to springtail XID
+        std::map<uint64_t, std::string> _db_map;      ///< Map of db ID to db name
+        std::map<uint64_t, uint64_t> _schema_xid_map; ///< Map of db ID to schema XID
 
         std::string _fdw_id;               ///< FDW ID for this instance
         std::string _hostname="localhost"; ///< Hostname for fdw server
@@ -229,7 +233,6 @@ namespace springtail::pg_fdw {
         int _port=5432;                    ///< Port for fdw server
 
         std::thread _ddl_thread;           ///< Thread for DDL updates
-        std::thread _keep_alive_thread;    ///< Thread for keep alive
 
         // static methods
 
@@ -286,21 +289,18 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
-        /** Helper to apply outstanding DDL changes to the FDW tables. */
-        static void _update_schemas(RedisDDL &redis, nlohmann::json &ddls,
-                                    const std::string &servername,
-                                    const std::string &fdw_id);
-
         /** DDL thread startup function */
         static void _ddl_thread_func();
 
-        /** Keep alive thread startup function */
-        static void _keep_alive_thread_func();
-
         // non-static methods
 
+        /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
+        bool _update_schemas(RedisDDL &redis, nlohmann::json &ddls,
+                             const std::string &servername,
+                             const std::string &fdw_id);
+
         /** Helper to execute ddl statements for this db */
-        void _execute_ddl(const std::string &fdw_id, uint64_t db_id, const std::vector<std::string> &sql);
+        void _execute_ddl(const std::string &db_name, const std::vector<std::string> &sql);
 
     };
 } // namespace springtail::pg_fdw

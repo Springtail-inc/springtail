@@ -16,11 +16,14 @@ typedef struct PgFdwMgr PgFdwMgr;
 /** Get fdw mgr singleton instance */
 PgFdwMgr* get_fdw_mgr();
 
+/** fdw_function_call */
+void fdw_function_call(const char *command);
+
 /** Init call, pass in config file path */
 void fdw_init(const char *config_file);
 
 /** Create state */
-void *fdw_create_state(uint64_t tid, uint64_t pg_xid);
+void *fdw_create_state(uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
 
 /** Begin scan */
 void *fdw_begin_scan(void *stat, List *target_list, List *qual_list, List *sortgroup);

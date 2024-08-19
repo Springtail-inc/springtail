@@ -60,7 +60,7 @@ namespace springtail {
     {
         nlohmann::json ddls;
 
-        // retrieve the next set of DDLs to apply for the given FDW
+        // retrieve the next set of DDLs to apply for the given FDW; this blocks
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
         auto &&res = _redis->blpop(key);
         if (!res) {
