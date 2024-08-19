@@ -58,22 +58,16 @@ namespace springtail::pg_fdw {
                 }
 
                 // apply the DDL statements
-                _update_schemas(redis_ddl, ddls, SPRINGTAIL_FDW_SERVER_NAME, fdw_id);
-
-                // update schema XID
-                uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
-                redis_ddl.update_schema_xid(fdw_id, schema_xid);
+                if (mgr->_update_schemas(redis_ddl, ddls, SPRINGTAIL_FDW_SERVER_NAME, fdw_id)) {
+                    // update schema XID if applied, otherwise they may be queued
+                    uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
+                    redis_ddl.update_schema_xid(fdw_id, schema_xid);
+                }
 
             } catch (...) {
                 // handle exception
             }
         }
-    }
-
-    void
-    PgFdwMgr::_keep_alive_thread_func()
-    {
-
     }
 
     /* called from PG_init */
@@ -90,18 +84,40 @@ namespace springtail::pg_fdw {
         // initialize the singleton
         std::call_once(_init_flag, _init);
 
+        // init fdw_id
+        _instance->_fdw_id = Properties::get_fdw_id();
+
         // start the DDL thread
         std::thread _ddl_thread(_ddl_thread_func);
+    }
 
-        // start the keep alive thread
-        std::thread _keep_alive_thread(_keep_alive_thread_func);
+    void
+    PgFdwMgr::fdw_function_call(const std::string &command)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_function_call: {}", command);
+
+        if (command == "startup") {
+            // start the ddl thread
+            // NOTE: there is a race condition on startup where the FDW may be running, but the
+            // import schema hasn't been run yet, so we need to wait for the schema to be imported
+            // otherwise we don't know the database name to connect to, and the database may not
+            // yet have been created.
+            // this command must be called after the import schema calls have completed, it starts
+            // up the ddl thread, to avoid the startup race condition.
+
+            std::thread _ddl_thread(_ddl_thread_func);
+            return;
+        }
+
+        SPDLOG_WARN("fdw_function_call: unknown command: {}", command);
+
+        return;
     }
 
     PgFdwState *
-    PgFdwMgr::fdw_create_state(uint64_t tid, uint64_t pg_xid)
+    PgFdwMgr::fdw_create_state(uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
     {
         uint64_t xid; // springtail xid
-        uint64_t schema_xid = 0; // XXX need to replace this with the schema XID from the server options
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
@@ -770,14 +786,15 @@ namespace springtail::pg_fdw {
         assert(0);
     }
 
-    void
+    bool
     PgFdwMgr::_update_schemas(RedisDDL &redis,
                               nlohmann::json &ddls,
                               const std::string &server_name,
                               const std::string &fdw_id)
     {
-        // get the db id
+        // get the db id and schema xid
         uint64_t db_id = ddls.at("db_id").get<uint64_t>();
+        uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
 
         // generate a DDL statement for each JSON in the transaction
         std::vector<std::string> txn;
@@ -788,25 +805,47 @@ namespace springtail::pg_fdw {
         // generate a statement to alter the server options with the schema XID
         txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET {} '{}');",
                                   server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
-                                  ddls.at("xid").get<uint64_t>()));
+                                  schema_xid));
 
-        // execute the set of statements
-        get_instance()->_execute_ddl(fdw_id, db_id, txn);
-    }
-
-    void
-    PgFdwMgr::_execute_ddl(const std::string &fdw_id, uint64_t db_id, const std::vector<std::string> &txn)
-    {
-        // get the db name based on the db id
         std::shared_lock<std::shared_mutex> rd_lock(_mutex);
+
+        // get the db name based on the db id
         auto itr = _db_map.find(db_id);
         if (itr == _db_map.end()) {
             SPDLOG_ERROR("Database ID not found: {}", db_id);
-            return;
+            return false;
         }
         std::string dbname = itr->second;
+
+        // check that the schema_xid hasn't already been applied
+        // this could happen if we just started up and a DDL change is queued
+        // before the schema has been imported
+        auto xitr = _schema_xid_map.find(db_id);
+        if (xitr != _schema_xid_map.end()) {
+            if (xitr->second >= schema_xid) {
+                SPDLOG_DEBUG("Schema XID already applied: {}", schema_xid);
+                return true;
+            }
+        }
+
         rd_lock.unlock();
 
+
+
+        // execute the set of statements
+        _execute_ddl(dbname, txn);
+
+        // update the schema map with the new schema xid
+        std::unique_lock<std::shared_mutex> wr_lock(_mutex);
+        _schema_xid_map[db_id] = schema_xid;
+        wr_lock.unlock();
+
+        return true;
+    }
+
+    void
+    PgFdwMgr::_execute_ddl(const std::string &dbname, const std::vector<std::string> &txn)
+    {
         // use libpq to connect to the database
         PGconn *conn = PQconnectdb(fmt::format("host={} dbname={} user={} password={}",
                                                _hostname, dbname, _username, _password).c_str());
@@ -1082,8 +1121,11 @@ namespace springtail::pg_fdw {
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
-        std::unique_lock<std::shared_mutex> lock(_mutex);
+        // update maps with db_id and schema_xid
+        std::unique_lock<std::shared_mutex> wr_lock(_mutex);
         _db_map[db_id] = db_name;
+        _schema_xid_map[db_id] = schema_xid;
+        wr_lock.unlock();
 
         return commands;
     }

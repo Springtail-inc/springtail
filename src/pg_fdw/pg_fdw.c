@@ -191,6 +191,20 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
+PG_FUNCTION_INFO_V1(springtail_fdw_function);
+Datum
+springtail_fdw_function(PG_FUNCTION_ARGS)
+{
+    // Get the input argument (a text string)
+    text *arg = PG_GETARG_TEXT_PP(0);
+    char *command = text_to_cstring(arg);
+
+    // Execute the command
+    fdw_function_call(command);
+
+    PG_RETURN_VOID();
+}
+
 /**
  * @brief Get the foreign server xid
  * @param serverid
@@ -209,17 +223,17 @@ get_foreign_server_xid(Oid serverid)
     foreach(lc, server->options)
     {
         DefElem    *def = (DefElem *) lfirst(lc);
-        if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0)
-        {
+        if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
             char *xidstr = defGetString(def);
-            elog(INFO, "XID: %s", xidstr);
+            elog(INFO, "XID: %s for server %s", xidstr, server->servername);
 
             return strtoull(xidstr, NULL, 10);
         }
-
-        // Print or use the option key and value
-        elog(INFO, "Option key: %s, value: %s", def->defname, defGetString(def));
     }
+
+    elog(ERROR, "No schema xid found for server %s", server->servername);
+
+    return 0;
 }
 
 /**
@@ -285,7 +299,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     ForeignServer *server = GetForeignServer(serverid);
 
     // get the foreign server xid
-    get_foreign_server_xid(serverid);
+    uint64_t schema_xid = get_foreign_server_xid(serverid);
 
     // create the plan state
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
@@ -293,7 +307,7 @@ springtail_GetForeignRelSize(PlannerInfo *root,
 
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();
-    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value);
+    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value, schema_xid);
 
     // store the plan state in the baserel
     baserel->fdw_private = planstate;

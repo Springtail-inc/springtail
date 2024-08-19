@@ -32,6 +32,7 @@ namespace springtail::environment {
         {"DATABASE_INSTANCE_ID", UINT64, "org", "db_instance_id"},
         {"LUSTRE_DNS_NAME", STR, "fs", "dns_name"},
         {"LUSTRE_MOUNT_NAME", STR, "fs", "mount_name"},
-        {"MOUNT_POINT", STR, "fs", "mount_point"}
+        {"MOUNT_POINT", STR, "fs", "mount_point"},
+        {"FDW_ID", STR, "org", "fdw_id"}
     };
 } // namespace springtail::environment

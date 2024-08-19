@@ -124,3 +124,8 @@ for db_name in db_schemas.keys():
     execute_sql(conn, "IMPORT FOREIGN SCHEMA %s FROM SERVER %s INTO %s;", (FDW_SYSTEM_CATALOG, FDW_SERVER_NAME, FDW_SYSTEM_CATALOG))
 
     conn.close()
+
+# notify fdw that the import is complete
+conn = psycopg2.connect(dbname='postgres', user=fdw['user'], password=fdw['password'], host='localhost', port=['port'])
+execute_sql(conn, "SELECT springtail_fdw_function('startup');")
+conn.close()

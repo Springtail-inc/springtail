@@ -67,6 +67,13 @@ namespace springtail {
             return std::filesystem::path(get_mount_point()) / path;
         }
 
+        static std::string get_fdw_id() {
+            assert (_instance != nullptr);
+            assert (_instance->_json.contains(ORG_CONFIG));
+            assert (_instance->_json[ORG_CONFIG].contains("fdw_id"));
+            return _instance->_json[ORG_CONFIG]["fdw_id"];
+        }
+
         /** Helper to get set of database names from Redis for this db instance */
         static std::map<uint64_t, std::string> get_databases();
 

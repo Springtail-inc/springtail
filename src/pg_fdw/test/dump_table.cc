@@ -133,7 +133,7 @@ dump_table(uint64_t tid, uint64_t xid)
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     // create the fdw state for the table @xid and begin the scan
-    PgFdwState *state = mgr->fdw_create_state(tid, xid);
+    PgFdwState *state = mgr->fdw_create_state(tid, xid, xid);
     mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
 
     // iterate through the table and print the values
