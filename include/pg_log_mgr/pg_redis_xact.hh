@@ -120,4 +120,7 @@ namespace springtail {
         uint64_t oid;
         uint64_t xid;
     };
+    using RSSOidValue = RedisSortedSet<PgRedisOidValue>;
+    using RSSOidValuePtr = std::shared_ptr<RSSOidValue>;
+
 }

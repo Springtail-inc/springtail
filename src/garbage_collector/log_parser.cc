@@ -18,14 +18,31 @@ namespace springtail::gc {
         return _backlog.empty();
     }
 
+    void
+    LogParser::Backlog::add_db(uint64_t db_id)
+    {
+        boost::unique_lock lock(_mutex);
+
+        std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
+        _oid_set.emplace(db_id, RSSOidValue(key));
+    }
+
+    void
+    LogParser::Backlog::remove_db(uint64_t db_id)
+    {
+        boost::unique_lock lock(_mutex);
+        _oid_set.erase(db_id);
+    }
+
     bool
-    LogParser::Backlog::check(uint64_t xid,
-                              uint64_t oid)
+    LogParser::Backlog::check(uint64_t db_id,
+                              uint64_t oid,
+                              uint64_t xid)
     {
         boost::shared_lock lock(_mutex);
 
         // check if there are any dependencies for this OID
-        auto &&i = _table_deps.find(oid);
+        auto &&i = _table_deps.find({ db_id, oid });
         if (i == _table_deps.end()) {
             return false;
         }
@@ -39,8 +56,9 @@ namespace springtail::gc {
     }
 
     void
-    LogParser::Backlog::push(uint64_t xid,
+    LogParser::Backlog::push(uint64_t db_id,
                              uint64_t oid,
+                             uint64_t xid,
                              std::shared_ptr<State> entry)
     {
         boost::unique_lock lock(_mutex);
@@ -48,15 +66,15 @@ namespace springtail::gc {
         // note: There can be a race condition between check() and push(), so we re-perform
         //       the check() here.  If it is no longer blocked, place the request on the
         //       ready queue directly.
-        auto &&i = _table_deps.find(oid);
+        auto &&i = _table_deps.find({ db_id, oid });
         if (i == _table_deps.end() || *i->second.begin() > xid) {
             _ready.push_front(entry);
             return;
         }
 
         // now add the depencency to the backlog
-        _backlog[xid] = { oid, entry };
-        _oid_backlog[oid].insert(xid);
+        _backlog[{ db_id, xid }] = { oid, entry };
+        _oid_backlog[{ db_id, oid }].insert(xid);
     }
 
     LogParser::StatePtr
@@ -79,33 +97,38 @@ namespace springtail::gc {
     {
         boost::unique_lock lock(_mutex);
 
-        // pull the dependencies from redis
-        auto &&values = _oid_set.get_by_score(_last_requested_xid + 1);
-        if (!values.empty()) {
-            // update the dependency mappings
-            for (auto const &value : values) {
-                _table_deps[value.oid].insert(value.xid);
-                _xid_map[value.xid].insert(value.oid);
-            }
+        // pull the dependencies from redis for each DB
+        for (auto &entry : _oid_set) {
+            uint64_t last_xid = _last_requested_xid[entry.first];
 
-            // save that we pulled data through the last seen XID
-            _last_requested_xid = values.back().xid;
+            auto &&values = entry.second.get_by_score(last_xid + 1);
+            if (!values.empty()) {
+                // update the dependency mappings
+                for (auto const &value : values) {
+                    _table_deps[{ entry.first, value.oid }].insert(value.xid);
+                    _xid_map[{ entry.first, value.xid }].insert(value.oid);
+                }
+
+                // save that we pulled data through the last seen XID
+                _last_requested_xid[entry.first] = values.back().xid;
+            }
         }
     }
 
     void
-    LogParser::Backlog::clear_dep(uint64_t xid)
+    LogParser::Backlog::clear_dep(uint64_t db_id,
+                                  uint64_t xid)
     {
         boost::unique_lock lock(_mutex);
 
-        auto &&i = _xid_map.find(xid);
+        auto i = _xid_map.find({ db_id, xid });
         if (i == _xid_map.end()) {
             return;
         }
 
         for (uint64_t oid : i->second) {
             // remove the xid from the set of blocking XIDs for the OID
-            auto &&j = _table_deps.find(oid);
+            auto &&j = _table_deps.find({ db_id, oid });
             j->second.erase(xid);
 
             // if we removed the last dependency on this OID, release all blocked XIDs
@@ -116,7 +139,7 @@ namespace springtail::gc {
             }
 
             // find the set of XIDs waiting on this OID
-            auto &&xid_set_i = _oid_backlog.find(oid);
+            auto &&xid_set_i = _oid_backlog.find({ db_id, oid });
 
             // note: there might not be any XIDs waiting on this OID, despite the dependency
             if (xid_set_i != _oid_backlog.end()) {
@@ -130,7 +153,7 @@ namespace springtail::gc {
                     }
 
                     // move the request to the ready queue
-                    auto &&b = _backlog.find(*xid_i);
+                    auto &&b = _backlog.find({ db_id, *xid_i });
                     _ready.push_front(b->second.second);
                     _backlog.erase(b);
 
@@ -283,7 +306,8 @@ namespace springtail::gc {
                             // check all of the tables referenced by the truncate
                             // note: there may be multiple due to CASCADE
                             for (auto rel_id : truncate_msg.rel_ids) {
-                                blocked = _check_backlog(_state->entry->xid, rel_id, _state->entry->begin_path, offset);
+                                blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
+                                                         rel_id, _state->entry->begin_path, offset);
                                 if (blocked) {
                                     break;
                                 }
@@ -305,8 +329,8 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
-                                                 _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
+                                                 table_msg.oid, _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
                             XidLsn xid(_state->entry->xid, _state->lsn);
@@ -326,8 +350,8 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->xid, table_msg.oid,
-                                                 _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
+                                                 table_msg.oid, _state->entry->begin_path, offset);
                         if (!blocked) {
                             // XXX need to stall the pipeline in some cases, eg type change
 
@@ -346,8 +370,8 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->xid, drop_msg.oid,
-                                                 _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
+                                                 drop_msg.oid, _state->entry->begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
                             XidLsn xid(_state->entry->xid, _state->lsn);
@@ -405,11 +429,11 @@ namespace springtail::gc {
                 _state->mutation_count->wait();
 
                 // XXX notify the ExtentMapper that the XID has been fully processed
-                //     note: we would only do this if the FDW supports roll-forward
+                //     note: we would only do this if the FDW supports roll-forward of uncommited XIDs
                 // write_cache->set_lookup();
 
                 // clear the dependencies and commit the entry in the Redis queue
-                _backlog->clear_dep(_state->entry->xid);
+                _backlog->clear_dep(_state->entry->db_id, _state->entry->xid);
                 _pg_queue.commit(_worker_id);
 
                 _gc_queue.push(XidReady(_state->entry->db_id, _state->entry->xid));
@@ -439,7 +463,8 @@ namespace springtail::gc {
     }
 
     bool
-    LogParser::Reader::_check_backlog(uint64_t xid,
+    LogParser::Reader::_check_backlog(uint64_t db_id,
+                                      uint64_t xid,
                                       uint64_t oid,
                                       const std::filesystem::path &file,
                                       uint64_t offset)
@@ -447,12 +472,12 @@ namespace springtail::gc {
         // if the mutation involves a table with a schema change in an earlier XID, then we
         // place this XID into the backlog to be picked back up later after the schema
         // change has been applied.
-        if (_backlog->check(xid, oid)) {
+        if (_backlog->check(db_id, oid, xid)) {
             // halt processing this XID until earlier schema changes have been applied
             _state->entry->begin_path = file;
             _state->entry->begin_offset = _reader.offset();
 
-            _backlog->push(xid, oid, _state);
+            _backlog->push(db_id, oid, xid, _state);
             return true;
         }
 
@@ -473,7 +498,7 @@ namespace springtail::gc {
         }
 
         // check if we need to block for schema changes
-        if (_check_backlog(xid, rel_id, file, offset)) {
+        if (_check_backlog(_state->entry->db_id, xid, rel_id, file, offset)) {
             return true;
         }
 

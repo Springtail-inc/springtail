@@ -227,9 +227,29 @@ namespace springtail {
     {
         uint64_t xid = xact->springtail_xid;
 
+        // find the correct RedisSortedSet
+        RSSOidValuePtr oid_set;
+        {
+            std::scoped_lock lock(_oid_set_mutex);
+
+            auto set_i = _oid_set.find(_db_id);
+            if (set_i == _oid_set.end()) {
+                // construct one if it doesn't exist
+                std::string key = fmt::format(redis::SET_PG_OID_XIDS, _db_id);
+                oid_set = std::make_shared<RSSOidValue>(key);
+
+                auto result = _oid_set.emplace(_db_id, oid_set);
+                if (!result.second) {
+                    throw Error();
+                }
+            } else {
+                oid_set = set_i->second;
+            }
+        }
+
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            _oid_set.add(PgRedisOidValue(oid, xid), xid);
+            oid_set->add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC

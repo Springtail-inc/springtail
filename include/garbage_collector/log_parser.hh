@@ -48,7 +48,7 @@ namespace springtail::gc {
             : _readers(reader_count),
               _parsers(parser_count)
         {
-            _backlog = std::make_shared<Backlog>(redis::SET_PG_OID_XIDS);
+            _backlog = std::make_shared<Backlog>();
             _parser_queue = std::make_shared<ParserQueue>();
 
             for (auto &reader : _readers) {
@@ -121,10 +121,6 @@ namespace springtail::gc {
          */
         class Backlog {
         public:
-            explicit Backlog(const std::string &redis_key)
-                : _oid_set(redis_key)
-            { }
-
             /**
              * Checks if the backlog is empty.
              * @return true if the backlog is empty, false otherwise
@@ -132,21 +128,33 @@ namespace springtail::gc {
             bool empty() const;
 
             /**
+             * Add a database to the set of tracked databases.
+             */
+            void add_db(uint64_t db_id);
+
+            /**
+             * Remove a database from the set of tracked databases.
+             */
+            void remove_db(uint64_t db_id);
+
+            /**
              * Checks if the given XID should block when mutating the given table OID.
-             * @param xid The XID of this request.
+             * @param db_id The DB of the table this request is accessing.
              * @param oid The OID of the table this request is accessing.
+             * @param xid The XID of this request.
              * @return true if the request should block, false otherwise.
              */
-            bool check(uint64_t xid, uint64_t oid);
+            bool check(uint64_t db_id, uint64_t oid, uint64_t xid);
 
             /**
              * Adds the blocked request to the backlog.  Indicates which XID it is, which OID it's
              * blocked on, and the request details.
-             * @param xid The XID of this request.
+             * @param db_id The DB this XID is blocking on.
              * @param oid The OID this XID is blocking on.
+             * @param xid The XID of this request.
              * @param entry The request details.
              */
-            void push(uint64_t xid, uint64_t oid, StatePtr entry);
+            void push(uint64_t db_id, uint64_t oid, uint64_t xid, StatePtr entry);
 
             /**
              * Retreives a request that was previously blocked but is no longer blocked.
@@ -161,11 +169,15 @@ namespace springtail::gc {
 
             /**
              * Clears any requests blocked on the provided XID.
+             * @param db_id The DB of the XID that completed.
              * @param xid The XID that completed, allowing other blocked requests to proceed.
              */
-            void clear_dep(uint64_t xid);
+            void clear_dep(uint64_t db_id, uint64_t xid);
 
         private:
+            using DbXid = std::pair<uint64_t, uint64_t>;
+            using DbOid = std::pair<uint64_t, uint64_t>;
+
             /** Guard on access to the members. */
             mutable boost::shared_mutex _mutex;
 
@@ -173,24 +185,24 @@ namespace springtail::gc {
             std::list<StatePtr> _ready;
 
             /** Map of blocked XIDs -- XID -> <OID, Request> */
-            std::map<uint64_t, std::pair<uint64_t, StatePtr>> _backlog;
+            std::map<DbXid, std::pair<uint64_t, StatePtr>> _backlog;
 
             /** Map from a given table OID to the set of blocked XIDs. */
-            std::map<uint64_t, std::set<uint64_t>> _oid_backlog;
+            std::map<DbOid, std::set<uint64_t>> _oid_backlog;
 
             /** Map of table dependencies -- OID -> <ordered set of XIDs> */
-            std::map<uint64_t, std::set<uint64_t>> _table_deps;
+            std::map<DbOid, std::set<uint64_t>> _table_deps;
 
             /** Map of XID to the OIDs it modifies for removing dependencies. */
-            std::map<uint64_t, std::set<uint64_t>> _xid_map;
+            std::map<DbXid, std::set<uint64_t>> _xid_map;
 
-            /** The last XID that was requested from Redis. */
-            uint64_t _last_requested_xid;
+            /** The last XID that was requested from Redis for each DB. */
+            std::map<uint64_t, uint64_t> _last_requested_xid;
 
-            /** The interface to Redis to retrieve the table dependencies. */
-            RedisSortedSet<PgRedisOidValue> _oid_set;
+            /** The interface to Redis to retrieve the table dependencies for each DB. */
+            std::map<uint64_t, RSSOidValue> _oid_set;
         };
-        typedef std::shared_ptr<Backlog> BacklogPtr;
+        using BacklogPtr = std::shared_ptr<Backlog>;
 
 
         /** A message from a Reader to a Parser. */
@@ -256,7 +268,8 @@ namespace springtail::gc {
              *
              * @return Returns true if the XID was blocked, false otherwise.
              */
-            bool _check_backlog(uint64_t xid, uint64_t oid, const std::filesystem::path &file, uint64_t offset);
+            bool _check_backlog(uint64_t db_id, uint64_t xid, uint64_t oid,
+                                const std::filesystem::path &file, uint64_t offset);
 
             /**
              * Process a mutation message (insert, update, delete, truncate).  If the mutation

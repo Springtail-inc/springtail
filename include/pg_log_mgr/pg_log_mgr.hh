@@ -70,8 +70,7 @@ namespace springtail {
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
-          _oid_set(redis::SET_PG_OID_XIDS)
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
         {}
 
         /**
@@ -84,8 +83,7 @@ namespace springtail {
         : _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
-          _oid_set(redis::SET_PG_OID_XIDS)
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -161,7 +159,10 @@ namespace springtail {
         uint64_t _next_xid=0;                 ///< next xid in xid range
 
         RedisQueue<PgRedisXactValue> _redis_queue; ///< redis queue for GC
-        RedisSortedSet<PgRedisOidValue> _oid_set;  ///< redis sorted set for oid to xid mapping
+
+        /** Redis sorted set for oid to xid mapping */
+        std::mutex _oid_set_mutex;
+        std::map<uint64_t, RSSOidValuePtr> _oid_set;
 
         /** transaction worker -- thread fn */
         void _xact_handler_thread();
