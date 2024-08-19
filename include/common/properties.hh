@@ -26,6 +26,8 @@ namespace springtail {
         static inline constexpr char LOGGING_CONFIG[] = "logging";
         /** SysTbl mgr section */
         static inline constexpr char SYS_TBL_MGR_CONFIG[] = "sys_tbl_mgr";
+        /** Log mgr section */
+        static inline constexpr char LOG_MGR_CONFIG[] = "log_mgr";
         /** Org configuration section */
         static inline constexpr char ORG_CONFIG[] = "org";
         /** FS configuration section */
@@ -82,6 +84,12 @@ namespace springtail {
 
         /** Helper to get set of FDW ids from Redis */
         static std::vector<std::string> get_fdw_ids();
+
+        /** Helper to get db config for given database */
+        static nlohmann::json get_db_config(uint64_t db_id);
+
+        /** Helper to get primary db json for current db instance */
+        static nlohmann::json get_primary_db_config();
 
     private:
         /** static _instance singleton */

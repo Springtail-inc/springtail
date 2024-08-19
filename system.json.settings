@@ -59,6 +59,10 @@
     "storage": {
         "table_dir": "table"
     },
+    "log_mgr": {
+        "replication_log_path": "repl_logs",
+        "transaction_log_path": "xact_logs"
+    },
     "fs": {
         "mount_point": "/tmp/springtail",
         "mount_name": null,
@@ -72,8 +76,12 @@
     },
     "db_instances": {
         "1234": {
-            "primary_db_hostname": "localhost",
-            "primary_db_port": 5432,
+            "primary_db": {
+                "host": "localhost",
+                "port": 5432,
+                "replication_user": "postgres",
+                "password": "postgres"
+            }
             "database_ids": [1]
         }
     },
@@ -94,7 +102,7 @@
         "1": {
             "host": "localhost",
             "port": 8888,
-            "user": "postgres",
+            "fdw_user": "postgres",
             "password": "postgres"
         }
     }

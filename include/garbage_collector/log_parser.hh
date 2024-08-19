@@ -96,13 +96,13 @@ namespace springtail::gc {
 
         /** Holds the state for processing an XID. */
         struct State {
-            std::shared_ptr<PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
+            std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
             bool process_as_stream; ///< True if the XID is in STREAM mode.
             CounterPtr mutation_count; ///< The number of mutations outstanding to the parsers.
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            explicit State(std::shared_ptr<PgRedisXactValue> entry)
+            explicit State(std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry)
                 : entry(entry),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
@@ -190,7 +190,7 @@ namespace springtail::gc {
             std::map<uint64_t, uint64_t> _last_requested_xid;
 
             /** The interface to Redis to retrieve the table dependencies for each DB. */
-            std::map<uint64_t, RSSOidValue> _oid_set;
+            std::map<uint64_t, pg_log_mgr::RSSOidValue> _oid_set;
         };
         using BacklogPtr = std::shared_ptr<Backlog>;
 
@@ -295,7 +295,7 @@ namespace springtail::gc {
             bool _shutdown;
 
             /** Queue for XID messages from the PG log manager. */
-            RedisQueue<PgRedisXactValue> _pg_queue;
+            RedisQueue<pg_log_mgr::PgRedisXactValue> _pg_queue;
 
             /** Queue for XID messages to the GC committer. */
             RedisQueue<XidReady> _gc_queue;
@@ -338,7 +338,7 @@ namespace springtail::gc {
         protected:
             /**
              * Packs the provided Postgres tuple into an Extent with a single row containing the data.
-             * 
+             *
              */
             std::shared_ptr<MutableTuple> _pack_extent(ExtentPtr extent, const PgMsgTupleData &data,
                                                        ExtentSchemaPtr schema);

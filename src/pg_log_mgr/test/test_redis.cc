@@ -8,6 +8,7 @@
 #include <pg_log_mgr/pg_redis_xact.hh>
 
 using namespace springtail;
+using namespace springtail::pg_log_mgr;
 
 namespace {
 

@@ -15,7 +15,7 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
 
     // XXX make sure GC is shutdown -- assume it for now
     void
@@ -259,4 +259,4 @@ namespace springtail {
         // XXX need to add customer ID
         _redis_queue.push(redis_xact);
     }
-}
+} // namespace springtail::pg_log_mgr

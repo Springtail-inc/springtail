@@ -45,8 +45,7 @@ db_instance_key = 'instance_config:' + str(db_instance_id)
 r.hset(db_instance_key, 'id', db_instance_id)
 
 db_instance_json = system_json['db_instances'][str(db_instance_id)]
-r.hset(db_instance_key, 'primary_db_hostname', db_instance_json['primary_db_hostname'])
-r.hset(db_instance_key, 'primary_db_port', db_instance_json['primary_db_port'])
+r.hset(db_instance_key, 'primary_db', json.dumps(db_instance_json['primary_db']))
 
 db_ids = json.dumps(db_instance_json['database_ids'])
 r.hset(db_instance_key, 'database_ids', db_ids)
@@ -59,6 +58,7 @@ sys_config_json['write_cache'] = system_json['write_cache']
 sys_config_json['xid_mgr'] = system_json['xid_mgr']
 sys_config_json['storage'] = system_json['storage']
 sys_config_json['redis'] = system_json['redis']
+sys_config_json['log_mgr'] = system_json['log_mgr']
 
 r.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

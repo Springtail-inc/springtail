@@ -5,6 +5,7 @@
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
 using namespace springtail;
+using namespace springtail::pg_log_mgr;
 
 namespace {
     class XactLogRW_Test : public testing::Test {

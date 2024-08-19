@@ -97,7 +97,7 @@ print(db_schemas)
 fdw = json.loads(r.hget('fdw:' + str(db_instance_id), fdw_id))
 
 # create databases first
-conn = psycopg2.connect(dbname='postgres', user=fdw['user'], password=fdw['password'], host='localhost', port=['port'])
+conn = psycopg2.connect(dbname='postgres', user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=['port'])
 for db_name in db_schemas:
     execute_sql(conn, "CREATE DATABASE IF NOT EXISTS %s;", (db_name))
 
@@ -108,7 +108,7 @@ print(f"Using xid: {xid}")
 
 # connect to database
 for db_name in db_schemas.keys():
-    conn = psycopg2.connect(dbname=dbname, user=fdw['user'], password=fdw['password'], host='localhost', port=['port'])
+    conn = psycopg2.connect(dbname=dbname, user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=['port'])
 
     # generate the create server and import foreign schema commands
     db_json = db_schemas[db_name]

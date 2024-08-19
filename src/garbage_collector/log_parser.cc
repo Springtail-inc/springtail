@@ -87,7 +87,7 @@ namespace springtail::gc {
         auto set_i = _oid_set.find(db_id);
         if (set_i == _oid_set.end()) {
             std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
-            auto res = _oid_set.emplace(db_id, RSSOidValue(key));
+            auto res = _oid_set.emplace(db_id, pg_log_mgr::RSSOidValue(key));
             if (!res.second) {
                 throw Error();
             }
@@ -403,8 +403,8 @@ namespace springtail::gc {
                 } else {
                     // XXX how to get the next file?
                     _state->entry->begin_path = fs::get_next_file(_state->entry->begin_path,
-                                                                  PgLogMgr::LOG_PREFIX_REPL,
-                                                                  PgLogMgr::LOG_SUFFIX);
+                                                                  pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
+                                                                  pg_log_mgr::PgLogMgr::LOG_SUFFIX);
                     begin_offset = 0;
                     commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
                         ? _state->entry->commit_offset

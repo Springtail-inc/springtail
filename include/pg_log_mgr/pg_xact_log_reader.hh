@@ -8,7 +8,10 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
+    /**
+     * @brief Postgres transaction log reader
+     */
     class PgXactLogReader {
     public:
         /**
@@ -89,4 +92,4 @@ namespace springtail {
         /** Open file */
         void _open(const std::filesystem::path &path);
     };
-}
+} // namespace springtail::pg_log_mgr

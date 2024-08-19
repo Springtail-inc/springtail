@@ -10,7 +10,7 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Does minimal parsing
      * to extract begin and commit messages.  Queues those begin/commit messages to a
@@ -72,4 +72,4 @@ namespace springtail {
         /** Process ddl change message; add oid to xact oid set */
         void _process_ddl(uint32_t oid, int32_t xid, bool is_streaming);
     };
-}
+} // namespace springtail::pg_log_mgr

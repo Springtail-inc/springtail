@@ -12,7 +12,7 @@
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
 
     void
     PgXactLogReader::scan_file(const std::filesystem::path &file, uint64_t committed_xid)
@@ -219,4 +219,4 @@ namespace springtail {
 
         return;
     }
-}
+} // namespace springtail::pg_log_mgr

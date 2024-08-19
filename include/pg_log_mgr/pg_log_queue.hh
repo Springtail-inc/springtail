@@ -6,7 +6,7 @@
 
 #include <common/concurrent_queue.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
     /**
      * @brief Queue Entry, encodes start/end offset and filename,
      *        plus number of messages covered by offset range
@@ -52,4 +52,4 @@ namespace springtail {
             _internal_push(new_entry, write_lock);
         }
     };
-}
+} // namespace springtail::pg_log_mgr

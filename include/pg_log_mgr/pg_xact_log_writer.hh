@@ -7,7 +7,11 @@
 
 #include <pg_repl/pg_repl_msg.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
+
+    /**
+     * @brief Postgres transaction log writer
+     */
     class PgXactLogWriter {
     public:
         static constexpr int PG_XLOG_MIN_FSYNC_MS = 50;

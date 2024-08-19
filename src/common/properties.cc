@@ -217,8 +217,8 @@ namespace springtail {
         return dbnames;
     }
 
-    std::string
-    Properties::get_db_name(uint64_t db_id)
+    nlohmann::json
+    Properties::get_db_config(uint64_t db_id)
     {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
@@ -232,7 +232,13 @@ namespace springtail {
         }
 
         // convert to json
-        nlohmann::json db_config = nlohmann::json::parse(db_config_str.value());
+        return nlohmann::json::parse(db_config_str.value());
+    }
+
+    std::string
+    Properties::get_db_name(uint64_t db_id)
+    {
+        nlohmann::json db_config = get_db_config(db_id);
         assert (db_config.contains("name"));
 
         return db_config["name"];
@@ -252,6 +258,24 @@ namespace springtail {
         redis->hkeys(fdw_key, std::back_inserter(fdw_ids));
 
         return fdw_ids;
+    }
+
+    nlohmann::json
+    Properties::get_primary_db_config()
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = Properties::get_db_instance_id();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+        std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, db_instance_id);
+        std::optional<std::string> db_instance_str = redis->hget(db_instance_key, "primary_db");
+        if (!db_instance_str.has_value()) {
+            throw Error("Error missing db_instance_id in redis");
+        }
+
+        // convert to json
+        return nlohmann::json::parse(db_instance_str.value());
     }
 
     void

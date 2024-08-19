@@ -26,6 +26,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/guc.h"
+#include "utils/builtins.h"
 
 PG_MODULE_MAGIC;
 

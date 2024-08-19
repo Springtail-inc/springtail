@@ -8,7 +8,7 @@
 #include <pg_log_mgr/pg_log_writer.hh>
 
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
 
     PgLogWriter::PgLogWriter(const std::filesystem::path &file,
                              std::function<void (uint64_t)> lsn_callback_fn)
@@ -125,4 +125,4 @@ namespace springtail {
 
         return false;
     }
-}
+} // namespace springtail::pg_log_mgr

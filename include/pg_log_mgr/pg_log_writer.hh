@@ -13,7 +13,7 @@
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_msg_stream.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
     /**
      * Postgres log writer class.  Receives data from Pg replication stream in messages.
      * A message may contain multiple Postgres operations.  A header is written for each
@@ -125,4 +125,4 @@ namespace springtail {
         }
     };
     using PgLogWriterPtr = std::shared_ptr<PgLogWriter>;
-}
+} // namespace springtail::pg_log_mgr
