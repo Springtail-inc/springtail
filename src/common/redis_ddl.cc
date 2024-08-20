@@ -10,7 +10,8 @@ namespace springtail {
                       uint64_t xid,
                       const std::string &ddl)
     {
-        std::string key = fmt::format(redis::QUEUE_DDL_XID, db_id, xid);
+        std::string key = fmt::format(redis::QUEUE_DDL_XID,
+                                      Properties::get_db_instance_id(), db_id, xid);
 
         // RPUSH ddl_queue:xid ddl
         _redis->rpush(key, ddl);
@@ -20,7 +21,8 @@ namespace springtail {
     RedisDDL::get_ddls_xid(uint64_t db_id,
                            uint64_t xid)
     {
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID, db_id, xid);
+        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
+                                          Properties::get_db_instance_id(), db_id, xid);
 
         // retrieve the list of DDL operations for this XID
         std::vector<std::string> values;

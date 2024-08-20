@@ -12,9 +12,9 @@ namespace springtail::redis {
      * Populated by the PgLogMgr and utilized by the gc::LogParser::Backlog.
      * There is one sorted set maintained per database.
      *
-     * args: <db_id>
+     * args: <db_inst_id>, <db_id>
      */
-    static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids:{}";
+    static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids:{}:{}";
 
     static constexpr char QUEUE_GC_XID_READY[] = "queue:gc_xid_ready:";
 
@@ -31,8 +31,8 @@ namespace springtail::redis {
 
     //// For RedisDDL
 
-    // args: <db_id>, <xid>
-    static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}";
+    // args: <db_inst_id>, <db_id>, <xid>
+    static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}:{}";
 
     // args: <db_instance_id>, <fdw_id>
     static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}:{}";

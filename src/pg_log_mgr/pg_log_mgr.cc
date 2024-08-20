@@ -235,7 +235,8 @@ namespace springtail::pg_log_mgr {
             auto set_i = _oid_set.find(_db_id);
             if (set_i == _oid_set.end()) {
                 // construct one if it doesn't exist
-                std::string key = fmt::format(redis::SET_PG_OID_XIDS, _db_id);
+                std::string key = fmt::format(redis::SET_PG_OID_XIDS,
+                                              Properties::get_db_instance_id(), _db_id);
                 oid_set = std::make_shared<RSSOidValue>(key);
 
                 auto result = _oid_set.emplace(_db_id, oid_set);

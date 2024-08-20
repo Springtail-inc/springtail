@@ -86,7 +86,8 @@ namespace springtail::gc {
 
         auto set_i = _oid_set.find(db_id);
         if (set_i == _oid_set.end()) {
-            std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
+            std::string key = fmt::format(redis::SET_PG_OID_XIDS,
+                                          Properties::get_db_instance_id(), db_id);
             auto res = _oid_set.emplace(db_id, pg_log_mgr::RSSOidValue(key));
             if (!res.second) {
                 throw Error();

@@ -159,7 +159,8 @@ namespace springtail::gc {
             _redis.commit(_worker_id);
 
             // clear the DDL dependency data from the redis SortedSet
-            std::string key = fmt::format(redis::SET_PG_OID_XIDS, db_id);
+            std::string key = fmt::format(redis::SET_PG_OID_XIDS,
+                                          Properties::get_db_instance_id(), db_id);
             pg_log_mgr::RSSOidValue set(key);
             set.remove_by_score(0, xid);
         }
