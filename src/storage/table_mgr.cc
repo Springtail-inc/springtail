@@ -47,30 +47,32 @@ namespace springtail {
     }
 
     TablePtr
-    TableMgr::get_table(uint64_t table_id,
+    TableMgr::get_table(uint64_t db_id,
+                        uint64_t table_id,
                         uint64_t xid,
                         uint64_t lsn)
     {
         boost::shared_lock lock(_mutex);
 
         // check the system tables
-        auto table = _get_system_table(table_id, xid);
+        auto table = _get_system_table(db_id, table_id, xid);
         if (table != nullptr) {
             return table;
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(table_id, xid);
+        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
 
         // construct the table and return it
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, {xid, lsn});
-        return std::make_shared<Table>(table_id, xid, _table_base / fmt::format("{}", table_id),
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, {xid, lsn});
+        return std::make_shared<Table>(db_id, table_id, xid, _table_base / std::to_string(db_id) / std::to_string(table_id),
                                        schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
                                        tbl_meta.roots, schema, tbl_meta.stats);
     }
 
     MutableTablePtr
-    TableMgr::get_mutable_table(uint64_t table_id,
+    TableMgr::get_mutable_table(uint64_t db_id,
+                                uint64_t table_id,
                                 uint64_t access_xid,
                                 uint64_t target_xid,
                                 bool for_gc)
@@ -78,54 +80,59 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // check the system tables
-        auto table = _get_mutable_system_table(table_id, access_xid, target_xid);
+        auto table = _get_mutable_system_table(db_id, table_id, access_xid, target_xid);
         if (table != nullptr) {
             return table;
         }
 
         // retrieve the roots and stats of the table
-        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(table_id, access_xid);
+        auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, access_xid);
 
         // construct the mutable table and return it
         XidLsn xid(access_xid);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(table_id, xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
-        return std::make_shared<MutableTable>(table_id, access_xid, target_xid, tbl_meta.roots,
-                                              _table_base / fmt::format("{}", table_id),
+        return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, tbl_meta.roots,
+                                              _table_base / std::to_string(db_id) / std::to_string(table_id),
                                               schema->get_sort_keys(),
                                               std::vector<std::vector<std::string>>{},
                                               schema, tbl_meta.stats, for_gc);
     }
 
     void
-    TableMgr::create_table(const XidLsn &xid,
+    TableMgr::create_table(uint64_t db_id,
+                           const XidLsn &xid,
                            const PgMsgTable &msg)
     {
-        sys_tbl_mgr::Client::get_instance()->create_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->create_table(db_id, xid, msg);
     }
 
     void
-    TableMgr::alter_table(const XidLsn &xid,
+    TableMgr::alter_table(uint64_t db_id,
+                          const XidLsn &xid,
                           const PgMsgTable &msg)
     {
-        sys_tbl_mgr::Client::get_instance()->alter_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->alter_table(db_id, xid, msg);
     }
 
     void
-    TableMgr::drop_table(const XidLsn &xid,
+    TableMgr::drop_table(uint64_t db_id,
+                         const XidLsn &xid,
                          const PgMsgDropTable &msg)
     {
-        sys_tbl_mgr::Client::get_instance()->drop_table(xid, msg);
+        sys_tbl_mgr::Client::get_instance()->drop_table(db_id, xid, msg);
     }
 
     void
-    TableMgr::finalize_metadata(uint64_t xid)
+    TableMgr::finalize_metadata(uint64_t db_id,
+                                uint64_t xid)
     {
-        sys_tbl_mgr::Client::get_instance()->finalize(xid);
+        sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
     }
 
     TablePtr
-    TableMgr::_get_system_table(uint64_t table_id,
+    TableMgr::_get_system_table(uint64_t db_id,
+                                uint64_t table_id,
                                 uint64_t xid)
     {
         // initialize the system tables using the look-aside root files
@@ -139,10 +146,11 @@ namespace springtail {
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
             secondary_keys.push_back(sys_tbl::TableNames::Secondary::KEY);
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID, access_xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableNames::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableNames::ID, access_xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableNames::ID);
 
-            return std::make_shared<Table>(sys_tbl::TableNames::ID,
+            return std::make_shared<Table>(db_id,
+                                           sys_tbl::TableNames::ID,
                                            xid,
                                            table_path,
                                            sys_tbl::TableNames::Primary::KEY,
@@ -152,10 +160,11 @@ namespace springtail {
                                            TableStats());
         }
         case (sys_tbl::TableRoots::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, access_xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableRoots::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableRoots::ID, access_xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableRoots::ID);
 
-            return std::make_shared<Table>(sys_tbl::TableRoots::ID,
+            return std::make_shared<Table>(db_id,
+                                           sys_tbl::TableRoots::ID,
                                            xid,
                                            table_path,
                                            sys_tbl::TableRoots::Primary::KEY,
@@ -165,10 +174,11 @@ namespace springtail {
                                            TableStats());
         }
         case (sys_tbl::Indexes::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, access_xid);
-            table_path = _table_base / std::to_string(sys_tbl::Indexes::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::Indexes::ID, access_xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::Indexes::ID);
 
-            return std::make_shared<Table>(sys_tbl::Indexes::ID,
+            return std::make_shared<Table>(db_id,
+                                           sys_tbl::Indexes::ID,
                                            xid,
                                            table_path,
                                            sys_tbl::Indexes::Primary::KEY,
@@ -178,10 +188,11 @@ namespace springtail {
                                            TableStats());
         }
         case (sys_tbl::Schemas::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, access_xid);
-            table_path = _table_base / std::to_string(sys_tbl::Schemas::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::Schemas::ID, access_xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::Schemas::ID);
 
-            return std::make_shared<Table>(sys_tbl::Schemas::ID,
+            return std::make_shared<Table>(db_id,
+                                           sys_tbl::Schemas::ID,
                                            xid,
                                            table_path,
                                            sys_tbl::Schemas::Primary::KEY,
@@ -191,10 +202,11 @@ namespace springtail {
                                            TableStats());
         }
         case (sys_tbl::TableStats::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID, access_xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableStats::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableStats::ID, access_xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableStats::ID);
 
-            return std::make_shared<Table>(sys_tbl::TableStats::ID,
+            return std::make_shared<Table>(db_id,
+                                           sys_tbl::TableStats::ID,
                                            xid,
                                            table_path,
                                            sys_tbl::TableStats::Primary::KEY,
@@ -209,16 +221,18 @@ namespace springtail {
     }
 
     void
-    TableMgr::update_roots(uint64_t table_id,
+    TableMgr::update_roots(uint64_t db_id,
+                           uint64_t table_id,
                            uint64_t target_xid,
                            const std::vector<uint64_t> &roots,
                            const TableStats &stats)
     {
-        sys_tbl_mgr::Client::get_instance()->update_roots(table_id, target_xid, roots, stats.row_count);
+        sys_tbl_mgr::Client::get_instance()->update_roots(db_id, table_id, target_xid, roots, stats.row_count);
     }
 
     MutableTablePtr
-    TableMgr::_get_mutable_system_table(uint64_t table_id,
+    TableMgr::_get_mutable_system_table(uint64_t db_id,
+                                        uint64_t table_id,
                                         uint64_t access_xid,
                                         uint64_t target_xid)
     {
@@ -236,10 +250,11 @@ namespace springtail {
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
             secondary_keys.push_back(sys_tbl::TableNames::Secondary::KEY);
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableNames::ID, xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableNames::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableNames::ID, xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableNames::ID);
 
-            sys_table = std::make_shared<MutableTable>(sys_tbl::TableNames::ID,
+            sys_table = std::make_shared<MutableTable>(db_id,
+                                                       sys_tbl::TableNames::ID,
                                                        access_xid,
                                                        target_xid,
                                                        roots,
@@ -251,10 +266,11 @@ namespace springtail {
             break;
         }
         case (sys_tbl::TableRoots::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableRoots::ID, xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableRoots::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableRoots::ID, xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableRoots::ID);
 
-            sys_table = std::make_shared<MutableTable>(sys_tbl::TableRoots::ID,
+            sys_table = std::make_shared<MutableTable>(db_id,
+                                                       sys_tbl::TableRoots::ID,
                                                        access_xid,
                                                        target_xid,
                                                        roots,
@@ -266,10 +282,11 @@ namespace springtail {
             break;
         }
         case (sys_tbl::Indexes::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Indexes::ID, xid);
-            table_path = _table_base / std::to_string(sys_tbl::Indexes::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::Indexes::ID, xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::Indexes::ID);
 
-            sys_table = std::make_shared<MutableTable>(sys_tbl::Indexes::ID,
+            sys_table = std::make_shared<MutableTable>(db_id,
+                                                       sys_tbl::Indexes::ID,
                                                        access_xid,
                                                        target_xid,
                                                        roots,
@@ -281,10 +298,11 @@ namespace springtail {
             break;
         }
         case (sys_tbl::Schemas::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::Schemas::ID, xid);
-            table_path = _table_base / std::to_string(sys_tbl::Schemas::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::Schemas::ID, xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::Schemas::ID);
 
-            sys_table = std::make_shared<MutableTable>(sys_tbl::Schemas::ID,
+            sys_table = std::make_shared<MutableTable>(db_id,
+                                                       sys_tbl::Schemas::ID,
                                                        access_xid,
                                                        target_xid,
                                                        roots,
@@ -296,10 +314,11 @@ namespace springtail {
             break;
         }
         case (sys_tbl::TableStats::ID): {
-            schema = SchemaMgr::get_instance()->get_extent_schema(sys_tbl::TableStats::ID, xid);
-            table_path = _table_base / std::to_string(sys_tbl::TableStats::ID);
+            schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableStats::ID, xid);
+            table_path = _table_base / std::to_string(db_id) / std::to_string(sys_tbl::TableStats::ID);
 
-            sys_table = std::make_shared<MutableTable>(sys_tbl::TableStats::ID,
+            sys_table = std::make_shared<MutableTable>(db_id,
+                                                       sys_tbl::TableStats::ID,
                                                        access_xid,
                                                        target_xid,
                                                        roots,

@@ -353,7 +353,7 @@ namespace springtail
     }
 
     int32_t
-    PgCopyTable::copy_to_springtail(const std::filesystem::path &base_dir,
+    PgCopyTable::copy_to_springtail(uint64_t db_id,
                                     uint64_t xid)
     {
         _get_table_oid();
@@ -374,10 +374,10 @@ namespace springtail
         // note: we create the system metadata at the previous XID
         // XXX need to fix this
         uint64_t access_xid = xid - 1;
-        TableMgr::get_instance()->create_table({ access_xid, 0 }, create_msg);
+        TableMgr::get_instance()->create_table(db_id, { access_xid, 0 }, create_msg);
 
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, XidLsn(access_xid));
-        auto table = TableMgr::get_instance()->get_mutable_table(_schema.table_oid, access_xid, xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, _schema.table_oid, XidLsn(access_xid));
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, _schema.table_oid, access_xid, xid);
 
         // start the COPY
         _prepare_copy();
@@ -422,7 +422,7 @@ namespace springtail
         auto roots = table->finalize();
 
         // store the roots into the system table
-        TableMgr::get_instance()->update_roots(_schema.table_oid, xid, roots, {});
+        TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid, roots, {});
 
         return _schema.table_oid;
     }

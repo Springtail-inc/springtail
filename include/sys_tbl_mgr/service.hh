@@ -88,7 +88,7 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The ID of the table.
          * @param xid The XID/LSN at which we are querying.
          */
-        TableInfoPtr _get_table_info(uint64_t table_id, const XidLsn &xid);
+        TableInfoPtr _get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Stores the TableInfo, performing a write-through in the cache and the system tables.  We
@@ -96,13 +96,13 @@ namespace springtail::sys_tbl_mgr {
          * from the cache is not evicted until _clear_table_info() is called.
          * @param table_info The metadata to update.
          */
-        void _set_table_info(TableInfoPtr table_info);
+        void _set_table_info(uint64_t db_id, TableInfoPtr table_info);
 
         /**
          * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
          * all committed to disk.
          */
-        void _clear_table_info();
+        void _clear_table_info(uint64_t db_id);
 
 
         // CACHE FOR ROOTS / STATS
@@ -115,7 +115,7 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The ID of the table.
          * @param xid The XID/LSN at which we are querying.
          */
-        RootsInfoPtr _get_roots_info(uint64_t table_id, const XidLsn &xid);
+        RootsInfoPtr _get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Stores the RootsInfo, performing a write-through in the cache and the system tables.  We
@@ -123,13 +123,13 @@ namespace springtail::sys_tbl_mgr {
          * from the cache is not evicted until _clear_roots_info() is called.
          * @param table_info The metadata to update.
          */
-        void _set_roots_info(uint64_t table_id, const XidLsn &xid, RootsInfoPtr roots_info);
+        void _set_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid, RootsInfoPtr roots_info);
 
         /**
          * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
          * all committed to disk.
          */
-        void _clear_roots_info();
+        void _clear_roots_info(uint64_t db_id);
 
 
         // CACHE FOR SCHEMA
@@ -143,7 +143,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are querying.
          * @param target_xid The XID/LSN up to which we should return a history of changes from the access_xid.
          */
-        SchemaInfoPtr _get_schema_info(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        SchemaInfoPtr _get_schema_info(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Records the provided column data, performing a write-through in the cache and the system
@@ -153,20 +153,20 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table that the schema is for.
          * @param columns The set of column data to record.
          */
-        void _set_schema_info(uint64_t table_id, const std::vector<ColumnHistory> &columns);
+        void _set_schema_info(uint64_t db_id, uint64_t table_id, const std::vector<ColumnHistory> &columns);
 
         /**
          * Clears the cache of schema data.  Called by finalize() once the system tables are
          * all committed to disk.
          */
-        void _clear_schema_info();
+        void _clear_schema_info(uint64_t db_id);
 
         /**
          * Helper function to read the full set of columns for a table from the on-disk system tables.
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t table_id, const XidLsn &access_xid);
+        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to apply any in-memory changes to the schema columns that might be
@@ -176,7 +176,7 @@ namespace springtail::sys_tbl_mgr {
          * @param columns A set of columns already constructed by calling _read_schema_columns()
          *                that will be updated by this function.
          */
-        void _apply_schema_cache_history(uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
+        void _apply_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -185,7 +185,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _read_schema_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        std::vector<ColumnHistory> _read_schema_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -195,7 +195,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to extract a change entry for a schema by comparing the old and new
@@ -216,13 +216,13 @@ namespace springtail::sys_tbl_mgr {
          * Retrieves a read-only Table interface for a given system table.
          * @param table_id The ID of the system table.
          */
-        TablePtr _get_system_table(uint64_t table_id);
+        TablePtr _get_system_table(uint64_t db_id, uint64_t table_id);
 
         /**
          * Retrieves a write-only MutableTable interface for a given system table.
          * @param table_id The ID of the system table.
          */
-        MutableTablePtr _get_mutable_system_table(uint64_t table_id);
+        MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id);
 
 
         // VARIABLES
@@ -252,29 +252,40 @@ namespace springtail::sys_tbl_mgr {
         uint64_t _target_xid;
 
         /** The read-only interface for the system tables to service get requests. */
-        std::map<uint64_t, TablePtr> _read;
+        std::map<uint64_t, std::map<uint64_t, TablePtr>> _read;
 
         /** The write-only interface for the system tables to service mutations. */
-        std::map<uint64_t, MutableTablePtr> _write;
+        std::map<uint64_t, std::map<uint64_t, MutableTablePtr>> _write;
 
         /**
          * Cache of unapplied table info changes.
-         * Stored as a map of Table ID -> XID/LSN (in reverse order) -> TableInfo
+         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> TableInfo
          */
-        std::map<uint64_t, std::map<XidLsn, TableInfoPtr, std::greater<XidLsn>>> _table_cache;
+        std::map<uint64_t,
+                 std::map<uint64_t,
+                          std::map<XidLsn,
+                                   TableInfoPtr,
+                                   std::greater<XidLsn>>>> _table_cache;
 
         /**
          * Cache of unapplied table roots/stats changes.
-         * Stored as a map of Table ID -> XID/LSN (in reverse order) -> RootsInfo
+         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> RootsInfo
          */
-        std::map<uint64_t, std::map<XidLsn, RootsInfoPtr, std::greater<XidLsn>>> _roots_cache;
+        std::map<uint64_t,
+                 std::map<uint64_t,
+                          std::map<XidLsn,
+                                   RootsInfoPtr,
+                                   std::greater<XidLsn>>>> _roots_cache;
 
         /**
          * Cache of unapplied schema changes.
-         * Stored as a map of Table ID -> Column ID -> vector<ColumnHistory> (in ascending XID/LSN order)
+         * Stored as a map of DB -> Table ID -> Column ID -> vector<ColumnHistory> (in ascending XID/LSN order)
          * Using vector because there may be multiple entries at the same XID/LSN on table create.
          */
-        std::map<uint64_t, std::map<uint32_t, std::vector<ColumnHistory>>> _schema_cache;
+        std::map<uint64_t,
+                 std::map<uint64_t,
+                          std::map<uint32_t,
+                                   std::vector<ColumnHistory>>>> _schema_cache;
     };
 
 

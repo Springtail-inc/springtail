@@ -30,7 +30,7 @@ namespace springtail {
          * Retrieve the column metadata for a given table at a given XID/LSN.
          * Map from column ID/column position to column metadata.
          */
-        std::map<uint32_t, SchemaColumn> get_columns(uint64_t table_id, const XidLsn &xid);
+        std::map<uint32_t, SchemaColumn> get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Retrieve the schema for a given table at a given point in time.
@@ -39,7 +39,7 @@ namespace springtail {
          * @param target_xid The XID that the query is executing at.
          * @param lsn An optional LSN (logical sequence number) which tells you which schema changes within a given XID to apply up through.
          */
-        std::shared_ptr<Schema> get_schema(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        std::shared_ptr<Schema> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Retrieve an ExtentSchema for a given table at a given XID that can be used for writing /
@@ -51,7 +51,7 @@ namespace springtail {
          * @param lsn The LSN that we need the schema at.  Defaults to the MAX_LSN, providing the
          *            schema at the point after all changes in the XID have been applied.
          */
-        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t table_id, const XidLsn &xid);
+        std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
     protected:
         static SchemaMgr *_instance; ///< static instance (singleton)

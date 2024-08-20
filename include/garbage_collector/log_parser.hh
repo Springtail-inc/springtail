@@ -202,9 +202,10 @@ namespace springtail::gc {
             uint64_t xid;
             uint64_t lsn;
             uint64_t table_id;
+            uint64_t db_id;
 
-            ParserEntry(PgMsgPtr msg, CounterPtr counter, uint64_t xid, uint64_t lsn, uint64_t table_id)
-                : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id)
+            ParserEntry(PgMsgPtr msg, CounterPtr counter, uint64_t xid, uint64_t lsn, uint64_t table_id, uint64_t db_id)
+                : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id), db_id(db_id)
             { }
         };
 

@@ -12,7 +12,8 @@ namespace springtail {
         };
     }
 
-    Table::Table(uint64_t table_id,
+    Table::Table(uint64_t db_id,
+                 uint64_t table_id,
                  uint64_t xid,
                  const std::filesystem::path &table_dir,
                  const std::vector<std::string> &primary_key,
@@ -20,7 +21,8 @@ namespace springtail {
                  std::vector<uint64_t> root_offsets,
                  ExtentSchemaPtr schema,
                  const TableStats &stats)
-        : _id(table_id),
+        : _db_id(db_id),
+          _id(table_id),
           _xid(xid),
           _table_dir(table_dir),
           _primary_key(primary_key),
@@ -110,13 +112,13 @@ namespace springtail {
     ExtentSchemaPtr
     Table::extent_schema() const
     {
-        return SchemaMgr::get_instance()->get_extent_schema(_id, XidLsn(_xid));
+        return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
     }
 
     SchemaPtr
     Table::schema(uint64_t extent_xid) const
     {
-        return SchemaMgr::get_instance()->get_schema(_id, XidLsn(extent_xid), XidLsn(_xid));
+        return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
     }
 
     Table::Iterator
@@ -222,7 +224,8 @@ namespace springtail {
     }
 
 
-    MutableTable::MutableTable(uint64_t id,
+    MutableTable::MutableTable(uint64_t db_id,
+                               uint64_t id,
                                uint64_t access_xid,
                                uint64_t target_xid,
                                std::vector<uint64_t> root_offsets,
@@ -232,7 +235,8 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                const TableStats &stats,
                                bool for_gc)
-    : _id(id),
+    : _db_id(db_id),
+      _id(id),
       _access_xid(access_xid),
       _target_xid(target_xid),
       _table_dir(table_dir),
@@ -419,7 +423,7 @@ namespace springtail {
         }
 
         // update the roots and stats
-        sys_tbl_mgr::Client::get_instance()->update_roots(_id, _target_xid, roots, 0);
+        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, 0);
     }
 
     StorageCache::PagePtr
@@ -576,11 +580,9 @@ namespace springtail {
         }
 
         // update the roots and stats in the system tables for non-system tables
+        // note: don't currently keep table roots or table stats for system tables
         if (_id > constant::MAX_SYSTEM_TABLE_ID) {
-            auto table_mgr = TableMgr::get_instance();
-
-            // note: don't currently keep table roots or table stats for system tables
-            table_mgr->update_roots(_id, _target_xid, roots, _stats);
+            sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, _stats.row_count);
         }
 
         // store the roots into a look-aside root file

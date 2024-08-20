@@ -48,7 +48,8 @@ void dump_table(const std::filesystem::path &base_dir,
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
     // perform the table copy
-    source->copy_to_springtail(base_dir, xid);
+    uint64_t db_id = 1;
+    source->copy_to_springtail(db_id, xid);
 }
 
 void

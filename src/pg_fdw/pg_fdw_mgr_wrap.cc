@@ -30,9 +30,9 @@ extern "C" {
 
     /** Create state for this table and transaction */
     void *
-    fdw_create_state(uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
+    fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
     {
-        return get_fdw_mgr()->fdw_create_state(tid, pg_xid, schema_xid);
+        return get_fdw_mgr()->fdw_create_state(db_id, tid, pg_xid, schema_xid);
     }
 
     /** Begin scan wrapper */

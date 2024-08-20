@@ -62,16 +62,17 @@ namespace {
             };
 
             uint64_t access_xid = 1, target_xid = 2;
+            _db_id = 1;
             _tid = 1000;
 
             // create the table via the table mgr
-            _create_table(_tid, access_xid);
+            _create_table(_db_id, _tid, access_xid);
 
             access_xid++;
             target_xid++;
 
             // create a mutable table
-            auto mtable = TableMgr::get_instance()->get_mutable_table(_tid, access_xid, target_xid, false);
+            auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
 
             // insert a number of rows
             _populate_table(mtable, target_xid);
@@ -115,6 +116,7 @@ namespace {
             }
         }
 
+        inline static uint64_t _db_id;
         inline static uint64_t _tid;
         inline static uint64_t _table_xid;
 
@@ -139,7 +141,7 @@ namespace {
         Form_pg_attribute *_attrs;
 
         static void
-        _create_table(uint64_t table_id, uint64_t xid)
+        _create_table(uint64_t db_id, uint64_t table_id, uint64_t xid)
         {
             // create a table
             PgMsgTable create_msg;
@@ -150,7 +152,7 @@ namespace {
             create_msg.table = "test_table";
             create_msg.columns = _columns;
 
-            TableMgr::get_instance()->create_table({ xid, 0 }, create_msg);
+            TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
         }
 
         std::shared_ptr<Tuple>
@@ -273,7 +275,7 @@ namespace {
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
             // don't call create state as it calls xid mgr, just create state
-            auto table = TableMgr::get_instance()->get_table(_tid, _table_xid, constant::MAX_LSN);
+            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid, constant::MAX_LSN);
             PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
 
             // begin the scan

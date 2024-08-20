@@ -82,7 +82,7 @@ namespace springtail::pg_fdw {
             : table(table), tid(tid), xid(xid), stats(table->get_stats())
         {
             // fetch the columns and column IDs for the table
-            columns = SchemaMgr::get_instance()->get_columns(tid, { xid, constant::MAX_LSN });
+            columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
 
             // populate pkey column ids
             int num_pkeys = 0;
@@ -125,7 +125,8 @@ namespace springtail::pg_fdw {
          * @param pg_xid Postgres XID of current transaction
          * @param schema_xid Schema XID optained from the foreign table import option
          */
-        PgFdwState *fdw_create_state(uint64_t tid,
+        PgFdwState *fdw_create_state(uint64_t db_id,
+                                     uint64_t tid,
                                      uint64_t pg_xid,
                                      uint64_t schema_xid);
 

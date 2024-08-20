@@ -23,7 +23,7 @@ void fdw_function_call(const char *command);
 void fdw_init(const char *config_file);
 
 /** Create state */
-void *fdw_create_state(uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
+void *fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid);
 
 /** Begin scan */
 void *fdw_begin_scan(void *stat, List *target_list, List *qual_list, List *sortgroup);

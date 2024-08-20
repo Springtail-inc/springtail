@@ -66,11 +66,13 @@ namespace {
         std::vector<std::vector<std::string>> _secondary_keys;
 
         std::filesystem::path _base_dir;
+        uint64_t _db_id = 1;
 
         TablePtr
         _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<Table>(table_id,
+            return std::make_shared<Table>(_db_id,
+                                           table_id,
                                            xid,
                                            _base_dir / fmt::format("{}", table_id),
                                            _primary_keys,
@@ -83,7 +85,8 @@ namespace {
         MutableTablePtr
         _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<MutableTable>(table_id,
+            return std::make_shared<MutableTable>(_db_id,
+                                                  table_id,
                                                   xid - 1,
                                                   xid,
                                                   roots,

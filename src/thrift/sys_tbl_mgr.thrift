@@ -35,17 +35,19 @@ struct TableInfo {
 }
 
 struct TableRequest {
-    1: i64 xid,
-    2: i64 lsn,
-    3: TableInfo table
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: TableInfo table
 }
 
 struct DropTableRequest {
-    1: i64 xid,
-    2: i64 lsn,
-    3: i64 table_id,
-    4: string schema,
-    5: string name
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: i64 table_id,
+    5: string schema,
+    6: string name
 }
 
 struct TableStats {
@@ -53,19 +55,22 @@ struct TableStats {
 }
 
 struct UpdateRootsRequest {
-    1: i64 xid,
-    2: i64 table_id,
-    3: list<i64> roots,
-    4: TableStats stats
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 table_id,
+    4: list<i64> roots,
+    5: TableStats stats
 }
 
 struct FinalizeRequest {
-    1: i64 xid
+    1: i64 db_id,
+    2: i64 xid
 }
 
 struct GetRootsRequest {
-    1: i64 xid,
-    2: i64 table_id
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 table_id
 }
 
 struct GetRootsResponse {
@@ -74,17 +79,19 @@ struct GetRootsResponse {
 }
 
 struct GetSchemaRequest {
-    1: i64 table_id,
-    2: i64 xid,
-    3: i64 lsn
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 xid,
+    4: i64 lsn
 }
 
 struct GetTargetSchemaRequest {
-    1: i64 table_id,
-    2: i64 access_xid,
-    3: i64 access_lsn,
-    4: i64 target_xid,
-    5: i64 target_lsn
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 access_xid,
+    4: i64 access_lsn,
+    5: i64 target_xid,
+    6: i64 target_lsn
 }
 
 struct ColumnHistory {

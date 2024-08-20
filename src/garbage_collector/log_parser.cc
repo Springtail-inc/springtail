@@ -311,7 +311,7 @@ namespace springtail::gc {
                             if (!blocked) {
                                 for (auto rel_id : truncate_msg.rel_ids) {
                                     _state->mutation_count->increment();
-                                    auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, rel_id);
+                                    auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, rel_id, _state->entry->db_id);
                                     _parser_queue->push(entry);
                                 }
                             }
@@ -329,7 +329,7 @@ namespace springtail::gc {
                         if (!blocked) {
                             // apply the schema change
                             XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_table(xid, table_msg);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_table(_state->entry->db_id, xid, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       processed since there might be additional schema changes
@@ -352,7 +352,7 @@ namespace springtail::gc {
 
                             // apply the schema change
                             XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(xid, table_msg);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(_state->entry->db_id, xid, table_msg);
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
                             _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
@@ -370,7 +370,7 @@ namespace springtail::gc {
                         if (!blocked) {
                             // apply the schema change
                             XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(xid, drop_msg);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(_state->entry->db_id, xid, drop_msg);
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();
@@ -499,7 +499,7 @@ namespace springtail::gc {
 
         // otherwise we queue this message for processing
         _state->mutation_count->increment();
-        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id);
+        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id, _state->entry->db_id);
         _parser_queue->push(entry);
 
         return false;
@@ -550,7 +550,7 @@ namespace springtail::gc {
             SPDLOG_INFO("Parser got work item for: {}", entry->xid);
 
             // get the table information for the mutation
-            auto table = TableMgr::get_instance()->get_table(entry->table_id, entry->xid, entry->lsn);
+            auto table = TableMgr::get_instance()->get_table(entry->db_id, entry->table_id, entry->xid, entry->lsn);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
             // note: this should be safe, even in the face of schema changes, since a primary key

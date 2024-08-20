@@ -52,10 +52,11 @@ namespace {
 
         // perform the table copy
         uint64_t xid = 2;
-        auto oid = source->copy_to_springtail(_base_dir, xid);
+        uint64_t db_id = 1;
+        auto oid = source->copy_to_springtail(db_id, xid);
 
         // create an access table
-        auto table = TableMgr::get_instance()->get_table(oid, xid, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

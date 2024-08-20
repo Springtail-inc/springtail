@@ -32,40 +32,40 @@ namespace springtail {
         /**
          * Read the table metadata for the requested table ID.
          */
-        TablePtr get_table(uint64_t table_id, uint64_t xid, uint64_t lsn);
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn);
 
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
 
         // Functions for managing system metadata
 
         /**
          * Create a new table.
          */
-        void create_table(const XidLsn &xid, const PgMsgTable &msg);
+        void create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Alters a table's schema.
          */
-        void alter_table(const XidLsn &xid, const PgMsgTable &msg);
+        void alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Drops a table.
          */
-        void drop_table(const XidLsn &xid, const PgMsgDropTable &msg);
+        void drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
          * Update the roots of a table.
          */
-        void update_roots(uint64_t table_id, uint64_t target_xid,
+        void update_roots(uint64_t db_id, uint64_t table_id, uint64_t target_xid,
                           const std::vector<uint64_t> &roots, const TableStats &stats);
 
         /**
          * Finalize all outstanding system metadata mutations.
          */
-        void finalize_metadata(uint64_t xid);
+        void finalize_metadata(uint64_t db_id, uint64_t xid);
 
     private:
         static TableMgr *_instance; ///< static instance (singleton)
@@ -79,12 +79,12 @@ namespace springtail {
         /**
          * Construct a system table.
          */
-        TablePtr _get_system_table(uint64_t table_id, uint64_t xid);
+        TablePtr _get_system_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
          * Construct a mutable system table.
          */
-        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
+        MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
     private:
         // singleton; delete copy constructor

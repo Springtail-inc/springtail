@@ -101,10 +101,12 @@ namespace springtail::sys_tbl_mgr {
     }
 
     TableRequest
-    _gen_table_request(const XidLsn &xid,
+    _gen_table_request(uint64_t db_id,
+                       const XidLsn &xid,
                        const PgMsgTable &msg)
     {
         TableRequest request;
+        request.db_id = db_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table.id = msg.oid;
@@ -132,13 +134,14 @@ namespace springtail::sys_tbl_mgr {
     }
 
     std::string
-    Client::create_table(const XidLsn &xid,
+    Client::create_table(uint64_t db_id,
+                         const XidLsn &xid,
                          const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
         DDLStatement result;
 
-        auto &&request = _gen_table_request(xid, msg);
+        auto &&request = _gen_table_request(db_id, xid, msg);
         c.client->create_table(result, request);
 
         if (result.statement.empty()) {
@@ -149,13 +152,14 @@ namespace springtail::sys_tbl_mgr {
     }
 
     std::string
-    Client::alter_table(const XidLsn &xid,
+    Client::alter_table(uint64_t db_id,
+                        const XidLsn &xid,
                         const PgMsgTable &msg)
     {
         ThriftClient c = _get_client();
         DDLStatement result;
 
-        auto &&request = _gen_table_request(xid, msg);
+        auto &&request = _gen_table_request(db_id, xid, msg);
         c.client->alter_table(result, request);
 
         if (result.statement.empty()) {
@@ -166,13 +170,15 @@ namespace springtail::sys_tbl_mgr {
     }
 
     std::string
-    Client::drop_table(const XidLsn &xid,
+    Client::drop_table(uint64_t db_id,
+                       const XidLsn &xid,
                        const PgMsgDropTable &msg)
     {
         ThriftClient c = _get_client();
         DDLStatement result;
 
         DropTableRequest request;
+        request.db_id = db_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table_id = msg.oid;
@@ -189,7 +195,8 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Client::update_roots(uint64_t table_id,
+    Client::update_roots(uint64_t db_id,
+                         uint64_t table_id,
                          uint64_t xid,
                          const std::vector<uint64_t> &roots,
                          uint64_t row_count)
@@ -198,6 +205,7 @@ namespace springtail::sys_tbl_mgr {
         Status result;
 
         UpdateRootsRequest request;
+        request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
         request.roots.insert(request.roots.end(), roots.begin(), roots.end());
@@ -211,12 +219,14 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Client::finalize(uint64_t xid)
+    Client::finalize(uint64_t db_id,
+                     uint64_t xid)
     {
         ThriftClient c = _get_client();
         Status result;
 
         FinalizeRequest request;
+        request.db_id = db_id;
         request.xid = xid;
 
         c.client->finalize(result, request);
@@ -227,13 +237,15 @@ namespace springtail::sys_tbl_mgr {
     }
 
     TableMetadata
-    Client::get_roots(uint64_t table_id,
+    Client::get_roots(uint64_t db_id,
+                      uint64_t table_id,
                       uint64_t xid)
     {
         ThriftClient c = _get_client();
         GetRootsResponse result;
 
         GetRootsRequest request;
+        request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
 
@@ -248,13 +260,15 @@ namespace springtail::sys_tbl_mgr {
     }
 
     SchemaMetadata
-    Client::get_schema(uint64_t table_id,
+    Client::get_schema(uint64_t db_id,
+                       uint64_t table_id,
                        const XidLsn &xid)
     {
         ThriftClient c = _get_client();
         GetSchemaResponse result;
 
         GetSchemaRequest request;
+        request.db_id = db_id;
         request.table_id = table_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
@@ -302,7 +316,8 @@ namespace springtail::sys_tbl_mgr {
     }
 
     SchemaMetadata
-    Client::get_target_schema(uint64_t table_id,
+    Client::get_target_schema(uint64_t db_id,
+                              uint64_t table_id,
                               const XidLsn &access_xid,
                               const XidLsn &target_xid)
     {
@@ -310,6 +325,7 @@ namespace springtail::sys_tbl_mgr {
         GetSchemaResponse result;
 
         GetTargetSchemaRequest request;
+        request.db_id = db_id;
         request.table_id = table_id;
         request.access_xid = access_xid.xid;
         request.access_lsn = access_xid.lsn;

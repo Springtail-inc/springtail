@@ -13,6 +13,9 @@ main(int argc,
 {
     springtail_init();
 
+    // takes the database ID from the first argument
+    uint64_t db_id = std::stoull(argv[1]);
+
     // go through each system table and print it out
 
     for (auto table_id : { sys_tbl::TableNames::ID,
@@ -20,7 +23,8 @@ main(int argc,
                            sys_tbl::Indexes::ID,
                            sys_tbl::Schemas::ID,
                            sys_tbl::TableStats::ID }) {
-        auto table = TableMgr::get_instance()->get_table(table_id,
+        auto table = TableMgr::get_instance()->get_table(db_id,
+                                                         table_id,
                                                          constant::LATEST_XID,
                                                          constant::MAX_LSN);
         auto fields = table->extent_schema()->get_fields();

@@ -300,7 +300,7 @@ namespace springtail::gc {
 
         // get the schema information
         XidLsn target_xid(xid);
-        auto target_schema = schema_mgr->get_extent_schema(table->id(), target_xid);
+        auto target_schema = schema_mgr->get_extent_schema(table->db(), table->id(), target_xid);
 
         // retrieve the pages that may be impacted
         std::vector<StorageCache::PagePtr> pages;
@@ -310,7 +310,7 @@ namespace springtail::gc {
             XidLsn access_xid(header.xid);
 
             // convert this page to a new schema if needed
-            auto &&meta = sys_tbl_mgr->get_target_schema(table->id(), access_xid, target_xid);
+            auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
             if (!meta.history.empty()) {
                 auto source_schema = std::make_shared<VirtualSchema>(meta);
                 page->convert(source_schema, target_schema);
@@ -338,7 +338,7 @@ namespace springtail::gc {
 
         // construct a virtual schema from the prevous commit XID to the target XID
         XidLsn access_xid(_committed_xid);
-        auto &&meta = sys_tbl_mgr->get_target_schema(table->id(), access_xid, target_xid);
+        auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
         auto vschema = std::make_shared<VirtualSchema>(meta);
         auto row_fields = vschema->get_fields();
         auto key_fields = vschema->get_fields(schema->get_sort_keys());

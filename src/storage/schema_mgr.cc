@@ -66,7 +66,7 @@ namespace springtail {
     }
 
     std::map<uint32_t, SchemaColumn>
-    SchemaMgr::get_columns(uint64_t table_id, const XidLsn &xid)
+    SchemaMgr::get_columns(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
     {
         // handle system tables
         if (table_id <= constant::MAX_SYSTEM_TABLE_ID) {
@@ -88,12 +88,13 @@ namespace springtail {
         }
 
         // non-system tables
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table_id, xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
         return _convert_columns(meta.columns);
     }
 
     std::shared_ptr<Schema>
-    SchemaMgr::get_schema(uint64_t table_id,
+    SchemaMgr::get_schema(uint64_t db_id,
+                          uint64_t table_id,
                           const XidLsn &access_xid,
                           const XidLsn &target_xid)
     {
@@ -106,7 +107,7 @@ namespace springtail {
         // XXX keep some kind of local cache?
 
         // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(table_id, access_xid, target_xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(db_id, table_id, access_xid, target_xid);
 
         // construct the schema object
         if (meta.history.empty()) {
@@ -117,7 +118,8 @@ namespace springtail {
     }
 
     std::shared_ptr<ExtentSchema>
-    SchemaMgr::get_extent_schema(uint64_t table_id,
+    SchemaMgr::get_extent_schema(uint64_t db_id,
+                                 uint64_t table_id,
                                  const XidLsn &xid)
     {
         // first check if it's an immutable system table schema
@@ -129,7 +131,7 @@ namespace springtail {
         // XXX keep some kind of local cache?  how to keep it valid given the XID progression?
 
         // call into the SysTblMgr to get the schema at the given XID/LSN
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table_id, xid);
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
         return std::make_shared<ExtentSchema>(meta.columns);

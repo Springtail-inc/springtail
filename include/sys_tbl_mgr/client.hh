@@ -38,43 +38,43 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call create_table() on the SysTblMgr.
          */
-        std::string create_table(const XidLsn &xid, const PgMsgTable &msg);
+        std::string create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Call alter_table() on the SysTblMgr.
          */
-        std::string alter_table(const XidLsn &xid, const PgMsgTable &msg);
+        std::string alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Call drop_table() on the SysTblMgr.
          */
-        std::string drop_table(const XidLsn &xid, const PgMsgDropTable &msg);
+        std::string drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
          * Call update_roots() on the SysTblMgr.
          */
-        void update_roots(uint64_t table_id, uint64_t xid,
+        void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid,
                           const std::vector<uint64_t> &roots, uint64_t row_count);
 
         /**
          * Call finalize() on the SysTblMgr.
          */
-        void finalize(uint64_t xid);
+        void finalize(uint64_t db_id, uint64_t xid);
 
         /**
          * Call get_roots() on the SysTblMgr.
          */
-        TableMetadata get_roots(uint64_t table_id, uint64_t xid);
+        TableMetadata get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
          * Call get_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_schema(uint64_t table_id, const XidLsn &xid);
+        SchemaMetadata get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Call get_target_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_target_schema(uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        SchemaMetadata get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
     protected:
         /** Singleton write cache client instance */

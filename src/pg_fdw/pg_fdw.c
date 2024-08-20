@@ -306,9 +306,12 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
     planstate->tid = tid;
 
+    // XXX need to get this from the correct place
+    uint64_t db_id = 0;
+
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();
-    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value, schema_xid);
+    planstate->pg_fdw_state = fdw_create_state(db_id, tid, pg_xid.value, schema_xid);
 
     // store the plan state in the baserel
     baserel->fdw_private = planstate;

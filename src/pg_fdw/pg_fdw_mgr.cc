@@ -115,7 +115,10 @@ namespace springtail::pg_fdw {
     }
 
     PgFdwState *
-    PgFdwMgr::fdw_create_state(uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
+    PgFdwMgr::fdw_create_state(uint64_t db_id,
+                               uint64_t tid,
+                               uint64_t pg_xid,
+                               uint64_t schema_xid)
     {
         uint64_t xid; // springtail xid
 
@@ -139,7 +142,7 @@ namespace springtail::pg_fdw {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: tid: {}, xid: {}, pg_xid: {}",
                             tid, xid, pg_xid);
 
-        TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, constant::MAX_LSN);
         PgFdwState *state = new PgFdwState{table, tid, xid};
 
         return state;
@@ -978,7 +981,7 @@ namespace springtail::pg_fdw {
         }
 
         // get the table names table to iterate over
-        auto table = TableMgr::get_instance()->get_table(sys_tbl::TableNames::ID,
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
                                                          schema_xid,
                                                          constant::MAX_LSN);
         // get field array
@@ -1053,11 +1056,11 @@ namespace springtail::pg_fdw {
         std::string current_table;
 
         // get the schemas table
-        table = TableMgr::get_instance()->get_table(sys_tbl::Schemas::ID,
+        table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
                                                     schema_xid,
                                                     constant::MAX_LSN);
 
-        auto idx_table = TableMgr::get_instance()->get_table(sys_tbl::Indexes::ID,
+        auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID,
                                                              schema_xid,
                                                              constant::MAX_LSN);
 
