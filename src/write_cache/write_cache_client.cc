@@ -100,19 +100,20 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_table_change(uint64_t tid, TableChange &change)
+    WriteCacheClient::add_table_change(uint64_t db_id, uint64_t tid, TableChange &change)
     {
         ThriftClient c = _get_client();
         thrift::write_cache::Status result;
 
-        thrift::write_cache::TableChange request;
-        request.table_id = tid;
-        request.xid = change.xid;
-        request.xid_seq = change.xid_seq;
+        thrift::write_cache::AddTableChangeRequest request;
+        request.db_id = db_id;
+        request.change.table_id = tid;
+        request.change.xid = change.xid;
+        request.change.xid_seq = change.xid_seq;
         if (change.op == TableOp::TRUNCATE) {
-            request.op = thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE;
+            request.change.op = thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE;
         } else if (change.op == TableOp::SCHEMA_CHANGE) {
-            request.op = thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE;
+            request.change.op = thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE;
         }
 
         c.client->add_table_change(result, request);
@@ -125,13 +126,14 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> &&rows)
+    WriteCacheClient::add_rows(uint64_t db_id, uint64_t tid, uint64_t eid, std::vector<RowData> &&rows)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::AddRowsRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.extent_id = eid;
 
@@ -170,13 +172,14 @@ namespace springtail {
     }
 
     std::vector<WriteCacheClient::TableChange>
-    WriteCacheClient::fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::fetch_table_changes(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::GetTableChangeRequest request;
         thrift::write_cache::GetTableChangeResponse response;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -203,13 +206,14 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::list_tables(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor)
+    WriteCacheClient::list_tables(uint64_t db_id, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::ListTablesRequest request;
         thrift::write_cache::ListTablesResponse response;
 
+        request.db_id = db_id;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
         request.count = count;
@@ -223,7 +227,7 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid,
+    WriteCacheClient::list_extents(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid,
                                    uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
@@ -232,6 +236,7 @@ namespace springtail {
         thrift::write_cache::ListExtentsRequest request;
         thrift::write_cache::ListExtentsResponse response;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -248,7 +253,7 @@ namespace springtail {
     }
 
     std::vector<WriteCacheClient::RowData>
-    WriteCacheClient::fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
+    WriteCacheClient::fetch_rows(uint64_t db_id, uint64_t tid, uint64_t eid, uint64_t start_xid,
                                  uint64_t end_xid, uint32_t count, uint64_t &cursor)
     {
         ThriftClient c = _get_client();
@@ -256,6 +261,7 @@ namespace springtail {
         thrift::write_cache::GetRowsRequest request;
         thrift::write_cache::GetRowsResponse response;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.extent_id = eid;
         request.start_xid = start_xid;
@@ -290,13 +296,14 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::evict_table(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::EvictTableRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -310,13 +317,14 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::evict_table_changes(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::EvictTableChangesRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -330,13 +338,14 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::set_clean_flag(uint64_t db_id, uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::SetCleanFlagRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.extent_id = eid;
         request.start_xid = start_xid;
@@ -351,13 +360,14 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid)
+    WriteCacheClient::reset_clean_flag(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid)
     {
         ThriftClient c = _get_client();
 
         thrift::write_cache::ResetCleanFlagRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.start_xid = start_xid;
         request.end_xid = end_xid;
@@ -371,7 +381,7 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::add_mapping(uint64_t tid,
+    WriteCacheClient::add_mapping(uint64_t db_id, uint64_t tid,
                                   uint64_t target_xid,
                                   uint64_t old_eid,
                                   const std::vector<uint64_t> &new_eids)
@@ -381,6 +391,7 @@ namespace springtail {
         thrift::write_cache::AddMappingRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.target_xid = target_xid;
         request.old_eid = old_eid;
@@ -395,7 +406,7 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::set_lookup(uint64_t tid,
+    WriteCacheClient::set_lookup(uint64_t db_id, uint64_t tid,
                                  uint64_t target_xid,
                                  uint64_t extent_id)
     {
@@ -404,6 +415,7 @@ namespace springtail {
         thrift::write_cache::SetLookupRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.target_xid = target_xid;
         request.extent_id = extent_id;
@@ -415,7 +427,7 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::forward_map(uint64_t tid,
+    WriteCacheClient::forward_map(uint64_t db_id, uint64_t tid,
                                   uint64_t target_xid,
                                   uint64_t extent_id)
     {
@@ -424,6 +436,7 @@ namespace springtail {
         thrift::write_cache::ForwardMapRequest request;
         thrift::write_cache::ExtentMapResponse result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.target_xid = target_xid;
         request.extent_id = extent_id;
@@ -436,7 +449,7 @@ namespace springtail {
     }
 
     std::vector<uint64_t>
-    WriteCacheClient::reverse_map(uint64_t tid,
+    WriteCacheClient::reverse_map(uint64_t db_id, uint64_t tid,
                                   uint64_t access_xid,
                                   uint64_t target_xid,
                                   uint64_t extent_id)
@@ -446,6 +459,7 @@ namespace springtail {
         thrift::write_cache::ReverseMapRequest request;
         thrift::write_cache::ExtentMapResponse result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.access_xid = access_xid;
         request.target_xid = target_xid;
@@ -459,7 +473,7 @@ namespace springtail {
     }
 
     void
-    WriteCacheClient::expire_map(uint64_t tid,
+    WriteCacheClient::expire_map(uint64_t db_id, uint64_t tid,
                                  uint64_t commit_xid)
     {
         ThriftClient c = _get_client();
@@ -467,6 +481,7 @@ namespace springtail {
         thrift::write_cache::ExpireMapRequest request;
         thrift::write_cache::Status result;
 
+        request.db_id = db_id;
         request.table_id = tid;
         request.commit_xid = commit_xid;
 

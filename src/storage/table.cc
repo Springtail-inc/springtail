@@ -511,7 +511,7 @@ namespace springtail {
 
         // record the mapping into the extent map
         if (_for_gc) {
-            WriteCacheClient::get_instance()->add_mapping(_id, _target_xid, old_eid, offsets);
+            WriteCacheClient::get_instance()->add_mapping(_db_id, _id, _target_xid, old_eid, offsets);
         }
 
         auto value_fields = std::make_shared<FieldArray>(1);

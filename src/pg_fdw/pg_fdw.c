@@ -209,13 +209,17 @@ springtail_fdw_function(PG_FUNCTION_ARGS)
 /**
  * @brief Get the foreign server xid
  * @param serverid
- * @return uint64_t
+ * @return
  */
-static uint64_t
-get_foreign_server_xid(Oid serverid)
+static void
+get_foreign_server_options(Oid serverid,
+                           uint64_t *xid,
+                           uint64_t *db_id)
 {
     ForeignServer *server;
-    ListCell   *lc;
+    ListCell      *lc;
+
+    bool           got_xid = false, got_db_id = false;
 
     // Get the foreign server
     server = GetForeignServer(serverid);
@@ -223,18 +227,30 @@ get_foreign_server_xid(Oid serverid)
     // Iterate over the options
     foreach(lc, server->options)
     {
-        DefElem    *def = (DefElem *) lfirst(lc);
+        DefElem *def = (DefElem *) lfirst(lc);
         if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
             char *xidstr = defGetString(def);
-            elog(INFO, "XID: %s for server %s", xidstr, server->servername);
+            elog(DEBUG3, "XID: %s for server %s", xidstr, server->servername);
 
-            return strtoull(xidstr, NULL, 10);
+            *xid = strtoull(xidstr, NULL, 10);
+            got_xid = true;
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
+            char *dbidstr = defGetString(def);
+            elog(DEBUG3, "DB ID: %s for server %s", dbidstr, server->servername);
+
+            *db_id = strtoull(dbidstr, NULL, 10);
+            got_db_id = true;
         }
     }
 
-    elog(ERROR, "No schema xid found for server %s", server->servername);
+    if (!got_xid || !got_db_id) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+                            errmsg("Xid or DB ID not found in options for server %s", server->servername),
+                            errhint("Xid or DB ID not found for fdw server from server options")));
+    }
 
-    return 0;
+    return;
 }
 
 /**
@@ -299,15 +315,15 @@ springtail_GetForeignRelSize(PlannerInfo *root,
     Oid serverid = ft->serverid;
     ForeignServer *server = GetForeignServer(serverid);
 
-    // get the foreign server xid
-    uint64_t schema_xid = get_foreign_server_xid(serverid);
+    // get the schema xid and db_id from the foreign server options
+    uint64_t schema_xid;
+    uint64_t db_id;
+
+    get_foreign_server_options(serverid, &schema_xid, &db_id);
 
     // create the plan state
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
     planstate->tid = tid;
-
-    // XXX need to get this from the correct place
-    uint64_t db_id = 0;
 
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();

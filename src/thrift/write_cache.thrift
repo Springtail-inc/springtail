@@ -30,27 +30,35 @@ struct Row {
 
 // table change record
 struct TableChange {
-    1: i64 table_id,
-    2: i64 xid,
-    3: i64 xid_seq,
-    4: TableChangeOpType op
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 xid,
+    4: i64 xid_seq,
+    5: TableChangeOpType op
+}
+
+struct AddTableChangeRequest {
+    1: i64 db_id,
+    2: TableChange change
 }
 
 // add a list of rows (or one)
 struct AddRowsRequest {
-    1: i64 table_id,
-    2: i64 extent_id,
-    3: list<Row> rows
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 extent_id,
+    4: list<Row> rows
 }
 
 // get a list of rows between range start xid exclusive to end xid inclusive
 struct GetRowsRequest {
-    1: i64 table_id,
-    2: i64 extent_id,
-    3: i64 start_xid,
-    4: i64 end_xid,
-    5: i64 cursor,
-    6: i32 count
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 extent_id,
+    4: i64 start_xid,
+    5: i64 end_xid,
+    6: i64 cursor,
+    7: i32 count
 }
 
 struct GetRowsResponse {
@@ -62,11 +70,12 @@ struct GetRowsResponse {
 
 // list dirty extents between range start xid exclusive and end xid inclusive
 struct ListExtentsRequest {
-    1: i64 table_id,
-    2: i64 start_xid,
-    3: i64 end_xid,
-    4: i64 cursor,
-    5: i32 count
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 start_xid,
+    4: i64 end_xid,
+    5: i64 cursor,
+    6: i32 count
 }
 
 // list of extents for a table_id; cursor is 0 if no more
@@ -77,10 +86,11 @@ struct ListExtentsResponse {
 }
 
 struct ListTablesRequest {
-    1: i64 start_xid,
-    2: i64 end_xid,
-    3: i64 cursor,
-    4: i32 count
+    1: i64 db_id,
+    2: i64 start_xid,
+    3: i64 end_xid,
+    4: i64 cursor,
+    5: i32 count
 }
 
 struct ListTablesResponse {
@@ -91,16 +101,18 @@ struct ListTablesResponse {
 // remove an extent and its associated rows from cached
 // between start xid exclusive and end xid inclusive
 struct EvictTableRequest {
-    1: i64 table_id,
+    1: i64 db_id,
+    2: i64 table_id,
     3: i64 start_xid,
     4: i64 end_xid
 }
 
 // get list of tables changes between xid
 struct GetTableChangeRequest {
-    1: i64 table_id,
-    2: i64 start_xid,
-    3: i64 end_xid
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 start_xid,
+    4: i64 end_xid
 }
 
 struct GetTableChangeResponse {
@@ -110,55 +122,63 @@ struct GetTableChangeResponse {
 
 // evict table changes between xid range
 struct EvictTableChangesRequest {
-    1: i64 table_id,
-    2: i64 start_xid,
-    3: i64 end_xid
-}
-
-struct SetCleanFlagRequest {
-    1: i64 table_id,
-    2: i64 extent_id,
+    1: i64 db_id,
+    2: i64 table_id,
     3: i64 start_xid,
     4: i64 end_xid
 }
 
+struct SetCleanFlagRequest {
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 extent_id,
+    4: i64 start_xid,
+    5: i64 end_xid
+}
+
 struct ResetCleanFlagRequest {
-    1: i64 table_id,
-    2: i64 start_xid,
-    3: i64 end_xid
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 start_xid,
+    4: i64 end_xid
 }
 
 // ExtentMapper request structures
 
 struct AddMappingRequest {
-    1: i64 table_id,
-    2: i64 target_xid,
-    3: i64 old_eid,
-    4: list<i64> new_eids
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 target_xid,
+    4: i64 old_eid,
+    5: list<i64> new_eids
 }
 
 struct SetLookupRequest {
-    1: i64 table_id,
-    2: i64 target_xid,
-    3: i64 extent_id
-}
-
-struct ForwardMapRequest {
-    1: i64 table_id,
-    2: i64 target_xid,
-    3: i64 extent_id
-}
-
-struct ReverseMapRequest {
-    1: i64 table_id,
-    2: i64 access_xid,
+    1: i64 db_id,
+    2: i64 table_id,
     3: i64 target_xid,
     4: i64 extent_id
 }
 
+struct ForwardMapRequest {
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 target_xid,
+    4: i64 extent_id
+}
+
+struct ReverseMapRequest {
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 access_xid,
+    4: i64 target_xid,
+    5: i64 extent_id
+}
+
 struct ExpireMapRequest {
-    1: i64 table_id,
-    2: i64 commit_xid
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 commit_xid
 }
 
 struct ExtentMapResponse {
@@ -180,7 +200,7 @@ service ThriftWriteCache {
     ListExtentsResponse list_extents(1: ListExtentsRequest request),
     GetRowsResponse get_rows(1: GetRowsRequest request),
     Status evict_table(1: EvictTableRequest request),
-    Status add_table_change(1: TableChange change),
+    Status add_table_change(1: AddTableChangeRequest change),
     GetTableChangeResponse get_table_changes(1: GetTableChangeRequest request),
     ListTablesResponse list_tables(1: ListTablesRequest request),
     Status evict_table_changes(1: EvictTableChangesRequest request),

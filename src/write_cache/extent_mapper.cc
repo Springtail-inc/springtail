@@ -213,19 +213,19 @@ namespace springtail {
     }
 
     /* static member initialization must happen outside of class */
-    ExtentMapper* ExtentMapper::_instance = {nullptr};
+    std::map<uint64_t, ExtentMapper*> ExtentMapper::_instances = {};
     boost::mutex ExtentMapper::_instance_mutex;
 
     ExtentMapper *
-    ExtentMapper::get_instance()
+    ExtentMapper::get_instance(uint64_t db_id)
     {
         boost::unique_lock lock(_instance_mutex);
 
-        if (_instance == nullptr) {
-            _instance = new ExtentMapper();
+        auto it = _instances.find(db_id);
+        if (it == _instances.end()) {
+            it = _instances.insert({ db_id, new ExtentMapper() }).first;
         }
-
-        return _instance;
+        return it->second;
     }
 
     void
@@ -233,9 +233,20 @@ namespace springtail {
     {
         boost::unique_lock lock(_instance_mutex);
 
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
+        for (auto &entry : _instances) {
+            delete entry.second;
+        }
+        _instances.clear();
+    }
+
+    void
+    ExtentMapper::shutdown(uint64_t db_id)
+    {
+        boost::unique_lock lock(_instance_mutex);
+        auto it = _instances.find(db_id);
+        if (it != _instances.end()) {
+            delete it->second;
+            _instances.erase(it);
         }
     }
 

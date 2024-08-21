@@ -72,48 +72,54 @@ namespace springtail {
 
         /**
          * @brief Marks table has having a table change that may affect data
+         * @param db_id Database ID
          * @param tid Table ID
          * @param change table change
          */
-        void add_table_change(uint64_t tid, TableChange &change);
+        void add_table_change(uint64_t db_id, uint64_t tid, TableChange &change);
 
         /**
          * @brief Fetch all table changes for a table up to and including XID
+         * @param db_id Database ID
          * @param tid Table ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          * @return std::vector<TableChange>
          */
-        std::vector<TableChange> fetch_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        std::vector<TableChange> fetch_table_changes(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Evict table changes between XID range
+         * @param db_id Database ID
          * @param tid table ID
          * @param start_xid start of xid range (exclusive)
          * @param end_xid end of xid range (inclusive)
          */
-        void evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        void evict_table_changes(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Add one or more rows to the cache for a specific table and extent and operation type
+         * @param db_id Database ID
          * @param tid  Table ID
          * @param eid  Extent ID
          * @param rows Set of rows
          */
-        void add_rows(uint64_t tid, uint64_t eid, std::vector<RowData> &&rows);
+        void add_rows(uint64_t db_id, uint64_t tid, uint64_t eid, std::vector<RowData> &&rows);
 
         /**
          * @brief Fetch list of table IDs that have been dirtied prior to and up to XID
+         * @param db_id Database ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          * @param count Max TIDs to return (may return less)
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
          * @return std::vector<uint64_t> a list of table IDs; if count > vector size, no more items
          */
-        std::vector<uint64_t> list_tables(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
+        std::vector<uint64_t> list_tables(uint64_t db_id, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of extent IDs that have been dirtied prior to and up to XID
+         * @param db_id Database ID
          * @param tid Table ID for extent
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
@@ -121,10 +127,11 @@ namespace springtail {
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
          * @return std::vector<uint64_t> a list of extent IDs; if count > vector size, no more items
          */
-        std::vector<uint64_t> list_extents(uint64_t tid, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
+        std::vector<uint64_t> list_extents(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Fetch list of ALL row IDs that have been dirtied prior to and up to XID
+         * @param db_id Database ID
          * @param tid Table ID for extent
          * @param eid Extent ID for row
          * @param start_xid start of xid range (exclusive) (start, end]
@@ -132,83 +139,89 @@ namespace springtail {
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
          * @return std::vector<uint64_t> a list of row IDs; if count > vector size, no more items
          */
-        std::vector<RowData> fetch_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                                        uint64_t end_xid, uint32_t count, uint64_t &cursor);
+        std::vector<RowData> fetch_rows(uint64_t db_id, uint64_t tid, uint64_t eid, uint64_t start_xid,
+                        uint64_t end_xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Mark a previously dirty table as clean; removes all row data for that
          *        table by XID up to and including provided XID; fixes up indexes up the chain
+         * @param db_id Database ID
          * @param tid Table ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          */
-        void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        void evict_table(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Mark an extent as clean
+         * @param db_id Database ID
          * @param tid Table ID
          * @param eid Extent ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          */
-        void set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
+        void set_clean_flag(uint64_t db_id, uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Reset the extent clean flag (unset it)
+         * @param db_id Database ID
          * @param tid Table ID
          * @param start_xid start of xid range (exclusive) (start, end]
          * @param end_xid   end of xid range (inclusive)
          */
-        void reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        void reset_clean_flag(uint64_t db_id, uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
         /**
          * @brief Add a GC-2 mapping to the extent mapper.  See TableExtentMapper::add_mapping().
+         * @param db_id Database ID
          * @param tid Table ID
          * @param target_xid The XID at which the mapping occurred.
          * @param old_eid The extent ID that was modified.
          * @param new_eids The new extent IDs that were written to replace the old_eid.
          */
-        void add_mapping(uint64_t tid, uint64_t target_xid, uint64_t old_eid,
-                         const std::vector<uint64_t> &new_eids);
+        void add_mapping(uint64_t db_id, uint64_t tid, uint64_t target_xid, uint64_t old_eid,
+                 const std::vector<uint64_t> &new_eids);
 
         /**
          * @brief Add a record of the use of and extent_id at a given XID within GC-1.  See
          *        TableExtentMapper::set_lookup().
+         * @param db_id Database ID
          * @param tid Table ID
          * @param target_xid The XID at which the lookup occurred.
          * @param extent_id The extent ID that was referenced in the GC-1 lookup.
          */
-        void set_lookup(uint64_t tid, uint64_t target_xid, uint64_t extent_id);
+        void set_lookup(uint64_t db_id, uint64_t tid, uint64_t target_xid, uint64_t extent_id);
 
         /**
          * @brief Maps the extent_id used at GC-1 lookup into the correct set of extent IDs that
          *        exist at the given XID given GC-2 mutations. See TableExtentMapper::forward_map().
+         * @param db_id Database ID
          * @param tid Table ID
          * @param target_xid The XID at which the lookup occurred.
          * @param extent_id The extent ID that was referenced in the GC-1 lookup.
          */
-        std::vector<uint64_t> forward_map(uint64_t tid, uint64_t target_xid, uint64_t extent_id);
+        std::vector<uint64_t> forward_map(uint64_t db_id, uint64_t tid, uint64_t target_xid, uint64_t extent_id);
 
         /**
          * @brief Maps the extent_id found at a given XID to the set of extent IDs used in GC-1 to
          *        populate the write cache. Used by hurry-ups in the query nodes.  GC-2 doesn't need
          *        to do this since it knows its already applied all changes from the write
          *        cache. See TableExtentMapper::reverse_map().
+         * @param db_id Database ID
          * @param tid Table ID
          * @param target_xid The XID at which the lookup occurred.
          * @param extent_id The extent ID that was referenced in the GC-1 lookup.
          */
-        std::vector<uint64_t> reverse_map(uint64_t tid, uint64_t access_xid, uint64_t target_xid,
-                                          uint64_t extent_id);
+        std::vector<uint64_t> reverse_map(uint64_t db_id, uint64_t tid, uint64_t access_xid, uint64_t target_xid,
+                          uint64_t extent_id);
 
         /**
          * @brief Clear any mappings stored against a given table up through the provided commit XID.
+         * @param db_id Database ID
          * @param tid The table being expired.
          * @param commit_xid The XID at through which all changes have been applied.
          */
-        void expire_map(uint64_t tid, uint64_t commit_xid);
-
-    protected:
+        void expire_map(uint64_t db_id, uint64_t tid, uint64_t commit_xid);
         /** Singleton write cache client instance */
         static WriteCacheClient *_instance;
 

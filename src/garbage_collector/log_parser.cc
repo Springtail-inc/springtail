@@ -579,8 +579,8 @@ namespace springtail::gc {
                     data.data = extent->serialize();
                     data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(table->id(), extent_id, { data });
-                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
+                    _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::DELETE: {
@@ -607,8 +607,8 @@ namespace springtail::gc {
                     data.pkey = extent->serialize();
                     data.op = WriteCacheClient::RowOp::DELETE;
 
-                    _write_cache->add_rows(table->id(), extent_id, { data });
-                    _write_cache->set_lookup(table->id(), entry->xid, extent_id);
+                    _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                     break;
                 }
                 case PgMsgEnum::UPDATE: {
@@ -638,8 +638,8 @@ namespace springtail::gc {
                         data.data = new_extent->serialize();
                         data.op = WriteCacheClient::RowOp::UPDATE;
 
-                        _write_cache->add_rows(table->id(), extent_id, { data });
-                        _write_cache->set_lookup(table->id(), entry->xid, extent_id);
+                        _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                     } else {
                         // generate extents for the delete data and insert data
                         auto schema = table->extent_schema();
@@ -676,10 +676,10 @@ namespace springtail::gc {
                         insert_data.data = new_extent->serialize();
                         insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                        _write_cache->add_rows(table->id(), old_extent_id, { delete_data });
-                        _write_cache->add_rows(table->id(), new_extent_id, { insert_data });
-                        _write_cache->set_lookup(table->id(), entry->xid, old_extent_id);
-                        _write_cache->set_lookup(table->id(), entry->xid, new_extent_id);
+                        _write_cache->add_rows(entry->db_id, table->id(), old_extent_id, { delete_data });
+                        _write_cache->add_rows(entry->db_id, table->id(), new_extent_id, { insert_data });
+                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, old_extent_id);
+                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, new_extent_id);
                     }
                     break;
                 }
@@ -687,7 +687,7 @@ namespace springtail::gc {
                     // record the truncate into the write cache look-aside
                     WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
                                                           WriteCacheClient::TableOp::TRUNCATE };
-                    _write_cache->add_table_change(table->id(), change);
+                    _write_cache->add_table_change(entry->db_id, table->id(), change);
                     break;
                 }
                 default:

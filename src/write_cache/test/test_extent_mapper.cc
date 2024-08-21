@@ -15,7 +15,7 @@ namespace {
     protected:
         void SetUp() override {
             springtail_init();
-            _extent_mapper = ExtentMapper::get_instance();
+            _extent_mapper = ExtentMapper::get_instance(1);
 
             _gc1_xid = 1;
             _gc2_xid = 1;
@@ -88,7 +88,7 @@ namespace {
         _gc1(tid, 2);
         _gc1(tid, 3);
         _gc1(tid, 4);
-        
+
         auto &&m = _gc2(tid, 1);
         ASSERT_EQ(m.size(), 1);
         ASSERT_EQ(m[0], 100);

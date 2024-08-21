@@ -40,7 +40,8 @@ void dump_table(const std::filesystem::path &base_dir,
                 const std::string &schema_name,
                 const std::string &table_name,
                 const PostgresConnection &conn,
-                uint64_t xid=2)
+                uint64_t db_id,
+                uint64_t xid)
 {
     SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
 
@@ -48,13 +49,13 @@ void dump_table(const std::filesystem::path &base_dir,
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
     // perform the table copy
-    uint64_t db_id = 1;
     source->copy_to_springtail(db_id, xid);
 }
 
 void
 dump_tables_in_schema(const PostgresConnection &conn,
-                      const std::string &schema_name)
+                      const std::string &schema_name,
+                      uint64_t db_id)
 {
     std::filesystem::path base_dir;
 
@@ -86,7 +87,7 @@ dump_tables_in_schema(const PostgresConnection &conn,
     uint64_t xid = 2;
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn, xid);
+        dump_table(base_dir, schema_name, table_name, conn, db_id, xid);
         xid += 2;
     }
 }
@@ -100,6 +101,7 @@ main(int argc, char *argv[])
     std::string user_name;
     std::string password;
     int port = 5432;
+    uint64_t db_id = 1;
 
     springtail_init();
 
@@ -118,8 +120,8 @@ main(int argc, char *argv[])
         ("password,p", boost::program_options::value<std::string>(&password)->default_value("springtail"),
          "Postgres password")
         ("port,P", boost::program_options::value<int>(&port)->default_value(5432),
-         "Postgres port number");
-
+         "Postgres port number")
+        ("db_id", boost::program_options::value<uint64_t>(&db_id)->default_value(1),"Database ID");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -139,5 +141,5 @@ main(int argc, char *argv[])
         .port = port
     };
 
-    dump_tables_in_schema(conn, schema_name);
+    dump_tables_in_schema(conn, schema_name, db_id);
 }

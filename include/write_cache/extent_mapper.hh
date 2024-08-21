@@ -85,19 +85,25 @@ namespace springtail {
     class ExtentMapper {
     public:
         /**
-         * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
-         * @return instance of StorageCache
+         * @brief get_instance() of singleton ExtentMapper; create if it doesn't exist.
+         * @return instance of ExtentMapper
          */
-        static ExtentMapper *get_instance();
+        static ExtentMapper *get_instance(uint64_t db_id);
 
         /**
-         * @brief Shutdown the StorageCache singleton.
+         * @brief Shutdown the ExtentMapper singleton.
          */
         static void shutdown();
 
+        /**
+         * @brief Shutdown the ExtentMapper singleton for a specific database.
+         * @param db_id database ID
+         */
+        static void shutdown(uint64_t db_id);
+
     private:
-        static ExtentMapper *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
+        static std::map<uint64_t, ExtentMapper *> _instances; ///< static instances per db (singleton)
+        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instances
 
         /** private constructor */
         ExtentMapper() = default;

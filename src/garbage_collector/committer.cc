@@ -37,7 +37,7 @@ namespace springtail::gc {
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = _write_cache->list_tables(_committed_xid, xid, 100, table_cursor);
+                auto table_list = _write_cache->list_tables(db_id, _committed_xid, xid, 100, table_cursor);
 
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
@@ -52,7 +52,7 @@ namespace springtail::gc {
                     uint64_t txid = 0, tlsn = 0;
 
                     // retrieve the set of table changes for this table
-                    auto table_changes = _write_cache->fetch_table_changes(tid, _committed_xid, xid);
+                    auto table_changes = _write_cache->fetch_table_changes(db_id, tid, _committed_xid, xid);
                     for (auto &&change : table_changes) {
                         // if any of the changes are a truncate, then we will ignore all row
                         // mutations before the last truncate XID/LSN
@@ -78,7 +78,7 @@ namespace springtail::gc {
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(tid, _committed_xid, xid, 100, extent_cursor);
+                        auto extent_list = _write_cache->list_extents(db_id, tid, _committed_xid, xid, 100, extent_cursor);
 
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
@@ -287,7 +287,7 @@ namespace springtail::gc {
         auto schema = table->schema();
 
         // determine if the provided extent_id needs to be forward mapped
-        auto &&extent_ids = _write_cache->forward_map(table->id(), xid, extent_id);
+        auto &&extent_ids = _write_cache->forward_map(table->db(), table->id(), xid, extent_id);
 
         // in the case of a truncate, we will have to create a new extent for any mutations
         if (txid > 0) {
@@ -347,7 +347,7 @@ namespace springtail::gc {
         bool done = false;
         while (!done) {
             // request rows from the write cache for the provided extent ID
-            auto rows = _write_cache->fetch_rows(table->id(), extent_id, _committed_xid, xid, 100, cursor);
+            auto rows = _write_cache->fetch_rows(table->db(), table->id(), extent_id, _committed_xid, xid, 100, cursor);
             if (rows.empty()) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}:{}@{}", table->id(), extent_id, xid);
                 done = true;

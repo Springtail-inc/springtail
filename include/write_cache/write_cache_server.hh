@@ -8,9 +8,9 @@
 
 #include <thrift/server/TServer.h>
 
-namespace springtail {
+#include <write_cache/write_cache_index.hh>
 
-    class WriteCacheIndex;
+namespace springtail {
 
     class WriteCacheServer
     {
@@ -46,8 +46,13 @@ namespace springtail {
          * @brief Get the write cache index object
          * @return std::shared_ptr<WriteCacheIndex>
          */
-        std::shared_ptr<WriteCacheIndex> get_index() {
-            return _index;
+        std::shared_ptr<WriteCacheIndex> get_index(uint64_t db_id) {
+            std::unique_lock lock(_mutex);
+            auto it = _indexes.find(db_id);
+            if (it == _indexes.end()) {
+                it = _indexes.insert({db_id, std::make_shared<WriteCacheIndex>()}).first;
+            }
+            return it->second;
         }
 
         // delete copy constructor
@@ -90,7 +95,11 @@ namespace springtail {
         /** server port */
         int _port;
 
-        std::shared_ptr<WriteCacheIndex> _index;
+        /** indexes mutex */
+        std::mutex _mutex;
+
+        /** map of indexes by db_id */
+        std::map<uint64_t, WriteCacheIndexPtr> _indexes;
     };
 
 } // namespace springtail
