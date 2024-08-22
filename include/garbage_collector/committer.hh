@@ -133,6 +133,6 @@ namespace springtail::gc {
         /** Cache of mutable tables that are in-flight. */
         std::map<uint64_t, MutableTablePtr> _table_map;
 
-        uint64_t _committed_xid; ///< The most recently committed XID.
+        std::map<uint64_t, uint64_t> _committed_xids; ///< The most recently committed XID by db_id
     };
 }

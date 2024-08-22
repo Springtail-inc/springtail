@@ -18,8 +18,8 @@ service ThriftXidMgr {
     Status ping(),
 
     // commit upto and including the provided xid
-    Status commit_xid(1: xid_t xid, 2: bool has_schema_changes),
+    Status commit_xid(1: i64 db_id, 2: xid_t xid, 3: bool has_schema_changes),
 
     // get latest committed xid
-    xid_t get_committed_xid(1: xid_t schema_xid)
+    xid_t get_committed_xid(1: i64 db_id, 2: xid_t schema_xid)
 }

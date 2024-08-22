@@ -130,7 +130,7 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
             // don't hold lock through get call, can only have one operation
             // for this transaction in flight at once
-            xid = XidMgrClient::get_instance()->get_committed_xid(schema_xid);
+            xid = XidMgrClient::get_instance()->get_committed_xid(db_id, schema_xid);
             std::unique_lock<std::shared_mutex> lock(_mutex);
             _xid_map[pg_xid] = xid;
             lock.unlock();

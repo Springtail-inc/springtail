@@ -18,7 +18,11 @@ target_include_directories(springtail_pglog
     PRIVATE ${CMAKE_SOURCE_DIR}/src/xid_mgr/gen-cpp # for thrift headers
 )
 target_link_libraries(springtail_pglog
-    PUBLIC springtail_pg springtail_common springtail_xid_mgr springtail_storage
+    PUBLIC springtail_pg
+           springtail_common
+           springtail_xid_mgr
+           springtail_storage
+           springtail_sys_tbl_mgr
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt)
 
@@ -36,13 +40,18 @@ add_dsymutil_command(pg_log_mgr_daemon)
 add_executable(test_log_reader test/test_reader.cc)
 target_link_libraries(test_log_reader
     PUBLIC springtail_pglog
+           springtail_common
+           springtail_storage
+           springtail_sys_tbl_mgr
     PRIVATE GTest::gtest_main)
 target_include_directories(test_log_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_log_reader)
 
 add_executable(test_xact_log test/test_xact_log.cc)
 target_link_libraries(test_xact_log
-    PUBLIC springtail_pglog springtail_common springtail_storage
+    PUBLIC springtail_pglog
+           springtail_common
+           springtail_storage
     PRIVATE GTest::gtest_main)
 target_include_directories(test_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_xact_log)

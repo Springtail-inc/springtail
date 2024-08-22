@@ -39,8 +39,9 @@ namespace springtail::sys_tbl_mgr {
     Service::Service()
     {
         // call into the XID Mgr to get the latest committed XID
+        // XXX this needs to be fixed
         auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid(0);
+        auto xid = xid_mgr->get_committed_xid(1, 0);
 
         _access_xid = XidLsn(xid);
         _target_xid = xid + 1;
@@ -305,7 +306,7 @@ namespace springtail::sys_tbl_mgr {
 
         XidLsn xid(request.xid, request.lsn);
         auto info = _get_schema_info(request.db_id, request.table_id, xid, xid);
-        
+
         _return = *info;
     }
 
@@ -319,7 +320,7 @@ namespace springtail::sys_tbl_mgr {
         XidLsn target_xid(request.target_xid, request.target_lsn);
 
         auto info = _get_schema_info(request.db_id, request.table_id, access_xid, target_xid);
-        
+
         _return = *info;
     }
 

@@ -11,7 +11,7 @@ namespace {
     void
     handle_sigint(int signal)
     {
-        XidMgrServer::shutdown();
+        xid_mgr::XidMgrServer::shutdown();
     }
 }
 
@@ -19,11 +19,13 @@ int main(int argc, char *argv[]) {
     springtail_init();
 
     uint64_t starting_xid;
+    uint64_t db_id=1;
 
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
         ("xid,x", boost::program_options::value<uint64_t>(&starting_xid)->default_value(2), "The starting XID.")
+        ("dbid,d", boost::program_options::value<uint64_t>(&db_id)->default_value(1), "DB ID.")
         ("daemonize", "Start the server as a daemon");
 
     boost::program_options::variables_map vm;
@@ -36,8 +38,9 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    if (vm.count("xid")) {
-        XidMgrServer::get_instance()->commit_xid(starting_xid, false);
+    if (vm.count("xid") && vm.count("dbid")) {
+        // note: since the defaults are set this always commits the starting_xid of 2 for db_id 1
+        xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, starting_xid, false);
     }
 
     // daemonize the process
@@ -49,7 +52,7 @@ int main(int argc, char *argv[]) {
     std::signal(SIGINT, handle_sigint);
 
     // start the server
-    XidMgrServer::startup();
+    xid_mgr::XidMgrServer::startup();
 
     return 0;
 }

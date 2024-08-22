@@ -14,9 +14,6 @@ namespace springtail::gc {
             _worker_threads.push_back(std::thread(&Committer::_run_worker, this));
         }
 
-        // get the most recent committed XID
-        _committed_xid = _xid_mgr->get_committed_xid(0);
-
         // enter a loop polling for data from the write cache
         // XXX we are currently processing XIDs one at a time, but we should bundle together XID
         //     ranges whenever possible.
@@ -30,6 +27,15 @@ namespace springtail::gc {
             uint64_t db_id = result->db_id();
             uint64_t xid = result->xid();
 
+            // initialize the committed XID for this database if needed
+            uint64_t committed_xid;
+            auto itr = _committed_xids.find(db_id);
+            if (itr == _committed_xids.end()) {
+                committed_xid = 0;
+            } else {
+                committed_xid = itr->second;
+            }
+
             SPDLOG_INFO("Commit XID: {}", xid);
 
             // find every table associated with this XID
@@ -37,7 +43,7 @@ namespace springtail::gc {
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = _write_cache->list_tables(db_id, _committed_xid, xid, 100, table_cursor);
+                auto table_list = _write_cache->list_tables(db_id, committed_xid, xid, 100, table_cursor);
 
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
@@ -52,7 +58,7 @@ namespace springtail::gc {
                     uint64_t txid = 0, tlsn = 0;
 
                     // retrieve the set of table changes for this table
-                    auto table_changes = _write_cache->fetch_table_changes(db_id, tid, _committed_xid, xid);
+                    auto table_changes = _write_cache->fetch_table_changes(db_id, tid, committed_xid, xid);
                     for (auto &&change : table_changes) {
                         // if any of the changes are a truncate, then we will ignore all row
                         // mutations before the last truncate XID/LSN
@@ -64,7 +70,7 @@ namespace springtail::gc {
                     }
 
                     // construct the mutable table object
-                    auto table = TableMgr::get_instance()->get_mutable_table(tid, _committed_xid, xid, true);
+                    auto table = TableMgr::get_instance()->get_mutable_table(tid, committed_xid, xid, true);
 
                     // check if we need to perform a table truncate
                     if (txid > 0) {
@@ -78,7 +84,7 @@ namespace springtail::gc {
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(db_id, tid, _committed_xid, xid, 100, extent_cursor);
+                        auto extent_list = _write_cache->list_extents(db_id, tid, committed_xid, xid, 100, extent_cursor);
 
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
@@ -145,8 +151,8 @@ namespace springtail::gc {
             auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
 
             // commit the completed XID
-            _xid_mgr->commit_xid(xid, !ddls.is_null());
-            _committed_xid = xid;
+            _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
+            _committed_xids[db_id] = xid;
 
             // push any DDL changes to the FDWs
             if (!ddls.is_null()) {
@@ -336,8 +342,8 @@ namespace springtail::gc {
         // note: at this point we've got a sorted list of pages that could be mutated, all at the
         //       correct schema for the target XID
 
-        // construct a virtual schema from the prevous commit XID to the target XID
-        XidLsn access_xid(_committed_xid);
+        // construct a virtual schema from the previous commit XID to the target XID
+        XidLsn access_xid(_committed_xids[table->db()]);
         auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
         auto vschema = std::make_shared<VirtualSchema>(meta);
         auto row_fields = vschema->get_fields();
@@ -347,7 +353,7 @@ namespace springtail::gc {
         bool done = false;
         while (!done) {
             // request rows from the write cache for the provided extent ID
-            auto rows = _write_cache->fetch_rows(table->db(), table->id(), extent_id, _committed_xid, xid, 100, cursor);
+            auto rows = _write_cache->fetch_rows(table->db(), table->id(), extent_id, _committed_xids[table->db()], xid, 100, cursor);
             if (rows.empty()) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}:{}@{}", table->id(), extent_id, xid);
                 done = true;

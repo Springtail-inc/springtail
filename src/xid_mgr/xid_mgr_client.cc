@@ -79,21 +79,21 @@ namespace springtail {
     }
 
     void
-    XidMgrClient::commit_xid(uint64_t xid, bool has_schema_change)
+    XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_change)
     {
         ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        c.client->commit_xid(result, xid, has_schema_change);
+        c.client->commit_xid(result, db_id, xid, has_schema_change);
 
     }
 
     uint64_t
-    XidMgrClient::get_committed_xid(uint64_t schema_xid)
+    XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     {
         ThriftClient c = _get_client();
 
-        thrift::xid_mgr::xid_t xid = c.client->get_committed_xid(schema_xid);
+        thrift::xid_mgr::xid_t xid = c.client->get_committed_xid(db_id, schema_xid);
 
         return xid;
     }

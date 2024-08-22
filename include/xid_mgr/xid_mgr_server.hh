@@ -5,12 +5,13 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include <string_view>
 #include <filesystem>
 
 #include <thrift/server/TServer.h>
 
-namespace springtail {
+#include <xid_mgr/xid_partition.hh>
+
+namespace springtail::xid_mgr {
 
     /**
      * @class XidMgrServer
@@ -20,7 +21,6 @@ namespace springtail {
     class XidMgrServer
     {
     public:
-        static constexpr char const XID_MGR_COMMIT_FILE[] = "xid_mgr_commit";
 
         // delete copy constructor
         XidMgrServer(const XidMgrServer &)   = delete;
@@ -53,20 +53,22 @@ namespace springtail {
             delete _instance;
         }
 
-
         // interfaces from thrift
 
         /**
          * @brief commit up to and including given xid
-         * @param xid
+         * @param db_id database id
+         * @param xid xid to commit
          */
-        void commit_xid(uint64_t xid, bool has_schema_changes);
+        void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
 
         /**
          * @brief Get the latest committed xid object
+         * @param db_id database id
+         * @param schema_xid last known schema xid
          * @return uint64_t
          */
-        uint64_t get_committed_xid(uint64_t schema_xid);
+        uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
     private:
         /**
@@ -81,6 +83,9 @@ namespace springtail {
 
         /** init from get_instance, called once */
         static XidMgrServer *_init();
+
+        /** startup from startup(), called once */
+        void _startup();
 
         /** shutdown from shutdown(), called once */
         static void _shutdown();
@@ -100,38 +105,35 @@ namespace springtail {
         /** server port */
         int _port;
 
-        /** last committed xid */
-        uint64_t _committed_xid = 0;
-
-        /** history of schema xids */
-        std::vector<uint64_t> _history;
-
         /** base path */
         std::filesystem::path _base_path;
-
-        /** file descriptor */
-        int _fd;
-
-        /** mutex for reading/writing xid */
-        std::shared_mutex _mutex;
 
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
 
-        /** startup from startup(), called once */
-        void _startup();
+        std::shared_mutex _mutex;
+
+        /** list of partitions */
+        std::vector<PartitionPtr> _partitions;
+
+        /** map of db_id to partitions */
+        std::map<uint64_t, PartitionPtr> _partition_map;
 
         /**
-         * Write committed xid to file (if larger than last value)
-         * @param xid new value for committed xid
+         * @brief Get a partition based on a db_id, optionally create it
+         * @param db_id database id
+         * @param create whether to create the partition if it doesn't exist
+         * @return PartitionPtr
          */
-        void _write_committed_xid(uint64_t xid);
+        PartitionPtr _get_partition(uint64_t db_id, bool create);
 
         /**
-         * Read committed xid from file into _committed_xid
-         * @return uint64_t return the committed xid
+         * @brief Load partitions from base path
          */
-        uint64_t _read_committed_xid();
+        void _load_partitions();
+
+
+        void _internal_shutdown();
     };
 
 } // namespace springtail

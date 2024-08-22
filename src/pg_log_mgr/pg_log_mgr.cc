@@ -32,7 +32,7 @@ namespace springtail::pg_log_mgr {
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        _next_xid = xid_mgr->get_committed_xid(0) + 1;
+        _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
         // scan xact logs and transfer in progress xacts to log reader
         PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX);

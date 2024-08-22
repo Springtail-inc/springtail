@@ -6,6 +6,7 @@ set(XID_MGR_SOURCES
     xid_mgr_client.cc
     xid_mgr_server.cc
     xid_mgr_service.cc
+    xid_partition.cc
 )
 
 # add the library target

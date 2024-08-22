@@ -1,4 +1,5 @@
 #include <iostream>
+#include <mutex>
 
 #include <thrift/transport/TSocket.h>
 
@@ -18,9 +19,36 @@ namespace springtail {
     public:
         ThriftXidMgrService() = default;
 
+        /**
+         * @brief Get the singleton write cache service instance object
+         * @return ThriftWriteCacheService *
+         */
+        static ThriftXidMgrService *get_instance() {
+            std::call_once(_init_flag, &ThriftXidMgrService::_init);
+            return _instance;
+        }
+
+        /**
+         * @brief Shutdown cache
+         */
+        static void shutdown() {
+            std::call_once(_shutdown_flag, &ThriftXidMgrService::_shutdown);
+        }
+
         void ping(thrift::xid_mgr::Status& _return) override;
-        void commit_xid(thrift::xid_mgr::Status& _return, const thrift::xid_mgr::xid_t xid, bool has_schema_changes) override;
-        thrift::xid_mgr::xid_t get_committed_xid(thrift::xid_mgr::xid_t schema_xid) override;
+        void commit_xid(thrift::xid_mgr::Status& _return, const int64_t db_id, const thrift::xid_mgr::xid_t xid, bool has_schema_changes) override;
+        thrift::xid_mgr::xid_t get_committed_xid(const int64_t db_id, thrift::xid_mgr::xid_t schema_xid) override;
+
+    private:
+        static ThriftXidMgrService *_instance; ///< singleton instance
+        static std::once_flag _init_flag;     ///< init flag
+        static std::once_flag _shutdown_flag; ///< shutdown flag
+
+        /** init from get_instance, called once */
+        static ThriftXidMgrService *_init();
+
+        /** shutdown from shutdown(), called once */
+        static void _shutdown();
     };
 
 
@@ -49,12 +77,12 @@ namespace springtail {
                 SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerAddress: {}", sock->getPeerAddress());
                 SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerPort: {}", sock->getPeerPort());
 
-                return new ThriftXidMgrService();
+                return ThriftXidMgrService::get_instance();
             }
 
             void
             releaseHandler(thrift::xid_mgr::ThriftXidMgrIf *handler) override {
-                delete handler;
+                // delete handler;
             }
     };
 }
