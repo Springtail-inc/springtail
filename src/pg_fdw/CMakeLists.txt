@@ -31,6 +31,8 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
+    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE PostgreSQL::PostgreSQL
 )
 #add_dsymutil_command(springtail_pg_fdw)
 

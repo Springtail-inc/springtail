@@ -72,7 +72,7 @@
         "organization_id": "abc-de-fgh",
         "account_id": "123-45-678",
         "db_instance_id": 1234,
-        "fdw_id": 1
+        "fdw_id": "1"
     },
     "db_instances": {
         "1234": {
@@ -80,7 +80,7 @@
                 "host": "localhost",
                 "port": 5432,
                 "replication_user": "postgres",
-                "password": "postgres"
+                "password": "springtail"
             },
             "database_ids": [1]
         }
@@ -101,9 +101,9 @@
     "fdws": {
         "1": {
             "host": "localhost",
-            "port": 8888,
+            "port": 5432,
             "fdw_user": "postgres",
-            "password": "postgres"
+            "password": "springtail"
         }
     }
 }

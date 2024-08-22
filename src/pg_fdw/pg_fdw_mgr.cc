@@ -38,7 +38,13 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
+        springtail_init(LOG_ALL);
+
         _instance = new PgFdwMgr();
+
+        // init fdw_id
+        _instance->_fdw_id = Properties::get_fdw_id();
+
         return _instance;
     }
 
@@ -76,19 +82,12 @@ namespace springtail::pg_fdw {
     {
         if (config_file != nullptr) {
             // set env variable
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing, config file: {}", config_file);
             setenv("SPRINGTAIL_PROPERTIES_FILE", config_file, 1);
         }
-        springtail_init(LOG_ALL);
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing, config file: {}", config_file);
 
         // initialize the singleton
         std::call_once(_init_flag, _init);
-
-        // init fdw_id
-        _instance->_fdw_id = Properties::get_fdw_id();
-
-        // start the DDL thread
-        std::thread _ddl_thread(_ddl_thread_func);
     }
 
     void
@@ -105,7 +104,11 @@ namespace springtail::pg_fdw {
             // this command must be called after the import schema calls have completed, it starts
             // up the ddl thread, to avoid the startup race condition.
 
-            std::thread _ddl_thread(_ddl_thread_func);
+            // create the ddl thread
+            if (std::atomic_flag_test_and_set(&_ddl_thread_started) == false) {
+                _ddl_thread = std::thread(_ddl_thread_func);
+            }
+
             return;
         }
 

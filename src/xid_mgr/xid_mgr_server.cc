@@ -80,6 +80,8 @@ namespace springtail::xid_mgr {
         threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
         threadManager->start();
 
+        auto socket =
+
         _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),

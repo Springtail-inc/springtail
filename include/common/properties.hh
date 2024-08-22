@@ -1,4 +1,12 @@
 #pragma once
+
+#include <cassert>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <vector>
+#include <iostream>
+
 #include <nlohmann/json.hpp>
 
 #ifndef SPRINGTAIL_PROPERTIES

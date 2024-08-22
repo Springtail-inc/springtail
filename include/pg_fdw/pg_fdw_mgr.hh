@@ -5,6 +5,7 @@
 #include <shared_mutex>
 #include <optional>
 #include <thread>
+#include <atomic>
 
 #include <common/constants.hh>
 #include <common/redis_ddl.hh>
@@ -110,7 +111,7 @@ namespace springtail::pg_fdw {
 
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {
-            std::call_once(_init_flag, _init);
+            assert (_instance != nullptr);
             return _instance;
         }
 
@@ -233,6 +234,7 @@ namespace springtail::pg_fdw {
         std::string _password="";          ///< Password for fdw server
         int _port=5432;                    ///< Port for fdw server
 
+        std::atomic_flag _ddl_thread_started = ATOMIC_FLAG_INIT; ///< Flag to indicate if DDL thread is started
         std::thread _ddl_thread;           ///< Thread for DDL updates
 
         // static methods

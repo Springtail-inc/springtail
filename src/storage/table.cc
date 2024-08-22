@@ -248,7 +248,7 @@ namespace springtail {
       _for_gc(for_gc)
     {
         // make sure that the table directory exists
-        std::filesystem::create_directory(_table_dir);
+        std::filesystem::create_directories(_table_dir);
 
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
