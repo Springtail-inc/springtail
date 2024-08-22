@@ -81,7 +81,7 @@
                 "port": 5432,
                 "replication_user": "postgres",
                 "password": "postgres"
-            }
+            },
             "database_ids": [1]
         }
     },

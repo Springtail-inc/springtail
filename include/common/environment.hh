@@ -23,7 +23,7 @@ namespace springtail::environment {
     static const std::tuple<const char *, Type, const char *, const char *> Variables[] =
     {
         {"REDIS_HOSTNAME", STR, "redis", "host"},
-        {"REDIS_USER", STR, "redis"," user"},
+        {"REDIS_USER", STR, "redis", "user"},
         {"REDIS_PASSWORD", STR, "redis", "password"},
         {"REDIS_USER_DATABASE_ID", UINT32, "redis", "db"},
         {"REDIS_PORT", UINT32, "redis", "port"},

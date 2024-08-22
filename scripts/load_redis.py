@@ -59,6 +59,7 @@ sys_config_json['xid_mgr'] = system_json['xid_mgr']
 sys_config_json['storage'] = system_json['storage']
 sys_config_json['redis'] = system_json['redis']
 sys_config_json['log_mgr'] = system_json['log_mgr']
+sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
 
 r.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

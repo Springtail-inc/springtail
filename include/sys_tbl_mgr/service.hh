@@ -308,11 +308,11 @@ namespace springtail::sys_tbl_mgr {
             std::shared_ptr<apache::thrift::transport::TSocket> sock =
                 std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
 
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "Incoming connection\n");
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tSocketInfo: {}\n", sock->getSocketInfo());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerHost: {}\n", sock->getPeerHost());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerAddress: {}\n", sock->getPeerAddress());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerPort: {}\n", sock->getPeerPort());
+            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "Incoming connection");
+            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tSocketInfo: {}", sock->getSocketInfo());
+            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerHost: {}", sock->getPeerHost());
+            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerAddress: {}", sock->getPeerAddress());
+            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerPort: {}", sock->getPeerPort());
 
             return Service::get_instance();
         }

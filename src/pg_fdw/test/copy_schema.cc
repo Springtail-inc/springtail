@@ -121,7 +121,7 @@ main(int argc, char *argv[])
          "Postgres password")
         ("port,P", boost::program_options::value<int>(&port)->default_value(5432),
          "Postgres port number")
-        ("db_id", boost::program_options::value<uint64_t>(&db_id)->default_value(1),"Database ID");
+        ("db_id, i", boost::program_options::value<uint64_t>(&db_id)->default_value(1),"Database ID");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);

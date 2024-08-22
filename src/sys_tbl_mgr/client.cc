@@ -45,13 +45,13 @@ namespace springtail::sys_tbl_mgr {
         nlohmann::json client_json;
         nlohmann::json server_json;
 
-        // fetch properties for the write cache client
+        // fetch properties for the sys tbl mgr
         if (!Json::get_to(json, "client", client_json)) {
-            throw Error("Write cache client settings not found");
+            throw Error("Sys tbl mgr client settings not found");
         }
 
         if (!Json::get_to(json, "server", server_json)) {
-            throw Error("Write cache server settings not found");
+            throw Error("Sys tbl mgr server settings not found");
         }
 
         // init channel pool

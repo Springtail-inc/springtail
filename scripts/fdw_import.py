@@ -101,11 +101,6 @@ conn = psycopg2.connect(dbname='postgres', user=fdw['fdw_user'], password=fdw['p
 for db_name in db_schemas:
     execute_sql(conn, "CREATE DATABASE IF NOT EXISTS %s;", (db_name))
 
-# get the current xid from xid mgr
-xid = run_command(XID_CLIENT, ['-g'])
-
-print(f"Using xid: {xid}")
-
 # connect to database
 for db_name in db_schemas.keys():
     conn = psycopg2.connect(dbname=dbname, user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=['port'])
@@ -113,6 +108,11 @@ for db_name in db_schemas.keys():
     # generate the create server and import foreign schema commands
     db_json = db_schemas[db_name]
     db_id = str(db_json['id'])
+
+    # get the current xid from xid mgr
+    xid = run_command(XID_CLIENT, ['-g', '-d', db_id])
+
+    print(f"Using xid: {xid} for db: {db_name}")
 
     execute_sql(conn, "DROP SERVER %s IF EXISTS;", (FDW_SERVER_NAME))
     execute_sql(conn, "CREATE SERVER %s FOREIGN DATA WRAPPER %s OPTIONS (id %s, db_id %s, db_name %s, schema_xid %s);", (fdw_id, FDW_SERVER_NAME, FDW_WRAPPER, db_id, db_name, xid))
