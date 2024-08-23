@@ -520,18 +520,30 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
     uint64_t db_id;
     uint64_t schema_xid;
     char *db_name = NULL;
+    int found = 0;
 
     foreach(lc, server->options) {
         DefElem    *def = (DefElem *) lfirst(lc);
         if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
             char *db_id_str = defGetString(def);
             db_id = strtoull(db_id_str, NULL, 10);
+            found++;
         } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_NAME_OPTION) == 0) {
             db_name = defGetString(def);
+            found++;
         } else if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
             char *schema_xid_str = defGetString(def);
             schema_xid = strtoull(schema_xid_str, NULL, 10);
+            found++;
         }
+    }
+
+    if (found != 3) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+                            errmsg("Xid, DB ID or DB Name not found in options for server %s", server->servername),
+                            errhint("Xid, DB ID or DB Name not found for fdw server from server options")));
+
     }
 
     return fdw_import_foreign_schema(server->servername, stmt->remote_schema,

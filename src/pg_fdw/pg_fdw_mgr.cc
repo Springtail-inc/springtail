@@ -40,6 +40,8 @@ namespace springtail::pg_fdw {
     {
         springtail_init(LOG_ALL);
 
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
+
         _instance = new PgFdwMgr();
 
         // init fdw_id
@@ -142,8 +144,8 @@ namespace springtail::pg_fdw {
             rd_lock.unlock();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: tid: {}, xid: {}, pg_xid: {}",
-                            tid, xid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}",
+                            db_id, tid, xid, pg_xid);
 
         TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, constant::MAX_LSN);
         PgFdwState *state = new PgFdwState{table, tid, xid};
@@ -978,8 +980,10 @@ namespace springtail::pg_fdw {
             }
         }
 
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Importing schema: {} <=> {}\n", schema, CATALOG_SCHEMA_NAME);
+
         // if we are importing the catalog schema, handle it separately
-        if (schema == CATALOG_SCHEMA_NAME) {
+        if (schema == std::string(CATALOG_SCHEMA_NAME)) {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 

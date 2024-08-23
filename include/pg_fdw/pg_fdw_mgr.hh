@@ -102,7 +102,7 @@ namespace springtail::pg_fdw {
     /** Singleton manager for handling table scan operations */
     class PgFdwMgr {
     public:
-        static constexpr char CATALOG_SCHEMA_NAME[] = "__pg_springtail";  ///< Schema name for catalog tables
+        static constexpr char CATALOG_SCHEMA_NAME[] = SPRINGTAIL_FDW_CATALOG_SCHEMA;  ///< Schema name for catalog tables
         static constexpr char CATALOG_TABLE_NAMES[] = "table_names";      ///< Table name for system table names
         static constexpr char CATALOG_TABLE_ROOTS[] = "table_roots";      ///< Table name for system table roots
         static constexpr char CATALOG_TABLE_INDEXES[] = "indexes";        ///< Table name for system table indexes

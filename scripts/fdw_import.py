@@ -8,7 +8,7 @@ import subprocess
 
 FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
-FDW_SYSTEM_CATALOG = '__springtail_catalog'
+FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 
 # get the xid client path
 XID_CLIENT_RELATIVE_PATH = 'debug/src/xid_mgr/xid_client'
@@ -101,11 +101,15 @@ conn.autocommit = True
 
 print("Connected to postgres db, creating dbs")
 
+# setup primary db
+execute_sql(conn, "CREATE EXTENSION IF NOT EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
+
+# create the databases
 for db_name in db_schemas:
     execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)};")
     execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name,conn)};")
 
-# connect to database
+# connect to each database, create the foreign server and import the foreign schema
 for db_name in db_schemas.keys():
     conn = psycopg2.connect(dbname=dbname, user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=fdw['port'])
     conn.autocommit = True
@@ -119,19 +123,21 @@ for db_name in db_schemas.keys():
 
     print(f"Using xid: {xid} for db: {db_name}")
 
-    execute_sql(conn, "CREATE EXTENSION {};".format(quote_ident(FDW_WRAPPER, conn)))
+    execute_sql(conn, "CREATE EXTENSION IF NOT EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
     execute_sql(conn, "DROP SERVER IF EXISTS {} CASCADE;".format(quote_ident(FDW_SERVER_NAME, conn)))
     execute_sql(conn, "CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id %s, db_id %s, db_name %s, schema_xid %s);".format(quote_ident(FDW_SERVER_NAME, conn), quote_ident(FDW_WRAPPER, conn)), (fdw_id, db_id, db_name, xid))
 
     for schema in db_json['schemas']:
+        execute_sql(conn, "CREATE SCHEMA IF NOT EXISTS {};".format(quote_ident(schema, conn)))
         execute_sql(conn, "IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {};".format(quote_ident(schema, conn), quote_ident(FDW_SERVER_NAME, conn), quote_ident(schema, conn)))
 
     # import the system catalog
+    execute_sql(conn, "CREATE SCHEMA IF NOT EXISTS {};".format(quote_ident(FDW_SYSTEM_CATALOG, conn)))
     execute_sql(conn, "IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {};".format(quote_ident(FDW_SYSTEM_CATALOG, conn), quote_ident(FDW_SERVER_NAME, conn), quote_ident(FDW_SYSTEM_CATALOG, conn)))
 
     conn.close()
 
-# notify fdw that the import is complete
+# notify fdw that the import is complete; doesn't really matter where it runs but fdw extension must be loaded
 conn = psycopg2.connect(dbname='postgres', user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=fdw['port'])
 conn.autocommit = True
 execute_sql(conn, "SELECT springtail_fdw_function('startup');")
