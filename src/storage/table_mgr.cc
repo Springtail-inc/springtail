@@ -55,9 +55,8 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // check the system tables
-        auto table = _get_system_table(db_id, table_id, xid);
-        if (table != nullptr) {
-            return table;
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return _get_system_table(db_id, table_id, xid);
         }
 
         // retrieve the roots and stats of the table
@@ -80,10 +79,9 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // check the system tables
-        //auto table = _get_mutable_system_table(db_id, table_id, access_xid, target_xid);
-        //if (table != nullptr) {
-        //    return table;
-        //}
+        if (table_id < constant::MAX_SYSTEM_TABLE_ID) {
+            return _get_mutable_system_table(db_id, table_id, access_xid, target_xid);
+        }
 
         // retrieve the roots and stats of the table
         auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, access_xid);

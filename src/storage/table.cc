@@ -642,6 +642,13 @@ namespace springtail {
     MutableTable::_insert_append(TuplePtr value,
                                  uint64_t xid)
     {
+        // if the primary_lookup tree is empty, we will maintain a single page of data that we will
+        // keep against the table and use for all operations.
+        if (_primary_lookup->empty()) {
+            _insert_empty(value, xid);
+            return;
+        }
+
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
         auto pos = --(_primary_lookup->end());

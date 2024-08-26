@@ -31,7 +31,7 @@ namespace springtail::gc {
             uint64_t committed_xid;
             auto itr = _committed_xids.find(db_id);
             if (itr == _committed_xids.end()) {
-                committed_xid = 0;
+                committed_xid = _xid_mgr->get_committed_xid(db_id, 0);
             } else {
                 committed_xid = itr->second;
             }
