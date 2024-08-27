@@ -126,6 +126,8 @@ dump_table(uint64_t db_id,
     FormData_pg_attribute attrdata[fields->size()];
     Form_pg_attribute attrs[fields->size()];
 
+    List *target_list = NIL;
+
     // iterate over column map and extract attrnums
     int i = 0;
     for (auto &col : columns) {
@@ -134,14 +136,20 @@ dump_table(uint64_t db_id,
             attrs[i]->attnum = col.first;
             attrs[i]->atttypid = col.second.pg_type;
             attrs[i]->atttypmod = -1;
+
+            // append col.first to target_list
+            target_list = lappend(target_list, makeInteger(col.first));
+
+            i++;
         }
     }
 
+    PgFdwMgr::fdw_init(nullptr);
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     // create the fdw state for the table @xid and begin the scan
     PgFdwState *state = mgr->fdw_create_state(db_id, tid, xid, xid);
-    mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
+    mgr->fdw_begin_scan(state, target_list, nullptr, nullptr);
 
     // iterate through the table and print the values
     Datum values[fields->size()];
@@ -186,7 +194,7 @@ dump_table(uint64_t db_id,
 
 int main(int argc, char *argv[])
 {
-    springtail_init(0);
+    springtail_init();
 
     std::string table;
     std::string schema;
