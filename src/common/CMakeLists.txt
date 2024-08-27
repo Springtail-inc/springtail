@@ -2,8 +2,18 @@
 find_package(redis++ CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(c-ares CONFIG REQUIRED)
 
-set(COMMON_LIB_SOURCES exception.cc logging.cc common.cc properties.cc redis.cc redis_ddl.cc tracking_allocator.cc)
+set(COMMON_LIB_SOURCES
+  exception.cc
+  logging.cc
+  common.cc
+  properties.cc
+  redis.cc
+  redis_ddl.cc
+  tracking_allocator.cc
+  dns_resolver.cc
+)
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -12,7 +22,8 @@ target_link_libraries(springtail_common
          spdlog::spdlog
          fmt::fmt
          redis++::redis++_static
-	 nlohmann_json::nlohmann_json
+	       nlohmann_json::nlohmann_json
+         c-ares::cares
 )
 
 add_executable(test_thread test/test_thread.cc)
@@ -45,9 +56,15 @@ target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_redis PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_redis)
 
+add_executable(test_dns test/test_dns.cc)
+target_include_directories(test_dns PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_dns PRIVATE springtail_common Boost::thread GTest::gtest_main)
+add_dsymutil_command(test_dns)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
 gtest_discover_tests(test_filesystem)
 gtest_discover_tests(test_counter)
 gtest_discover_tests(test_redis)
+gtest_discover_tests(test_dns)

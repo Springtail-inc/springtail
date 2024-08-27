@@ -7,6 +7,9 @@
 #include <pg_repl/libpq_connection.hh>
 #include <pg_repl/exception.hh>
 
+#include <common/logging.hh>
+#include <common/dns_resolver.hh>
+
 namespace springtail {
 
     /** SQL command to set serach path */
@@ -175,7 +178,7 @@ namespace springtail {
         // clear old result if there was one
         clear();
 
-        std::cout << "Executing query: " << cmd << std::endl;
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query: {}", cmd);
         PGresult *res = PQexec(_connection, cmd);
         if (PQresultStatus(res) != PGRES_COMMAND_OK &&
             PQresultStatus(res) != PGRES_TUPLES_OK &&
@@ -316,7 +319,6 @@ namespace springtail {
 
         // create key value list for: host, port, dbname, user, password, options
         // escape options
-        std::unique_ptr<char[]> host = escape_string(db_host);
         std::unique_ptr<char[]> name = escape_string(db_name);
         std::unique_ptr<char[]> user = escape_string(db_user);
         std::unique_ptr<char[]> pass = escape_string(db_pass);
@@ -325,24 +327,65 @@ namespace springtail {
         // setting database=replication to put connection in replication mode
         std::string encoding("UTF8");
 
-        std::string conninfo = fmt::format("host={} port={} dbname={} user={} \
-            password={} {}client_encoding={} \
-            options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
-            host.get(), db_port, name.get(), user.get(), pass.get(),
-            (replication ? "replication=database ": ""), encoding);
+        std::string hosttype;
+        std::unique_ptr<char[]> host;
 
-        std::cout << "Attempting to connect: " << conninfo << std::endl;
+        PGconn *connection = nullptr;
 
-        // try connection
-        PGconn *connection = PQconnectdb(conninfo.c_str());
-        if (PQstatus(connection) != CONNECTION_OK) {
-            std::cerr << "Error connecting: " << PQerrorMessage(connection) << std::endl;
-            PQfinish(connection);
-            throw PgIOError();
+        int retries = 0;
+        int backoff = RETRY_SLEEP_SECS;
+        bool do_dns_lookup = false;
+
+        while (retries < MAX_RETRY_COUNT) {
+            if (do_dns_lookup) {
+                // do ip lookup for hostname using internal dns resolver
+                DNSResolver *resolver = DNSResolver::get_instance();
+                std::optional<std::string> ip = resolver->resolve(db_host);
+                if (!ip.has_value()) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Failed to resolve hostname: {}", db_host);
+                    throw PgConnectionError();
+                }
+
+                hosttype = "hostaddr";
+                host = escape_string(ip.value());
+            } else {
+                // allow libpq to do the hostname lookup (using system resolver)
+                hosttype = "host";
+                host = escape_string(db_host);
+            }
+
+            // generate connection string
+            std::string conninfo = fmt::format("{}={} port={} dbname={} user={} \
+                password={} {}client_encoding={} \
+                options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
+                hosttype, host.get(), db_port, name.get(), user.get(), pass.get(),
+                (replication ? "replication=database ": ""), encoding);
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Attempting to connect: {}", conninfo);
+
+            // try connection
+            connection = PQconnectdb(conninfo.c_str());
+            if (PQstatus(connection) != CONNECTION_OK) {
+                SPDLOG_ERROR("Error connecting: conninfo: {}, msg: {}", conninfo, PQerrorMessage(connection));
+                PQfinish(connection);
+
+                // sleep and backoff
+                std::this_thread::sleep_for(std::chrono::seconds(backoff));
+                do_dns_lookup = true;
+
+                backoff *= 2;
+                retries++;
+            } else {
+                break;
+            }
         }
 
-        std::cout << fmt::format("PG connected, protocol version={}, server version={}\n",
-                                 PQprotocolVersion(connection), PQserverVersion(connection));
+        if (retries >= MAX_RETRY_COUNT) {
+            throw PgConnectionError();
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "PG connected, protocol version={}, server version={}",
+                            PQprotocolVersion(connection), PQserverVersion(connection));
 
         // for safety set search path
         try {

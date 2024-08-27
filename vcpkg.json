@@ -16,6 +16,7 @@
         "thrift",
         "gtest",
         "vincentlaucsb-csv-parser",
-        "openssl"
+        "openssl",
+        "c-ares"
     ]
 }

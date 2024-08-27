@@ -7,20 +7,10 @@ namespace springtail {
 
     class LibPqConnection {
 
-    private:
-        /** Internal libpq connection */
-        PGconn *_connection = nullptr;
-
-        /** Result pointer from last query */
-        PGresult *_result = nullptr;
-
-        /** Indicates if connection is in a transaction or not */
-        bool _in_transaction = false;
-
-        /** Copy buffer pointer */
-        char *_buffer = nullptr;
-
     public:
+
+        static constexpr int MAX_RETRY_COUNT = 5;  ///< max retry count for connection
+        static constexpr int RETRY_SLEEP_SECS = 2; ///< initial sleep time in sec between retries
 
         LibPqConnection() {};
 
@@ -236,5 +226,17 @@ namespace springtail {
          */
         int end_copy();
 
+    private:
+        /** Internal libpq connection */
+        PGconn *_connection = nullptr;
+
+        /** Result pointer from last query */
+        PGresult *_result = nullptr;
+
+        /** Indicates if connection is in a transaction or not */
+        bool _in_transaction = false;
+
+        /** Copy buffer pointer */
+        char *_buffer = nullptr;
     };
 };
