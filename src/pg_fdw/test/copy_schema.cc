@@ -19,6 +19,10 @@
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
+
 using namespace springtail;
 
 struct PostgresConnection {
@@ -84,12 +88,18 @@ dump_tables_in_schema(const PostgresConnection &conn,
     pg_conn.clear();
     pg_conn.disconnect();
 
-    uint64_t xid = 2;
+    uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn, db_id, xid);
-        xid += 2;
+        dump_table(base_dir, schema_name, table_name, conn, db_id, xid + 1);
     }
+
+    // finalize the system tables
+    sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid + 1);
+
+    // update the xid mgr
+    XidMgrClient::get_instance()->commit_xid(db_id, xid + 1, false);
 }
 
 int

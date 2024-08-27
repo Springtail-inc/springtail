@@ -4,7 +4,7 @@ BUILD_DIR=`pwd`/$1
 echo ${BUILD_DIR}
 
 PSQL_CMD="psql postgresql://springtail:springtail@localhost/springtail"
-PSQL_CMD_REPLICA="psql postgresql://springtail:springtail@localhost/springtail_replica"
+PSQL_CMD_REPLICA="psql postgresql://springtail:springtail@localhost/replica_springtail"
 
 # change to the directory of the script
 cd $(dirname $0)
@@ -40,8 +40,11 @@ SYS_TBL_DAEMON="${BUILD_DIR}/src/sys_tbl_mgr/sys_tbl_mgr_daemon"
 SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/sys_tbl_mgr.log" ${SYS_TBL_DAEMON} --daemon
 sleep 1
 
+exit
+
 # copy the initial snapshot of the table data
 ${BUILD_DIR}/src/pg_fdw/copy_schema -d springtail -u springtail -s public
+
 
 # start the write cache
 echo Start Write Cache...
@@ -64,8 +67,7 @@ sleep 1
 # sleep 1
 
 # set up the replica database
-# note: using PSQL_CMD here as the replica DB does not exist yet
-${PSQL_CMD} < setup_replica_db.sql
+../fdw_import.py
 
 # verify the snapshot by running a query against the FDW
 echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}

@@ -106,12 +106,20 @@ execute_sql(conn, "CREATE EXTENSION IF NOT EXISTS {};".format(quote_ident(FDW_WR
 
 # create the databases
 for db_name in db_schemas:
-    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)};")
-    execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name,conn)};")
+    fdw_db_name = db_name
+    if 'db_prefix' in fdw:
+        fdw_db_name = fdw['db_prefix'] + db_name
+
+    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(fdw_db_name, conn)};")
+    execute_sql(conn, f"CREATE DATABASE {quote_ident(fdw_db_name,conn)};")
 
 # connect to each database, create the foreign server and import the foreign schema
 for db_name in db_schemas.keys():
-    conn = psycopg2.connect(dbname=dbname, user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=fdw['port'])
+    fdw_db_name = db_name
+    if 'db_prefix' in fdw:
+        fdw_db_name = fdw['db_prefix'] + db_name
+
+    conn = psycopg2.connect(dbname=fdw_db_name, user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=fdw['port'])
     conn.autocommit = True
 
     # generate the create server and import foreign schema commands
