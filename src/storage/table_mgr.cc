@@ -87,7 +87,7 @@ namespace springtail {
         auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, access_xid);
 
         // construct the mutable table and return it
-        XidLsn xid(access_xid);
+        XidLsn xid(target_xid);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, tbl_meta.roots,

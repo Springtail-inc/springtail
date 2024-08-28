@@ -526,6 +526,8 @@ namespace springtail::sys_tbl_mgr {
 
         // first read the columns from the schemas table
         XidLsn xid = std::min(access_xid, _access_xid);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, xid.xid, xid.lsn);
+
         auto &&columns = _read_schema_columns(db_id, table_id, xid);
 
         // if the requested access XID is ahead of the on-disk XID, apply changes from the cache
@@ -586,6 +588,7 @@ namespace springtail::sys_tbl_mgr {
             // get the table_id from the entry
             uint64_t tid = fields->at(sys_tbl::Schemas::Data::TABLE_ID)->get_uint64(row);
             if (tid != table_id) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
                 // if we have read all of the entries for this table ID, stop processing
                 break;
             }
@@ -594,6 +597,7 @@ namespace springtail::sys_tbl_mgr {
             uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(row);
             uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
             if (access_xid < XidLsn(xid, lsn)) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid, lsn);
                 continue;
             }
 
@@ -613,6 +617,7 @@ namespace springtail::sys_tbl_mgr {
                 column.is_generated = false; // XXX
                 if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
                     column.default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
+                    column.__isset.default_value = true;
                 }
                 // note: pk_position set via scan of Indexes system table later
 
@@ -622,6 +627,8 @@ namespace springtail::sys_tbl_mgr {
 
         // if no schema (e.g., due to DROP TABLE) then return empty schema info
         if (columns.empty()) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found no columns for table {}@{}:{}",
+                                table_id, access_xid.xid, access_xid.lsn);
             return columns;
         }
 
@@ -667,7 +674,7 @@ namespace springtail::sys_tbl_mgr {
             // update the primary key details in the schema columns
             uint32_t column_id = fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row);
             uint32_t index_pos = fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row);
-            columns[column_id].pk_position = index_pos;
+            columns[column_id].__set_pk_position(index_pos);
         }
 
         return columns;
@@ -763,6 +770,7 @@ namespace springtail::sys_tbl_mgr {
             entry.column.is_generated = false; // XXX
             if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
                 entry.column.default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
+                entry.column.__isset.default_value = true;
             }
 
             history.push_back(entry);

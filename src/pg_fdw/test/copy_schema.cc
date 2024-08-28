@@ -45,14 +45,14 @@ void dump_table(const std::filesystem::path &base_dir,
                 const std::string &table_name,
                 const PostgresConnection &conn,
                 uint64_t db_id,
-                uint64_t xid)
+                XidLsn &xid)
 {
     SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
 
     auto source = std::make_shared<PgCopyTable>(conn.database, schema_name, table_name, "");
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
-    // perform the table copy
+    // perform the table copy -- note: updates the LSN of the xid
     source->copy_to_springtail(db_id, xid);
 }
 
@@ -90,16 +90,17 @@ dump_tables_in_schema(const PostgresConnection &conn,
 
     uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
+    XidLsn target_xid(xid + 1, 0);
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn, db_id, xid + 1);
+        dump_table(base_dir, schema_name, table_name, conn, db_id, target_xid);
     }
 
     // finalize the system tables
-    sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid + 1);
+    sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
 
     // update the xid mgr
-    XidMgrClient::get_instance()->commit_xid(db_id, xid + 1, false);
+    XidMgrClient::get_instance()->commit_xid(db_id, target_xid.xid, false);
 }
 
 int

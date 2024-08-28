@@ -557,8 +557,8 @@ namespace springtail {
     std::vector<uint64_t>
     MutableTable::finalize()
     {
-        // in the case of having an empty table, there are no invalidations... we can flush the
-        // single Page and update the indexes
+        // in the case of having an (initially) empty table, there are no invalidations... we can
+        // flush the single Page and update the indexes
         if (_empty_page) {
             _flush_and_populate_indexes(_empty_page);
 
@@ -566,10 +566,10 @@ namespace springtail {
             _empty_page = nullptr;
 
             // XXX should we still call StorageCache::flush() to make sure that the file is sync()'d?
-        } else {
-            // flush the dirty data pages of the table to disk
-            StorageCache::get_instance()->flush(_data_file);
         }
+
+        // flush the dirty data pages of the table to disk
+        StorageCache::get_instance()->flush(_data_file);
 
         // now flush the indexes, capturing the roots
         std::vector<uint64_t> roots;
