@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <common/redis.hh>
+
 #ifndef SPRINGTAIL_PROPERTIES
 #define SPRINGTAIL_PROPERTIES = "system.json"
 #endif
@@ -103,8 +105,14 @@ namespace springtail {
         /** static _instance singleton */
         static Properties *_instance;
 
+        /** once init flag */
+        static std::once_flag _init_flag;
+
         /** json containing parsed settings file */
         nlohmann::json _json;
+
+        /** properties file override env is set */
+        bool _properties_file_override = false;
 
         /**
          * @brief Construct a new Properties object
@@ -124,5 +132,8 @@ namespace springtail {
         // delete move constructor
         Properties(const Properties &)     = delete;
         void operator=(const Properties &) = delete;
+
+        /** Redis client connected to config db */
+        RedisClientPtr _redis_config_client = nullptr;
     };
 }
