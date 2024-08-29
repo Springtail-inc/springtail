@@ -45,15 +45,6 @@ namespace springtail {
             SPDLOG_ERROR("Failed to initialize c-ares channel");
             throw Error("Failed to initialize c-ares channel");
         }
-
-            // Set a custom DNS server (e.g., Google's public DNS)
-        const char* dns_server = "8.8.8.8";
-        if (ares_set_servers_csv(_channel, dns_server) != ARES_SUCCESS) {
-            SPDLOG_ERROR("Failed to set DNS server");
-            ares_destroy(_channel);
-            ares_library_cleanup();
-            throw Error("Failed to set DNS server");
-        }
     }
 
     void
