@@ -81,9 +81,7 @@ target_include_directories(test_where
 )
 target_link_libraries(test_where
     PRIVATE springtail_common
-    PRIVATE springtail_storage
-    PRIVATE springtail_sys_tbl_mgr
-    PRIVATE springtail_xid_mgr
+    PRIVATE springtail_test
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE GTest::gtest_main
 )

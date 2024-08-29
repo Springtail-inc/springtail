@@ -7,6 +7,8 @@
 
 #include <pg_fdw/pg_fdw_mgr.hh>
 
+#include <test/services.hh>
+
 using namespace springtail;
 using namespace springtail::pg_fdw;
 
@@ -21,18 +23,8 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            springtail_init();
-
-            auto json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir);
-            _table_dir = Properties::make_absolute_path(_table_dir);
-            std::filesystem::remove_all(_table_dir);
-
-            _base_dir = std::filesystem::temp_directory_path() / "test_fdw_table";
-            std::filesystem::remove_all(_base_dir);
-
-            std::filesystem::create_directories(_table_dir);
-            std::filesystem::create_directories(_base_dir / std::to_string(_tid));
+            PgFdwMgr::fdw_init(); // calls springtail_init
+            _services.init(true);
 
             _columns = {
                 {"col1", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
@@ -86,8 +78,7 @@ namespace {
         // Called once per testsuite.  Remove the table directories
         static void TearDownTestSuite() {
             // remove any files created during the run
-            std::filesystem::remove_all(_table_dir);
-            std::filesystem::remove_all(_base_dir);
+           _services.shutdown();
         }
 
         // Pre test setup
@@ -115,6 +106,8 @@ namespace {
                 delete[] _attrs;
             }
         }
+
+        inline static test::Services _services{true, true, true};
 
         inline static uint64_t _db_id;
         inline static uint64_t _tid;

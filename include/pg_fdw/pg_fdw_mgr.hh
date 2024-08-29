@@ -119,7 +119,7 @@ namespace springtail::pg_fdw {
          * Init call, pass in config file path;
          * Ideally, call before first get_instance()
          */
-        static void fdw_init(const char *config_file);
+        static void fdw_init(const char *config_file=nullptr);
 
         /** Create state based on table ID
          * @param tid Table ID
