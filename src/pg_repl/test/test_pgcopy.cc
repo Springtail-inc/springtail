@@ -32,7 +32,7 @@ namespace {
             password = p_db["password"].get<std::string>();
             port = p_db["port"].get<int>();
 
-            std::string conn_cmd = fmt::format("psql {}://{}:{}@{}:{} -f sample.sql", db_name, user, password, host, port);
+            std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
             SPDLOG_INFO("Connecting to: {}", conn_cmd);
             int err = std::system(conn_cmd.c_str());
             if (err) {

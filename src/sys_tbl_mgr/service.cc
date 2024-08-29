@@ -330,7 +330,7 @@ namespace springtail::sys_tbl_mgr {
                              const XidLsn &xid)
     {
         // check the cache
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
         auto table_i = _table_cache[db_id].find(table_id);
         if (table_i != _table_cache[db_id].end()) {
             // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
