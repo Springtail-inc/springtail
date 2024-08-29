@@ -15,8 +15,9 @@ namespace {
     }
 }
 
-int main(int argc, char *argv[]) {
-    springtail_init();
+int main(int argc, char *argv[])
+{
+    springtail_init("xid_mgr");
 
     uint64_t starting_xid;
     uint64_t db_id=1;

@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    springtail_init();
+    springtail_init("write_cache");
 
     // daemonize the process
     if (vm.count("daemonize")) {

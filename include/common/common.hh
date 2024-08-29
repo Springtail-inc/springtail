@@ -7,13 +7,27 @@
 #include <csignal>
 #include <string>
 #include <vector>
+#include <optional>
+
 
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/exception.hh>
 
 namespace springtail {
-    void springtail_init(uint32_t logging_mask = LOG_ALL);
+    /**
+     * @brief Initialize the springtail system
+     * @param logging_mask logging mask override
+     * @param log_filename log filename override
+     */
+    void springtail_init(uint32_t logging_mask = LOG_ALL,
+                                const std::optional<std::string> &log_filename = std::nullopt);
+
+    /**
+     * @brief Initialize the springtail system
+     * @param log_filename log filename override
+     */
+    void springtail_init(const std::string &log_filename);
 
     namespace common {
         /**

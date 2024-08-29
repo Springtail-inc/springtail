@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
         common::daemonize("/var/springtail/pg_log_mgr.pid");
     }
 
-    springtail_init();
+    springtail_init("pg_log_mgr");
 
     pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
 

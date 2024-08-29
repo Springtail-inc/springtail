@@ -8,8 +8,8 @@
 
 namespace springtail {
 
-
-    void springtail_init(uint32_t logging_mask)
+    void springtail_init(uint32_t logging_mask,
+                         const std::optional<std::string> &log_filename)
     {
         // initialize the backtrace signal handling
         init_exception();
@@ -18,7 +18,12 @@ namespace springtail {
         Properties::init();
 
         // initialize the logging infrastructure
-        init_logging(logging_mask);
+        init_logging(logging_mask, log_filename);
+    }
+
+    void springtail_init(const std::string &log_filename)
+    {
+        springtail_init(LOG_ALL, log_filename);
     }
 
     void

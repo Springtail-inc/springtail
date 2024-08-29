@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    springtail_init();
+    springtail_init("sys_tbl_mgr");
 
     // daemonize the process
     if (vm.count("daemonize")) {

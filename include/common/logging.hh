@@ -4,6 +4,8 @@
 #include <utility>
 #include <memory>
 #include <map>
+#include <string>
+#include <optional>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
@@ -59,9 +61,12 @@ namespace springtail {
     /**
      * @brief Initialize logging system
      * @param log_ids optionally pass in a set of modules (bitwise OR'ed) to filter debug logs
+     * @param log_name optionally pass in a log name to use, relative path
      * Use macro above: SPDLOG_DEBUG_MODULE(module, ...)
      */
-    void init_logging(uint32_t module_mask=LOG_ALL);
+    void init_logging(const std::optional<uint32_t> &module_mask = std::nullopt,
+                      const std::optional<std::string> &log_name = std::nullopt);
+
 
     namespace logging {
         /** Internal call to get a logger based on log id */

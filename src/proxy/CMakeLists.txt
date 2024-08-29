@@ -69,7 +69,7 @@ target_link_libraries(parsing
 )
 
 # test server daemon executable
-add_executable(daemon test/daemon.cc)
+add_executable(daemon daemon.cc)
 target_include_directories(daemon
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
