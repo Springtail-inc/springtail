@@ -129,6 +129,15 @@ namespace springtail {
          */
         void _read_redis_properties();
 
+        /**
+         * @brief Get config redis client
+         */
+        static RedisClientPtr _get_redis_client() {
+            assert(_instance != nullptr);
+            assert(_instance->_redis_config_client != nullptr);
+            return _instance->_redis_config_client;
+        }
+
         // delete move constructor
         Properties(const Properties &)     = delete;
         void operator=(const Properties &) = delete;

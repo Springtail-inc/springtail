@@ -22,6 +22,11 @@ namespace springtail {
             std::filesystem::path latest_file;
             std::filesystem::file_time_type latest_mtime;
 
+            // check if directory exists, if not return empty path
+            if (!std::filesystem::exists(directory)) {
+                return {};
+            }
+
             // Iterate through all files in the directory
             for (const auto& entry : std::filesystem::directory_iterator(directory)) {
                 // Check if it's a regular file (not a directory or other special type)
@@ -64,6 +69,11 @@ namespace springtail {
             // Initialize variables to store the earliest file and its modification time
             std::filesystem::path earliest_file;
             std::filesystem::file_time_type earliest_mtime;
+
+            // check if directory exists, if not return empty path
+            if (!std::filesystem::exists(directory)) {
+                return {};
+            }
 
             // Iterate through all files in the directory
             for (const auto& entry : std::filesystem::directory_iterator(directory)) {

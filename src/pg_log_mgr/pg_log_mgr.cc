@@ -23,6 +23,10 @@ namespace springtail::pg_log_mgr {
     {
         uint64_t lsn = INVALID_LSN;
 
+        // create directories if they don't exist
+        std::filesystem::create_directories(_repl_log_path);
+        std::filesystem::create_directories(_xact_log_path);
+
         // scan latest replication log and extract ending LSN
         // XXX if we find an empty log then remove file and go to previous log
         std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
