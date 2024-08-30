@@ -32,12 +32,11 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    springtail_init("sys_tbl_mgr");
-
-    // daemonize the process
+    std::optional<std::filesystem::path> pidfile;
     if (vm.count("daemonize")) {
-        common::daemonize("/var/springtail/sys_tbl_mgr.pid");
+        pidfile = "/var/springtail/sys_tbl_mgr.pid";
     }
+    springtail_init("sys_tbl_mgr", pidfile);
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);

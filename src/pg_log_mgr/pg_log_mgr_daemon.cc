@@ -38,12 +38,12 @@ int main(int argc, char *argv[])
     }
     boost::program_options::notify(vm);
 
-    // daemonize the process
+    // initialize the springtail subsystems
+    std::optional<std::filesystem::path> pidfile;
     if (vm.count("daemonize")) {
-        common::daemonize("/var/springtail/pg_log_mgr.pid");
+        pidfile = "/var/springtail/pg_log_mgr.pid";
     }
-
-    springtail_init("pg_log_mgr");
+    springtail::springtail_init("pg_log_mgr", pidfile);
 
     pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
 

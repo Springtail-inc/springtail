@@ -19,6 +19,9 @@ rm -rf /tmp/xact_logs/*
 redis-cli flushdb
 rm -f /tmp/xid_mgr.log /tmp/write_cache.log /tmp/pg_log_mgr.log /tmp/gc.log
 
+# setup the config
+python3 ../load_redis.py ../../system.json
+
 # install the FDW extension into postgres
 ./install_fdw.sh ${BUILD_DIR}
 
@@ -40,11 +43,8 @@ SYS_TBL_DAEMON="${BUILD_DIR}/src/sys_tbl_mgr/sys_tbl_mgr_daemon"
 SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/sys_tbl_mgr.log" ${SYS_TBL_DAEMON} --daemon
 sleep 1
 
-exit
-
 # copy the initial snapshot of the table data
 ${BUILD_DIR}/src/pg_fdw/copy_schema -d springtail -u springtail -s public
-
 
 # start the write cache
 echo Start Write Cache...
@@ -57,7 +57,7 @@ sleep 1
 rm -rdf /tmp/xact_logs /tmp/repl_logs
 mkdir /tmp/xact_logs /tmp/repl_logs
 PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --daemon -d springtail -P springtail -b springtail_pub -s springtail_slot -x /tmp/xact_logs -r /tmp/repl_logs
+SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --daemon
 sleep 1
 
 # start the garbage collector
@@ -67,7 +67,7 @@ sleep 1
 # sleep 1
 
 # set up the replica database
-../fdw_import.py
+python3 ../fdw_import.py
 
 # verify the snapshot by running a query against the FDW
 echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}

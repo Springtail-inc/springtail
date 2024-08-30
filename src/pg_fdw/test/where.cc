@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 
     std::cout << "searching for: " << val << " op: " << direction << std::endl;
 
-    springtail_init(0);
+    springtail_init(std::nullopt, std::nullopt, 0);
 
     // convert operator to enum
     QualOpName op;

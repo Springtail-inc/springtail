@@ -65,7 +65,8 @@ namespace springtail {
      * Use macro above: SPDLOG_DEBUG_MODULE(module, ...)
      */
     void init_logging(const std::optional<uint32_t> &module_mask = std::nullopt,
-                      const std::optional<std::string> &log_name = std::nullopt);
+                      const std::optional<std::string> &log_name = std::nullopt,
+                      bool is_daemon = false);
 
 
     namespace logging {

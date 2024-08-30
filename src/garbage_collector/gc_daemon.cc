@@ -38,16 +38,15 @@ main(int argc,
     boost::program_options::notify(vm);
 
     // initialize the springtail subsystems
-    springtail::springtail_init();
+    std::optional<std::filesystem::path> pidfile;
+    if (vm.count("daemonize")) {
+        pidfile = "/var/springtail/gc.pid";
+    }
+    springtail::springtail_init("gc", pidfile);
 
     // the GC components
     log_parser = std::make_shared<springtail::gc::LogParser>(1, 1);
     committer = std::make_shared<springtail::gc::Committer>(1);
-
-    // daemonize the process
-    if (vm.count("daemonize")) {
-        springtail::common::daemonize("/var/springtail/gc.pid");
-    }
 
     // signal handler for shutdown
     std::signal(SIGINT, shutdown_handler);

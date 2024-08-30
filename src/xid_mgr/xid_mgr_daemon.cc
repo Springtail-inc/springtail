@@ -17,8 +17,6 @@ namespace {
 
 int main(int argc, char *argv[])
 {
-    springtail_init("xid_mgr");
-
     uint64_t starting_xid;
     uint64_t db_id=1;
 
@@ -39,14 +37,15 @@ int main(int argc, char *argv[])
     }
     boost::program_options::notify(vm);
 
+    std::optional<std::filesystem::path> pidfile;
+    if (vm.count("daemonize")) {
+        pidfile = "/var/springtail/xid_mgr.pid";
+    }
+    springtail_init("xid_mgr", pidfile);
+
     if (vm.count("xid") && vm.count("dbid")) {
         // note: since the defaults are set this always commits the starting_xid of 2 for db_id 1
         xid_mgr::XidMgrServer::get_instance()->commit_xid(db_id, starting_xid, false);
-    }
-
-    // daemonize the process
-    if (vm.count("daemonize")) {
-        common::daemonize("/var/springtail/xid_mgr.pid");
     }
 
     // register the SIGINT handler

@@ -38,7 +38,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        springtail_init(LOG_ALL);
+        springtail_init();
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
 
