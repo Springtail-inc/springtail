@@ -10,7 +10,7 @@
 
 #include <pg_repl/pg_msg_stream.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
 
     void
     PgLogReader::process_log(const std::filesystem::path &path,
@@ -221,4 +221,4 @@ namespace springtail {
         PgTransactionPtr xact = itr->second;
         xact->oids.insert(oid);
     }
-}
+} // namespace springtail::pg_log_mgr

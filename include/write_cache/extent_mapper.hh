@@ -35,7 +35,8 @@ namespace springtail {
         /**
          * Finds the set of new extent IDs that were generated through a roll-forward so that the
          * changes can be correctly applied to them instead of to the extent ID provided by the
-         * write cache from GC-1.
+         * write cache from GC-1.  If no changes exist for the given extent, will return a vector
+         * with a single entry containing the provided extent_id.
          */
         std::vector<uint64_t> forward_map(uint64_t target_xid, uint64_t extent_id);
 
@@ -84,19 +85,25 @@ namespace springtail {
     class ExtentMapper {
     public:
         /**
-         * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
-         * @return instance of StorageCache
+         * @brief get_instance() of singleton ExtentMapper; create if it doesn't exist.
+         * @return instance of ExtentMapper
          */
-        static ExtentMapper *get_instance();
+        static ExtentMapper *get_instance(uint64_t db_id);
 
         /**
-         * @brief Shutdown the StorageCache singleton.
+         * @brief Shutdown the ExtentMapper singleton.
          */
         static void shutdown();
 
+        /**
+         * @brief Shutdown the ExtentMapper singleton for a specific database.
+         * @param db_id database ID
+         */
+        static void shutdown(uint64_t db_id);
+
     private:
-        static ExtentMapper *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
+        static std::map<uint64_t, ExtentMapper *> _instances; ///< static instances per db (singleton)
+        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instances
 
         /** private constructor */
         ExtentMapper() = default;

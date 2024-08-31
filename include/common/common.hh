@@ -7,13 +7,31 @@
 #include <csignal>
 #include <string>
 #include <vector>
+#include <optional>
+
 
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/exception.hh>
 
 namespace springtail {
-    void springtail_init(uint32_t logging_mask = LOG_ALL);
+    /**
+     * @brief Initialize the springtail system
+     * @param log_filename log filename override
+     * @param daemon_pid if set, daemonize the process and store the pid in the provided file
+     * @param logging_mask logging mask override
+     */
+    void springtail_init(const std::optional<std::string> &log_filename = std::nullopt,
+                         const std::optional<std::filesystem::path> &daemon_pid = std::nullopt,
+                         uint32_t logging_mask = LOG_ALL);
+
+    /**
+     * @brief Initialize the springtail system
+     * @param log_filename log filename override
+     * @param logging_mask logging mask override
+     */
+    void springtail_init(const std::string &log_filename,
+                         uint32_t logging_mask);
 
     namespace common {
         /**
@@ -53,12 +71,5 @@ namespace springtail {
                 outvec.push_back(std::move(token));
             }
         }
-
-        /**
-         * Turns the current process into a background daemon, storing it's process ID into the
-         * provided file.
-         * @param pid_filename The path of the file in which to store the PID.
-         */
-        void daemonize(const std::filesystem::path &pid_filename);
     }
 }

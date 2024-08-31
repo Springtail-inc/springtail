@@ -94,6 +94,14 @@ namespace springtail {
     };
 
     /**
+     * Object representing the metadata of a schema.
+     */
+    struct SchemaMetadata {
+        std::vector<SchemaColumn> columns;
+        std::vector<SchemaColumn> history;
+    };
+
+    /**
      * The interface for schema objects.
      */
     class Schema {
@@ -311,9 +319,7 @@ namespace springtail {
          * @param columns The column definitions for the underlying extent data.
          * @param updates The updates to apply to the extent schema to generate the virtual schema.
          */
-        VirtualSchema(std::shared_ptr<ExtentSchema> extent_schema,
-                      const std::map<uint32_t, SchemaColumn> &columns,
-                      const std::vector<SchemaColumn> &updates);
+        VirtualSchema(const SchemaMetadata &meta);
 
         /**
          * Checks if the column exists within the virtual schema.

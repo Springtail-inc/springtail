@@ -1,5 +1,15 @@
 #pragma once
+
+#include <cassert>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <vector>
+#include <iostream>
+
 #include <nlohmann/json.hpp>
+
+#include <common/redis.hh>
 
 #ifndef SPRINGTAIL_PROPERTIES
 #define SPRINGTAIL_PROPERTIES = "system.json"
@@ -24,6 +34,10 @@ namespace springtail {
         static inline constexpr char STORAGE_CONFIG[] = "storage";
         /** Logging config section */
         static inline constexpr char LOGGING_CONFIG[] = "logging";
+        /** SysTbl mgr section */
+        static inline constexpr char SYS_TBL_MGR_CONFIG[] = "sys_tbl_mgr";
+        /** Log mgr section */
+        static inline constexpr char LOG_MGR_CONFIG[] = "log_mgr";
         /** Org configuration section */
         static inline constexpr char ORG_CONFIG[] = "org";
         /** FS configuration section */
@@ -65,15 +79,40 @@ namespace springtail {
             return std::filesystem::path(get_mount_point()) / path;
         }
 
+        static std::string get_fdw_id() {
+            assert (_instance != nullptr);
+            assert (_instance->_json.contains(ORG_CONFIG));
+            assert (_instance->_json[ORG_CONFIG].contains("fdw_id"));
+            return _instance->_json[ORG_CONFIG]["fdw_id"];
+        }
+
         /** Helper to get set of database names from Redis for this db instance */
-        static std::vector<std::string> get_database_names();
+        static std::map<uint64_t, std::string> get_databases();
+
+        /** Helper to get database name from Redis for db id */
+        static std::string get_db_name(uint64_t db_id);
+
+        /** Helper to get set of FDW ids from Redis */
+        static std::vector<std::string> get_fdw_ids();
+
+        /** Helper to get db config for given database */
+        static nlohmann::json get_db_config(uint64_t db_id);
+
+        /** Helper to get primary db json for current db instance */
+        static nlohmann::json get_primary_db_config();
 
     private:
         /** static _instance singleton */
         static Properties *_instance;
 
+        /** once init flag */
+        static std::once_flag _init_flag;
+
         /** json containing parsed settings file */
         nlohmann::json _json;
+
+        /** properties file override env is set */
+        bool _properties_file_override = false;
 
         /**
          * @brief Construct a new Properties object
@@ -90,8 +129,20 @@ namespace springtail {
          */
         void _read_redis_properties();
 
+        /**
+         * @brief Get config redis client
+         */
+        static RedisClientPtr _get_redis_client() {
+            assert(_instance != nullptr);
+            assert(_instance->_redis_config_client != nullptr);
+            return _instance->_redis_config_client;
+        }
+
         // delete move constructor
         Properties(const Properties &)     = delete;
         void operator=(const Properties &) = delete;
+
+        /** Redis client connected to config db */
+        RedisClientPtr _redis_config_client = nullptr;
     };
 }

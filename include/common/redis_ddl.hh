@@ -1,0 +1,72 @@
+#pragma once
+
+#include <common/redis.hh>
+
+namespace springtail {
+
+    /**
+     * Shared class among GC-1, GC-2, the FDW and the XidMgr to coordinate DDL changes through the
+     * system.  It operates as follows:
+     *
+     * - GC-1 generates a list of DDL statements as it processes the log
+     * - GC-2 takes the complete list of DDL statements and places them into a queue for each FDW
+     * - FDW listens for new items on the queue and generates the set of DDL statements to apply as a
+     *   transaction.  Once the DDL statements have been applied, it updates it's schema XID in Redis.
+     * - XidMgr checks the set of schema XIDs at each FDW and updates it's history based on the minimum
+     *   schema XID reached across all FDWs
+     */
+    class RedisDDL {
+    public:
+        RedisDDL()
+            : _redis(RedisMgr::get_instance()->get_client())
+        { }
+
+        /**
+         * Used by gc::LogParser (GC-1) to record DDL statements against the XID.
+         * @param xid The XID at which this DDL statement needs to be applied.
+         * @param ddl A JSON representation of the DDL statement.
+         */
+        void add_ddl(uint64_t db_id, uint64_t xid, const std::string &ddl);
+
+        /**
+         * Used by gc::Committer (GC-2) to retrieve the set of DDL statements recorded against the
+         * XID we are about to commit.
+         * @param xid The XID we are about to commit.
+         * @return A JSON array containing the ordered set of DDLs to apply at each FDW.
+         */
+        nlohmann::json get_ddls_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * Used by gc::Committer (GC-2) to provide the list of DDL statements to the FDWs.
+         * @param db_id The ID of the database instance we are updating.
+         * @param xid The XID at which these DDL statements were applied.
+         * @param ddls A JSON array of DDL statements to apply, retrieved from get_ddls_xid()
+         */
+        void commit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls);
+
+        /**
+         * Used by the FDW to retrieve the next set of DDL statements that need to be applied.
+         * @param fdw_id The ID of the FDW we are updating.
+         * @return A JSON object containing the XID at which the DDLs were applied and an array of
+         *         the DDL statements themselves.
+         */
+        nlohmann::json get_next_ddls(const std::string &fdw_id);
+
+        /**
+         * Used by the FDW to record the latest schema XID that it has applied.
+         * @param fdw_id The ID of the FDW we are updating.
+         * @param schema_xid The XID from the last get_next_ddls() call that was applied.
+         */
+        void update_schema_xid(const std::string &fdw_id, uint64_t schema_xid);
+
+        /**
+         * Used by the XidMgr to identify when it can remove XIDs from it's schema XID history.
+         * @return The minimum schema XID applied across all of the FDWs.
+         */
+        uint64_t min_schema_xid();
+
+    private:
+        std::shared_ptr<RedisClient> _redis;
+    };
+
+}

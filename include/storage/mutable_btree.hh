@@ -2,8 +2,8 @@
 
 #include <boost/thread.hpp>
 
+#include <common/constants.hh>
 #include <storage/cache.hh>
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
@@ -114,6 +114,12 @@ namespace springtail {
          * @param value The value of the entry we are about to remove from the tree.
          */
         void remove(TuplePtr value);
+
+        /**
+         * Truncates the btree, removing all entries from it.  In-memory dirty pages are evicted
+         * without being written, meaning any non-finalized mutations are lost.
+         */
+        void truncate();
 
         /**
          * Commits all changes to disk, marking all of the written extents as being valid at the
@@ -557,6 +563,11 @@ namespace springtail {
          */
         void _cache_evict(uint64_t extent_id);
 
+        /**
+         * Clears the cache, dropping all pages without flushing them.  Used to implement
+         * truncate().
+         */
+        void _cache_clear();
 
         //// INTERNAL OPERATIONS
 

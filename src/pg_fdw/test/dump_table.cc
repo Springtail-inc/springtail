@@ -9,11 +9,11 @@
 #include <boost/program_options.hpp>
 
 #include <common/common.hh>
+#include <common/constants.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
@@ -23,9 +23,10 @@ using namespace springtail::pg_fdw;
 
 /** List all tables from TableNames system table */
 void
-list_tables()
+list_tables(uint64_t db_id)
 {
-    auto table = TableMgr::get_instance()->get_table(sys_tbl::TableNames::ID,
+    auto table = TableMgr::get_instance()->get_table(db_id,
+                                                     sys_tbl::TableNames::ID,
                                                      constant::LATEST_XID,
                                                      constant::MAX_LSN);
     // get field array
@@ -48,10 +49,14 @@ list_tables()
 
 /** Lookup table ID from TableNames system table */
 uint64_t
-lookup_table(const std::string &schema_name, const std::string &table_name, uint64_t xid)
+lookup_table(uint64_t db_id,
+             const std::string &schema_name,
+             const std::string &table_name,
+             uint64_t xid)
 {
     // get the table names table
-    auto table = TableMgr::get_instance()->get_table(sys_tbl::TableNames::ID,
+    auto table = TableMgr::get_instance()->get_table(db_id,
+                                                     sys_tbl::TableNames::ID,
                                                      constant::LATEST_XID,
                                                      constant::MAX_LSN);
     // get field array
@@ -109,15 +114,19 @@ dump_datum(Datum value, SchemaType type)
 
 /** Dump a table by table ID and xid */
 void
-dump_table(uint64_t tid, uint64_t xid)
+dump_table(uint64_t db_id,
+           uint64_t tid,
+           uint64_t xid)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(tid, xid, constant::MAX_LSN);
+    TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, constant::MAX_LSN);
     ExtentSchemaPtr schema = table->extent_schema();
-    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(tid, xid, constant::MAX_LSN);
+    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(db_id, tid, { xid, constant::MAX_LSN });
 
     auto fields = schema->get_fields();
     FormData_pg_attribute attrdata[fields->size()];
     Form_pg_attribute attrs[fields->size()];
+
+    List *target_list = NIL;
 
     // iterate over column map and extract attrnums
     int i = 0;
@@ -127,14 +136,20 @@ dump_table(uint64_t tid, uint64_t xid)
             attrs[i]->attnum = col.first;
             attrs[i]->atttypid = col.second.pg_type;
             attrs[i]->atttypmod = -1;
+
+            // append col.first to target_list
+            target_list = lappend(target_list, makeInteger(col.first));
+
+            i++;
         }
     }
 
+    PgFdwMgr::fdw_init(nullptr);
     PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
     // create the fdw state for the table @xid and begin the scan
-    PgFdwState *state = mgr->fdw_create_state(tid, xid);
-    mgr->fdw_begin_scan(state, nullptr, nullptr, nullptr);
+    PgFdwState *state = mgr->fdw_create_state(db_id, tid, xid, xid);
+    mgr->fdw_begin_scan(state, target_list, nullptr, nullptr);
 
     // iterate through the table and print the values
     Datum values[fields->size()];
@@ -163,23 +178,27 @@ dump_table(uint64_t tid, uint64_t xid)
 
 /** Dump a table by schema, table name and xid */
 void
-dump_table(const std::string &schema_name, const std::string &table_name, uint64_t xid)
+dump_table(uint64_t db_id,
+           const std::string &schema_name,
+           const std::string &table_name,
+           uint64_t xid)
 {
-    uint64_t tid = lookup_table(schema_name, table_name, xid);
+    uint64_t tid = lookup_table(db_id, schema_name, table_name, xid);
     if (tid == -1) {
         std::cerr << fmt::format("Table {}.{} not found\n", schema_name, table_name);
         return;
     }
 
-    dump_table(tid, xid);
+    dump_table(db_id, tid, xid);
 }
 
 int main(int argc, char *argv[])
 {
-    springtail_init(0);
+    springtail_init();
 
     std::string table;
     std::string schema;
+    uint64_t db_id = 0;
     uint64_t xid=0;
     uint64_t tid=0;
     bool list = false;
@@ -190,6 +209,7 @@ int main(int argc, char *argv[])
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
+        ("db,d", boost::program_options::value<uint64_t>(&db_id), "Database ID")
         ("table,t", boost::program_options::value<std::string>(&table), "Table name to dump")
         ("schema,s", boost::program_options::value<std::string>(&schema)->default_value("public"), "Schema name")
         ("xid,x", boost::program_options::value<uint64_t>(&xid), "XID")
@@ -208,21 +228,21 @@ int main(int argc, char *argv[])
 
     if (list) {
         std::cout << "Listing tables:" << std::endl;
-        list_tables();
+        list_tables(db_id);
     } else if (!table.empty()) {
         if (xid == 0) {
             std::cerr << "XID must be specified with table name" << std::endl;
             return -1;
         }
         std::cout << "Dump table: " << table << " XID: " << xid << std::endl;
-        dump_table(schema, table, xid);
+        dump_table(db_id, schema, table, xid);
     } else if (tid != 0) {
         if (xid == 0) {
             std::cerr << "XID must be specified with table ID" << std::endl;
             return -1;
         }
         std::cout << "Dump table: " << tid << " XID: " << xid << std::endl;
-        dump_table(tid, xid);
+        dump_table(db_id, tid, xid);
     } else {
         std::cerr << "List flag, Table name or ID must be specified" << std::endl;
         return -1;

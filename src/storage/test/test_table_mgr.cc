@@ -9,6 +9,8 @@
 #include <storage/system_tables.hh>
 #include <storage/table_mgr.hh>
 
+#include <test/services.hh>
+
 using namespace springtail;
 
 namespace {
@@ -18,23 +20,20 @@ namespace {
     class TableMgr_Test : public testing::Test {
         void SetUp() override {
             springtail_init();
-
-            auto json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _table_dir);
-            _table_dir = Properties::make_absolute_path(_table_dir);
-
-            std::filesystem::remove_all(_table_dir);
+            _services.init(true);
         }
 
         void TearDown() override {
-            std::filesystem::remove_all(_table_dir);
+            _services.shutdown();
         }
 
-        std::filesystem::path _table_dir;
+        test::Services _services{true, true, false};
     };
 
     // Tests the schema modification paths
     TEST_F(TableMgr_Test, CreateAlterDrop) {
+        uint64_t db_id = 1;
+
         // create a table
         PgMsgTable create_msg;
         create_msg.lsn = 0;
@@ -45,7 +44,7 @@ namespace {
         create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
         create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
 
-        TableMgr::get_instance()->create_table(2, 0, create_msg);
+        TableMgr::get_instance()->create_table(db_id, {2, 0}, create_msg);
 
         // alter the table's schema
         PgMsgTable alter_msg;
@@ -57,7 +56,7 @@ namespace {
         alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
         alter_msg.columns.push_back({"colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
 
-        TableMgr::get_instance()->alter_table(3, 0, alter_msg);
+        TableMgr::get_instance()->alter_table(db_id, {3, 0}, alter_msg);
 
         // drop the table
         PgMsgDropTable drop_msg;
@@ -66,10 +65,12 @@ namespace {
         drop_msg.xid = 4;
         drop_msg.schema = "public";
         drop_msg.table = "x";
-        TableMgr::get_instance()->drop_table(4, 0, drop_msg);
+        TableMgr::get_instance()->drop_table(db_id, {4, 0}, drop_msg);
+
+        TableMgr::get_instance()->finalize_metadata(db_id, 4);
 
         // verify system table correctness
-        auto table = TableMgr::get_instance()->get_table(sys_tbl::TableNames::ID, 5, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 5, 0);
         auto fields = table->extent_schema()->get_fields();
         auto row_i = table->begin();
 

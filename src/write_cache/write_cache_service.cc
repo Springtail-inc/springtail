@@ -8,6 +8,27 @@
 
 namespace springtail {
 
+    ThriftWriteCacheService *ThriftWriteCacheService::_instance = nullptr;
+    std::once_flag ThriftWriteCacheService::_init_flag;
+    std::once_flag ThriftWriteCacheService::_shutdown_flag;
+
+    ThriftWriteCacheService *
+    ThriftWriteCacheService::_init() {
+        if (!_instance) {
+            _instance = new ThriftWriteCacheService();
+        }
+        return _instance;
+    }
+
+    void
+    ThriftWriteCacheService::_shutdown() {
+        if (_instance) {
+            delete _instance;
+            _instance = nullptr;
+        }
+    }
+
+
     void
     ThriftWriteCacheService::ping(thrift::write_cache::Status& _return)
     {
@@ -22,7 +43,7 @@ namespace springtail {
                                       const thrift::write_cache::AddRowsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         std::vector<WriteCacheIndexRowPtr> rows;
 
@@ -49,7 +70,7 @@ namespace springtail {
                                           const thrift::write_cache::ListExtentsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
         _return.extent_ids = index->get_eids(request.table_id, request.start_xid, request.end_xid,
@@ -64,7 +85,7 @@ namespace springtail {
                                       const thrift::write_cache::GetRowsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
         std::vector<WriteCacheIndexRowPtr> rows =
@@ -100,7 +121,7 @@ namespace springtail {
                                          const thrift::write_cache::EvictTableRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         index->evict_table(request.table_id, request.start_xid, request.end_xid);
 
@@ -108,26 +129,26 @@ namespace springtail {
     }
 
     void
-    ThriftWriteCacheService::add_table_change(thrift::write_cache::Status& _return, const thrift::write_cache::TableChange &change)
+    ThriftWriteCacheService::add_table_change(thrift::write_cache::Status& _return, const thrift::write_cache::AddTableChangeRequest &request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         WriteCacheIndexTableChange::TableChangeOp op;
-        if (change.op == thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE) {
+        if (request.change.op == thrift::write_cache::TableChangeOpType::SCHEMA_CHANGE) {
             op = WriteCacheIndexTableChange::TableChangeOp::SCHEMA_CHANGE;
-        } else if (change.op == thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE) {
+        } else if (request.change.op == thrift::write_cache::TableChangeOpType::TRUNCATE_TABLE) {
             op = WriteCacheIndexTableChange::TableChangeOp::TRUNCATE_TABLE;
         }
 
-        index->add_table_change(std::make_shared<WriteCacheIndexTableChange>(change.table_id, change.xid, change.xid_seq, op));
+        index->add_table_change(std::make_shared<WriteCacheIndexTableChange>(request.change.table_id, request.change.xid, request.change.xid_seq, op));
     }
 
     void
     ThriftWriteCacheService::get_table_changes(thrift::write_cache::GetTableChangeResponse& _return, const thrift::write_cache::GetTableChangeRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         std::vector<WriteCacheIndexTableChangePtr> changes = index->get_table_changes(request.table_id, request.start_xid, request.end_xid);
 
@@ -154,7 +175,7 @@ namespace springtail {
                                          const thrift::write_cache::ListTablesRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
 
@@ -167,7 +188,7 @@ namespace springtail {
                                                  const thrift::write_cache::EvictTableChangesRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         index->evict_table_changes(request.table_id, request.start_xid, request.end_xid);
 
@@ -179,7 +200,7 @@ namespace springtail {
                                            const thrift::write_cache::SetCleanFlagRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         index->set_clean_flag(request.table_id, request.extent_id, request.start_xid, request.end_xid);
 
@@ -191,7 +212,7 @@ namespace springtail {
                                               const thrift::write_cache::ResetCleanFlagRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index();
+        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
 
         index->reset_clean_flag(request.table_id, request.start_xid, request.end_xid);
 
@@ -202,7 +223,7 @@ namespace springtail {
     ThriftWriteCacheService::add_mapping(thrift::write_cache::Status &_return,
                                          const thrift::write_cache::AddMappingRequest &request)
     {
-        ExtentMapper *mapper = ExtentMapper::get_instance();
+        ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
 
         // note: unfortunately need to copy the data to shift to uin64_t type
         std::vector<uint64_t> new_eids(request.new_eids.begin(), request.new_eids.end());
@@ -216,7 +237,7 @@ namespace springtail {
     ThriftWriteCacheService::set_lookup(thrift::write_cache::Status &_return,
                                         const thrift::write_cache::SetLookupRequest &request)
     {
-        ExtentMapper *mapper = ExtentMapper::get_instance();
+        ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
         mapper->set_lookup(request.table_id, request.target_xid, request.extent_id);
 
         _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);
@@ -226,7 +247,7 @@ namespace springtail {
     ThriftWriteCacheService::forward_map(thrift::write_cache::ExtentMapResponse &_return,
                                          const thrift::write_cache::ForwardMapRequest &request)
     {
-        ExtentMapper *mapper = ExtentMapper::get_instance();
+        ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
         auto &&response = mapper->forward_map(request.table_id,
                                               request.target_xid, request.extent_id);
 
@@ -237,7 +258,7 @@ namespace springtail {
     ThriftWriteCacheService::reverse_map(thrift::write_cache::ExtentMapResponse &_return,
                                          const thrift::write_cache::ReverseMapRequest &request)
     {
-        ExtentMapper *mapper = ExtentMapper::get_instance();
+        ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
         auto &&response = mapper->reverse_map(request.table_id, request.access_xid,
                                               request.target_xid, request.extent_id);
 
@@ -248,7 +269,7 @@ namespace springtail {
     ThriftWriteCacheService::expire_map(thrift::write_cache::Status &_return,
                                         const thrift::write_cache::ExpireMapRequest &request)
     {
-        ExtentMapper *mapper = ExtentMapper::get_instance();
+        ExtentMapper *mapper = ExtentMapper::get_instance(request.db_id);
         mapper->expire(request.table_id, request.commit_xid);
 
         _return.__set_status(thrift::write_cache::StatusCode::SUCCESS);

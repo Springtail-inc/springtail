@@ -46,8 +46,22 @@
             "server" : "localhost"
         }
     },
+    "sys_tbl_mgr": {
+        "server" : {
+            "port" : 55053,
+            "worker_threads": 8
+        },
+        "client": {
+            "connections": 8,
+            "server" : "localhost"
+        }
+    },
     "storage": {
         "table_dir": "table"
+    },
+    "log_mgr": {
+        "replication_log_path": "repl_logs",
+        "transaction_log_path": "xact_logs"
     },
     "fs": {
         "mount_point": "/tmp/springtail",
@@ -57,12 +71,17 @@
     "org": {
         "organization_id": "abc-de-fgh",
         "account_id": "123-45-678",
-        "db_instance_id": 1234
+        "db_instance_id": 1234,
+        "fdw_id": "1"
     },
     "db_instances": {
         "1234": {
-            "primary_db_hostname": "localhost",
-            "primary_db_port": 5432,
+            "primary_db": {
+                "host": "localhost",
+                "port": 5432,
+                "replication_user": "postgres",
+                "password": "springtail"
+            },
             "database_ids": [1]
         }
     },
@@ -82,7 +101,9 @@
     "fdws": {
         "1": {
             "host": "localhost",
-            "port": 8888
+            "port": 5432,
+            "fdw_user": "postgres",
+            "password": "springtail"
         }
     }
 }

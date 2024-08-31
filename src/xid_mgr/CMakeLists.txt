@@ -6,6 +6,7 @@ set(XID_MGR_SOURCES
     xid_mgr_client.cc
     xid_mgr_server.cc
     xid_mgr_service.cc
+    xid_partition.cc
 )
 
 # add the library target
@@ -37,3 +38,13 @@ add_dsymutil_command(threaded_test)
 
 # hook tests into gtest framework
 gtest_discover_tests(threaded_test)
+
+
+add_executable(xid_client test/xid_client.cc)
+target_include_directories(xid_client PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
+target_link_libraries(xid_client
+    PUBLIC springtail_common
+           springtail_xid_mgr
+    PRIVATE Boost::program_options
+)
+add_dsymutil_command(xid_client)

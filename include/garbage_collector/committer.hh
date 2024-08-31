@@ -8,12 +8,13 @@
 #include <boost/uuid/uuid_io.hpp>
 
 #include <common/concurrent_queue.hh>
+#include <common/constants.hh>
 #include <common/redis.hh>
+#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
-#include <storage/constants.hh>
 #include <storage/table.hh>
 #include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
@@ -55,12 +56,16 @@ namespace springtail::gc {
             MutableTablePtr table;
             uint64_t extent_id;
             uint64_t xid;
+            uint64_t txid; ///< The XID at which a truncate took place.  Zero if none.
+            uint64_t tlsn; ///< The LSN at which a truncate took place.  Zero if none.
             bool do_finalize;
 
-            WorkerEntry(MutableTablePtr table, uint64_t extent_id, uint64_t xid)
+            WorkerEntry(MutableTablePtr table, uint64_t extent_id, uint64_t xid, uint64_t txid, uint64_t tlsn)
                 : table(table),
                   extent_id(extent_id),
                   xid(xid),
+                  txid(txid),
+                  tlsn(tlsn),
                   do_finalize(false)
             { }
 
@@ -68,6 +73,8 @@ namespace springtail::gc {
                 : table(table),
                   extent_id(constant::UNKNOWN_EXTENT),
                   xid(xid),
+                  txid(0),
+                  tlsn(0),
                   do_finalize(true)
             { }
         };
@@ -85,13 +92,28 @@ namespace springtail::gc {
         /**
          * Worker helper function to process mutations to a given extent ID.
          */
-        void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid);
+        void _process_rows(MutableTablePtr table, uint64_t extent_id,
+                           uint64_t xid, uint64_t txid, uint64_t tlsn);
+
+        /**
+         * Helper function to find the enclosing page for a key given an ordered set of contiguous
+         * pages.
+         */
+        StorageCache::PagePtr _find_page(std::vector<StorageCache::PagePtr> pages,
+                                         TuplePtr key, ExtentSchemaPtr schema);
+
+        /**
+         * Shifts the provided metadata to start at the new future XID.  Returns true if the
+         * metadata was modified, false otherwise.
+         */
+        bool _shift_to_xid(SchemaMetadata &meta, const XidLsn &xid);
 
     private:
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.
         WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
 
         RedisQueue<XidReady> _redis; ///< The redis queue to communicate between the LogParser and the Committer.
+        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
 
         uint32_t _worker_count;
@@ -111,6 +133,6 @@ namespace springtail::gc {
         /** Cache of mutable tables that are in-flight. */
         std::map<uint64_t, MutableTablePtr> _table_map;
 
-        uint64_t _committed_xid; ///< The most recently committed XID.
+        std::map<uint64_t, uint64_t> _committed_xids; ///< The most recently committed XID by db_id
     };
 }

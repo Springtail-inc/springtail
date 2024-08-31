@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <iostream>
 #include <chrono>
 #include <vector>
 
@@ -13,9 +14,7 @@
 
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 
-namespace springtail {
-
-    #include <iostream> // Add missing include statement
+namespace springtail::pg_log_mgr {
 
     PgXactLogWriter::PgXactLogWriter(const std::filesystem::path &file) : _file(file)
     {
@@ -180,5 +179,4 @@ namespace springtail {
         _offset += total_length;
         _need_fsync = true;
     }
-
-}
+} // namespace springtail::pg_log_mgr

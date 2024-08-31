@@ -1,4 +1,4 @@
-#include <storage/constants.hh>
+#include <common/constants.hh>
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
@@ -165,6 +165,26 @@ namespace springtail {
             // note: the auto-destructor will implicitly unlock the node's lock if one is held
             node = node->parent;
         }
+    }
+
+    void
+    MutableBTree::truncate()
+    {
+        // must have called init() or init_empty()
+        assert(_root != nullptr);
+
+        // acquire an exclusive lock on the tree here
+        boost::unique_lock lock(_mutex);
+
+        // evict all pages without flushing to disk
+        _root = nullptr;
+        {
+            boost::unique_lock cache_lock(_cache->mutex);
+            _cache_clear();
+        }
+
+        // set up an empty tree
+        init_empty();
     }
 
     uint64_t
@@ -553,6 +573,15 @@ namespace springtail {
         // remove the entry from the cache
         _cache->size -= std::get<3>(entry);
         _cache->lookup.erase(i);
+    }
+
+    void
+    MutableBTree::_cache_clear()
+    {
+        // clear all of the entries from the cache without flushing them
+        _cache->lookup.clear();
+        _cache->lru.clear();
+        _cache->size = 0;
     }
 
     void

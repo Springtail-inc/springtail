@@ -25,7 +25,7 @@
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres log manager
      * Manages pipeline of postgres replication messages.
@@ -48,6 +48,7 @@ namespace springtail {
 
         /**
          * @brief Construct a new Pg Log Mgr object
+         * @param db_id db id
          * @param repl_log_path replication log base path
          * @param xact_log_path transaction log base path
          * @param host postgres host
@@ -58,20 +59,20 @@ namespace springtail {
          * @param slot_name replication slot name
          * @param port postgres port
          */
-        PgLogMgr(const std::filesystem::path &repl_log_path,
+        PgLogMgr(uint64_t db_id,
+                 const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path,
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
                  int port)
-        : _host(host), _db_name(db_name), _user_name(user_name), _password(password),
-          _pub_name(pub_name), _slot_name(slot_name), _port(port),
+        : _db_id(db_id), _host(host), _db_name(db_name), _user_name(user_name),
+          _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
-          _oid_set(redis::SET_PG_OID_XIDS)
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
         {}
 
         /**
@@ -81,11 +82,10 @@ namespace springtail {
          */
         PgLogMgr(const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path)
-        : _repl_log_path(repl_log_path),
+        : _db_id(1), _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS),
-          _oid_set(redis::SET_PG_OID_XIDS)
+          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -122,6 +122,8 @@ namespace springtail {
         /** minimum size for log rollover */
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
 
+        uint64_t _db_id;                      ///< db id
+
         // connection params
         std::string _host;
         std::string _db_name;
@@ -157,11 +159,13 @@ namespace springtail {
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path; ///< xact log base path
         std::thread _xact_thread;             ///< xact worker thread
-        uint64_t _db_id=1;                    ///< db id
         uint64_t _next_xid=0;                 ///< next xid in xid range
 
         RedisQueue<PgRedisXactValue> _redis_queue; ///< redis queue for GC
-        RedisSortedSet<PgRedisOidValue> _oid_set;  ///< redis sorted set for oid to xid mapping
+
+        /** Redis sorted set for oid to xid mapping */
+        std::mutex _oid_set_mutex;
+        std::map<uint64_t, RSSOidValuePtr> _oid_set;
 
         /** transaction worker -- thread fn */
         void _xact_handler_thread();
@@ -169,5 +173,6 @@ namespace springtail {
         /** push transaction to redis queue */
         void _push_xact_to_redis(const PgTransactionPtr xact);
     };
+    using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 
-} // namespace springtail
+} // namespace springtail::pg_log_mgr

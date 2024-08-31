@@ -195,6 +195,6 @@ namespace springtail
          * @brief Copy remote table data into Springtail starting at a given internal XID
          * @param xid The XID at which the table is to become available.
          */
-        int32_t copy_to_springtail(const std::filesystem::path &base_dir, uint64_t xid);
+        int32_t copy_to_springtail(uint64_t db_id, XidLsn &xid);
     };
 }

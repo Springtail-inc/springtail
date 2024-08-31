@@ -6,12 +6,15 @@
 
 namespace springtail {
 
-    //// SYSTEM TABLE HELPERS
-
     /**
      * Singleton for managing the table metadata.  Handles table metadata mutations and provides
      * interfaces for retrieving a table object at a given XID as well as a mutable table object for
      * applying data mutations.
+     *
+     * To make sure that the system tables are accurate for use in GC-2 or roll-forward, we must
+     * ensure that all system table mutations (aside from table stats) are performed and finalized
+     * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
+     * read-only Table interfaces using the target XID.
      */
     class TableMgr {
     public:
@@ -29,38 +32,40 @@ namespace springtail {
         /**
          * Read the table metadata for the requested table ID.
          */
-        TablePtr get_table(uint64_t table_id, uint64_t xid, uint64_t lsn);
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn);
 
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
-        MutableTablePtr get_mutable_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+        MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+
+        // Functions for managing system metadata
 
         /**
          * Create a new table.
          */
-        void create_table(uint64_t xid, uint64_t lsn, const PgMsgTable &msg);
+        void create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Alters a table's schema.
          */
-        void alter_table(uint64_t xid, uint64_t lsn, const PgMsgTable &msg);
+        void alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg);
 
         /**
          * Drops a table.
          */
-        void drop_table(uint64_t xid, uint64_t lsn, const PgMsgDropTable &msg);
+        void drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
          * Update the roots of a table.
          */
-        void update_roots(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const std::vector<uint64_t> &roots);
+        void update_roots(uint64_t db_id, uint64_t table_id, uint64_t target_xid,
+                          const std::vector<uint64_t> &roots, const TableStats &stats);
 
         /**
-         * Update the stats of a table.
+         * Finalize all outstanding system metadata mutations.
          */
-        void update_stats(uint64_t table_id, uint64_t access_xid, uint64_t target_xid, const TableStats &stats);
-
+        void finalize_metadata(uint64_t db_id, uint64_t xid);
 
     private:
         static TableMgr *_instance; ///< static instance (singleton)
@@ -74,27 +79,12 @@ namespace springtail {
         /**
          * Construct a system table.
          */
-        TablePtr _get_system_table(uint64_t table_id, uint64_t xid);
+        TablePtr _get_system_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
          * Construct a mutable system table.
          */
-        MutableTablePtr _get_mutable_system_table(uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
-
-        /**
-         * Retrieve the namespace and name of the table at a given xid/lsn.
-         */
-        std::pair<std::string, std::string> _get_table_name(uint64_t table_id, uint64_t xid, uint64_t lsn);
-
-        /**
-         * Find the roots of a given table from the TableRoots system table.
-         */
-        std::vector<uint64_t> _find_roots(uint64_t table_id, uint64_t xid);
-
-        /**
-         * Find the table statistics from the TableStats system table.
-         */
-        TableStats _find_stats(uint64_t table_id, uint64_t xid);
+        MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
 
     private:
         // singleton; delete copy constructor

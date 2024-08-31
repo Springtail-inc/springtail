@@ -39,6 +39,8 @@ namespace springtail {
                     sw::redis::ConnectionPoolOptions pool_options) :
             sw::redis::Redis(options, pool_options)
         {}
+
+        /** Helper to set key expiry */
     };
     using RedisClientPtr = std::shared_ptr<RedisClient>;
 
@@ -283,6 +285,12 @@ namespace springtail {
                 result.push_back(T(value));
             }
             return result;
+        }
+
+        void remove_by_score(const uint64_t min, const uint64_t max=-1)
+        {
+            sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
+            RedisMgr::get_instance()->get_client()->zremrangebyscore(_key, interval);
         }
 
     private:

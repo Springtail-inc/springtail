@@ -2,45 +2,29 @@
 
 // springtail includes
 #include <common/common.hh>
-#include <pg_log_mgr/pg_log_mgr.hh>
+#include <common/properties.hh>
+
+#include <pg_log_mgr/pg_log_coordinator.hh>
+
+using namespace springtail;
 
 namespace {
-    std::shared_ptr<springtail::PgLogMgr> log_mgr;
-
     void
     handle_sigint(int signal)
     {
-        log_mgr->shutdown();
+        pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
+        if (log_co != nullptr) {
+            log_co->shutdown();
+        }
     }
 }
 
 int main(int argc, char *argv[])
 {
-    std::string host;
-    std::string db_name;
-    std::string user_name;
-    std::string password;
-    std::string pub_name;
-    std::string slot_name;
-    std::filesystem::path repl_log_path;
-    std::filesystem::path xact_log_path;
-
-    //bool create_slot = false;
-    int port;
-
     // parse the arguments
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
-        ("host,H", boost::program_options::value<std::string>(&host)->default_value("localhost"), "Hostname")
-        ("port,p", boost::program_options::value<int>(&port)->default_value(5432), "Port number")
-        ("dbname,d", boost::program_options::value<std::string>(&db_name)->default_value("springtail"), "DB database name")
-        ("user,u", boost::program_options::value<std::string>(&user_name)->default_value("springtail"), "DB user name")
-        ("password,P", boost::program_options::value<std::string>(&password)->default_value(""), "DB Password")
-        ("publication,b", boost::program_options::value<std::string>(&pub_name)->default_value("springtail"), "Publication name")
-        ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created")
-        ("repl_path,r", boost::program_options::value<std::filesystem::path>(&repl_log_path)->default_value(std::filesystem::path("./repl_logs")), "Replication log file path")
-        ("xact_path,x", boost::program_options::value<std::filesystem::path>(&xact_log_path)->default_value(std::filesystem::path("./xact_logs")), "Transaction log file path")
         ("daemonize", "Start the server as a daemon")
     ;
 
@@ -54,24 +38,26 @@ int main(int argc, char *argv[])
     }
     boost::program_options::notify(vm);
 
-    // daemonize the process
+    // initialize the springtail subsystems
+    std::optional<std::filesystem::path> pidfile;
     if (vm.count("daemonize")) {
-        springtail::common::daemonize("/var/springtail/pg_log_mgr.pid");
+        pidfile = "/var/springtail/pg_log_mgr.pid";
     }
+    springtail::springtail_init("pg_log_mgr", pidfile);
 
-    springtail::springtail_init();
-
-    log_mgr = std::make_shared<springtail::PgLogMgr>(repl_log_path, xact_log_path, host,
-                                                     db_name, user_name, password, pub_name,
-                                                     slot_name, port);
+    pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
 
-    // log_mgr->start_streaming();
-    log_mgr->startup();
+    // get the set of db ids for this instance
+    std::map<uint64_t, std::string> db_ids = Properties::get_databases();
+    for (auto &db: db_ids) {
+        uint64_t db_id = db.first;
+        log_co->add_database(db_id);
+    }
 
-    log_mgr->join();
+    log_co->wait_shutdown();
 
     return 0;
 }

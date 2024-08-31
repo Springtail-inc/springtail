@@ -26,10 +26,11 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/guc.h"
+#include "utils/builtins.h"
 
 PG_MODULE_MAGIC;
 
-// define from storage/constants.hh
+// define from common/constants.hh
 #define INVALID_TABLE 0
 
 // exposed from and defined in multicorn_util.c
@@ -191,6 +192,67 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
+PG_FUNCTION_INFO_V1(springtail_fdw_function);
+Datum
+springtail_fdw_function(PG_FUNCTION_ARGS)
+{
+    // Get the input argument (a text string)
+    text *arg = PG_GETARG_TEXT_PP(0);
+    char *command = text_to_cstring(arg);
+
+    // Execute the command
+    fdw_function_call(command);
+
+    PG_RETURN_VOID();
+}
+
+/**
+ * @brief Get the foreign server xid
+ * @param serverid
+ * @return
+ */
+static void
+get_foreign_server_options(Oid serverid,
+                           uint64_t *xid,
+                           uint64_t *db_id)
+{
+    ForeignServer *server;
+    ListCell      *lc;
+
+    bool           got_xid = false, got_db_id = false;
+
+    // Get the foreign server
+    server = GetForeignServer(serverid);
+
+    // Iterate over the options
+    foreach(lc, server->options)
+    {
+        DefElem *def = (DefElem *) lfirst(lc);
+        if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
+            char *xidstr = defGetString(def);
+            elog(DEBUG3, "XID: %s for server %s", xidstr, server->servername);
+
+            *xid = strtoull(xidstr, NULL, 10);
+            got_xid = true;
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
+            char *dbidstr = defGetString(def);
+            elog(DEBUG3, "DB ID: %s for server %s", dbidstr, server->servername);
+
+            *db_id = strtoull(dbidstr, NULL, 10);
+            got_db_id = true;
+        }
+    }
+
+    if (!got_xid || !got_db_id) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+                            errmsg("Xid or DB ID not found in options for server %s", server->servername),
+                            errhint("Xid or DB ID not found for fdw server from server options")));
+    }
+
+    return;
+}
+
 /**
  * @brief Update baserel->rows, and possibly baserel->reltarget->width and
  *        baserel->tuples, with an estimated result set size for a
@@ -249,13 +311,23 @@ springtail_GetForeignRelSize(PlannerInfo *root,
                             errhint("Invalid oid for table from table options")));
     }
 
+    // Get the foreign server OID
+    Oid serverid = ft->serverid;
+    ForeignServer *server = GetForeignServer(serverid);
+
+    // get the schema xid and db_id from the foreign server options
+    uint64_t schema_xid;
+    uint64_t db_id;
+
+    get_foreign_server_options(serverid, &schema_xid, &db_id);
+
     // create the plan state
     SpringtailPlanState *planstate = (SpringtailPlanState *)palloc0(sizeof(SpringtailPlanState));
     planstate->tid = tid;
 
     // Get the postgres transaction id, and create the internal state
     FullTransactionId pg_xid = GetCurrentFullTransactionId();
-    planstate->pg_fdw_state = fdw_create_state(tid, pg_xid.value);
+    planstate->pg_fdw_state = fdw_create_state(db_id, tid, pg_xid.value, schema_xid);
 
     // store the plan state in the baserel
     baserel->fdw_private = planstate;
@@ -440,5 +512,41 @@ springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
         table_list = stmt->table_list;
     }
 
-    return fdw_import_foreign_schema(server->servername, stmt->remote_schema, table_list, except_list, limit_to_list);
+    // get foreign server and iterate through its options
+    server = GetForeignServer(serverOid);
+    ListCell   *lc;
+
+    // Iterate over the options to find the db_id, db_name and schema_xid
+    uint64_t db_id;
+    uint64_t schema_xid;
+    char *db_name = NULL;
+    int found = 0;
+
+    foreach(lc, server->options) {
+        DefElem    *def = (DefElem *) lfirst(lc);
+        if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
+            char *db_id_str = defGetString(def);
+            db_id = strtoull(db_id_str, NULL, 10);
+            found++;
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_NAME_OPTION) == 0) {
+            db_name = defGetString(def);
+            found++;
+        } else if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
+            char *schema_xid_str = defGetString(def);
+            schema_xid = strtoull(schema_xid_str, NULL, 10);
+            found++;
+        }
+    }
+
+    if (found != 3) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+                            errmsg("Xid, DB ID or DB Name not found in options for server %s", server->servername),
+                            errhint("Xid, DB ID or DB Name not found for fdw server from server options")));
+
+    }
+
+    return fdw_import_foreign_schema(server->servername, stmt->remote_schema,
+                                     table_list, except_list, limit_to_list,
+                                     db_id, db_name, schema_xid);
 }

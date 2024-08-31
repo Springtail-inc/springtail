@@ -23,7 +23,7 @@ namespace springtail::environment {
     static const std::tuple<const char *, Type, const char *, const char *> Variables[] =
     {
         {"REDIS_HOSTNAME", STR, "redis", "host"},
-        {"REDIS_USER", STR, "redis"," user"},
+        {"REDIS_USER", STR, "redis", "user"},
         {"REDIS_PASSWORD", STR, "redis", "password"},
         {"REDIS_USER_DATABASE_ID", UINT32, "redis", "db"},
         {"REDIS_PORT", UINT32, "redis", "port"},
@@ -32,6 +32,7 @@ namespace springtail::environment {
         {"DATABASE_INSTANCE_ID", UINT64, "org", "db_instance_id"},
         {"LUSTRE_DNS_NAME", STR, "fs", "dns_name"},
         {"LUSTRE_MOUNT_NAME", STR, "fs", "mount_name"},
-        {"MOUNT_POINT", STR, "fs", "mount_point"}
+        {"MOUNT_POINT", STR, "fs", "mount_point"},
+        {"FDW_ID", STR, "org", "fdw_id"}
     };
 } // namespace springtail::environment

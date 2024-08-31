@@ -3,11 +3,14 @@
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <common/logging.hh>
 
 #include <pg_repl/pg_copy_table.hh>
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
+
+#include <test/services.hh>
 
 using namespace springtail;
 
@@ -20,42 +23,47 @@ namespace {
         void SetUp() override {
             springtail_init();
 
-            // get the base directory for table data
-            nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-            Json::get_to<std::filesystem::path>(json, "table_dir", _base_dir);
-            _base_dir = Properties::make_absolute_path(_base_dir);
+            _services.init(true);
 
-            // cleanup from failed previous run
-            TearDown();
+            auto p_db = Properties::get_primary_db_config();
 
-            std::filesystem::create_directories(_base_dir);
+            host = p_db["host"].get<std::string>();
+            user = p_db["replication_user"].get<std::string>();
+            password = p_db["password"].get<std::string>();
+            port = p_db["port"].get<int>();
 
-            std::cout << "writing to " << _base_dir << "\n";
-
-            int err = std::system("psql postgresql://postgres:springtail@localhost -f sample.sql");
+            std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
+            SPDLOG_INFO("Connecting to: {}", conn_cmd);
+            int err = std::system(conn_cmd.c_str());
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
             }
-
         }
 
         void TearDown() override {
-            // remove any files created during the run
-            std::filesystem::remove_all(_base_dir);
+            _services.shutdown();
         }
 
+        std::string db_name = "postgres";
+        std::string host;
+        std::string user;
+        std::string password;
+        int port;
+
+        test::Services _services{true, true, true};
     };
 
     TEST_F(PgCopyTable_Test, CopyTable) {
-        auto source = std::make_shared<PgCopyTable>("postgres", "public", "test_pgcopy", "");
-        source->connect("localhost", "postgres", "springtail", 5432);
+        auto source = std::make_shared<PgCopyTable>(db_name, "public", "test_pgcopy", "");
+        source->connect(host, user, password, port);
 
         // perform the table copy
-        uint64_t xid = 2;
-        auto oid = source->copy_to_springtail(_base_dir, xid);
+        XidLsn xid(2, 0);
+        uint64_t db_id = 1;
+        auto oid = source->copy_to_springtail(db_id, xid);
 
         // create an access table
-        auto table = TableMgr::get_instance()->get_table(oid, xid, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid.xid, 0);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

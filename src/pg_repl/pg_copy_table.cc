@@ -353,8 +353,8 @@ namespace springtail
     }
 
     int32_t
-    PgCopyTable::copy_to_springtail(const std::filesystem::path &base_dir,
-                                    uint64_t xid)
+    PgCopyTable::copy_to_springtail(uint64_t db_id,
+                                    XidLsn &xid)
     {
         _get_table_oid();
         _get_xact_xids();
@@ -372,11 +372,11 @@ namespace springtail
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
         // note: we create the system metadata at the previous XID
-        uint64_t access_xid = xid - 1;
-        TableMgr::get_instance()->create_table(access_xid, 0, create_msg);
+        // XXX need to fix this
+        TableMgr::get_instance()->create_table(db_id, xid, create_msg);
+        ++xid.lsn;
 
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(_schema.table_oid, access_xid);
-        auto table = TableMgr::get_instance()->get_mutable_table(_schema.table_oid, access_xid, xid);
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, _schema.table_oid, xid.xid, xid.xid);
 
         // start the COPY
         _prepare_copy();
@@ -415,13 +415,13 @@ namespace springtail
             auto tuple = std::make_shared<FieldTuple>(fields, nullptr);
 
             // add the row to the table
-            table->insert(tuple, xid, constant::UNKNOWN_EXTENT);
+            table->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
         }
 
         auto roots = table->finalize();
 
         // store the roots into the system table
-        TableMgr::get_instance()->update_roots(_schema.table_oid, access_xid, xid, roots);
+        TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, roots, {});
 
         return _schema.table_oid;
     }

@@ -20,6 +20,7 @@
 #include <pg_repl/pg_msg_stream.hh>
 
 using namespace springtail;
+using namespace springtail::pg_log_mgr;
 
 namespace {
 

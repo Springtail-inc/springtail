@@ -1,6 +1,6 @@
 -- create the replica DB
-CREATE DATABASE springtail_replica;
-\c springtail_replica
+CREATE DATABASE replica_springtail;
+\c replica_springtail
 
 -- setup the FDW
 CREATE EXTENSION springtail_fdw;

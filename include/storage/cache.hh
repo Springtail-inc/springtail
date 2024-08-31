@@ -5,7 +5,7 @@
 
 #include <boost/thread.hpp>
 
-#include <storage/constants.hh>
+#include <common/constants.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
 
@@ -256,7 +256,7 @@ namespace springtail {
              * Invalidates the provided DIRTY extent, ensuring that it is released without being
              * written to disk.
              */
-            void remove_empty(CacheExtentPtr extent);
+            void drop_dirty(CacheExtentPtr extent);
 
             /**
              * Splits the provided extent into two new extents, each holding roughly half of the
@@ -757,6 +757,12 @@ namespace springtail {
              */
             void remove(const Iterator &pos);
 
+            /**
+             * Converts the page to the provided target_schema using the provided schema to read
+             * target_schema formatted rows from the existing extents and writing them to new extents.
+             */
+            void convert(VirtualSchemaPtr schema, ExtentSchemaPtr target_schema);
+
         private:
             // HELPER FUNCTIONS
 
@@ -859,6 +865,12 @@ namespace springtail {
              */
             void flush_file(const std::filesystem::path &file);
 
+            /**
+             * Drops all of the dirty pages associated with a file without flushing them to disk.
+             * Used to implement table truncate.
+             */
+            void drop_file(const std::filesystem::path &file);
+
         private:
             /**
              * Helper to return a page to the cache.
@@ -954,6 +966,12 @@ namespace springtail {
          * disk to complete.
          */
         void flush(const std::filesystem::path &file);
+
+        /**
+         * Drop all of the dirty pages associated with a given file without writing them.  Used to
+         * support truncate.
+         */
+        void drop_for_truncate(const std::filesystem::path &file);
 
     private:
         // INTERNAL MEMBER VARIABLES

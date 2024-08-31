@@ -87,16 +87,14 @@ int main(int argc, char* argv[])
         SPDLOG_INFO("SSL Disabled");
     }
 
-    springtail_init();
-
-    // daemonize the process
+    std::optional<std::filesystem::path> pidfile;
     if (vm.count("daemonize")) {
-        common::daemonize("/var/springtail/proxy.pid");
+        pidfile = "/var/springtail/xid_mgr.pid";
     }
+    springtail_init("proxy", pidfile);
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
-
 
     std::cout << "Logging initialized to: " << log << std::endl;
     LoggerPtr logger = std::make_shared<Logger>(log, 1024*1024*100, 5);

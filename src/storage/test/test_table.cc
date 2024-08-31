@@ -7,6 +7,8 @@
 #include <storage/csv_field.hh>
 #include <storage/table.hh>
 
+#include <test/services.hh>
+
 using namespace springtail;
 
 namespace {
@@ -18,6 +20,7 @@ namespace {
     protected:
         void SetUp() override {
             springtail_init();
+            _services.init(true);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -48,9 +51,13 @@ namespace {
         }
 
         void TearDown() override {
+            _services.shutdown();
+
             // remove any files created during the run
             std::filesystem::remove_all(_base_dir);
         }
+
+        test::Services _services{true, true, false};
 
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;
@@ -59,11 +66,13 @@ namespace {
         std::vector<std::vector<std::string>> _secondary_keys;
 
         std::filesystem::path _base_dir;
+        uint64_t _db_id = 1;
 
         TablePtr
         _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<Table>(table_id,
+            return std::make_shared<Table>(_db_id,
+                                           table_id,
                                            xid,
                                            _base_dir / fmt::format("{}", table_id),
                                            _primary_keys,
@@ -76,7 +85,8 @@ namespace {
         MutableTablePtr
         _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<MutableTable>(table_id,
+            return std::make_shared<MutableTable>(_db_id,
+                                                  table_id,
                                                   xid - 1,
                                                   xid,
                                                   roots,

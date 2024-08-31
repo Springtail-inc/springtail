@@ -32,12 +32,11 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    springtail_init();
-
-    // daemonize the process
+    std::optional<std::filesystem::path> pidfile;
     if (vm.count("daemonize")) {
-        common::daemonize("/var/springtail/write_cache.pid");
+        pidfile = "/var/springtail/write_cache.pid";
     }
+    springtail_init("write_cache", pidfile);
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);

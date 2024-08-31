@@ -15,6 +15,12 @@ extern "C" {
         return PgFdwMgr::get_instance();
     }
 
+    void
+    fdw_function_call(const char *command)
+    {
+        get_fdw_mgr()->fdw_function_call(command);
+    }
+
     /** Init call */
     void
     fdw_init(const char *config_file_path)
@@ -24,9 +30,9 @@ extern "C" {
 
     /** Create state for this table and transaction */
     void *
-    fdw_create_state(uint64_t tid, uint64_t pg_xid)
+    fdw_create_state(uint64_t db_id, uint64_t tid, uint64_t pg_xid, uint64_t schema_xid)
     {
-        return get_fdw_mgr()->fdw_create_state(tid, pg_xid);
+        return get_fdw_mgr()->fdw_create_state(db_id, tid, pg_xid, schema_xid);
     }
 
     /** Begin scan wrapper */
@@ -70,9 +76,12 @@ extern "C" {
     /** Import foreign schema wrapper */
     List *
     fdw_import_foreign_schema(const char *server, const char *schema,
-                              const List *table_list, bool exclude, bool limit)
+                              const List *table_list, bool exclude, bool limit,
+                              uint64_t db_id, const char *db_name, uint64_t schema_xid)
     {
-        return get_fdw_mgr()->fdw_import_foreign_schema(server, schema, table_list, exclude, limit);
+        return get_fdw_mgr()->fdw_import_foreign_schema(server, schema,
+                                                        table_list, exclude, limit,
+                                                        db_id, db_name, schema_xid);
     }
 
     /** Helper return true if table is sortable by sort group */

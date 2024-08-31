@@ -524,7 +524,7 @@ namespace springtail {
         }
 
         int8_t get_int8(const std::any &row) const override {
-            // must be boolean type
+            // must be int8 type
             assert(_type == SchemaType::INT8);
             assert(row.type() == typeid(Extent::Row));
 
@@ -533,7 +533,7 @@ namespace springtail {
         }
 
         uint8_t get_uint8(const std::any &row) const override {
-            // must be boolean type
+            // must be uint8 type
             assert(_type == SchemaType::UINT8);
             assert(row.type() == typeid(Extent::Row));
 
@@ -542,7 +542,7 @@ namespace springtail {
         }
 
         int16_t get_int16(const std::any &row) const override {
-            // must be boolean type
+            // must be int16 type
             assert(_type == SchemaType::INT16);
             assert(row.type() == typeid(Extent::Row));
 
@@ -551,7 +551,7 @@ namespace springtail {
         }
 
         uint16_t get_uint16(const std::any &row) const override {
-            // must be boolean type
+            // must be uint16 type
             assert(_type == SchemaType::UINT16);
             assert(row.type() == typeid(Extent::Row));
 
@@ -561,7 +561,7 @@ namespace springtail {
         }
 
         int32_t get_int32(const std::any &row) const override {
-            // must be boolean type
+            // must be int32 type
             assert(_type == SchemaType::INT32);
             assert(row.type() == typeid(Extent::Row));
 
@@ -570,7 +570,7 @@ namespace springtail {
         }
 
         uint32_t get_uint32(const std::any &row) const override {
-            // must be boolean type
+            // must be uint32 type
             assert(_type == SchemaType::UINT32);
             assert(row.type() == typeid(Extent::Row));
 
@@ -580,7 +580,7 @@ namespace springtail {
         }
 
         int64_t get_int64(const std::any &row) const override {
-            // must be boolean type
+            // must be int64 type
             assert(_type == SchemaType::INT64);
             assert(row.type() == typeid(Extent::Row));
 
@@ -589,7 +589,7 @@ namespace springtail {
         }
 
         uint64_t get_uint64(const std::any &row) const override {
-            // must be boolean type
+            // must be uint64 type
             assert(_type == SchemaType::UINT64);
             assert(row.type() == typeid(Extent::Row));
 
@@ -599,7 +599,7 @@ namespace springtail {
         }
 
         float get_float32(const std::any &row) const override {
-            // must be boolean type
+            // must be float32 type
             assert(_type == SchemaType::FLOAT32);
             assert(row.type() == typeid(Extent::Row));
 
@@ -609,7 +609,7 @@ namespace springtail {
         }
 
         double get_float64(const std::any &row) const override {
-            // must be boolean type
+            // must be float64 type
             assert(_type == SchemaType::FLOAT64);
             assert(row.type() == typeid(Extent::Row));
 
@@ -619,6 +619,7 @@ namespace springtail {
         }
 
         std::string_view get_text(const std::any &row) const override {
+            // must be text type
             assert(_type == SchemaType::TEXT);
             assert(row.type() == typeid(Extent::Row));
 
@@ -628,6 +629,7 @@ namespace springtail {
         }
 
         const std::span<const char> get_binary(const std::any &row) const override {
+            // must be binary type
             assert(_type == SchemaType::BINARY);
             assert(row.type() == typeid(Extent::Row));
 

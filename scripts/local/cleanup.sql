@@ -1,5 +1,5 @@
 -- drop the logical replica database
-DROP DATABASE IF EXISTS springtail_replica;
+DROP DATABASE IF EXISTS replica_springtail;
 
 -- remove the FDW
 DROP SERVER IF EXISTS springtail_fdw_server;

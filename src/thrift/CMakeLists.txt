@@ -28,7 +28,7 @@ message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
 # set variables for thrift schema .thrift file and generated .h
 # file(GLOB THRIFT_FILES "*.thrift")
-set(THRIFT_FILES write_cache.thrift xid_mgr.thrift)
+set(THRIFT_FILES write_cache.thrift xid_mgr.thrift sys_tbl_mgr.thrift)
 
 # iterate over all thrift files; generate the cpp and h files and link them into libraries
 foreach(THRIFT_FILE ${THRIFT_FILES})
@@ -52,6 +52,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
     # Regular expression to match a word after "service " (with optional whitespace)
     set(THRIFT_SERVICE "")
     string(REGEX REPLACE  "^[ ]*service[ ]+(.*)[ ]+{" "\\1" THRIFT_SERVICE "${EXTRACTED_SERVICE_NAME}")
+    MESSAGE(STATUS "Found service ${EXTRACTED_SERVICE_NAME} for ${THRIFT_FILE}")
 
     # set the generated files
     set(THRIFT_GEN_FILES

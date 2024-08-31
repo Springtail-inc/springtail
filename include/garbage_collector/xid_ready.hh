@@ -1,5 +1,7 @@
 #pragma once
 
+#include <common/common.hh>
+
 namespace springtail::gc {
 
     /**
@@ -8,17 +10,27 @@ namespace springtail::gc {
      */
     class XidReady {
     public:
-        XidReady(uint64_t xid)
-            : _xid(xid)
+        XidReady(uint64_t db_id,
+                 uint64_t xid)
+            : _db_id(db_id),
+              _xid(xid)
         { }
 
         XidReady(const std::string &value)
         {
-            _xid = static_cast<uint64_t>(std::atoll(value.c_str()));
+            std::vector<std::string> split;
+            common::split_string(":", value, split);
+
+            _db_id = std::stoull(split[0]);
+            _xid = std::stoull(split[1]);
         }
 
         std::string serialize() const {
-            return fmt::format("{}", _xid);
+            return fmt::format("{}:{}", _db_id, _xid);
+        }
+
+        uint64_t db_id() const {
+            return _db_id;
         }
 
         uint64_t xid() const {
@@ -26,6 +38,7 @@ namespace springtail::gc {
         }
 
     private:
+        uint64_t _db_id;
         uint64_t _xid;
     };
 

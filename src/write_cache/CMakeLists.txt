@@ -1,5 +1,4 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
 
 # source files
 set(WRITE_CACHE_SOURCES

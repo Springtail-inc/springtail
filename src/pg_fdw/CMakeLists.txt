@@ -31,6 +31,8 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
+    PRIVATE springtail_sys_tbl_mgr
+    PRIVATE PostgreSQL::PostgreSQL
 )
 #add_dsymutil_command(springtail_pg_fdw)
 
@@ -42,6 +44,7 @@ target_link_libraries(copy_schema
     PRIVATE springtail_common
     PRIVATE springtail_pg
     PRIVATE springtail_storage
+    PRIVATE springtail_sys_tbl_mgr
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(copy_schema)
@@ -54,6 +57,7 @@ target_include_directories(dump_table
 target_link_libraries(dump_table
     PRIVATE springtail_common
     PRIVATE springtail_storage
+    PRIVATE springtail_sys_tbl_mgr
     PRIVATE springtail_xid_mgr
     PRIVATE Boost::program_options
     PRIVATE PostgreSQL::PostgreSQL
@@ -67,6 +71,7 @@ target_include_directories(where
 target_link_libraries(where
     PRIVATE springtail_common
     PRIVATE springtail_storage
+    PRIVATE springtail_sys_tbl_mgr
 )
 add_dsymutil_command(where)
 
@@ -76,8 +81,7 @@ target_include_directories(test_where
 )
 target_link_libraries(test_where
     PRIVATE springtail_common
-    PRIVATE springtail_storage
-    PRIVATE springtail_xid_mgr
+    PRIVATE springtail_test
     PRIVATE PostgreSQL::PostgreSQL
     PRIVATE GTest::gtest_main
 )

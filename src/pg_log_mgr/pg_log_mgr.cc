@@ -15,13 +15,17 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
 
     // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
     {
         uint64_t lsn = INVALID_LSN;
+
+        // create directories if they don't exist
+        std::filesystem::create_directories(_repl_log_path);
+        std::filesystem::create_directories(_xact_log_path);
 
         // scan latest replication log and extract ending LSN
         // XXX if we find an empty log then remove file and go to previous log
@@ -32,7 +36,7 @@ namespace springtail {
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        _next_xid = xid_mgr->get_committed_xid() + 1;
+        _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
         // scan xact logs and transfer in progress xacts to log reader
         PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX);
@@ -227,9 +231,30 @@ namespace springtail {
     {
         uint64_t xid = xact->springtail_xid;
 
+        // find the correct RedisSortedSet
+        RSSOidValuePtr oid_set;
+        {
+            std::scoped_lock lock(_oid_set_mutex);
+
+            auto set_i = _oid_set.find(_db_id);
+            if (set_i == _oid_set.end()) {
+                // construct one if it doesn't exist
+                std::string key = fmt::format(redis::SET_PG_OID_XIDS,
+                                              Properties::get_db_instance_id(), _db_id);
+                oid_set = std::make_shared<RSSOidValue>(key);
+
+                auto result = _oid_set.emplace(_db_id, oid_set);
+                if (!result.second) {
+                    throw Error();
+                }
+            } else {
+                oid_set = set_i->second;
+            }
+        }
+
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            _oid_set.add(PgRedisOidValue(oid, xid), xid);
+            oid_set->add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC
@@ -239,4 +264,4 @@ namespace springtail {
         // XXX need to add customer ID
         _redis_queue.push(redis_xact);
     }
-}
+} // namespace springtail::pg_log_mgr

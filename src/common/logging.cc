@@ -46,17 +46,21 @@ namespace logging {
         }
     }
 
-    void init_logging(uint32_t module_mask)
+    void init_logging(const std::optional<uint32_t> &module_mask_opt,
+                      const std::optional<std::string> &log_name,
+                      bool is_daemon)
     {
         nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
 
+        uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
+
         // configuration options
-        std::string log_path;
+        std::string log_path_str;
         std::string log_level;
         std::string pattern;
         int max_size;
         int max_files;
-        Json::get_to<std::string>(props, "log_path", log_path, "/tmp/springtail_log.txt");
+        Json::get_to<std::string>(props, "log_path", log_path_str, "/tmp/springtail_log.txt");
         Json::get_to<int>(props, "log_file_size", max_size, 1024 * 1024 * 5);
         Json::get_to<int>(props, "log_file_count", max_files, 5);
         Json::get_to<std::string>(props, "log_level", log_level, "trace");
@@ -79,21 +83,46 @@ namespace logging {
             }
         }
 
+        // if log_name is set, then override log_path
+        if (log_name.has_value()) {
+            std::filesystem::path log_path{log_path_str};
+            std::filesystem::path log_name_path{log_name.value()};
+
+            // add extension if not already exists
+            if (!log_name_path.has_extension()) {
+                log_name_path += ".log";
+            }
+
+            // if log_name is absolute path, then use it as is
+            if (log_name_path.is_absolute()) {
+                log_path = log_name_path;
+            } else {
+                log_path = log_path.parent_path() / log_name_path;
+            }
+            log_path_str = log_path.string();
+        }
+
         // log bitmask
         logging::_log_mask = module_mask;
 
+        std::vector<spdlog::sink_ptr> sinks;
+
         // console sink
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        console_sink->set_pattern(pattern);
-        set_level(console_sink, log_level);
+        if (!is_daemon) {
+            auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            console_sink->set_pattern(pattern);
+            set_level(console_sink, log_level);
+            sinks.push_back(console_sink);
+        }
 
         // file sink
-        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path, max_size, max_files);
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
         set_level(file_sink, log_level);
+        sinks.push_back(file_sink);
 
         // create the logger for both console and file sink
-        spdlog::sinks_init_list list = {console_sink, file_sink};
-        auto logger = std::make_shared<spdlog::logger>("springtail", list);
+        auto logger = std::make_shared<spdlog::logger>("springtail",
+                                                       std::begin(sinks), std::end(sinks));
         logger->set_pattern(pattern);
         set_level(logger, log_level);
         logger->flush_on(spdlog::level::err);

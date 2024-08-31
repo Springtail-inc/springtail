@@ -1,6 +1,7 @@
 #include <storage/system_tables.hh>
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
+#include <sys_tbl_mgr/client.hh>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {
@@ -11,7 +12,8 @@ namespace springtail {
         };
     }
 
-    Table::Table(uint64_t table_id,
+    Table::Table(uint64_t db_id,
+                 uint64_t table_id,
                  uint64_t xid,
                  const std::filesystem::path &table_dir,
                  const std::vector<std::string> &primary_key,
@@ -19,7 +21,8 @@ namespace springtail {
                  std::vector<uint64_t> root_offsets,
                  ExtentSchemaPtr schema,
                  const TableStats &stats)
-        : _id(table_id),
+        : _db_id(db_id),
+          _id(table_id),
           _xid(xid),
           _table_dir(table_dir),
           _primary_key(primary_key),
@@ -109,13 +112,13 @@ namespace springtail {
     ExtentSchemaPtr
     Table::extent_schema() const
     {
-        return SchemaMgr::get_instance()->get_extent_schema(_id, _xid);
+        return SchemaMgr::get_instance()->get_extent_schema(_db_id, _id, XidLsn(_xid));
     }
 
     SchemaPtr
     Table::schema(uint64_t extent_xid) const
     {
-        return SchemaMgr::get_instance()->get_schema(_id, extent_xid, _xid);
+        return SchemaMgr::get_instance()->get_schema(_db_id, _id, XidLsn(extent_xid), XidLsn(_xid));
     }
 
     Table::Iterator
@@ -163,10 +166,15 @@ namespace springtail {
     Table::Iterator
     Table::inverse_lower_bound(TuplePtr search_key)
     {
+        // if the priamry index is empty, return end()
+        if (_primary_index->empty()) {
+            return end();
+        }
+
         // find the extent that could contain the inverse_lower_bound() key
         auto &&i = _primary_index->lower_bound(search_key);
         if (i == _primary_index->end()) {
-            return end();
+            --i;
         }
 
         // read the extent and find the inverse_lower_bound() of the key within it
@@ -175,8 +183,11 @@ namespace springtail {
         // find the inverse_lower_bound() of the key within the data extent
         auto &&j = page->inverse_lower_bound(search_key, _schema);
 
-        // note: the primary index indicates that there is a value <= the search_key in this page
-        assert(j != page->end());
+        // note: the index found this page, but if it's the first page in the table, the key may be
+        //       less than the first entry, meaning no such inverse_lower_bound() exists
+        if (j == page->end()) {
+            return end();
+        }
 
         return Iterator(this, _primary_index, i, page, j);
     }
@@ -213,7 +224,8 @@ namespace springtail {
     }
 
 
-    MutableTable::MutableTable(uint64_t id,
+    MutableTable::MutableTable(uint64_t db_id,
+                               uint64_t id,
                                uint64_t access_xid,
                                uint64_t target_xid,
                                std::vector<uint64_t> root_offsets,
@@ -223,7 +235,8 @@ namespace springtail {
                                ExtentSchemaPtr schema,
                                const TableStats &stats,
                                bool for_gc)
-    : _id(id),
+    : _db_id(db_id),
+      _id(id),
       _access_xid(access_xid),
       _target_xid(target_xid),
       _table_dir(table_dir),
@@ -235,7 +248,7 @@ namespace springtail {
       _for_gc(for_gc)
     {
         // make sure that the table directory exists
-        std::filesystem::create_directory(_table_dir);
+        std::filesystem::create_directories(_table_dir);
 
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
@@ -324,7 +337,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             ++_stats.row_count;
         }
     }
@@ -350,7 +363,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (did_insert && _id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (did_insert && _id > constant::MAX_SYSTEM_TABLE_ID) {
             ++_stats.row_count;
         }
     }
@@ -372,7 +385,7 @@ namespace springtail {
         }
 
         // update the stats
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             --_stats.row_count;
         }
     }
@@ -392,6 +405,44 @@ namespace springtail {
         }
 
         // note: no change in the stats.row_count
+    }
+
+    void
+    MutableTable::truncate()
+    {
+        // remove any dirty cached pages for this table since they don't need to be written
+        StorageCache::get_instance()->drop_for_truncate(_data_file);
+
+        // clear the indexes
+        std::vector<uint64_t> roots{constant::UNKNOWN_EXTENT};
+        _primary_index->truncate();
+
+        for (auto secondary : _secondary_indexes) {
+            roots.push_back(constant::UNKNOWN_EXTENT);
+            secondary->truncate();
+        }
+
+        // update the roots and stats
+        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, 0);
+    }
+
+    StorageCache::PagePtr
+    MutableTable::read_page(uint64_t extent_id) const
+    {
+        return StorageCache::get_instance()->get(_data_file, extent_id,
+                                                 _access_xid, _target_xid);
+    }
+
+    void
+    MutableTable::release_pages(const std::vector<StorageCache::PagePtr> &pages)
+    {
+        auto cache = StorageCache::get_instance();
+
+        // need to release the dirty pages back to the cache with the appropriate callback
+        for (auto &page : pages) {
+            cache->put(page, std::bind(&MutableTable::_flush_handler,
+                                       this, std::placeholders::_1));
+        }
     }
 
     bool
@@ -460,7 +511,7 @@ namespace springtail {
 
         // record the mapping into the extent map
         if (_for_gc) {
-            WriteCacheClient::get_instance()->add_mapping(_id, _target_xid, old_eid, offsets);
+            WriteCacheClient::get_instance()->add_mapping(_db_id, _id, _target_xid, old_eid, offsets);
         }
 
         auto value_fields = std::make_shared<FieldArray>(1);
@@ -506,8 +557,8 @@ namespace springtail {
     std::vector<uint64_t>
     MutableTable::finalize()
     {
-        // in the case of having an empty table, there are no invalidations... we can flush the
-        // single Page and update the indexes
+        // in the case of having an (initially) empty table, there are no invalidations... we can
+        // flush the single Page and update the indexes
         if (_empty_page) {
             _flush_and_populate_indexes(_empty_page);
 
@@ -515,10 +566,10 @@ namespace springtail {
             _empty_page = nullptr;
 
             // XXX should we still call StorageCache::flush() to make sure that the file is sync()'d?
-        } else {
-            // flush the dirty data pages of the table to disk
-            StorageCache::get_instance()->flush(_data_file);
         }
+
+        // flush the dirty data pages of the table to disk
+        StorageCache::get_instance()->flush(_data_file);
 
         // now flush the indexes, capturing the roots
         std::vector<uint64_t> roots;
@@ -529,12 +580,9 @@ namespace springtail {
         }
 
         // update the roots and stats in the system tables for non-system tables
-        if (_id > sys_tbl::MAX_SYS_TBL_ID) {
-            auto table_mgr = TableMgr::get_instance();
-
-            // note: don't currently keep table roots or table stats for system tables
-            table_mgr->update_roots(_id, _access_xid, _target_xid, roots);
-            table_mgr->update_stats(_id, _access_xid, _target_xid, _stats);
+        // note: don't currently keep table roots or table stats for system tables
+        if (_id > constant::MAX_SYSTEM_TABLE_ID) {
+            sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, _stats.row_count);
         }
 
         // store the roots into a look-aside root file
@@ -594,6 +642,13 @@ namespace springtail {
     MutableTable::_insert_append(TuplePtr value,
                                  uint64_t xid)
     {
+        // if the primary_lookup tree is empty, we will maintain a single page of data that we will
+        // keep against the table and use for all operations.
+        if (_primary_lookup->empty()) {
+            _insert_empty(value, xid);
+            return;
+        }
+
         // note: in this case there is no explicit primary key, so we need to append the row to the
         //       end of the file
         auto pos = --(_primary_lookup->end());

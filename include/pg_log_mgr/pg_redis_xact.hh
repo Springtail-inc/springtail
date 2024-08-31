@@ -11,7 +11,7 @@
 #include <common/common.hh>
 #include <common/redis.hh>
 
-namespace springtail {
+namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres Redis Value for transaction queue
      */
@@ -108,16 +108,19 @@ namespace springtail {
 
             assert(split.size() == 2);
 
-            xid = std::stoull(split[0]);
-            oid = std::stoull(split[1]);
+            oid = std::stoull(split[0]);
+            xid = std::stoull(split[1]);
         }
 
         std::string serialize() const
         {
-            return fmt::format("{}:{}", xid, oid);
+            return fmt::format("{}:{}", oid, xid);
         }
 
         uint64_t oid;
         uint64_t xid;
     };
-}
+    using RSSOidValue = RedisSortedSet<PgRedisOidValue>;
+    using RSSOidValuePtr = std::shared_ptr<RSSOidValue>;
+
+} // namespace springtail::pg_log_mgr

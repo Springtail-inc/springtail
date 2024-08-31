@@ -19,6 +19,14 @@ namespace springtail {
     };
 
     /**
+     * Structure to hold table metadata required to create a table.
+     */
+    struct TableMetadata {
+        std::vector<uint64_t> roots;
+        TableStats stats;
+    };
+
+    /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
      */
@@ -151,7 +159,8 @@ namespace springtail {
         /**
          * Table constructor.
          */
-        Table(uint64_t table_id,
+        Table(uint64_t db_id,
+              uint64_t table_id,
               uint64_t xid,
               const std::filesystem::path &table_dir,
               const std::vector<std::string> &primary_key,
@@ -180,6 +189,12 @@ namespace springtail {
         std::vector<std::string> primary_key() const
         {
             return _primary_key;
+        }
+
+        /** Retrieve the Database ID of this table. */
+        uint64_t db() const
+        {
+            return _db_id;
         }
 
         /** Retrieve the ID of this table. */
@@ -258,8 +273,8 @@ namespace springtail {
         StorageCache::PagePtr _read_page(uint64_t extent_id) const;
 
     private:
-        /** The ID of the table. */
-        uint64_t _id;
+        uint64_t _db_id; ///< The ID of the database containing this table.
+        uint64_t _id; ///< The ID of the table.
 
         uint64_t _xid; ///< The XID at which this table is being accessed.
         std::filesystem::path _table_dir; ///< The directory holding the table data.
@@ -290,7 +305,8 @@ namespace springtail {
         /**
          * Mutable table constructor.
          */
-        MutableTable(uint64_t id,
+        MutableTable(uint64_t db_id,
+                     uint64_t id,
                      uint64_t access_xid,
                      uint64_t target_xid,
                      std::vector<uint64_t> root_offsets,
@@ -345,8 +361,24 @@ namespace springtail {
          */
         void update(TuplePtr value, uint64_t xid, uint64_t extent_id);
 
+        /**
+         * Truncates the table, removing the callback of any mutated pages in the cache, clearing
+         * all of the indexes, and marking the roots to be cleared in the system tables.
+         */
+        void truncate();
 
-        void evict_handler(StorageCache::PagePtr page);
+        /**
+         * Reads an extent from the tree and returns it.
+         * @param extent_id The extent ID to read.
+         * @return A pointer to the requested page.
+         */
+        StorageCache::PagePtr read_page(uint64_t extent_id) const;
+
+        /**
+         * Release modified pages back to the cache.
+         */
+        void release_pages(const std::vector<StorageCache::PagePtr> &pages);
+
 
         /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
@@ -365,6 +397,12 @@ namespace springtail {
         std::vector<std::string> primary_key() const
         {
             return _primary_key;
+        }
+
+        /** Retrieve the Database ID of this table. */
+        uint64_t db() const
+        {
+            return _db_id;
         }
 
         /**
@@ -471,8 +509,8 @@ namespace springtail {
         void _update_by_lookup(TuplePtr key, uint64_t xid);
 
     private:
-        /** The ID of the table. */
-        uint64_t _id;
+        uint64_t _db_id; ///< The ID of the database containing this table.
+        uint64_t _id; ///< The ID of the table.
 
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.

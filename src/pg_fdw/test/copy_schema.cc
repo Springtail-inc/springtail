@@ -5,6 +5,7 @@
 #include <boost/program_options.hpp>
 
 #include <common/common.hh>
+#include <common/constants.hh>
 #include <common/logging.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
@@ -14,10 +15,13 @@
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
-#include <storage/constants.hh>
 #include <storage/field.hh>
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
+
+#include <sys_tbl_mgr/client.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 
@@ -36,27 +40,26 @@ static constexpr char SCHEMA_TABLES_QUERY[] =
     "AND table_type = 'BASE TABLE' "
     "AND table_schema NOT IN ('pg_catalog', 'information_schema'); ";
 
-static constexpr char SERVER_NAME[] = "springtail_fdw_server";
-static constexpr char SPRINGTAIL_CATALOG_SCHEMA[] = "__springtail_catalog";
-
 void dump_table(const std::filesystem::path &base_dir,
                 const std::string &schema_name,
                 const std::string &table_name,
                 const PostgresConnection &conn,
-                uint64_t xid=2)
+                uint64_t db_id,
+                XidLsn &xid)
 {
     SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
 
     auto source = std::make_shared<PgCopyTable>(conn.database, schema_name, table_name, "");
     source->connect(conn.host, conn.user, conn.password, conn.port);
 
-    // perform the table copy
-    source->copy_to_springtail(base_dir, xid);
+    // perform the table copy -- note: updates the LSN of the xid
+    source->copy_to_springtail(db_id, xid);
 }
 
 void
 dump_tables_in_schema(const PostgresConnection &conn,
-                      const std::string &schema_name)
+                      const std::string &schema_name,
+                      uint64_t db_id)
 {
     std::filesystem::path base_dir;
 
@@ -85,12 +88,19 @@ dump_tables_in_schema(const PostgresConnection &conn,
     pg_conn.clear();
     pg_conn.disconnect();
 
-    uint64_t xid = 2;
+    uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
+    XidLsn target_xid(xid + 1, 0);
     for (const auto &table_name : table_names) {
         SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn, xid);
-        xid += 2;
+        dump_table(base_dir, schema_name, table_name, conn, db_id, target_xid);
     }
+
+    // finalize the system tables
+    sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+
+    // update the xid mgr
+    XidMgrClient::get_instance()->commit_xid(db_id, target_xid.xid, false);
 }
 
 int
@@ -102,6 +112,7 @@ main(int argc, char *argv[])
     std::string user_name;
     std::string password;
     int port = 5432;
+    uint64_t db_id = 1;
 
     springtail_init();
 
@@ -120,8 +131,8 @@ main(int argc, char *argv[])
         ("password,p", boost::program_options::value<std::string>(&password)->default_value("springtail"),
          "Postgres password")
         ("port,P", boost::program_options::value<int>(&port)->default_value(5432),
-         "Postgres port number");
-
+         "Postgres port number")
+        ("db_id, i", boost::program_options::value<uint64_t>(&db_id)->default_value(1),"Database ID");
 
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -141,5 +152,5 @@ main(int argc, char *argv[])
         .port = port
     };
 
-    dump_tables_in_schema(conn, schema_name);
+    dump_tables_in_schema(conn, schema_name, db_id);
 }

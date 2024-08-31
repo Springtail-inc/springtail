@@ -7,6 +7,7 @@
 #include <common/concurrent_queue.hh>
 #include <common/counter.hh>
 #include <common/redis.hh>
+#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 
 #include <garbage_collector/xid_ready.hh>
@@ -47,7 +48,7 @@ namespace springtail::gc {
             : _readers(reader_count),
               _parsers(parser_count)
         {
-            _backlog = std::make_shared<Backlog>(redis::SET_PG_OID_XIDS);
+            _backlog = std::make_shared<Backlog>();
             _parser_queue = std::make_shared<ParserQueue>();
 
             for (auto &reader : _readers) {
@@ -95,13 +96,13 @@ namespace springtail::gc {
 
         /** Holds the state for processing an XID. */
         struct State {
-            std::shared_ptr<PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
+            std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
             bool process_as_stream; ///< True if the XID is in STREAM mode.
             CounterPtr mutation_count; ///< The number of mutations outstanding to the parsers.
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            explicit State(std::shared_ptr<PgRedisXactValue> entry)
+            explicit State(std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry)
                 : entry(entry),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
@@ -120,10 +121,6 @@ namespace springtail::gc {
          */
         class Backlog {
         public:
-            explicit Backlog(const std::string &redis_key)
-                : _oid_set(redis_key)
-            { }
-
             /**
              * Checks if the backlog is empty.
              * @return true if the backlog is empty, false otherwise
@@ -132,20 +129,22 @@ namespace springtail::gc {
 
             /**
              * Checks if the given XID should block when mutating the given table OID.
-             * @param xid The XID of this request.
+             * @param db_id The DB of the table this request is accessing.
              * @param oid The OID of the table this request is accessing.
+             * @param xid The XID of this request.
              * @return true if the request should block, false otherwise.
              */
-            bool check(uint64_t xid, uint64_t oid);
+            bool check(uint64_t db_id, uint64_t oid, uint64_t xid);
 
             /**
              * Adds the blocked request to the backlog.  Indicates which XID it is, which OID it's
              * blocked on, and the request details.
-             * @param xid The XID of this request.
+             * @param db_id The DB this XID is blocking on.
              * @param oid The OID this XID is blocking on.
+             * @param xid The XID of this request.
              * @param entry The request details.
              */
-            void push(uint64_t xid, uint64_t oid, StatePtr entry);
+            void push(uint64_t db_id, uint64_t oid, uint64_t xid, StatePtr entry);
 
             /**
              * Retreives a request that was previously blocked but is no longer blocked.
@@ -154,17 +153,21 @@ namespace springtail::gc {
             StatePtr pop();
 
             /**
-             * Updates the XID / table dependencies from Redis.
+             * Updates the XID / table dependencies for a given DB from Redis.
              */
-            void update_deps();
+            void update_deps(uint64_t db_id);
 
             /**
              * Clears any requests blocked on the provided XID.
+             * @param db_id The DB of the XID that completed.
              * @param xid The XID that completed, allowing other blocked requests to proceed.
              */
-            void clear_dep(uint64_t xid);
+            void clear_dep(uint64_t db_id, uint64_t xid);
 
         private:
+            using DbXid = std::pair<uint64_t, uint64_t>;
+            using DbOid = std::pair<uint64_t, uint64_t>;
+
             /** Guard on access to the members. */
             mutable boost::shared_mutex _mutex;
 
@@ -172,24 +175,24 @@ namespace springtail::gc {
             std::list<StatePtr> _ready;
 
             /** Map of blocked XIDs -- XID -> <OID, Request> */
-            std::map<uint64_t, std::pair<uint64_t, StatePtr>> _backlog;
+            std::map<DbXid, std::pair<uint64_t, StatePtr>> _backlog;
 
             /** Map from a given table OID to the set of blocked XIDs. */
-            std::map<uint64_t, std::set<uint64_t>> _oid_backlog;
+            std::map<DbOid, std::set<uint64_t>> _oid_backlog;
 
             /** Map of table dependencies -- OID -> <ordered set of XIDs> */
-            std::map<uint64_t, std::set<uint64_t>> _table_deps;
+            std::map<DbOid, std::set<uint64_t>> _table_deps;
 
             /** Map of XID to the OIDs it modifies for removing dependencies. */
-            std::map<uint64_t, std::set<uint64_t>> _xid_map;
+            std::map<DbXid, std::set<uint64_t>> _xid_map;
 
-            /** The last XID that was requested from Redis. */
-            uint64_t _last_requested_xid;
+            /** The last XID that was requested from Redis for each DB. */
+            std::map<uint64_t, uint64_t> _last_requested_xid;
 
-            /** The interface to Redis to retrieve the table dependencies. */
-            RedisSortedSet<PgRedisOidValue> _oid_set;
+            /** The interface to Redis to retrieve the table dependencies for each DB. */
+            std::map<uint64_t, pg_log_mgr::RSSOidValue> _oid_set;
         };
-        typedef std::shared_ptr<Backlog> BacklogPtr;
+        using BacklogPtr = std::shared_ptr<Backlog>;
 
 
         /** A message from a Reader to a Parser. */
@@ -199,9 +202,10 @@ namespace springtail::gc {
             uint64_t xid;
             uint64_t lsn;
             uint64_t table_id;
+            uint64_t db_id;
 
-            ParserEntry(PgMsgPtr msg, CounterPtr counter, uint64_t xid, uint64_t lsn, uint64_t table_id)
-                : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id)
+            ParserEntry(PgMsgPtr msg, CounterPtr counter, uint64_t xid, uint64_t lsn, uint64_t table_id, uint64_t db_id)
+                : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id), db_id(db_id)
             { }
         };
 
@@ -255,7 +259,8 @@ namespace springtail::gc {
              *
              * @return Returns true if the XID was blocked, false otherwise.
              */
-            bool _check_backlog(uint64_t xid, uint64_t oid, const std::filesystem::path &file, uint64_t offset);
+            bool _check_backlog(uint64_t db_id, uint64_t xid, uint64_t oid,
+                                const std::filesystem::path &file, uint64_t offset);
 
             /**
              * Process a mutation message (insert, update, delete, truncate).  If the mutation
@@ -264,6 +269,11 @@ namespace springtail::gc {
              */
             bool _process_mutation(uint64_t pg_xid, uint64_t xid, uint64_t rel_id, PgMsgPtr msg,
                                    const std::filesystem::path &file, uint64_t offset);
+
+            /**
+             * Records the DDL record into Redis to eventually pass to the FDW.
+             */
+            void _record_ddl(const XidLsn &xid, const std::string &ddl);
 
         private:
             /** The filter to use at the start of processing. */
@@ -286,7 +296,7 @@ namespace springtail::gc {
             bool _shutdown;
 
             /** Queue for XID messages from the PG log manager. */
-            RedisQueue<PgRedisXactValue> _pg_queue;
+            RedisQueue<pg_log_mgr::PgRedisXactValue> _pg_queue;
 
             /** Queue for XID messages to the GC committer. */
             RedisQueue<XidReady> _gc_queue;
@@ -302,6 +312,9 @@ namespace springtail::gc {
 
             /** State machine for processing an XID. */
             StatePtr _state;
+
+            /** For managing the DDL statements in Redis. */
+            RedisDDL _redis_ddl;
         };
         typedef std::shared_ptr<Reader> ReaderPtr;
 
@@ -326,7 +339,7 @@ namespace springtail::gc {
         protected:
             /**
              * Packs the provided Postgres tuple into an Extent with a single row containing the data.
-             * 
+             *
              */
             std::shared_ptr<MutableTuple> _pack_extent(ExtentPtr extent, const PgMsgTupleData &data,
                                                        ExtentSchemaPtr schema);

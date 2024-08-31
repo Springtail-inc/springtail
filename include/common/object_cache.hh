@@ -186,6 +186,9 @@ namespace springtail {
 
             // push onto the front of the LRU queue
             _cache.push_front({id, entry, size});
+
+            // note: if this replaces an existing entry, we aren't evicting the replaced entry; it
+            //       will only get evicted via eventual LRU eviction
             _lookup.insert_or_assign(id, _cache.begin());
             _cache_size += size;
         }

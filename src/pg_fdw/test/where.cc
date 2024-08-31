@@ -44,9 +44,9 @@ bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, Qu
     }
 }
 
-void search(int val, QualOpName op)
+void search(uint64_t db_id, int val, QualOpName op)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(57455, 8, constant::MAX_LSN);
+    TablePtr table = TableMgr::get_instance()->get_table(db_id, 57455, 8, constant::MAX_LSN);
     std::optional<Table::Iterator> iter_start = std::nullopt;
     std::optional<Table::Iterator> iter_end = std::nullopt;
 
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 
     std::cout << "searching for: " << val << " op: " << direction << std::endl;
 
-    springtail_init(0);
+    springtail_init(std::nullopt, std::nullopt, 0);
 
     // convert operator to enum
     QualOpName op;
@@ -136,7 +136,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    search(val, op);
+    uint64_t db_id = 1;
+    search(db_id, val, op);
 
     return 0;
 }
