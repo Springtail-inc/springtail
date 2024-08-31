@@ -21,8 +21,8 @@ namespace springtail::gc {
             std::vector<std::string> split;
             common::split_string(":", value, split);
 
-            _db_id = std::stoull(value);
-            _xid = std::stoull(value);
+            _db_id = std::stoull(split[0]);
+            _xid = std::stoull(split[1]);
         }
 
         std::string serialize() const {
