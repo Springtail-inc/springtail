@@ -3,6 +3,7 @@ find_package(redis++ CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
+find_package(opentelemetry-cpp CONFIG REQUIRED)
 
 set(COMMON_LIB_SOURCES
   exception.cc
@@ -13,6 +14,7 @@ set(COMMON_LIB_SOURCES
   redis_ddl.cc
   tracking_allocator.cc
   dns_resolver.cc
+  metrics.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})

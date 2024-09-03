@@ -9,6 +9,7 @@
 
 #include <common/object_pool.hh>
 
+#include <thrift/timing_protocol.hh>
 #include <thrift/xid_mgr/ThriftXidMgr.h>
 
 namespace springtail {
@@ -37,10 +38,16 @@ namespace springtail {
 
             std::shared_ptr<apache::thrift::transport::TTransport> transport =
                 std::make_shared<apache::thrift::transport::TFramedTransport>(socket);
+
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol =
                 std::make_shared<apache::thrift::protocol::TCompactProtocol>(transport);
+
+            // wrap the protocol in a timing protocol
+            std::shared_ptr<thrift::TimingProtocol> tprotocol =
+                std::make_shared<thrift::TimingProtocol>(protocol);
+
             std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client =
-                std::make_shared<thrift::xid_mgr::ThriftXidMgrClient>(protocol);
+                std::make_shared<thrift::xid_mgr::ThriftXidMgrClient>(tprotocol);
 
             return client;
         }

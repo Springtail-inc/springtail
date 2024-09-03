@@ -18,6 +18,7 @@
 #include <common/properties.hh>
 #include <common/json.hh>
 
+#include <thrift/timing_protocol.hh>
 #include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_server.hh>
@@ -80,13 +81,11 @@ namespace springtail::xid_mgr {
         threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
         threadManager->start();
 
-        auto socket =
-
         _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
             std::make_shared<apache::thrift::transport::TServerSocket>(_port),
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
-            std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
+            std::make_shared<thrift::TimingProtocolFactory>(),
             threadManager
         );
 
