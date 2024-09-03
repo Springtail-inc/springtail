@@ -43,7 +43,7 @@ namespace springtail::gc {
     LogParser::Backlog::push(uint64_t db_id,
                              uint64_t oid,
                              uint64_t xid,
-                             std::shared_ptr<State> entry)
+                             StatePtr entry)
     {
         boost::unique_lock lock(_mutex);
 

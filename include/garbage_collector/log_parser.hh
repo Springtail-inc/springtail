@@ -4,11 +4,14 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#include <fmt/format.h>
+
 #include <common/concurrent_queue.hh>
 #include <common/counter.hh>
 #include <common/redis.hh>
 #include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
+#include <common/properties.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -52,7 +55,8 @@ namespace springtail::gc {
             _parser_queue = std::make_shared<ParserQueue>();
 
             for (auto &reader : _readers) {
-                reader = std::make_shared<Reader>(redis::QUEUE_PG_TRANSACTIONS, _backlog, _parser_queue);
+                reader = std::make_shared<Reader>(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()),
+                                                   _backlog, _parser_queue);
             }
 
             for (auto &parser : _parsers) {
@@ -228,7 +232,7 @@ namespace springtail::gc {
                    ParserQueuePtr parser_queue)
                 : _shutdown(false),
                   _pg_queue(pg_queue_key),
-                  _gc_queue(redis::QUEUE_GC_XID_READY),
+                  _gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
                   _backlog(backlog),
                   _parser_queue(parser_queue)
             {
@@ -269,11 +273,6 @@ namespace springtail::gc {
              */
             bool _process_mutation(uint64_t pg_xid, uint64_t xid, uint64_t rel_id, PgMsgPtr msg,
                                    const std::filesystem::path &file, uint64_t offset);
-
-            /**
-             * Records the DDL record into Redis to eventually pass to the FDW.
-             */
-            void _record_ddl(const XidLsn &xid, const std::string &ddl);
 
         private:
             /** The filter to use at the start of processing. */

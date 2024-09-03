@@ -9,10 +9,13 @@
 #include <thread>
 #include <atomic>
 
+#include <fmt/format.h>
+
 #include <common/concurrent_queue.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/filesystem.hh>
+#include <common/properties.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
 
@@ -77,7 +80,7 @@ namespace springtail::pg_log_mgr {
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
+          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()))
         {}
 
         /**
@@ -90,7 +93,7 @@ namespace springtail::pg_log_mgr {
         : _db_id(1), _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(redis::QUEUE_PG_TRANSACTIONS)
+          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()))
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
