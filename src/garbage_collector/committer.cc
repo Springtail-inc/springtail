@@ -70,7 +70,7 @@ namespace springtail::gc {
                     }
 
                     // construct the mutable table object
-                    auto table = TableMgr::get_instance()->get_mutable_table(tid, committed_xid, xid, true);
+                    auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, committed_xid, xid, true);
 
                     // check if we need to perform a table truncate
                     if (txid > 0) {
@@ -260,9 +260,26 @@ namespace springtail::gc {
             }
 
             // we need to update the base columns to reflect this schema change
-            for (int i = 0; i < meta.columns.size(); i++) {
-                if (meta.columns[i].position == history_i->position) {
-                    meta.columns[i] = *history_i;
+            if (history_i->update_type == SchemaUpdateType::NEW_COLUMN) {
+                // add a new column
+                meta.columns.push_back(*history_i);
+
+            } else if (history_i->update_type == SchemaUpdateType::REMOVE_COLUMN) {
+                // remove an existing column
+                for (auto pos_i = meta.columns.begin(); pos_i != meta.columns.end(); ++pos_i) {
+                    if (pos_i->position == history_i->position) {
+                        meta.columns.erase(pos_i);
+                        break;
+                    }
+                }
+
+            } else {
+                // update an existing column
+                for (auto pos_i = meta.columns.begin(); pos_i != meta.columns.end(); ++pos_i) {
+                    if (pos_i->position == history_i->position) {
+                        *pos_i = *history_i;
+                        break;
+                    }
                 }
             }
         }
