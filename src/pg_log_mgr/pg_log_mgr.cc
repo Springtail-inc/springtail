@@ -70,11 +70,26 @@ namespace springtail::pg_log_mgr {
         // XXX notify GC of startup??? notify an external coordinator?
 
         // start streaming
-        start_streaming(lsn);
+        _start_streaming(lsn);
     }
 
     void
-    PgLogMgr::start_streaming(uint64_t lsn)
+    PgLogMgr::_clean_startup()
+    {
+        // remove all files in log directories
+        std::filesystem::remove_all(_repl_log_path);
+        std::filesystem::remove_all(_xact_log_path);
+
+        // create directories if they don't exist
+        std::filesystem::create_directories(_repl_log_path);
+        std::filesystem::create_directories(_xact_log_path);
+
+        // clear out Redis
+        
+    }
+
+    void
+    PgLogMgr::_start_streaming(uint64_t lsn)
     {
         _pg_conn.connect();
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Connecting to postgres server: {}\n", _host);

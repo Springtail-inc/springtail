@@ -46,6 +46,11 @@ namespace springtail::pg_log_mgr {
         static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 
+        static constexpr char const * const STATE_STARTING = "starting";
+        static constexpr char const * const STATE_RUNNING = "running";
+        static constexpr char const * const STATE_SYNCING = "syncing";
+        static constexpr char const * const STATE_STOPPED = "stopped";
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -91,8 +96,7 @@ namespace springtail::pg_log_mgr {
         /** Start the pipeline; setup the log reader/writer log files etc. */
         void startup();
 
-        /** Setup streaming and startup threads */
-        void start_streaming(uint64_t lsn = INVALID_LSN);
+
 
         /** Wait for threads */
         void join() {
@@ -172,6 +176,12 @@ namespace springtail::pg_log_mgr {
 
         /** push transaction to redis queue */
         void _push_xact_to_redis(const PgTransactionPtr xact);
+
+        /** clean startup, clear out all state */
+        void _clean_startup();
+
+        /** Setup streaming and startup threads */
+        void _start_streaming(uint64_t lsn = INVALID_LSN);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

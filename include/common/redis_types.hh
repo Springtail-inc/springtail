@@ -29,6 +29,12 @@ namespace springtail::redis {
     // Config for database within instance: var db_instance_id, db_config_id
     static constexpr char DB_CONFIG[] = "db_config:{}:{}";
 
+    // State hash for database instance: var db_instance_id
+    static constexpr char DB_INSTANCE_STATE[] = "instance_state:{}";
+
+    // DB state key for database within DB_INSTANCE_STATE: var db_id
+    static constexpr char KEY_DB_STATE[] = "db_state:{}";
+
     //// For RedisDDL
 
     // args: <db_inst_id>, <db_id>, <xid>
@@ -39,4 +45,7 @@ namespace springtail::redis {
 
     // args: <db_instance_id> -- hash key: fdw_id
     static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw:{}";
+
+
+
 }

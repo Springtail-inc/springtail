@@ -248,6 +248,41 @@ namespace springtail {
     }
 
     std::string
+    Properties::get_db_state(uint64_t db_id)
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // need to use redis
+        RedisClientPtr redis_client = _get_redis_client();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
+        std::string db_state_key = std::format(redis::KEY_DB_STATE, db_id);
+        std::optional<std::string> db_state_str = redis_client->get(db_state_key);
+        if (!db_state_str.has_value()) {
+            throw Error("Error missing db_state in redis");
+        }
+
+        return db_state_str.value();
+    }
+
+    void
+    Properties::set_db_state(uint64_t db_id, const std::string &state)
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // need to use redis
+        RedisClientPtr redis_client = _get_redis_client();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
+        std::string db_state_key = std::format(redis::KEY_DB_STATE, db_id);
+        redis_client->hset(db_instance_state_hash, db_state_key, state);
+    }
+
+    std::string
     Properties::get_db_name(uint64_t db_id)
     {
         nlohmann::json db_config = get_db_config(db_id);
