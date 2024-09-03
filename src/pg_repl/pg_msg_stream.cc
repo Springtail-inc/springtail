@@ -826,7 +826,6 @@ namespace springtail {
             nlohmann::json json = el.value();
 
             json["name"].get_to(column.column_name);
-            json["type"].get_to(column.type);
             json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
