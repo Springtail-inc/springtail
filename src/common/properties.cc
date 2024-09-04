@@ -264,7 +264,9 @@ namespace springtail {
 
         // see if we are using the properties file override
         if (_instance != nullptr && _instance->_properties_file_override) {
-            return _instance->_json["db_instances"][std::to_string(db_instance_id)]["fdw_ids"];
+            std::string fdw_id;
+            Json::get_to<std::string>(_instance->_json[ORG_CONFIG], "fdw_id", fdw_id);
+            return {fdw_id};
         }
 
         // get the redis client and lookup the db ids from the db_instance config
