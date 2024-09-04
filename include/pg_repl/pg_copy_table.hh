@@ -134,11 +134,6 @@ namespace springtail
          */
         int32_t _verify_copy_header(const std::string_view &header);
 
-        /**
-         * @brief Convert pg type to internal schema type
-         */
-        SchemaType _convert_pg_type(int32_t pg_type);
-
     public:
 
         /**

@@ -24,3 +24,12 @@ INSERT INTO test_data2 (a, b) VALUES ('{1, 3}', 'b');
 INSERT INTO test_data2 (a, b) VALUES ('{1, 3, 5}', 'c');
 INSERT INTO test_data2 (a, b) VALUES ('{1, 8, 5}', 'd');
 COMMIT;
+
+BEGIN;
+INSERT INTO test_data3 (b, d) VALUES ('b', 14);
+ALTER TABLE test_data3 DROP COLUMN d;
+INSERT INTO test_data3 (b, c) VALUES ('c', now());
+ALTER TABLE test_data3 ADD COLUMN e INTEGER;
+INSERT INTO test_data3 (b, e) VALUES ('d', 15);
+UPDATE test_data3 SET e = 14 WHERE b = 'b';
+COMMIT;

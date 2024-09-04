@@ -842,6 +842,7 @@ namespace springtail {
                 column.default_value = json["default"].get<std::string>();
             }
 
+            column.type = static_cast<uint8_t>(pg_msg::convert_pg_type(column.pg_type));
             columns.push_back(column);
         }
     }
