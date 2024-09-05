@@ -26,6 +26,10 @@ INSERT INTO test_data2 (a, b) VALUES ('{1, 8, 5}', 'd');
 COMMIT;
 
 BEGIN;
+ALTER TABLE test_data2 ADD COLUMN e INTEGER DEFAULT VALUE 10;
+COMMIT;
+
+BEGIN;
 INSERT INTO test_data3 (b, d) VALUES ('b', 14);
 ALTER TABLE test_data3 DROP COLUMN d;
 INSERT INTO test_data3 (b, c) VALUES ('c', now());
