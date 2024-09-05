@@ -16,8 +16,8 @@ typedef struct PgFdwMgr PgFdwMgr;
 /** Get fdw mgr singleton instance */
 PgFdwMgr* get_fdw_mgr();
 
-/** fdw_function_call */
-void fdw_function_call(const char *command);
+/** Worker main */
+void fdw_worker_main(const char *fdw_id, const char *config_file_path);
 
 /** Init call, pass in config file path */
 void fdw_init(const char *config_file);

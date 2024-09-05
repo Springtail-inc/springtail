@@ -9,9 +9,9 @@ CREATE FUNCTION springtail_fdw_validator(text[], oid)
     AS '$libdir/springtail_fdw', 'springtail_fdw_validator'
     LANGUAGE c STRICT;
 
-CREATE FUNCTION springtail_fdw_function(text)
+CREATE FUNCTION springtail_fdw_startup(text)
     RETURNS void
-    AS '$libdir/springtail_fdw', 'springtail_fdw_function'
+    AS '$libdir/springtail_fdw', 'springtail_fdw_startup'
     LANGUAGE c STRICT;
 
 CREATE FOREIGN DATA WRAPPER springtail_fdw

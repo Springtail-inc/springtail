@@ -101,6 +101,9 @@ namespace springtail {
         /** Helper to get primary db json for current db instance */
         static nlohmann::json get_primary_db_config();
 
+        /** Helper to get fdw config */
+        static nlohmann::json get_fdw_config(const std::string &fdw_id);
+
     private:
         /** static _instance singleton */
         static Properties *_instance;
@@ -130,10 +133,18 @@ namespace springtail {
         void _read_redis_properties();
 
         /**
+         * @brief Create redis client from config for config db
+         */
+        void _create_redis_client();
+
+        /**
          * @brief Get config redis client
          */
         static RedisClientPtr _get_redis_client() {
             assert(_instance != nullptr);
+            if (_instance->_redis_config_client == nullptr) {
+                _instance->_create_redis_client();
+            }
             assert(_instance->_redis_config_client != nullptr);
             return _instance->_redis_config_client;
         }

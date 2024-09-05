@@ -56,7 +56,7 @@ namespace springtail {
     }
 
     void
-    Properties::_read_redis_properties()
+    Properties::_create_redis_client()
     {
         // verify we have the redis config
         if (_json.contains(REDIS_CONFIG) == false) {
@@ -77,7 +77,8 @@ namespace springtail {
         std::string hostname = redis_config["host"];
         int port = redis_config["port"];
         std::string user = redis_config["user"];
-        std::string password = redis_config["password"];
+        std::string password; // password is optional
+        Json::get_to<std::string>(redis_config, "password", password);
 
         // create connection options for config db
         sw::redis::ConnectionOptions connect_options;
@@ -89,6 +90,12 @@ namespace springtail {
 
         // create redis client just for accessing config db
         _redis_config_client = std::make_shared<RedisClient>(connect_options);
+    }
+
+    void
+    Properties::_read_redis_properties()
+    {
+        _create_redis_client();
 
         // check for db_instance_id in org config and extract
         // this is set by the environment variable
@@ -283,7 +290,7 @@ namespace springtail {
     Properties::get_primary_db_config()
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = Properties::get_db_instance_id();
+        uint64_t db_instance_id = get_db_instance_id();
 
         // see if we are using the properties file override
         if (_instance != nullptr && _instance->_properties_file_override) {
@@ -302,6 +309,34 @@ namespace springtail {
 
         // convert to json
         return nlohmann::json::parse(db_instance_str.value());
+    }
+
+    nlohmann::json
+    Properties::get_fdw_config(const std::string &fdw_id)
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // otherwise, we are using redis
+        RedisClientPtr redis_client = _get_redis_client();
+
+        // get the redis client and lookup the db ids from the db_instance config
+        std::string fdw_key = std::format(redis::HASH_FDW, db_instance_id);
+
+        std::optional<std::string> fdw_config_str = redis_client->hget(fdw_key, fdw_id);
+        if (!fdw_config_str.has_value()) {
+
+            std::vector<std::string> fdw_ids;
+            redis_client->hgetall(fdw_key, std::back_inserter(fdw_ids));
+            for (auto &fdw : fdw_ids) {
+                SPDLOG_WARN("Found FDW: {}", fdw);
+            }
+
+            throw Error("Error missing fdw_config in redis");
+        }
+
+        // convert to json
+        return nlohmann::json::parse(fdw_config_str.value());
     }
 
     void

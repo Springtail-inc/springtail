@@ -7,6 +7,10 @@
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/redis_ddl.hh>
+#include <common/properties.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
+#include <common/json.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -25,6 +29,12 @@ extern "C" {
     #include <varatt.h>
     #include <lib/stringinfo.h>
     #include <libpq-fe.h>
+    #include <miscadmin.h>
+    #include <postmaster/interrupt.h>
+    #include <postmaster/bgworker.h>
+    #include <storage/pmsignal.h>
+    #include <storage/ipc.h>
+    #include <tcop/utility.h>
 }
 
 using namespace springtail;
@@ -44,29 +54,61 @@ namespace springtail::pg_fdw {
 
         _instance = new PgFdwMgr();
 
-        // init fdw_id
-        _instance->_fdw_id = Properties::get_fdw_id();
-
         return _instance;
     }
 
     void
-    PgFdwMgr::_ddl_thread_func()
+    PgFdwMgr::fdw_worker_main(const std::string &fdw_id, const char *config_file)
     {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Background worker pid: {}, fdw_id: {}", ::getpid(), fdw_id);
+
+        assert(fdw_id.empty() == false);
+
+        // use config file as override for properties init
+        if (config_file != nullptr) {
+            // set env variable
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing background worker; config file: {}", config_file);
+            setenv("SPRINGTAIL_PROPERTIES_FILE", config_file, 1);
+        }
+
+        // init springtail
+        springtail_init();
+
+        // fetch config for fdw (host, port, user, password)
+        nlohmann::json fdw_config;
+        try {
+            fdw_config = Properties::get_fdw_config(fdw_id);
+        } catch (const Error &error) {
+            SPDLOG_ERROR("Error fetching fdw config: {}", error.what());
+            return;
+        }
+
+        // init redis ddl client after springtail_init()
         RedisDDL redis_ddl;
-        PgFdwMgr *mgr = PgFdwMgr::get_instance();
-        std::string fdw_id = mgr->get_fdw_id();
+
+
+
+        pqsignal(SIGTERM, die);
+        BackgroundWorkerUnblockSignals();
 
         while (true) {
             try {
                 // blocking redis call to get next set of DDL statements
                 nlohmann::json ddls = redis_ddl.get_next_ddls(fdw_id);
                 if (ddls.empty()) {
+                    // got a timeout, need to check if we have signals or need to exit
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "No DDLs to apply, timeout, continue");
+                    CHECK_FOR_INTERRUPTS();
+
+                    if (!PostmasterIsAlive()) {
+                        elog(LOG, "Postmaster is not alive, exiting.");
+                        proc_exit(1);
+                    }
                     continue;
                 }
 
                 // apply the DDL statements
-                if (mgr->_update_schemas(redis_ddl, ddls, SPRINGTAIL_FDW_SERVER_NAME, fdw_id)) {
+                if (_update_schemas(redis_ddl, ddls, SPRINGTAIL_FDW_SERVER_NAME, fdw_id, fdw_config)) {
                     // update schema XID if applied, otherwise they may be queued
                     uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
                     redis_ddl.update_schema_xid(fdw_id, schema_xid);
@@ -74,6 +116,7 @@ namespace springtail::pg_fdw {
 
             } catch (...) {
                 // handle exception
+                SPDLOG_ERROR("Exception in DDL thread");
             }
         }
     }
@@ -84,39 +127,14 @@ namespace springtail::pg_fdw {
     {
         if (config_file != nullptr) {
             // set env variable
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing, config file: {}", config_file);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing fdw; config file: {}", config_file);
             setenv("SPRINGTAIL_PROPERTIES_FILE", config_file, 1);
         }
 
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
+
         // initialize the singleton
         std::call_once(_init_flag, _init);
-    }
-
-    void
-    PgFdwMgr::fdw_function_call(const std::string &command)
-    {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_function_call: {}", command);
-
-        if (command == "startup") {
-            // start the ddl thread
-            // NOTE: there is a race condition on startup where the FDW may be running, but the
-            // import schema hasn't been run yet, so we need to wait for the schema to be imported
-            // otherwise we don't know the database name to connect to, and the database may not
-            // yet have been created.
-            // this command must be called after the import schema calls have completed, it starts
-            // up the ddl thread, to avoid the startup race condition.
-
-            // create the ddl thread
-            if (std::atomic_flag_test_and_set(&_ddl_thread_started) == false) {
-                _ddl_thread = std::thread(_ddl_thread_func);
-            }
-
-            return;
-        }
-
-        SPDLOG_WARN("fdw_function_call: unknown command: {}", command);
-
-        return;
     }
 
     PgFdwState *
@@ -796,13 +814,17 @@ namespace springtail::pg_fdw {
 
     bool
     PgFdwMgr::_update_schemas(RedisDDL &redis,
-                              nlohmann::json &ddls,
+                              const nlohmann::json &ddls,
                               const std::string &server_name,
-                              const std::string &fdw_id)
+                              const std::string &fdw_id,
+                              const nlohmann::json &fdw_config)
     {
         // get the db id and schema xid
         uint64_t db_id = ddls.at("db_id").get<uint64_t>();
         uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
+
+        // get the database name for the db_id; XXX should see if we can swtich to OID
+        std::string db_name = Properties::get_db_name(db_id);
 
         // generate a DDL statement for each JSON in the transaction
         std::vector<std::string> txn;
@@ -815,48 +837,30 @@ namespace springtail::pg_fdw {
                                   server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                   schema_xid));
 
-        std::shared_lock<std::shared_mutex> rd_lock(_mutex);
-
-        // get the db name based on the db id
-        auto itr = _db_map.find(db_id);
-        if (itr == _db_map.end()) {
-            SPDLOG_ERROR("Database ID not found: {}", db_id);
-            return false;
-        }
-        std::string dbname = itr->second;
-
-        // check that the schema_xid hasn't already been applied
-        // this could happen if we just started up and a DDL change is queued
-        // before the schema has been imported
-        auto xitr = _schema_xid_map.find(db_id);
-        if (xitr != _schema_xid_map.end()) {
-            if (xitr->second >= schema_xid) {
-                SPDLOG_DEBUG("Schema XID already applied: {}", schema_xid);
-                return true;
-            }
-        }
-
-        rd_lock.unlock();
-
-
-
         // execute the set of statements
-        _execute_ddl(dbname, txn);
-
-        // update the schema map with the new schema xid
-        std::unique_lock<std::shared_mutex> wr_lock(_mutex);
-        _schema_xid_map[db_id] = schema_xid;
-        wr_lock.unlock();
+        _execute_ddl(db_name, schema_xid, txn, fdw_config);
 
         return true;
     }
 
     void
-    PgFdwMgr::_execute_ddl(const std::string &dbname, const std::vector<std::string> &txn)
+    PgFdwMgr::_execute_ddl(const std::string &dbname,
+                           uint64_t schema_xid,
+                           const std::vector<std::string> &txn,
+                           const nlohmann::json &fdw_config)
     {
+        std::string hostname, username, password;
+        int port;
+
+        // get the connection information from the FDW config
+        Json::get_to<std::string>(fdw_config, "host", hostname);
+        Json::get_to<std::string>(fdw_config, "fdw_user", username);
+        Json::get_to<std::string>(fdw_config, "password", password);
+        Json::get_to<int>(fdw_config, "port", port);
+
         // use libpq to connect to the database
-        PGconn *conn = PQconnectdb(fmt::format("host={} dbname={} user={} password={}",
-                                               _hostname, dbname, _username, _password).c_str());
+        PGconn *conn = PQconnectdb(fmt::format("host={} dbname={} user={} password={} port={}",
+                                               hostname, dbname, username, password, port).c_str());
 
         if (PQstatus(conn) != CONNECTION_OK) {
             SPDLOG_ERROR("Connection to database failed: {}", PQerrorMessage(conn));
@@ -873,6 +877,37 @@ namespace springtail::pg_fdw {
             return;
         }
         PQclear(res);
+
+        // get current schema xid
+        std::string xid_sql = "SELECT option FROM ("
+            "SELECT unnest(options) AS option "
+            "FROM pg_foreign_server "
+            "WHERE srvname = 'springtail' "
+        ") AS options WHERE option LIKE 'schema_xid%';";
+
+        // get the schema XID from the server options
+        res = PQexec(conn, xid_sql.c_str());
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
+            SPDLOG_ERROR("SELECT command failed: {}", PQerrorMessage(conn));
+            PQclear(res);
+            PQfinish(conn);
+            return;
+        }
+
+        // extract the schema XID from the result
+        uint64_t current_schema_xid = 0;
+        std::string option = PQgetvalue(res, 0, 0);
+        std::string xid_str = option.substr(option.find('=') + 1);
+        current_schema_xid = std::stoull(xid_str);
+
+        PQclear(res);
+
+        if (current_schema_xid >= schema_xid) {
+            SPDLOG_ERROR("Schema XID has already been applied: current={}, new={}",
+                         current_schema_xid, schema_xid);
+            PQfinish(conn);
+            return;
+        }
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
@@ -1117,10 +1152,7 @@ namespace springtail::pg_fdw {
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
             std::optional<std::string> default_value{};
 
-            if (!fields->at(sys_tbl::Schemas::Data::DEFAULT)->is_null(row)) {
-                default_value = fields->at(sys_tbl::Schemas::Data::DEFAULT)->get_text(row);
-            }
-
+            // don't add default values
             columns.push_back({column_name, pg_type, nullable, default_value});
         }
 
@@ -1130,12 +1162,6 @@ namespace springtail::pg_fdw {
             std::string sql = _gen_fdw_table_sql(server, current_table, current_tid, columns);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
-
-        // update maps with db_id and schema_xid
-        std::unique_lock<std::shared_mutex> wr_lock(_mutex);
-        _db_map[db_id] = db_name;
-        _schema_xid_map[db_id] = schema_xid;
-        wr_lock.unlock();
 
         return commands;
     }

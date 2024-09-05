@@ -180,3 +180,16 @@ void ReleaseSysCache(HeapTuple tuple) { }
 HeapTuple SearchSysCache1(int cacheId, Datum key1) {
     return (HeapTuple)NULL;
 }
+
+// For background worker
+void ProcessInterrupts(void) {}
+
+bool InterruptPending = false;
+
+void BackgroundWorkerUnblockSignals(void) {}
+
+void die(int postgres_signal_arg) {}
+
+void proc_exit(int code) {}
+
+bool PostmasterIsAliveInternal(void) { return true; }
