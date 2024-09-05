@@ -411,7 +411,7 @@ namespace springtail::gc {
                 // pass that tuple into the appropriate table mutation
                 switch (row.op) {
                 case (WriteCacheClient::RowOp::INSERT): {
-                    ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                    ExtentHeader header(ExtentType(), xid, vschema->row_size(), 0);
                     Extent extent(header);
                     extent.deserialize(row.data);
 
@@ -427,7 +427,7 @@ namespace springtail::gc {
                 }
 
                 case (WriteCacheClient::RowOp::UPDATE): {
-                    ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                    ExtentHeader header(ExtentType(), xid, vschema->row_size(), 0);
                     Extent extent(header);
                     extent.deserialize(row.data);
 

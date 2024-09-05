@@ -38,7 +38,7 @@ BEGIN
         FROM (
             SELECT json_build_object('name', column_name,
                 'is_nullable', is_nullable::boolean,
-                'pg_type', atttypid,
+                'pg_type', atttypid::int,
                 'default', column_default,
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
                 'position', ordinal_position,

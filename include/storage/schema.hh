@@ -294,7 +294,10 @@ namespace springtail {
     private:
         /** Map from column name to field accessor.  */
         std::map<std::string, std::shared_ptr<Field>> _field_map;
-        ExtentSchemaPtr _extent_schema;
+        ExtentSchemaPtr _extent_schema; ///< The underlying schema of the on-disk data.
+
+        /** Column order of the virtual schema. */
+        std::vector<std::string> _column_order;
 
     private:
         /**
@@ -354,6 +357,12 @@ namespace springtail {
          * @param columns A list of requested columns for the returned ConstFieldTuple
          */
         std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const override;
+
+        /** Returns the fixed width for a single row of the underlying ExtentSchema. */
+        uint32_t row_size() const {
+            return _extent_schema->row_size();
+        }
+
     };
     typedef std::shared_ptr<VirtualSchema> VirtualSchemaPtr;
 

@@ -1,4 +1,5 @@
 #include <common/constants.hh>
+#include <common/logging.hh>
 #include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
