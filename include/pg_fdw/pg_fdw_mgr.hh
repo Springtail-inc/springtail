@@ -202,16 +202,10 @@ namespace springtail::pg_fdw {
         void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
         /**
-         * @brief Get the fdw id object
-         * @return std::string
-         */
-        std::string get_fdw_id() const { return _fdw_id; }
-
-        /**
-         * @brief Execute a function from SQL that calls into FDW
+         * @brief Execute a function from SQL that calls into FDW at startup time
          * @param command command to execute
          */
-        void fdw_function_call(const std::string &command);
+        static void fdw_worker_main(const std::string &fdw_id, const char *config_file);
 
     private:
         /** Delete constructor */
@@ -223,19 +217,8 @@ namespace springtail::pg_fdw {
         static std::once_flag _init_flag;  ///< Initialization flag
         static PgFdwMgr* _init();          ///< Initialize singleton
 
-        std::shared_mutex _mutex;                     ///< Mutex for maps; latest schema XID
-        std::map<uint64_t, uint64_t> _xid_map;        ///< Map of pg XID to springtail XID
-        std::map<uint64_t, std::string> _db_map;      ///< Map of db ID to db name
-        std::map<uint64_t, uint64_t> _schema_xid_map; ///< Map of db ID to schema XID
-
-        std::string _fdw_id;               ///< FDW ID for this instance
-        std::string _hostname="localhost"; ///< Hostname for fdw server
-        std::string _username="postgres";  ///< Username for fdw server
-        std::string _password="";          ///< Password for fdw server
-        int _port=5432;                    ///< Port for fdw server
-
-        std::atomic_flag _ddl_thread_started = ATOMIC_FLAG_INIT; ///< Flag to indicate if DDL thread is started
-        std::thread _ddl_thread;           ///< Thread for DDL updates
+        std::shared_mutex _mutex;               ///< Mutex for xid map
+        std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
 
         // static methods
 
@@ -292,18 +275,18 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
-        /** DDL thread startup function */
-        static void _ddl_thread_func();
-
-        // non-static methods
 
         /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
-        bool _update_schemas(RedisDDL &redis, nlohmann::json &ddls,
-                             const std::string &servername,
-                             const std::string &fdw_id);
+        static bool _update_schemas(RedisDDL &redis, const nlohmann::json &ddls,
+                                    const std::string &servername,
+                                    const std::string &fdw_id,
+                                    const nlohmann::json &fdw_config);
 
         /** Helper to execute ddl statements for this db */
-        void _execute_ddl(const std::string &db_name, const std::vector<std::string> &sql);
+        static void _execute_ddl(const std::string &db_name,
+                                 uint64_t schema_xid,
+                                 const std::vector<std::string> &sql,
+                                 const nlohmann::json &fdw_config);
 
     };
 } // namespace springtail::pg_fdw

@@ -61,6 +61,11 @@ target_include_directories(test_dns PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_dns PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_dns)
 
+add_executable(main test/main.cc)
+target_include_directories(main PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(main PRIVATE springtail_common Boost::thread)
+add_dsymutil_command(main)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
