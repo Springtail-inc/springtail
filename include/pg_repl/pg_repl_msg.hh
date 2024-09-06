@@ -6,6 +6,7 @@
 
 #include <pg_repl/pg_types.hh>
 #include <nlohmann/json.hpp>
+#include <storage/schema_type.hh>
 
 namespace springtail
 {
@@ -310,5 +311,12 @@ namespace springtail
          * @return LSN_t
          */
         LSN_t str_to_LSN(const char *lsn_str) noexcept;
+
+        /**
+         * @brief Convert a PG type to a Springtail type.
+         * @param pg_type The PG column type OID.
+         * @return A springtail SchemaType.
+         */
+        SchemaType convert_pg_type(int32_t pg_type);
     };
 }

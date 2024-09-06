@@ -14,8 +14,9 @@ ${PSQL_CMD} < cleanup.sql
 
 # clear any previous replica data
 rm -r /tmp/springtail/table
-rm -rf /tmp/repl_logs/*
-rm -rf /tmp/xact_logs/*
+rm -rf /tmp/springtail/repl_logs/*
+rm -rf /tmp/springtail/xact_logs/*
+rm -rf /tmp/springtail/xid_mgr/*
 redis-cli flushdb
 rm -f /tmp/xid_mgr.log /tmp/write_cache.log /tmp/pg_log_mgr.log /tmp/gc.log
 

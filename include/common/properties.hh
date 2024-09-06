@@ -104,7 +104,11 @@ namespace springtail {
         /** Helper to get db state */
         static std::string get_db_state(uint64_t db_id);
 
+        /** Helper to set db state */
         static void set_db_state(uint64_t db_id, const std::string &state);
+
+        /** Helper to get fdw config */
+        static nlohmann::json get_fdw_config(const std::string &fdw_id);
 
     private:
         /** static _instance singleton */
@@ -135,10 +139,18 @@ namespace springtail {
         void _read_redis_properties();
 
         /**
+         * @brief Create redis client from config for config db
+         */
+        void _create_redis_client();
+
+        /**
          * @brief Get config redis client
          */
         static RedisClientPtr _get_redis_client() {
             assert(_instance != nullptr);
+            if (_instance->_redis_config_client == nullptr) {
+                _instance->_create_redis_client();
+            }
             assert(_instance->_redis_config_client != nullptr);
             return _instance->_redis_config_client;
         }

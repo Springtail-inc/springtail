@@ -16,9 +16,9 @@ extern "C" {
     }
 
     void
-    fdw_function_call(const char *command)
+    fdw_worker_main(const char *fdw_id, const char *config_file_path)
     {
-        get_fdw_mgr()->fdw_function_call(command);
+        PgFdwMgr::fdw_worker_main(fdw_id, config_file_path);
     }
 
     /** Init call */

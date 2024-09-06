@@ -826,7 +826,6 @@ namespace springtail {
             nlohmann::json json = el.value();
 
             json["name"].get_to(column.column_name);
-            json["type"].get_to(column.type);
             json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
@@ -843,6 +842,7 @@ namespace springtail {
                 column.default_value = json["default"].get<std::string>();
             }
 
+            column.type = static_cast<uint8_t>(pg_msg::convert_pg_type(column.pg_type));
             columns.push_back(column);
         }
     }
