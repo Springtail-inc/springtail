@@ -14,8 +14,9 @@ ${PSQL_CMD} < cleanup.sql
 
 # clear any previous replica data
 rm -r /tmp/springtail/table
-rm -rf /tmp/repl_logs/*
-rm -rf /tmp/xact_logs/*
+rm -rf /tmp/springtail/repl_logs/*
+rm -rf /tmp/springtail/xact_logs/*
+rm -rf /tmp/springtail/xid_mgr/*
 redis-cli flushdb
 rm -f /tmp/xid_mgr.log /tmp/write_cache.log /tmp/pg_log_mgr.log /tmp/gc.log
 
@@ -61,10 +62,10 @@ SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --
 sleep 1
 
 # start the garbage collector
-# echo Start Garbage Collector...
-# GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
-# SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/gc.log" ${GC_DAEMON} --daemon
-# sleep 1
+echo Start Garbage Collector...
+GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
+SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/gc.log" ${GC_DAEMON} --daemon
+sleep 1
 
 # set up the replica database
 python3 ../fdw_import.py

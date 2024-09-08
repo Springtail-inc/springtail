@@ -27,6 +27,8 @@
 #include "utils/rel.h"
 #include "utils/guc.h"
 #include "utils/builtins.h"
+#include "postmaster/bgworker.h"
+
 
 PG_MODULE_MAGIC;
 
@@ -94,6 +96,12 @@ static bool springtail_AnalyzeForeignTable(Relation relation,
 
 static List *springtail_ImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
 
+
+/* Static global variables */
+
+/** Path to the FDW configuration file -- config variable */
+static char *fdw_config_file_path = NULL;
+
 /** Transaction commit/abort callback */
 static void
 fdw_xact_callback(XactEvent event, void *arg)
@@ -118,6 +126,8 @@ fdw_xact_callback(XactEvent event, void *arg)
     }
 }
 
+
+
 /* Register the transaction callback */
 void
 _PG_init(void)
@@ -126,7 +136,6 @@ _PG_init(void)
     RegisterXactCallback(fdw_xact_callback, NULL);
 
     // Define the configuration file path
-    char *fdw_config_file_path = NULL;
     DefineCustomStringVariable(
         "springtail_fdw.config_file_path",
         "Path to the FDW configuration file",
@@ -192,16 +201,84 @@ springtail_fdw_validator(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
-PG_FUNCTION_INFO_V1(springtail_fdw_function);
+/**
+ * @brief Main entry point for the background worker
+ * @param main_arg
+ */
+PGDLLEXPORT void background_worker_main(Datum main_arg);
+void
+background_worker_main(Datum main_arg)
+{
+    // Get the FDW ID from bgw_extra
+    BackgroundWorker *worker = MyBgworkerEntry;
+
+    elog(DEBUG4, "Background worker started with FDW ID: %s, config_file: %s",
+         worker->bgw_extra, fdw_config_file_path);
+
+    fdw_worker_main(worker->bgw_extra, fdw_config_file_path);
+}
+
 Datum
-springtail_fdw_function(PG_FUNCTION_ARGS)
+launch_background_worker(char *fdw_id)
+{
+    elog(DEBUG4, "Launching background worker with FDW ID: %s", fdw_id);
+
+    BackgroundWorker worker;
+    BackgroundWorkerHandle *handle;
+    BgwHandleStatus status;
+    pid_t pid;
+
+    MemSet(&worker, 0, sizeof(BackgroundWorker));
+    sprintf(worker.bgw_name, "springtail fdw background worker");
+    sprintf(worker.bgw_type, "springtail_fdw");
+    worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
+    worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+    worker.bgw_restart_time = BGW_NEVER_RESTART; // XXX for production we probably want a reasonble restart time
+    sprintf(worker.bgw_library_name, "springtail_fdw");
+    sprintf(worker.bgw_function_name, "background_worker_main");
+    worker.bgw_notify_pid = MyProcPid;
+    worker.bgw_main_arg = 0;
+
+    // copy the fdw_id into the extra field
+    strncpy(worker.bgw_extra, fdw_id, BGW_EXTRALEN);
+
+    if (!RegisterDynamicBackgroundWorker(&worker, &handle)) {
+        return (Datum) 0;
+    }
+
+     status = WaitForBackgroundWorkerStartup(handle, &pid);
+
+     if (status == BGWH_STOPPED) {
+         ereport(ERROR,
+                 (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                  errmsg("could not start background process"),
+                  errhint("More details may be available in the server log.")));
+     }
+
+     if (status == BGWH_POSTMASTER_DIED) {
+         ereport(ERROR,
+                 (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                  errmsg("cannot start background processes without postmaster"),
+                  errhint("Kill all remaining database processes and restart the database.")));
+     }
+
+     Assert(status == BGWH_STARTED);
+
+     PG_RETURN_INT32(pid);
+}
+
+PG_FUNCTION_INFO_V1(springtail_fdw_startup);
+Datum
+springtail_fdw_startup(PG_FUNCTION_ARGS)
 {
     // Get the input argument (a text string)
     text *arg = PG_GETARG_TEXT_PP(0);
-    char *command = text_to_cstring(arg);
+    char *fdw_id = text_to_cstring(arg);
 
-    // Execute the command
-    fdw_function_call(command);
+    elog(DEBUG4, "Starting background worker with FDW ID: %s", fdw_id);
+
+    // Launch the background worker
+    int pid = launch_background_worker(fdw_id);
 
     PG_RETURN_VOID();
 }

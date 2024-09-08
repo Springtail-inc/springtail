@@ -38,7 +38,7 @@ BEGIN
         FROM (
             SELECT json_build_object('name', column_name,
                 'is_nullable', is_nullable::boolean,
-                'type', udt_name,
+                'pg_type', atttypid::int,
                 'default', column_default,
                 'is_pkey', coalesce((pga.attnum=any(pgi.indkey))::boolean, false),
                 'position', ordinal_position,
@@ -52,6 +52,7 @@ BEGIN
             ON pga.attrelid=pgi.indrelid AND pgi.indisprimary
             WHERE pga.attrelid=obj.objid
               AND table_schema || '.' || table_name = obj.object_identity
+              AND atttypid > 0
             ORDER BY ordinal_position
         ) AS obj_select
         INTO json_columns;

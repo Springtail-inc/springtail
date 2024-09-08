@@ -1,4 +1,5 @@
 #include <common/constants.hh>
+#include <common/logging.hh>
 #include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
@@ -64,7 +65,7 @@ namespace springtail {
 
         // retrieve the next set of DDLs to apply for the given FDW; this blocks
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
-        auto &&res = _redis->blpop(key);
+        auto &&res = _redis->blpop(key, std::chrono::seconds(2));
         if (!res) {
             return ddls;
         }

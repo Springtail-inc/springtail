@@ -85,7 +85,6 @@ namespace springtail {
             nlohmann::json col;
             col["name"] = c.column_name;
             col["is_nullable"] = c.is_nullable;
-            col["type"] = c.type;
             col["pg_type"] = c.pg_type;
             if (c.default_value.has_value()) {
                 col["default"] = c.default_value.value();
@@ -580,7 +579,6 @@ namespace springtail {
             PgMsgSchemaColumn col;
             col.column_name = c["name"];
             col.is_nullable = c["is_nullable"];
-            col.type = c["type"];
             col.pg_type = c["pg_type"];
             if (!c.contains("default") || c["default"].is_null()) {
                 col.default_value = std::nullopt;

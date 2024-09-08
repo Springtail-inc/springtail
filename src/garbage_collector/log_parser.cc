@@ -43,7 +43,7 @@ namespace springtail::gc {
     LogParser::Backlog::push(uint64_t db_id,
                              uint64_t oid,
                              uint64_t xid,
-                             std::shared_ptr<State> entry)
+                             StatePtr entry)
     {
         boost::unique_lock lock(_mutex);
 
@@ -562,7 +562,8 @@ namespace springtail::gc {
                     auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
                     // generate an extent tuple from the pg log data
-                    auto schema = table->extent_schema();
+                    auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                               { entry->xid, entry->lsn });
                     auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
                     auto tuple = _pack_extent(extent, insert_msg.new_tuple, schema);
 
@@ -591,7 +592,8 @@ namespace springtail::gc {
                     assert(delete_msg.type == 'K');
 
                     // generate an extent with a row holding the PG tuple data
-                    auto schema = table->extent_schema();
+                    auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                               { entry->xid, entry->lsn });
                     auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
 
                     auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
@@ -620,7 +622,8 @@ namespace springtail::gc {
                     assert(update_msg.new_type == 'N');
 
                     if (update_msg.old_type == 0) {
-                        auto schema = table->extent_schema();
+                        auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                                   { entry->xid, entry->lsn });
 
                         auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
                         auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
@@ -642,7 +645,8 @@ namespace springtail::gc {
                         _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                     } else {
                         // generate extents for the delete data and insert data
-                        auto schema = table->extent_schema();
+                        auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                                   { entry->xid, entry->lsn });
                         auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
 
                         auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());

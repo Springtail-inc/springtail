@@ -1021,7 +1021,7 @@ namespace springtail::sys_tbl_mgr {
                 return update;
             }
 
-            if (entry.type != new_col.type) {
+            if (entry.pg_type != new_col.pg_type) {
                 // copy the new column details
                 update.column = new_col;
 
@@ -1032,7 +1032,7 @@ namespace springtail::sys_tbl_mgr {
                 // set the DDL statement
                 ddl["action"] = "col_type";
                 ddl["column"]["name"] = update.column.name;
-                ddl["column"]["type"] = update.column.type;
+                ddl["column"]["type"] = update.column.pg_type;
 
                 return update;
             }

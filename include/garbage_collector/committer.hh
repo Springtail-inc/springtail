@@ -12,6 +12,7 @@
 #include <common/redis.hh>
 #include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
+#include <common/properties.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -34,7 +35,7 @@ namespace springtail::gc {
     class Committer {
     public:
         Committer(uint32_t worker_count)
-            : _redis(redis::QUEUE_GC_XID_READY),
+            : _redis(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
               _worker_count(worker_count)
         {
             _xid_mgr = XidMgrClient::get_instance();

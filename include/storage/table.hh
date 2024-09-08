@@ -441,6 +441,11 @@ namespace springtail {
         void _insert_empty(TuplePtr value, uint64_t xid);
 
         /**
+         * Appends a tuple into the "empty" Page object.  Used when the Table started empty.
+         */
+        void _append_empty(TuplePtr value, uint64_t xid);
+
+        /**
          * Inserts a tuple at the end of the last extent of the table at the given XID.
          */
         void _insert_append(TuplePtr value, uint64_t xid);

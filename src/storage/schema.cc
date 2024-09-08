@@ -391,7 +391,7 @@ namespace springtail {
         _extent_schema = std::make_shared<ExtentSchema>(meta.columns);
 
         // get a copy of the fields from the extent schema
-        for (auto &&column : meta.columns) {
+        for (auto &column : meta.columns) {
             _field_map[column.name] = _extent_schema->get_field(column.name);
             name_map[column.position] = column.name;
         }
@@ -434,12 +434,17 @@ namespace springtail {
                 throw SchemaError("Can't handle column type changes yet");
             }
         }
+
+        // order the columns based on position
+        for (const auto &entry : name_map) {
+            _column_order.push_back(entry.second);
+        }
     }
 
     std::shared_ptr<std::vector<FieldPtr>>
     VirtualSchema::get_fields() const
     {
-        return this->get_fields(_extent_schema->column_order());
+        return this->get_fields(_column_order);
     }
 
     std::shared_ptr<std::vector<FieldPtr>>

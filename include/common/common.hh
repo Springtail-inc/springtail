@@ -47,6 +47,29 @@ namespace springtail {
         }
 
         /**
+         * @brief Joins strings into a single string with a delimiter between them.
+         * @param delimiter delimiter string (e.g., ",")
+         * @param first An iterator to the first element to include
+         * @param last An iterator past the end of the last element to include
+         */
+        template<class ForwardIt>
+        std::string
+        join_string(const std::string &delimiter,
+                    ForwardIt first,
+                    ForwardIt last)
+        {
+            std::ostringstream buf;
+            while (first != last) {
+                buf << *first;
+                ++first;
+                if (first != last) {
+                    buf << delimiter;
+                }
+            }
+            return buf.str();
+        }
+
+        /**
          * @brief Split a string based on a delimiter
          * @param delimiter delimiter string (e.g., ":")
          * @param string_value string to split (e.g., "this:is:a:string")

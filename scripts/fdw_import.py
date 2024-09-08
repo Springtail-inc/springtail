@@ -26,6 +26,20 @@ def execute_sql(conn, sql, args=None):
 
     return
 
+# execute a sql select statement and return the result
+def execute_sql_select(conn, sql, args=None):
+    """Execute the given sql select statement with the given arguments on the given connection and return the result."""
+    print(f"Executing sql select: {sql} with args: {args}")
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, args)
+        result = cur.fetchall()
+    except Exception as e:
+        print(f"Error executing sql: {e}")
+        result = None
+
+    return result
+
 def run_command(command, args):
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
@@ -102,6 +116,7 @@ conn.autocommit = True
 print("Connected to postgres db, creating dbs")
 
 # setup primary db
+execute_sql(conn, "DROP EXTENSION IF EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
 execute_sql(conn, "CREATE EXTENSION IF NOT EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
 
 # create the databases
@@ -148,5 +163,5 @@ for db_name in db_schemas.keys():
 # notify fdw that the import is complete; doesn't really matter where it runs but fdw extension must be loaded
 conn = psycopg2.connect(dbname='postgres', user=fdw['fdw_user'], password=fdw['password'], host='localhost', port=fdw['port'])
 conn.autocommit = True
-execute_sql(conn, "SELECT springtail_fdw_function('startup');")
+execute_sql(conn, "SELECT springtail_fdw_startup('{}')".format(fdw_id))
 conn.close()
