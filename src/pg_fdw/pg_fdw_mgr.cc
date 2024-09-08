@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 extern "C" {
@@ -97,7 +98,6 @@ namespace springtail::pg_fdw {
                 nlohmann::json ddls = redis_ddl.get_next_ddls(fdw_id);
                 if (ddls.empty()) {
                     // got a timeout, need to check if we have signals or need to exit
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "No DDLs to apply, timeout, continue");
                     CHECK_FOR_INTERRUPTS();
 
                     if (!PostmasterIsAlive()) {
@@ -113,6 +113,10 @@ namespace springtail::pg_fdw {
                     uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
                     redis_ddl.update_schema_xid(fdw_id, schema_xid);
                 }
+
+            } catch (Error &e) {
+                SPDLOG_ERROR("Springtail exception in DDL thread");
+                e.log_backtrace();
 
             } catch (...) {
                 // handle exception
@@ -683,10 +687,28 @@ namespace springtail::pg_fdw {
     }
 
     std::string
+    PgFdwMgr::_get_type_name(int32_t pg_type)
+    {
+        // get the type name from the system cache
+        HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
+        if (!HeapTupleIsValid(tuple)) {
+            elog(ERROR, "cache lookup failed for type%u", pg_type);
+            ReleaseSysCache(tuple);
+
+            throw FdwError(fmt::format("Failed to find type name for {}", pg_type));
+        }
+
+        std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
+        ReleaseSysCache(tuple);
+
+        return type_name;
+    }
+
+    std::string
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
                                  const std::string &table,
                                  uint64_t tid,
-                                 std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns)
+                                 std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
@@ -694,27 +716,15 @@ namespace springtail::pg_fdw {
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         for (int i = 0; i < columns.size(); i++) {
-            const auto &[column_name, pg_type, nullable, default_value] = columns[i];
+            const auto &[column_name, type_name, nullable] = columns[i];
             std::string column = fmt::format("  {} ", quote_identifier(column_name.c_str()));
 
-            // get the type name
-            HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_type));
-            if (!HeapTupleIsValid(tuple)) {
-                elog(ERROR, "cache lookup failed for type%u", pg_type);
-            }
-
-            std::string type_name = ((Form_pg_type) GETSTRUCT(tuple))->typname.data;
-            ReleaseSysCache(tuple);
-
+            // set the type name
             column += type_name;
 
             // add nullability and default
             if (!nullable) {
                 column += " NOT NULL";
-            }
-
-            if (default_value.has_value() && !default_value.value().empty()) {
-                column += fmt::format(" DEFAULT {}", default_value.value());
             }
 
             if (i < columns.size() - 1) {
@@ -732,7 +742,27 @@ namespace springtail::pg_fdw {
     }
 
     std::string
-    PgFdwMgr::_gen_sql_from_json(const std::string &server_name,
+    PgFdwMgr::_query_type_name(PGconn *conn,
+                               uint32_t pg_type)
+    {
+        std::string &&query = fmt::format("SELECT typname FROM pg_type WHERE oid = {}", pg_type);
+        PGresult *res = PQexec(conn, query.c_str());
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
+            SPDLOG_ERROR("SELECT command failed: {}", PQerrorMessage(conn));
+            PQclear(res);
+            throw FdwError();
+        }
+
+        // extract the type name from the result
+        std::string type_name = PQgetvalue(res, 0, 0);
+        PQclear(res);
+
+        return type_name;
+    }
+
+    std::string
+    PgFdwMgr::_gen_sql_from_json(PGconn *conn,
+                                 const std::string &server_name,
                                  nlohmann::json ddl)
     {
         assert(ddl.is_object());
@@ -740,15 +770,13 @@ namespace springtail::pg_fdw {
 
         auto &action = ddl.at("action");
         if (action == "create") {
-            std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
+            std::vector<std::tuple<std::string, std::string, bool>> columns;
             for (auto &col : ddl.at("columns")) {
-                std::optional<std::string> default_value;
-                if (col.contains("default")) {
-                    default_value = col.at("default");
-                }
+                std::string type_name = _query_type_name(conn, col.at("type").get<uint32_t>());
                 columns.push_back({
-                        col.at("name"), col.at("type"),
-                        col.at("nullable"), default_value
+                        col.at("name"),
+                        type_name,
+                        col.at("nullable")
                     });
             }
 
@@ -780,10 +808,11 @@ namespace springtail::pg_fdw {
                 constraints = null_constraint;
             }
 
+            std::string &&type_name = _query_type_name(conn, col.at("type").get<uint32_t>());
             return fmt::format("ALTER FOREIGN TABLE {} ADD COLUMN {} {} {};",
                                ddl.at("table").get<std::string>(),
                                col.at("name").get<std::string>(),
-                               col.at("type").get<std::string>(),
+                               type_name,
                                constraints);
         }
 
@@ -825,30 +854,11 @@ namespace springtail::pg_fdw {
 
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
-
-        // generate a DDL statement for each JSON in the transaction
-        std::vector<std::string> txn;
-        for (auto ddl : ddls.at("ddls")) {
-            txn.push_back(_gen_sql_from_json(server_name, ddl));
+        if (fdw_config.contains("db_prefix")) {
+            // if the FDW is using a prefix, prepend it
+            db_name = fdw_config.at("db_prefix").get<std::string>() + db_name;
         }
 
-        // generate a statement to alter the server options with the schema XID
-        txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET {} '{}');",
-                                  server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
-                                  schema_xid));
-
-        // execute the set of statements
-        _execute_ddl(db_name, schema_xid, txn, fdw_config);
-
-        return true;
-    }
-
-    void
-    PgFdwMgr::_execute_ddl(const std::string &dbname,
-                           uint64_t schema_xid,
-                           const std::vector<std::string> &txn,
-                           const nlohmann::json &fdw_config)
-    {
         std::string hostname, username, password;
         int port;
 
@@ -860,38 +870,77 @@ namespace springtail::pg_fdw {
 
         // use libpq to connect to the database
         PGconn *conn = PQconnectdb(fmt::format("host={} dbname={} user={} password={} port={}",
-                                               hostname, dbname, username, password, port).c_str());
+                                               hostname, db_name, username, password, port).c_str());
 
         if (PQstatus(conn) != CONNECTION_OK) {
             SPDLOG_ERROR("Connection to database failed: {}", PQerrorMessage(conn));
             PQfinish(conn);
-            return;
+            return false;
         }
 
-        // start a transaction
-        PGresult *res = PQexec(conn, "BEGIN");
-        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-            SPDLOG_ERROR("BEGIN command failed: {}", PQerrorMessage(conn));
+        try {
+            // start a transaction
+            PGresult *res = PQexec(conn, "BEGIN");
+            if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+                SPDLOG_ERROR("BEGIN command failed: {}", PQerrorMessage(conn));
+                PQclear(res);
+                throw FdwError();
+            }
             PQclear(res);
-            PQfinish(conn);
-            return;
-        }
-        PQclear(res);
 
+            // generate a DDL statement for each JSON in the transaction
+            std::vector<std::string> txn;
+            for (auto ddl : ddls.at("ddls")) {
+                txn.push_back(_gen_sql_from_json(conn, server_name, ddl));
+            }
+
+            // generate a statement to alter the server options with the schema XID
+            txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET {} '{}');",
+                                      server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
+                                      schema_xid));
+
+            // execute the set of statements
+            _execute_ddl(conn, schema_xid, txn, fdw_config);
+
+            // commit the transaction
+            res = PQexec(conn, "COMMIT");
+            if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+                SPDLOG_ERROR("COMMIT command failed: {}", PQerrorMessage(conn));
+                PQclear(res);
+                throw FdwError();
+            }
+            PQclear(res);
+
+            // close the connection
+            PQfinish(conn);
+
+        } catch (Error &e) {
+            PQfinish(conn);
+            return false;
+        }
+
+        return true;
+    }
+
+    void
+    PgFdwMgr::_execute_ddl(PGconn *conn,
+                           uint64_t schema_xid,
+                           const std::vector<std::string> &txn,
+                           const nlohmann::json &fdw_config)
+    {
         // get current schema xid
         std::string xid_sql = "SELECT option FROM ("
-            "SELECT unnest(options) AS option "
+            "SELECT unnest(srvoptions) AS option "
             "FROM pg_foreign_server "
-            "WHERE srvname = 'springtail' "
+            "WHERE srvname = 'springtail_fdw_server' "
         ") AS options WHERE option LIKE 'schema_xid%';";
 
         // get the schema XID from the server options
-        res = PQexec(conn, xid_sql.c_str());
+        PGresult *res = PQexec(conn, xid_sql.c_str());
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
-            SPDLOG_ERROR("SELECT command failed: {}", PQerrorMessage(conn));
+            SPDLOG_ERROR("SELECT command failed: {} {}", xid_sql, PQerrorMessage(conn));
             PQclear(res);
-            PQfinish(conn);
-            return;
+            throw FdwError();
         }
 
         // extract the schema XID from the result
@@ -905,8 +954,7 @@ namespace springtail::pg_fdw {
         if (current_schema_xid >= schema_xid) {
             SPDLOG_ERROR("Schema XID has already been applied: current={}, new={}",
                          current_schema_xid, schema_xid);
-            PQfinish(conn);
-            return;
+            throw FdwError();
         }
 
         // exectute each DDL statement
@@ -916,24 +964,10 @@ namespace springtail::pg_fdw {
             if (PQresultStatus(res) != PGRES_COMMAND_OK) {
                 SPDLOG_ERROR("DDL command failed: {}", PQerrorMessage(conn));
                 PQclear(res);
-                PQfinish(conn);
-                return;
+                throw FdwError();
             }
             PQclear(res);
         }
-
-        // commit the transaction
-        res = PQexec(conn, "COMMIT");
-        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-            SPDLOG_ERROR("COMMIT command failed: {}", PQerrorMessage(conn));
-            PQclear(res);
-            PQfinish(conn);
-            return;
-        }
-        PQclear(res);
-
-        // close the connection
-        PQfinish(conn);
     }
 
     std::string
@@ -943,10 +977,11 @@ namespace springtail::pg_fdw {
                                     const std::vector<SchemaColumn> &column_schema)
     {
         // column description: name, pg_type, nullable, default
-        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
+        std::vector<std::tuple<std::string, std::string, bool>> columns;
 
         for (const auto &column : column_schema) {
-            columns.push_back({column.name, column.pg_type, column.nullable, column.default_value});
+            std::string type_name = _get_type_name(column.pg_type);
+            columns.push_back({ column.name, type_name, column.nullable });
         }
 
         return _gen_fdw_table_sql(server, table_name, tid, columns);
@@ -1091,8 +1126,8 @@ namespace springtail::pg_fdw {
 
         // Move on to iterating through the schemas table
 
-        // column list: name, type, nullable, default
-        std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> columns;
+        // column list: name, type, nullable
+        std::vector<std::tuple<std::string, std::string, bool>> columns;
 
         uint64_t current_tid=0;
         std::string current_table;
@@ -1150,10 +1185,8 @@ namespace springtail::pg_fdw {
             std::string column_name(fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row));
             int32_t pg_type(fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row));
             bool nullable = fields->at(sys_tbl::Schemas::Data::NULLABLE)->get_bool(row);
-            std::optional<std::string> default_value{};
 
-            // don't add default values
-            columns.push_back({column_name, pg_type, nullable, default_value});
+            columns.push_back({column_name, _get_type_name(pg_type), nullable});
         }
 
         // process last table

@@ -62,10 +62,10 @@ SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --
 sleep 1
 
 # start the garbage collector
-# echo Start Garbage Collector...
-# GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
-# SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/gc.log" ${GC_DAEMON} --daemon
-# sleep 1
+echo Start Garbage Collector...
+GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
+SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/gc.log" ${GC_DAEMON} --daemon
+sleep 1
 
 # set up the replica database
 python3 ../fdw_import.py
