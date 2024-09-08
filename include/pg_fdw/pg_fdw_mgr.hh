@@ -238,8 +238,8 @@ namespace springtail::pg_fdw {
                                               uint64_t tid,
                                               std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
-        /** Helper to convert the PG type OID to a type name via an external SQL query. */
-        static std::string _query_type_name(PGconn *conn, uint32_t pg_type);
+        /** Helper to convert a set of PG type OIDs to type names via an external SQL query. */
+        static std::map<uint32_t, std::string> _query_type_names(PGconn *conn, std::set<uint32_t> pg_types);
 
         /** Helper to generate a DDL statement from the JSON provided from the ingest pipeline. */
         static std::string _gen_sql_from_json(PGconn *conn,

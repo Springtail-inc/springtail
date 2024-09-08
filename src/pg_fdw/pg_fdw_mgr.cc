@@ -741,11 +741,14 @@ namespace springtail::pg_fdw {
         return create;
     }
 
-    std::string
-    PgFdwMgr::_query_type_name(PGconn *conn,
-                               uint32_t pg_type)
+    std::map<uint32_t, std::string>
+    PgFdwMgr::_query_type_names(PGconn *conn,
+                                std::set<uint32_t> pg_types)
     {
-        std::string &&query = fmt::format("SELECT typname FROM pg_type WHERE oid = {}", pg_type);
+        std::map<uint32_t, std::string> type_map;
+
+        std::string &&query = fmt::format("SELECT oid, typname FROM pg_type WHERE oid IN ({})",
+                                          common::join_string(",", pg_types.begin(), pg_types.end()));
         PGresult *res = PQexec(conn, query.c_str());
         if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
             SPDLOG_ERROR("SELECT command failed: {}", PQerrorMessage(conn));
@@ -753,11 +756,31 @@ namespace springtail::pg_fdw {
             throw FdwError();
         }
 
-        // extract the type name from the result
-        std::string type_name = PQgetvalue(res, 0, 0);
+        // extract the type names from the result
+        int rows = PQntuples(res);
+        for (int i = 0; i < rows; ++i) {
+            char *value = PQgetvalue(res, i, 0);
+            if (value == nullptr) {
+                SPDLOG_ERROR("Retrieving OID {}: {}", i, PQerrorMessage(conn));
+                PQclear(res);
+                throw FdwError();
+            }
+            uint32_t oid = std::stoi(value, nullptr, 10);
+
+            value = PQgetvalue(res, i, 1);
+            if (value == nullptr) {
+                SPDLOG_ERROR("Retrieving type name {}: {}", i, PQerrorMessage(conn));
+                PQclear(res);
+                throw FdwError();
+            }
+            std::string type_name(value);
+
+            // store the mapping
+            type_map[oid] = type_name;
+        }
         PQclear(res);
 
-        return type_name;
+        return type_map;
     }
 
     std::string
@@ -771,15 +794,24 @@ namespace springtail::pg_fdw {
         auto &action = ddl.at("action");
         if (action == "create") {
             std::vector<std::tuple<std::string, std::string, bool>> columns;
+
+            // retrieve the column type names
+            std::set<uint32_t> type_set;
             for (auto &col : ddl.at("columns")) {
-                std::string type_name = _query_type_name(conn, col.at("type").get<uint32_t>());
+                type_set.insert(col.at("type").get<uint32_t>());
+            }
+            auto &&type_map = _query_type_names(conn, type_set);
+
+            // save the column details
+            for (auto &col : ddl.at("columns")) {
                 columns.push_back({
                         col.at("name"),
-                        type_name,
+                        type_map.at(col.at("type").get<uint32_t>()),
                         col.at("nullable")
                     });
             }
 
+            // generate the CREATE TABLE statement
             return _gen_fdw_table_sql(server_name, ddl.at("table"), ddl.at("tid"), columns);
         }
 
@@ -808,11 +840,12 @@ namespace springtail::pg_fdw {
                 constraints = null_constraint;
             }
 
-            std::string &&type_name = _query_type_name(conn, col.at("type").get<uint32_t>());
+            uint32_t type_oid = col.at("type").get<uint32_t>();
+            auto &&type_map = _query_type_names(conn, { type_oid });
             return fmt::format("ALTER FOREIGN TABLE {} ADD COLUMN {} {} {};",
                                ddl.at("table").get<std::string>(),
                                col.at("name").get<std::string>(),
-                               type_name,
+                               type_map.at(type_oid),
                                constraints);
         }
 
@@ -932,7 +965,9 @@ namespace springtail::pg_fdw {
         std::string xid_sql = "SELECT option FROM ("
             "SELECT unnest(srvoptions) AS option "
             "FROM pg_foreign_server "
-            "WHERE srvname = 'springtail_fdw_server' "
+            "WHERE srvname = '"
+            SPRINGTAIL_FDW_SERVER_NAME
+            "' "
         ") AS options WHERE option LIKE 'schema_xid%';";
 
         // get the schema XID from the server options
