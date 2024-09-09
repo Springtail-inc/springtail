@@ -51,7 +51,7 @@ namespace springtail::pg_log_mgr {
 
         static constexpr char const * const STATE_STARTING = "starting";
         static constexpr char const * const STATE_RUNNING = "running";
-        static constexpr char const * const STATE_SYNCING = "syncing";
+        static constexpr char const * const STATE_SYNCING = "synchronizing";
         static constexpr char const * const STATE_STOPPED = "stopped";
 
         /**
@@ -99,8 +99,6 @@ namespace springtail::pg_log_mgr {
         /** Start the pipeline; setup the log reader/writer log files etc. */
         void startup();
 
-
-
         /** Wait for threads */
         void join() {
             _writer_thread.join();
@@ -114,7 +112,11 @@ namespace springtail::pg_log_mgr {
         }
 
     protected:
-        /** for testing */
+        enum PIPELINE_STALL : int {
+            PIPELINE_STALL_NONE = 0,
+            PIPELINE_STALL_INIT = 1,
+            PIPELINE_STALL_WRITER = 2
+        };
 
         /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_repl_logger();
@@ -131,6 +133,8 @@ namespace springtail::pg_log_mgr {
 
         uint64_t _db_id;                      ///< db id
 
+        std::string _state;                   ///< current state of the log manager
+
         // connection params
         std::string _host;
         std::string _db_name;
@@ -140,11 +144,26 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         int _port;
 
-        std::atomic<bool> _stall_pipeline = false; ///< stall pipeline flag
+        /** stall pipeline flag
+         * 0 - no stall
+         * 1 - stall initiated
+         * 2 - log writer stalled
+         */
+        std::atomic<int> _stall_pipeline = PIPELINE_STALL_NONE;
 
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
         std::atomic<bool> _shutdown = false;  ///< shutdown flag
+
+        ///// Startup
+        /** init startup, clear out all state */
+        void _startup_init();
+
+        /** normal startup from running state */
+        uint64_t _startup_running();
+
+        /** Setup streaming and startup threads */
+        void _start_streaming(uint64_t lsn = INVALID_LSN);
 
         ///// Stage 1 of pipeline, writing replication log to disk
         std::thread _writer_thread;           ///< log writer thread
@@ -182,11 +201,11 @@ namespace springtail::pg_log_mgr {
         /** push transaction to redis queue */
         void _push_xact_to_redis(const PgTransactionPtr xact);
 
-        /** clean startup, clear out all state */
-        void _clean_startup();
+        //// Table copy
 
-        /** Setup streaming and startup threads */
-        void _start_streaming(uint64_t lsn = INVALID_LSN);
+        std::thread _table_copy_thread;    ///< table copy thread
+        void _copy_thread(bool full_sync); ///< table copy thread fn
+
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

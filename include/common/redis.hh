@@ -207,6 +207,14 @@ namespace springtail {
             return result;
         }
 
+        /**
+         * @brief Clear the queue.
+         */
+        void clear()
+        {
+            _redis->del(_key);
+        }
+
     private:
         std::string _key;       ///< The unique key within Redis for this queue.
         RedisClientPtr _redis; ///< A connection to Redis.

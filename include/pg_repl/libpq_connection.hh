@@ -127,6 +127,15 @@ namespace springtail {
         int32_t get_int32(int row, int col);
 
         /**
+         * @brief Retreive an int64 column value from a query result
+         *
+         * @param row row index
+         * @param col col index
+         * @return int64 value for row/col
+         */
+        int64_t get_int64(int row, int col);
+
+        /**
          * @brief Retreive a string column value from a query result; maintains NULL value
          *
          * @param row row index

@@ -213,6 +213,17 @@ namespace springtail {
         return r;
     }
 
+    int64_t LibPqConnection::get_int64(int row, int col)
+    {
+        char *value = PQgetvalue(_result, row, col);
+        if (value == nullptr) {
+            throw PgQueryError();
+        }
+
+        int64_t r = std::stoll(value, nullptr, 10);
+        return r;
+    }
+
     /**
      * @brief Retreive a string column value from a query result; maps NULL to empty string
      *

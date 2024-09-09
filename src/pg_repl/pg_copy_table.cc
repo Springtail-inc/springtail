@@ -17,7 +17,12 @@
 #include <storage/system_tables.hh>
 #include <storage/schema.hh>
 #include <storage/table.hh>
+#include <storage/field.hh>
 #include <storage/table_mgr.hh>
+
+#include <sys_tbl_mgr/client.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
 
 extern "C" {
     #include <postgres.h>
@@ -28,9 +33,9 @@ extern "C" {
 
 namespace springtail
 {
-    /** get oid for table */
+    /** Query oid from table and schema */
     static constexpr char TABLE_OID_QUERY[] =
-        "SELECT pg_class.oid "
+        "SELECT relname::text, nspname::text, pg_class.oid::integer "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
@@ -73,6 +78,37 @@ namespace springtail
     /** copy command, output in binary using utf-8 encoding */
     static constexpr char COPY_QUERY[] = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
 
+    /** Get table name, schema name, oid for all tables */
+    static constexpr char TABLES_QUERY[] =
+        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "FROM pg_catalog.pg_class "
+        "JOIN pg_catalog.pg_namespace "
+        "ON relnamespace=pg_namespace.oid "
+        "WHERE relkind = 'r'  -- regular tables "
+        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "AND nspname != 'information_schema'";
+
+    /** Get table name, schema name, oid for all tables in a schema */
+    static constexpr char TABLES_SCHEMA_QUERY[] =
+        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "FROM pg_catalog.pg_class "
+        "JOIN pg_catalog.pg_namespace "
+        "ON relnamespace=pg_namespace.oid "
+        "WHERE relkind = 'r'  -- regular tables "
+        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "AND nspname != 'information_schema' "
+        "AND nspname = '{}'";
+
+    /** Get table name, schema name, oid for a single table */
+    static constexpr char TABLE_QUERY[] =
+        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "FROM pg_catalog.pg_class "
+        "JOIN pg_catalog.pg_namespace "
+        "ON relnamespace=pg_namespace.oid "
+        "WHERE relkind = 'r'  -- regular tables "
+        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "AND nspname != 'information_schema' "
+        "AND pg_class.oid::integer = {}";
 
     /**
      * @brief Connect to database
@@ -112,7 +148,7 @@ namespace springtail
     }
 
 
-    void PgCopyTable::_get_xact_xids()
+    std::string PgCopyTable::_get_xact_xids()
     {
         _connection.exec(XID_QUERY);
         if (_connection.ntuples() == 0) {
@@ -124,24 +160,8 @@ namespace springtail
         _schema.xids = _connection.get_string(0, 0);
 
         _connection.clear();
-    }
 
-    void PgCopyTable::_get_table_oid()
-    {
-        // escape the name strings
-        std::unique_ptr<char[]> table_name = _connection.escape_string(_table_name);
-        std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema_name);
-
-        _connection.exec(fmt::format(TABLE_OID_QUERY, table_name.get(), schema_name.get()));
-        if (_connection.ntuples() == 0) {
-            _connection.clear();
-            SPDLOG_ERROR("Unexpected results from query: {}", TABLE_OID_QUERY);
-            throw PgQueryError();
-        }
-
-        _schema.table_oid = _connection.get_int32(0, 0);
-
-        _connection.clear();
+        return _schema.xids;
     }
 
     void PgCopyTable::_get_secondary_indexes()
@@ -172,16 +192,18 @@ namespace springtail
     }
 
 
-    void PgCopyTable::_get_schema()
+    void PgCopyTable::_set_schema(const std::string &table_name,
+                                  const std::string &schema_name,
+                                  uint64_t table_oid)
     {
-        std::unique_ptr<char[]> table_name = _connection.escape_string(_table_name);
-        std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema_name);
+        std::unique_ptr<char[]> table_name_ptr = _connection.escape_string(table_name);
+        std::unique_ptr<char[]> schema_name_ptr = _connection.escape_string(schema_name);
 
-        _connection.exec(fmt::format(SCHEMA_QUERY, _schema.table_oid,
-                                     schema_name.get(), table_name.get()));
+        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid,
+                                     schema_name_ptr.get(), table_name_ptr.get()));
 
         if (_connection.ntuples() == 0) {
-            SPDLOG_ERROR("Table not found: {}.{}", _schema_name, _table_name);
+            SPDLOG_ERROR("Table not found: {}.{}", schema_name, table_name);
             _connection.clear();
             throw PgQueryError();
         }
@@ -195,8 +217,9 @@ namespace springtail
 
         try {
             _schema.db_name = _db_name;
-            _schema.table_name = _table_name;
-            _schema.schema_name = _schema_name;
+            _schema.table_name = table_name;
+            _schema.schema_name = schema_name;
+            _schema.table_oid = table_oid;
 
             // get columns
             int rows = _connection.ntuples();
@@ -252,8 +275,8 @@ namespace springtail
     void
     PgCopyTable::_prepare_copy()
     {
-        std::unique_ptr<char[]> table_name = _connection.escape_string(_table_name);
-        std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema_name);
+        std::unique_ptr<char[]> table_name = _connection.escape_string(_schema.table_name);
+        std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema.schema_name);
 
         _connection.exec(fmt::format(COPY_QUERY, schema_name.get(), table_name.get()));
 
@@ -353,18 +376,21 @@ namespace springtail
         }
     }
 
-    int32_t
-    PgCopyTable::copy_to_springtail(uint64_t db_id,
-                                    XidLsn &xid)
+    void
+    PgCopyTable::_copy_table(uint64_t db_id,
+                             springtail::XidLsn &xid,
+                             const std::string &table_name,
+                             const std::string &schema_name,
+                             uint64_t table_oid)
     {
-        _get_table_oid();
-        _get_xact_xids();
-        _get_schema();
+        // set the schema
+        _set_schema(table_name, schema_name, table_oid);
+
+        // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
 
-        // TODO: put start_xid and end_xid somewhere from _schema.xids
-
-        // create the table metadata
+        // assumes table oid is set, and the schema is populated
+         // create the table metadata
         PgMsgTable create_msg{0, // pg lsn
                               static_cast<uint32_t>(_schema.table_oid),
                               0, // pg xid
@@ -423,8 +449,6 @@ namespace springtail
 
         // store the roots into the system table
         TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, roots, {});
-
-        return _schema.table_oid;
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)
@@ -555,4 +579,133 @@ namespace springtail
 
         return fields;
     }
-}
+
+    void
+    PgCopyTable::connect(uint64_t db_id)
+    {
+        std::string host, user, password;
+        int port;
+
+        // get configuration for the database
+        nlohmann::json db_config = Properties::get_db_config(db_id);
+        Json::get_to<std::string>(db_config, "name", _db_name);
+
+        nlohmann::json primary_db = Properties::get_primary_db_config();
+        Json::get_to<std::string>(primary_db, "host", host);
+        Json::get_to<int>(primary_db, "port", port);
+        Json::get_to<std::string>(primary_db, "replication_user", user);
+        Json::get_to<std::string>(primary_db, "password", password);
+
+        // connect to the database
+        connect(host, user, password, port);
+    }
+
+    void
+    PgCopyTable::_get_table_oids(const std::string &query,
+                                 std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids)
+    {
+        // do the tables query
+        _connection.exec(query);
+        if (_connection.ntuples() == 0) {
+            SPDLOG_ERROR("No tables found in database");
+            _connection.clear();
+            return;
+        }
+
+        // iterate through the results and get the table oids
+        for (int i = 0; i < _connection.ntuples(); i++) {
+            // get the table name, schema name, and oid
+            std::string table_name = _connection.get_string(i, 0);
+            std::string schema_name = _connection.get_string(i, 1);
+            int32_t table_oid = _connection.get_int32(i, 2);
+            table_oids.push_back({table_name, schema_name, table_oid});
+        }
+
+        return;
+    }
+
+    PgCopyResultPtr
+    PgCopyTable::copy_table(uint64_t db_id,
+                             uint32_t table_oid)
+    {
+        return _internal_copy(db_id, std::nullopt, std::nullopt, table_oid);
+    }
+
+    PgCopyResultPtr
+    PgCopyTable::copy_schema(uint64_t db_id,
+                             const std::string &schema_name)
+    {
+        return _internal_copy(db_id, schema_name, std::nullopt, std::nullopt);
+    }
+
+    PgCopyResultPtr
+    PgCopyTable::copy_db(uint64_t db_id)
+    {
+        return _internal_copy(db_id, std::nullopt, std::nullopt, std::nullopt);
+    }
+
+    PgCopyResultPtr
+    PgCopyTable:: copy_table(uint64_t db_id,
+                             const std::string &schema_name,
+                             const std::string &table_name)
+    {
+        return _internal_copy(db_id, std::nullopt, std::pair{schema_name, table_name}, std::nullopt);
+    }
+
+    PgCopyResultPtr
+    PgCopyTable::_internal_copy(uint64_t db_id,
+                                std::optional<std::string> schema_name,
+                                std::optional<std::pair<std::string, std::string>> schema_table,
+                                std::optional<uint32_t> table_oid)
+    {
+        // get committed xid and set target xid
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+        XidLsn target_xid(xid + 1, 0);
+
+        // create copy table object and connect to db
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
+        // start transaction and get the xids
+        std::string xid_str = copy_table._get_xact_xids();
+
+        // fetch the table oids
+        std::vector<std::tuple<std::string, std::string, int32_t>> table_oids;
+
+        // get the table oids, depends on input
+        if (schema_name.has_value()) {
+            // by schema name
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema_name.value()), table_oids);
+        } else if (table_oid.has_value()) {
+            // by table oid
+            copy_table._get_table_oids(fmt::format(TABLE_QUERY, table_oid.value()), table_oids);
+        } else if (schema_table.has_value()) {
+            // by schema, table pair
+            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, schema_table.value().second, schema_table.value().first), table_oids);
+        } else {
+            // all tables in db
+            copy_table._get_table_oids(TABLES_QUERY, table_oids);
+        }
+
+        std::vector<int32_t> table_oids_int;
+
+        // iterate through the tables and copy them
+        for (const auto &table_tuple : table_oids) {
+            SPDLOG_DEBUG("Dumping table {}", std::get<0>(table_tuple));
+
+            copy_table._copy_table(db_id,
+                                   target_xid,
+                                   std::get<0>(table_tuple),  // table name
+                                   std::get<1>(table_tuple),  // schema name
+                                   std::get<2>(table_tuple)); // table oid
+
+            table_oids_int.push_back(std::get<2>(table_tuple));
+        }
+
+        // finalize the system tables
+        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+
+        // create result object
+        return std::make_shared<PgCopyResult>(table_oids_int, xid_str, target_xid.xid);
+    }
+} // namespace springtail

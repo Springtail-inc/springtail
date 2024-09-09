@@ -33,29 +33,6 @@ struct PostgresConnection {
     int port;
 };
 
-static constexpr char SCHEMA_TABLES_QUERY[] =
-    "SELECT table_name "
-    "FROM information_schema.tables "
-    "WHERE table_schema = '{}' "
-    "AND table_type = 'BASE TABLE' "
-    "AND table_schema NOT IN ('pg_catalog', 'information_schema'); ";
-
-void dump_table(const std::filesystem::path &base_dir,
-                const std::string &schema_name,
-                const std::string &table_name,
-                const PostgresConnection &conn,
-                uint64_t db_id,
-                XidLsn &xid)
-{
-    SPDLOG_DEBUG("Dumping table {}.{}", schema_name, table_name);
-
-    auto source = std::make_shared<PgCopyTable>(conn.database, schema_name, table_name, "");
-    source->connect(conn.host, conn.user, conn.password, conn.port);
-
-    // perform the table copy -- note: updates the LSN of the xid
-    source->copy_to_springtail(db_id, xid);
-}
-
 void
 dump_tables_in_schema(const PostgresConnection &conn,
                       const std::string &schema_name,
@@ -70,37 +47,10 @@ dump_tables_in_schema(const PostgresConnection &conn,
 
     std::filesystem::create_directories(base_dir);
 
-    LibPqConnection pg_conn{};
-    pg_conn.connect(conn.host, conn.database, conn.user,
-                    conn.password, conn.port, false);
-
-    pg_conn.exec(fmt::format(SCHEMA_TABLES_QUERY, schema_name));
-    if (pg_conn.ntuples() == 0) {
-        pg_conn.clear();
-        return;
-    }
-
-    std::vector<std::string> table_names;
-    for (int i = 0; i < pg_conn.ntuples(); i++) {
-        auto table_name = pg_conn.get_string(i, 0);
-        table_names.push_back(table_name);
-    }
-    pg_conn.clear();
-    pg_conn.disconnect();
-
-    uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-
-    XidLsn target_xid(xid + 1, 0);
-    for (const auto &table_name : table_names) {
-        SPDLOG_DEBUG("Dumping table {} in schema {}", table_name, schema_name);
-        dump_table(base_dir, schema_name, table_name, conn, db_id, target_xid);
-    }
-
-    // finalize the system tables
-    sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+    PgCopyResultPtr res = PgCopyTable::copy_schema(db_id, schema_name);
 
     // update the xid mgr
-    XidMgrClient::get_instance()->commit_xid(db_id, target_xid.xid, false);
+    XidMgrClient::get_instance()->commit_xid(db_id, res->target_xid, false);
 }
 
 int

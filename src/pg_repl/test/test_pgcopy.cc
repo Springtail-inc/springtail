@@ -25,12 +25,14 @@ namespace {
 
             _services.init(true);
 
-            auto p_db = Properties::get_primary_db_config();
+            nlohmann::json db_config = Properties::get_db_config(db_id);
+            auto db_name = db_config["name"].get<std::string>();
 
-            host = p_db["host"].get<std::string>();
-            user = p_db["replication_user"].get<std::string>();
-            password = p_db["password"].get<std::string>();
-            port = p_db["port"].get<int>();
+            auto p_db = Properties::get_primary_db_config();
+            auto host = p_db["host"].get<std::string>();
+            auto user = p_db["replication_user"].get<std::string>();
+            auto password = p_db["password"].get<std::string>();
+            auto port = p_db["port"].get<int>();
 
             std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
             SPDLOG_INFO("Connecting to: {}", conn_cmd);
@@ -44,26 +46,25 @@ namespace {
             _services.shutdown();
         }
 
-        std::string db_name = "postgres";
-        std::string host;
-        std::string user;
-        std::string password;
-        int port;
+        uint64_t db_id = 1;
 
         test::Services _services{true, true, true};
     };
 
-    TEST_F(PgCopyTable_Test, CopyTable) {
-        auto source = std::make_shared<PgCopyTable>(db_name, "public", "test_pgcopy", "");
-        source->connect(host, user, password, port);
+    TEST_F(PgCopyTable_Test, CopyTable)
+    {
+        std::string table_name = "test_pgcopy";
+        std::string schema_name = "public";
 
         // perform the table copy
-        XidLsn xid(2, 0);
-        uint64_t db_id = 1;
-        auto oid = source->copy_to_springtail(db_id, xid);
+        PgCopyResultPtr res = PgCopyTable::copy_table(db_id, schema_name, table_name);
+        ASSERT_EQ(res->tids.size(), 1);
+
+        uint32_t oid = res->tids[0];
+        uint64_t xid = res->target_xid;
 
         // create an access table
-        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid.xid, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

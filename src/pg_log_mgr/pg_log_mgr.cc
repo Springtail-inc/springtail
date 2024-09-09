@@ -6,6 +6,7 @@
 #include <common/common.hh>
 #include <common/properties.hh>
 #include <common/logging.hh>
+#include <common/redis.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -20,6 +21,24 @@ namespace springtail::pg_log_mgr {
     // XXX make sure GC is shutdown -- assume it for now
     void
     PgLogMgr::startup()
+    {
+        _state = Properties::get_db_state(_db_id);
+
+        uint64_t lsn = INVALID_LSN;
+
+        if (_state == STATE_STARTING) {
+            _startup_init();
+        } else {
+            lsn = _startup_running();
+        }
+        // XXX notify GC of startup??? notify an external coordinator?
+
+        // start streaming
+        _start_streaming(lsn);
+    }
+
+    uint64_t
+    PgLogMgr::_startup_running()
     {
         uint64_t lsn = INVALID_LSN;
 
@@ -66,15 +85,10 @@ namespace springtail::pg_log_mgr {
             PgTransactionPtr last_xact = xact_list.back();
             _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
         }
-
-        // XXX notify GC of startup??? notify an external coordinator?
-
-        // start streaming
-        _start_streaming(lsn);
     }
 
     void
-    PgLogMgr::_clean_startup()
+    PgLogMgr::_startup_init()
     {
         // remove all files in log directories
         std::filesystem::remove_all(_repl_log_path);
@@ -85,7 +99,33 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_xact_log_path);
 
         // clear out Redis
-        
+        _redis_queue.clear();
+
+        // set state to synchronization
+        Properties::set_db_state(_db_id, STATE_SYNCING);
+        _state = STATE_SYNCING;
+
+        // set stall state
+        _stall_pipeline = PIPELINE_STALL_INIT;
+
+        // initiate table copy
+        _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this, true);
+    }
+
+    void
+    PgLogMgr::_copy_thread(bool full_sync)
+    {
+        assert (_stall_pipeline != PIPELINE_STALL_NONE);
+
+        if (full_sync) {
+            // full sync, copy all tables
+            PgCopyTable copy_table(_db_id);
+            copy_table.copy_all_tables();
+        } else {
+            // incremental sync, copy only changed tables
+            PgCopyTable copy_table(_db_id);
+            copy_table.copy_changed_tables();
+        }
     }
 
     void
@@ -141,8 +181,33 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            bool log_msg_complete = logger->log_data(data);
+
+            // get pipeline stall state
+            int pipeline_stall = _stall_pipeline.load();
+            if (pipeline_stall == PIPELINE_STALL_WRITER) {
+                // stall writer until sync is complete
+                continue;
+            }
+
+            if (pipeline_stall == PIPELINE_STALL_INIT) {
+                // initiated stall, rollover log
+                logger->close();
+                logger = this->_create_repl_logger();
+                start_offset = 0;
+
+                // record in redis the log file
+                RedisMgr::get_instance()->get_client()->set(redis::STRING_LOG_RESYNC,
+                                                            logger->filename().string());
+
+                // set stall flag to stall writer
+                _stall_pipeline.store(PIPELINE_STALL_WRITER);
+
+                continue;
+            }
+
             // log data, if data message is complete then record start/end offsets
-            if (logger->log_data(data)) {
+            if (log_msg_complete) {
                 uint64_t end_offset = logger->offset();
 
                 // record start/end offsets for this message

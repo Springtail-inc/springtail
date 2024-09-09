@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <string>
 #include <memory>
+#include <vector>
+#include <optional>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -10,6 +12,18 @@
 
 namespace springtail
 {
+    /** Stores the result of a copy operation */
+    struct PgCopyResult {
+        std::vector<int32_t> tids;  ///< table ids
+        std::string pg_xids;        ///< xids from pg_current_snapshot()
+        uint64_t target_xid;        ///< target xid
+
+        PgCopyResult(const std::vector<int32_t> &tids,
+                     const std::string &pg_xids,
+                     uint64_t target_xid) :
+            tids(tids), pg_xids(pg_xids), target_xid(target_xid) {}
+    };
+    using PgCopyResultPtr = std::shared_ptr<PgCopyResult>;
 
     /** Stores the column schema for the table being copied */
     struct PgColumn {
@@ -33,7 +47,6 @@ namespace springtail
         std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
     };
 
-
     /**
      * @brief Serialize data for a single table from a remote
      * Postgres server to a file, and de-serialize from a file
@@ -41,9 +54,6 @@ namespace springtail
     class PgCopyTable {
 
     private:
-        /** magic number for header of the file */
-        static inline constexpr uint32_t HEADER_MAGIC = 0x43219876;
-
         /** header of copy data signature */
         static inline constexpr char COPY_SIGNATURE[] = "PGCOPY\n\377\r\n\0";
 
@@ -51,7 +61,6 @@ namespace springtail
         std::string _db_name;
         std::string _schema_name;
         std::string _table_name;
-        std::string _filename;
 
         bool _oid_flag = false;
 
@@ -64,17 +73,19 @@ namespace springtail
          *          and is_nullable flag for each table column.  Requires getTableOid() first.
          *
          */
-        void _get_schema();
+        void _set_schema(const std::string &table_name,
+                         const std::string &schema_name,
+                         uint64_t table_oid);
 
         /**
          * @brief Get transaction ids for current transaction snapshot
          * @details calls: SELECT txid_current_snapshot() returns string
          *          in format: "xid_min:xid_max:xid,xid,xid" showing set of
          *          transactions overlapping with current transaction
-         *
+         * @return std::string xid string from pg_current_snapshot()
          * @throws PgQueryError
          */
-        void _get_xact_xids();
+        std::string _get_xact_xids();
 
         /**
          * @brief Get table's oid based on schema / table, store in schema
@@ -134,32 +145,47 @@ namespace springtail
          */
         int32_t _verify_copy_header(const std::string_view &header);
 
+        /**
+         * @brief Get table oids based on query passed in
+         * @param query query to get table oids
+         * @param table_oids output: table name, schema name, oid
+         */
+        void _get_table_oids(const std::string &query,
+                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+
+        /**
+         * @brief Copy table from remote system
+         */
+        void _copy_table(uint64_t db_id,
+                         springtail::XidLsn &xid,
+                         const std::string &table_name,
+                         const std::string &schema_name,
+                         uint64_t table_oid);
+
+        /**
+         * @brief Internall helper called from copy_db, copy_schema, copy_table
+         * @param db_id database id
+         * @param schema_name schema name (optional)
+         * @param table_oid table oid (optional)
+         * @return PgCopyResultPtr
+         */
+        static PgCopyResultPtr _internal_copy(uint64_t db_id,
+                                              std::optional<std::string> schema_name,
+                                              std::optional<std::pair<std::string, std::string>> table_name,
+                                              std::optional<uint32_t> table_oid);
+
     public:
 
         /**
-         * @brief Constructor for copying table from remote system and writing to file
-         *
-         * @param db_name database name
-         * @param schema_name schema name
-         * @param table_name table name
-         * @param filename output filename
+         * @brief Constructor for copying table from remote system
          */
-        PgCopyTable(const std::string &db_name,
-                    const std::string &schema_name,
-                    const std::string &table_name,
-                    const std::string filename) :
-            _db_name(db_name),
-            _schema_name(schema_name),
-            _table_name(table_name),
-            _filename(filename)
-        {}
+        PgCopyTable() {}
 
         /**
-         * @brief Empty constructor for reading data back from file
-         * @param filename input filename
+         * @brief Constructor for copying table from remote system
+         * @param db_name name of the database
          */
-        PgCopyTable(const std::string filename) : _filename(filename)
-        {}
+        PgCopyTable(const std::string &db_name) : _db_name(db_name) {}
 
         ~PgCopyTable()
         {
@@ -169,11 +195,9 @@ namespace springtail
 
         /**
          * @brief Connect to database; call prior to copyToFile
-         *
          * @param hostname DB hostname
          * @param username DB username
          * @param password DB password
-         * @param snapshot Snapshot ID
          * @param port     DB port
          */
         void connect(const std::string &hostname,
@@ -182,14 +206,51 @@ namespace springtail
                      const int port);
 
         /**
+         * @brief Connect to database, get config from Properties
+         * @param db_id database id
+         */
+        void connect(uint64_t db_id);
+
+        /**
          * @brief Disconnect connection; should be done after copy is finished
          */
         void disconnect();
 
         /**
-         * @brief Copy remote table data into Springtail starting at a given internal XID
-         * @param xid The XID at which the table is to become available.
+         * @brief Copy all tables from remote system
+         * @param db_id database id
+         * @param table_oid table oid
+         * @return PgCopyResultPtr
          */
-        int32_t copy_to_springtail(uint64_t db_id, XidLsn &xid);
+        static PgCopyResultPtr copy_db(uint64_t db_id);
+
+        /**
+         * @brief Copy all tables in single schema from remote system
+         * @param db_id database id
+         * @param table_oid table oid
+         * @return PgCopyResultPtr
+         */
+        static PgCopyResultPtr copy_schema(uint64_t db_id,
+                                           const std::string &schema_name);
+
+        /**
+         * @brief Copy a single table from remote system
+         * @param db_id database id
+         * @param table_oid table oid
+         * @return PgCopyResultPtr
+         */
+        static PgCopyResultPtr copy_table(uint64_t db_id,
+                                          uint32_t table_oid);
+
+        /**
+         * @brief Copy a single table from remote system
+         * @param db_id database id
+         * @param schema_name schema name
+         * @param table_name table name
+         * @return PgCopyResultPtr
+         */
+        static PgCopyResultPtr copy_table(uint64_t db_id,
+                                          const std::string &schema_name,
+                                          const std::string &table_name);
     };
 }
