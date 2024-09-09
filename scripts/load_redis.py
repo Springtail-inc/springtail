@@ -66,8 +66,8 @@ r.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 # setup db_config
 for db_id in db_instance_json['database_ids']:
     db_json = system_json['databases'][str(db_id)]
-    db_key = 'db_config:' + str(db_instance_id) + ':' + str(db_id)
-    r.set(db_key, json.dumps(db_json))
+    db_key = 'db_config:' + str(db_instance_id)
+    r.hset(db_key, str(db_id), json.dumps(db_json))
 
 # create hset for fdws
 fdw_key = 'fdw:' + str(db_instance_id)

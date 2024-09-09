@@ -160,7 +160,7 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    /** Thread for reading log data */
+    /** Thread for reading log data that is written from writer */
     void
     PgLogMgr::_log_reader_thread()
     {

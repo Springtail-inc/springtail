@@ -107,7 +107,7 @@ namespace springtail {
         Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
 
         // read the system properties from redis
-        std::string db_instance_key = redis::SYSTEM_PREFIX + std::to_string(db_instance_id);
+        std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, std::to_string(db_instance_id));
         std::string system_key = "system_settings";
 
         // read the system properties from redis
@@ -244,8 +244,8 @@ namespace springtail {
         RedisClientPtr redis_client = _get_redis_client();
 
         // get the redis client and lookup the db ids from the db_instance config
-        std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id, db_id);
-        std::optional<std::string> db_config_str = redis_client->get(db_config_key);
+        std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id);
+        std::optional<std::string> db_config_str = redis_client->hget(db_config_key, std::to_string(db_id));
         if (!db_config_str.has_value()) {
             throw Error("Error missing db_config_id in redis");
         }
@@ -265,8 +265,7 @@ namespace springtail {
 
         // get the redis client and lookup the db ids from the db_instance config
         std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
-        std::string db_state_key = std::format(redis::KEY_DB_STATE, db_id);
-        std::optional<std::string> db_state_str = redis_client->get(db_state_key);
+        std::optional<std::string> db_state_str = redis_client->get(std::to_string(db_id));
         if (!db_state_str.has_value()) {
             throw Error("Error missing db_state in redis");
         }
@@ -285,8 +284,7 @@ namespace springtail {
 
         // get the redis client and lookup the db ids from the db_instance config
         std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
-        std::string db_state_key = std::format(redis::KEY_DB_STATE, db_id);
-        redis_client->hset(db_instance_state_hash, db_state_key, state);
+        redis_client->hset(db_instance_state_hash, std::to_string(db_id), state);
     }
 
     std::string

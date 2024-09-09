@@ -66,8 +66,9 @@ namespace springtail
         "  AND c.conname IS NULL "
         "ORDER BY i.relname, index_name, s.snum ";
 
-    /** select current xmin:xmax:list of xids in progress from DB as start of this transaction */
-    static constexpr char XID_QUERY[] = "SELECT txid_current_snapshot()";
+    /** select current xmin:xmax:list of xids in progress from DB as start of this transaction;
+     *  result: xmin:xmax:xid,xid,... */
+    static constexpr char XID_QUERY[] = "SELECT pg_current_snapshot()";
 
     /** copy command, output in binary using utf-8 encoding */
     static constexpr char COPY_QUERY[] = "COPY \"{}\".\"{}\" TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";

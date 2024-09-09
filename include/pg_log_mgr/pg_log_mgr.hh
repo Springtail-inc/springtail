@@ -140,6 +140,8 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         int _port;
 
+        std::atomic<bool> _stall_pipeline = false; ///< stall pipeline flag
+
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
         std::atomic<bool> _shutdown = false;  ///< shutdown flag
