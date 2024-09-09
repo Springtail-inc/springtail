@@ -116,6 +116,7 @@ conn.autocommit = True
 print("Connected to postgres db, creating dbs")
 
 # setup primary db
+execute_sql(conn, "DROP EXTENSION IF EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
 execute_sql(conn, "CREATE EXTENSION IF NOT EXISTS {};".format(quote_ident(FDW_WRAPPER, conn)))
 
 # create the databases

@@ -639,13 +639,26 @@ namespace springtail {
     }
 
     void
+    MutableTable::_append_empty(TuplePtr value,
+                                uint64_t xid)
+    {
+        // get the page from the cache if we don't have one
+        if (!_empty_page) {
+            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+        }
+
+        // add the row to the page
+        _empty_page->append(value, _schema);
+    }
+
+    void
     MutableTable::_insert_append(TuplePtr value,
                                  uint64_t xid)
     {
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
-            _insert_empty(value, xid);
+            _append_empty(value, xid);
             return;
         }
 

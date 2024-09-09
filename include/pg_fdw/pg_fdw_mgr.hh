@@ -31,6 +31,7 @@ extern "C" {
     #include <nodes/pg_list.h>
     #include <c.h>
     #include <utils/builtins.h>
+    #include <libpq-fe.h>
 }
 
 #include <pg_fdw/pg_fdw_common.h>
@@ -228,14 +229,21 @@ namespace springtail::pg_fdw {
                                            int32_t pg_type,
                                            int32_t atttypmod);
 
+        /** Helper to convert a PG type OID to a type name using the PG system cache. */
+        static std::string _get_type_name(int32_t pg_type);
+
         /** Helper to generate create foreign table sql */
-        static std::string _gen_fdw_table_sql(const std::string &server,
+        static std::string _gen_fdw_table_sql(const std::string &server_name,
                                               const std::string &table,
                                               uint64_t tid,
-                                              std::vector<std::tuple<std::string, int32_t, bool, std::optional<std::string>>> &columns);
+                                              std::vector<std::tuple<std::string, std::string, bool>> &columns);
+
+        /** Helper to convert a set of PG type OIDs to type names via an external SQL query. */
+        static std::map<uint32_t, std::string> _query_type_names(PGconn *conn, std::set<uint32_t> pg_types);
 
         /** Helper to generate a DDL statement from the JSON provided from the ingest pipeline. */
-        static std::string _gen_sql_from_json(const std::string &server_name, nlohmann::json ddl);
+        static std::string _gen_sql_from_json(PGconn *conn,
+                                              const std::string &server_name, nlohmann::json ddl);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
@@ -283,7 +291,7 @@ namespace springtail::pg_fdw {
                                     const nlohmann::json &fdw_config);
 
         /** Helper to execute ddl statements for this db */
-        static void _execute_ddl(const std::string &db_name,
+        static void _execute_ddl(PGconn *conn,
                                  uint64_t schema_xid,
                                  const std::vector<std::string> &sql,
                                  const nlohmann::json &fdw_config);
