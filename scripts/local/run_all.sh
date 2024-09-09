@@ -18,6 +18,7 @@ rm -rf /tmp/springtail/repl_logs/*
 rm -rf /tmp/springtail/xact_logs/*
 rm -rf /tmp/springtail/xid_mgr/*
 redis-cli flushdb
+redis-cli -n 1 flushdb
 rm -f /tmp/xid_mgr.log /tmp/write_cache.log /tmp/pg_log_mgr.log /tmp/gc.log
 
 # setup the config
