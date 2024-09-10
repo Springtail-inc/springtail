@@ -67,6 +67,9 @@ namespace springtail::sys_tbl_mgr {
             history of any changes to bring it to a target XID/LSN. */
         void get_target_schema(GetSchemaResponse& _return, const GetTargetSchemaRequest &request) override;
 
+        /** Returns a boolean indicating if the table exists at a given XID. */
+        bool exists(const ExistsRequest &request) override;
+
     private:
         // CACHE FOR NAMES
 

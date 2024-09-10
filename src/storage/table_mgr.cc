@@ -69,6 +69,16 @@ namespace springtail {
                                        tbl_meta.roots, schema, tbl_meta.stats);
     }
 
+    bool
+    TableMgr::exists(uint64_t db_id,
+                     uint64_t table_id,
+                     uint64_t xid,
+                     uint64_t lsn)
+    {
+        boost::shared_lock lock(_mutex);
+        return sys_tbl_mgr::Client::get_instance()->exists(db_id, table_id, { xid, lsn });
+    }
+
     MutableTablePtr
     TableMgr::get_mutable_table(uint64_t db_id,
                                 uint64_t table_id,

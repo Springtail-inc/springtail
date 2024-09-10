@@ -166,6 +166,9 @@ namespace {
         // verify correctness after finalize
         _finalize();
 
+        auto exists = _client->exists(_db, tid, { 1, 0 });
+        ASSERT_TRUE(exists);
+
         metadata = _client->get_roots(_db, tid, 1);
         ASSERT_EQ(metadata.roots.size(), 1);
         ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);

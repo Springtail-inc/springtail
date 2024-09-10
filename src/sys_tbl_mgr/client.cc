@@ -374,4 +374,21 @@ namespace springtail::sys_tbl_mgr {
         return metadata;
     }
 
+    bool
+    Client::exists(uint64_t db_id,
+                   uint64_t table_id,
+                   const XidLsn &xid)
+    {
+        ThriftClient c = _get_client();
+
+        ExistsRequest request;
+        request.db_id = db_id;
+        request.table_id = table_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+
+        return c.client->exists(request);
+    }
+    
+
 } // namespace

@@ -191,6 +191,12 @@ namespace springtail::gc {
 
             SPDLOG_INFO("Process XID: {}", _state->entry->xid);
 
+            // XXX check if the transaction is a table copy
+            if (false) {
+                // if so, mark the table as being in the "sync" state and record the PG xid at which the snapshot is taking place as well as the PG xids that should *not* be ignored for this table when processing additional records prior to the snapshot's PG xid.
+                continue;
+            }
+
             // once we have an XID, scan the individual mutations from the log
             uint64_t begin_offset = _state->entry->begin_offset;
             uint64_t commit_offset = (_state->entry->begin_path == _state->entry->commit_path)

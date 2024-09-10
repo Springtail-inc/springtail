@@ -107,6 +107,13 @@ struct GetSchemaResponse {
     2: list<ColumnHistory> history
 }
 
+struct ExistsRequest {
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 xid,
+    4: i64 lsn
+}
+
 // the interface for managing the system tables
 service Service {
     Status ping(),
@@ -130,8 +137,11 @@ service Service {
     GetRootsResponse get_roots(1: GetRootsRequest request),
 
     // retrieve the schema information for a given table at a given xid/lsn
-    GetSchemaResponse get_schema(1: GetSchemaRequest request)
+    GetSchemaResponse get_schema(1: GetSchemaRequest request),
 
     // retrieve the schema information for a given table at a given xid/lsn with changes up to the target xid/lsn
-    GetSchemaResponse get_target_schema(1: GetTargetSchemaRequest request)
+    GetSchemaResponse get_target_schema(1: GetTargetSchemaRequest request),
+
+    // checks if the table exists at a given xid/lsn
+    bool exists(1: ExistsRequest request)
 }

@@ -35,6 +35,11 @@ namespace springtail {
         TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn);
 
         /**
+         * Returns a boolean indicating if the table exists at a given xid/lsn.
+         */
+        bool exists(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn=constant::MAX_LSN);
+
+        /**
          * Returns the MutableTable interface for the requested table ID.
          */
         MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);

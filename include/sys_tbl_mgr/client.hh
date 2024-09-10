@@ -76,6 +76,11 @@ namespace springtail::sys_tbl_mgr {
          */
         SchemaMetadata get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
+        /**
+         * Call exists() on the SysTblMgr.
+         */
+        bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
     protected:
         /** Singleton write cache client instance */
         static Client *_instance;

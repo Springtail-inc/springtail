@@ -324,6 +324,17 @@ namespace springtail::sys_tbl_mgr {
         _return = *info;
     }
 
+    bool
+    Service::exists(const ExistsRequest &request)
+    {
+        boost::shared_lock lock(_read_mutex);
+
+        XidLsn xid(request.xid, request.lsn);
+        auto info = _get_table_info(request.db_id, request.table_id, xid);
+        return (info != nullptr);
+    }
+
+
     Service::TableInfoPtr
     Service::_get_table_info(uint64_t db_id,
                              uint64_t table_id,
