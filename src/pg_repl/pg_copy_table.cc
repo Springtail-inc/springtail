@@ -196,11 +196,10 @@ namespace springtail
                                   const std::string &schema_name,
                                   uint64_t table_oid)
     {
-        std::unique_ptr<char[]> table_name_ptr = _connection.escape_string(table_name);
-        std::unique_ptr<char[]> schema_name_ptr = _connection.escape_string(schema_name);
+        std::string table_name_ptr = _connection.escape_identifier(table_name);
+        std::string schema_name_ptr = _connection.escape_identifier(schema_name);
 
-        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid,
-                                     schema_name_ptr.get(), table_name_ptr.get()));
+        _connection.exec(fmt::format(SCHEMA_QUERY, table_oid, schema_name, table_name));
 
         if (_connection.ntuples() == 0) {
             SPDLOG_ERROR("Table not found: {}.{}", schema_name, table_name);
@@ -275,10 +274,10 @@ namespace springtail
     void
     PgCopyTable::_prepare_copy()
     {
-        std::unique_ptr<char[]> table_name = _connection.escape_string(_schema.table_name);
-        std::unique_ptr<char[]> schema_name = _connection.escape_string(_schema.schema_name);
+        std::string table_name = _connection.escape_identifier(_schema.table_name);
+        std::string schema_name = _connection.escape_identifier(_schema.schema_name);
 
-        _connection.exec(fmt::format(COPY_QUERY, schema_name.get(), table_name.get()));
+        _connection.exec(fmt::format(COPY_QUERY, schema_name, table_name));
 
         if (_connection.status() != PGRES_COPY_OUT) {
             SPDLOG_ERROR("Copy command did not receive PGRES_COPY_OUT");
@@ -674,14 +673,18 @@ namespace springtail
 
         // get the table oids, depends on input
         if (schema_name.has_value()) {
-            // by schema name
-            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema_name.value()), table_oids);
+            // by schema name, need to escape the schema name
+            // escape the schema name
+            std::string schema = copy_table._connection.escape_identifier(schema_name.value());
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
         } else if (table_oid.has_value()) {
             // by table oid
             copy_table._get_table_oids(fmt::format(TABLE_QUERY, table_oid.value()), table_oids);
         } else if (schema_table.has_value()) {
             // by schema, table pair
-            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, schema_table.value().second, schema_table.value().first), table_oids);
+            std::string schema = copy_table._connection.escape_identifier(schema_table.value().first);
+            std::string table = copy_table._connection.escape_identifier(schema_table.value().second);
+            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
         } else {
             // all tables in db
             copy_table._get_table_oids(TABLES_QUERY, table_oids);

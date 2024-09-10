@@ -156,9 +156,9 @@ namespace springtail
         _last_flushed_lsn = LSN;
 
         // replication start command
-        std::unique_ptr<char[]> pub_name = _stream_connection->escape_string(_pub_name);
+        std::string pub_name = _stream_connection->escape_string(_pub_name);
         std::string cmd = fmt::format("START_REPLICATION SLOT \"{}\" LOGICAL {} (proto_version '{}', publication_names '{}', streaming 'on'",
-            _slot_name, pg_msg::lsn_to_str(LSN), _proto_version, pub_name.get());
+            _slot_name, pg_msg::lsn_to_str(LSN), _proto_version, pub_name);
 
         if (_server_version >= PG_VERS_14) {
             // binary and logical messages not supported prior to pg14
@@ -885,9 +885,9 @@ namespace springtail
             throw std::runtime_error("No queries after streaming starts");
         }
 
-        std::unique_ptr<char[]> slot_name = _connection->escape_string(_slot_name);
+        std::string slot_name = _connection->escape_string(_slot_name);
         std::string cmd = fmt::format("SELECT restart_lsn, confirmed_flush_lsn from pg_catalog.pg_replication_slots WHERE slot_name='{}'",
-                                      slot_name.get());
+                                      slot_name);
 
         // execute query
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query check slots: cmd={}\n", cmd);
@@ -933,9 +933,9 @@ namespace springtail
             throw PgStreamingError();
         }
 
-        std::unique_ptr<char[]> slot_name = _connection->escape_string(_slot_name);
+        std::string slot_name = _connection->escape_identifier(_slot_name);
 
-        std::string cmd = fmt::format("DROP_REPLICATION_SLOT '{}'", slot_name.get());
+        std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
 
         // execute query
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query drop replication slot: cmd={}\n", cmd);
@@ -971,12 +971,12 @@ namespace springtail
         std::stringstream s;
 
         // escape slot name
-        std::unique_ptr<char[]> slot_name = _connection->escape_string(_slot_name);
+        std::string slot_name = _connection->escape_identifier(_slot_name);
 
         bool use_new_syntax = (_server_version >= 150000);
 
         // setup command
-        s << "CREATE_REPLICATION_SLOT " << "\"" << slot_name.get() << "\"";
+        s << "CREATE_REPLICATION_SLOT " << slot_name;
         if (temporary) {
             s << " TEMPORARY";
         }
