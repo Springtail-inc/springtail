@@ -393,6 +393,12 @@ namespace springtail {
             return _schema;
         }
 
+        /** Returns true if the table has a primary key.  False otherwise. */
+        bool has_primary() const
+        {
+            return !_primary_key.empty();
+        }
+
         /** Retrieves the ordered set of columns that form the primary key. */
         std::vector<std::string> primary_key() const
         {

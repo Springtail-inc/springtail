@@ -233,7 +233,8 @@ namespace {
         }
 
         // fetch the redis xacts and compare
-        RedisQueue<PgRedisXactValue> queue(redis::QUEUE_PG_TRANSACTIONS);
+        RedisQueue<PgRedisXactValue> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+                                                       Properties::get_db_instance_id()));
         auto xacts = queue.range(0, -1);
         std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
 

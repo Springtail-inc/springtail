@@ -553,162 +553,178 @@ namespace springtail::gc {
             auto table = TableMgr::get_instance()->get_table(entry->db_id, entry->table_id, entry->xid, entry->lsn);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
-            // note: this should be safe, even in the face of schema changes, since a primary key
-            //       change will result in a full table re-sync, so won't go down this code path
-            if (table->has_primary()) {
-                switch (msg->msg_type) {
-                case PgMsgEnum::INSERT: {
-                    // extract the primary key from the message
-                    auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
+            //     note: this should be safe, even in the face of schema changes, since a primary key
+            //           change will result in a full table re-sync, so won't go down this code path
+            // if no primary key, then:
+            //     if insert, use UNKNOWN_EXTENT and perform an append of the new row in the committer
+            //     if remove, must scan the data to find the impacted extent_id in the committer
+            switch (msg->msg_type) {
+            case PgMsgEnum::INSERT: {
+                // extract the primary key from the message
+                auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
-                    // generate an extent tuple from the pg log data
-                    auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
-                                                                               { entry->xid, entry->lsn });
-                    auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                    auto tuple = _pack_extent(extent, insert_msg.new_tuple, schema);
+                // generate an extent tuple from the pg log data
+                auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                           { entry->xid, entry->lsn });
+                auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
+                auto tuple = _pack_extent(extent, insert_msg.new_tuple, schema);
 
+                uint64_t extent_id = constant::UNKNOWN_EXTENT;
+                if (table->has_primary()) {
                     // extract the primary key from the tuple
                     auto pkey_tuple = schema->tuple_subset(tuple, table->primary_key());
 
                     // find the affected extent
-                    uint64_t extent_id = table->primary_lookup(pkey_tuple);
-
-                    // send insert to the write cache
-                    WriteCacheClient::RowData data;
-                    data.xid = entry->xid;
-                    data.xid_seq = entry->lsn;
-                    data.data = extent->serialize();
-                    data.op = WriteCacheClient::RowOp::INSERT;
-
-                    _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
-                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
-                    break;
+                    extent_id = table->primary_lookup(pkey_tuple);
+                } else {
+                    // note: with no primary key we will always append these rows to the table,
+                    //       so nothing to do here?
                 }
-                case PgMsgEnum::DELETE: {
-                    // extract the primary key from the message
-                    auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
-                    // tuple type should be 'K' for primary key
-                    assert(delete_msg.type == 'K');
+                // send insert to the write cache
+                WriteCacheClient::RowData data;
+                data.xid = entry->xid;
+                data.xid_seq = entry->lsn;
+                data.data = extent->serialize();
+                data.op = WriteCacheClient::RowOp::INSERT;
 
-                    // generate an extent with a row holding the PG tuple data
-                    auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
-                                                                               { entry->xid, entry->lsn });
-                    auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                if (extent_id != constant::UNKNOWN_EXTENT) {
+                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
+                }
+                break;
+            }
+            case PgMsgEnum::DELETE: {
+                // extract the primary key from the message
+                auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
-                    auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
-                    auto &&tuple = _pack_extent(extent, delete_msg.tuple, pkey_schema);
+                // tuple type should be 'K' for primary key or 'O' for non-primary key
+                assert(delete_msg.type == 'K' || delete_msg.type == 'O');
+
+                // generate an extent with a row holding the PG tuple data
+                auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                           { entry->xid, entry->lsn });
+                auto pkey_schema = schema;
+                if (table->has_primary()) {
+                    // get the specific columns of the primary key, if available
+                    pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                }
+                auto extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
+                auto &&tuple = _pack_extent(extent, delete_msg.tuple, pkey_schema);
+
+                // find the affected extent
+                uint64_t extent_id = constant::UNKNOWN_EXTENT;
+                if (table->has_primary()) {
+                    extent_id = table->primary_lookup(tuple);
+                }
+
+                // send the delete to the write cache
+                WriteCacheClient::RowData data;
+                data.xid = entry->xid;
+                data.xid_seq = entry->lsn;
+                data.pkey = extent->serialize();
+                data.op = WriteCacheClient::RowOp::DELETE;
+
+                _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                if (extent_id != constant::UNKNOWN_EXTENT) {
+                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
+                }
+                break;
+            }
+            case PgMsgEnum::UPDATE: {
+                auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
+
+                // tuple type should be 'K' for primary key, 'O' for un-keyed tables, or null
+                // when no changes to the primary key
+                assert(update_msg.old_type == 'K' || update_msg.old_type == 'O' || update_msg.old_type == 0);
+                assert(update_msg.new_type == 'N');
+
+                auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
+                                                                           { entry->xid, entry->lsn });
+
+                if (update_msg.old_type == 0) {
+                    // note: un-keyed tables should never follow this path
+                    assert(table->has_primary());
+
+                    auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
+                    auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
+
+                    // extract the primary key from the tuple
+                    auto pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
 
                     // find the affected extent
-                    uint64_t extent_id = table->primary_lookup(tuple);
+                    uint64_t extent_id = table->primary_lookup(pkey_tuple);
 
-                    // send the delete to the write cache
+                    // send the update to the write cache
                     WriteCacheClient::RowData data;
                     data.xid = entry->xid;
                     data.xid_seq = entry->lsn;
-                    data.pkey = extent->serialize();
-                    data.op = WriteCacheClient::RowOp::DELETE;
+                    data.data = new_extent->serialize();
+                    data.op = WriteCacheClient::RowOp::UPDATE;
 
                     _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
                     _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
-                    break;
-                }
-                case PgMsgEnum::UPDATE: {
-                    auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
+                } else {
+                    // generate extents for the delete data and insert data
+                    auto pkey_schema = schema;
+                    if (table->has_primary()) {
+                        pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                    }
 
-                    // tuple type should be 'K' for primary key, 'O' for un-keyed tables, or null
-                    // when no changes to the primary key
-                    assert(update_msg.old_type == 'K' || update_msg.old_type == 'O' || update_msg.old_type == 0);
-                    assert(update_msg.new_type == 'N');
+                    auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
+                    auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple, pkey_schema);
 
-                    if (update_msg.old_type == 0) {
-                        auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
-                                                                                   { entry->xid, entry->lsn });
+                    auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
+                    auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
 
-                        auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                        auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
+                    // extract the primary key from the new data tuple
+                    auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
 
-                        // extract the primary key from the tuple
-                        auto pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
+                    // they shouldn't have the same primary key in this case
+                    assert(!(old_pkey_tuple == new_pkey_tuple));
 
-                        // find the affected extent
-                        uint64_t extent_id = table->primary_lookup(pkey_tuple);
+                    // look up the extent_id for the old and new tuple
+                    uint64_t old_extent_id = constant::UNKNOWN_EXTENT;
+                    uint64_t new_extent_id = constant::UNKNOWN_EXTENT;
+                    if (table->has_primary()) {
+                        old_extent_id = table->primary_lookup(old_pkey_tuple);
+                        new_extent_id = table->primary_lookup(new_pkey_tuple);
+                    }
 
-                        // send the update to the write cache
-                        WriteCacheClient::RowData data;
-                        data.xid = entry->xid;
-                        data.xid_seq = entry->lsn;
-                        data.data = new_extent->serialize();
-                        data.op = WriteCacheClient::RowOp::UPDATE;
+                    // send a delete and insert to the write cache
+                    WriteCacheClient::RowData delete_data;
+                    delete_data.xid = entry->xid;
+                    delete_data.xid_seq = entry->lsn;
+                    delete_data.pkey = old_extent->serialize();
+                    delete_data.op = WriteCacheClient::RowOp::DELETE;
 
-                        _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
-                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
-                    } else {
-                        // generate extents for the delete data and insert data
-                        auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,
-                                                                                   { entry->xid, entry->lsn });
-                        auto pkey_schema = schema->create_schema(table->primary_key(), {}, table->primary_key());
+                    WriteCacheClient::RowData insert_data;
+                    insert_data.xid = entry->xid;
+                    insert_data.xid_seq = entry->lsn;
+                    insert_data.data = new_extent->serialize();
+                    insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                        auto old_extent = std::make_shared<Extent>(ExtentType(), entry->xid, pkey_schema->row_size());
-                        auto old_pkey_tuple = _pack_extent(old_extent, update_msg.old_tuple, pkey_schema);
-
-                        auto new_extent = std::make_shared<Extent>(ExtentType(), entry->xid, schema->row_size());
-                        auto new_tuple = _pack_extent(new_extent, update_msg.new_tuple, schema);
-
-                        // extract the primary key from the new data tuple
-                        auto new_pkey_tuple = schema->tuple_subset(new_tuple, table->primary_key());
-
-                        // look up the extent_id for the old tuple
-                        uint64_t old_extent_id = table->primary_lookup(old_pkey_tuple);
-
-                        // they shouldn't have the same primary key in this case
-                        assert(!(old_pkey_tuple == new_pkey_tuple));
-
-                        // lookup the extent for the new key
-                        uint64_t new_extent_id = table->primary_lookup(new_pkey_tuple);
-
-                        // send a delete and insert to the write cache
-                        WriteCacheClient::RowData delete_data;
-                        delete_data.xid = entry->xid;
-                        delete_data.xid_seq = entry->lsn;
-                        delete_data.pkey = old_extent->serialize();
-                        delete_data.op = WriteCacheClient::RowOp::DELETE;
-
-                        WriteCacheClient::RowData insert_data;
-                        insert_data.xid = entry->xid;
-                        insert_data.xid_seq = entry->lsn;
-                        insert_data.data = new_extent->serialize();
-                        insert_data.op = WriteCacheClient::RowOp::INSERT;
-
-                        _write_cache->add_rows(entry->db_id, table->id(), old_extent_id, { delete_data });
-                        _write_cache->add_rows(entry->db_id, table->id(), new_extent_id, { insert_data });
+                    _write_cache->add_rows(entry->db_id, table->id(), old_extent_id, { delete_data });
+                    _write_cache->add_rows(entry->db_id, table->id(), new_extent_id, { insert_data });
+                    if (old_extent_id != constant::UNKNOWN_EXTENT) {
                         _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, old_extent_id);
+                    }
+                    if (new_extent_id != constant::UNKNOWN_EXTENT) {
                         _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, new_extent_id);
                     }
-                    break;
                 }
-                case PgMsgEnum::TRUNCATE: {
-                    // record the truncate into the write cache look-aside
-                    WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
-                                                          WriteCacheClient::TableOp::TRUNCATE };
-                    _write_cache->add_table_change(entry->db_id, table->id(), change);
-                    break;
-                }
-                default:
-                    SPDLOG_ERROR("Invalid message type: {}", static_cast<int>(msg->msg_type));
-                    break;
-                }
-            } else {
-                // if no primary key, then:
-                //    if insert, return the last extent_id in the primary index
-                //    if remove, must scan the data to find the impacted extent_id
-                // note: it might make sense to special-case tables without primary keys?  No need to do
-                //       the lookup until we are making the actual mutation, would be better for a
-                //       reader to scan the mutations to see if they impact the query
-                // uint64_t extent_id = constant::UNKNOWN_EXTENT;
-
-                // XXX currently not supported
-                assert(0);
+                break;
+            }
+            case PgMsgEnum::TRUNCATE: {
+                // record the truncate into the write cache look-aside
+                WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
+                                                      WriteCacheClient::TableOp::TRUNCATE };
+                _write_cache->add_table_change(entry->db_id, table->id(), change);
+                break;
+            }
+            default:
+                SPDLOG_ERROR("Invalid message type: {}", static_cast<int>(msg->msg_type));
+                break;
             }
 
             // decrement the outstanding work counter

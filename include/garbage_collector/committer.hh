@@ -93,8 +93,14 @@ namespace springtail::gc {
         /**
          * Worker helper function to process mutations to a given extent ID.
          */
-        void _process_rows(MutableTablePtr table, uint64_t extent_id,
-                           uint64_t xid, uint64_t txid, uint64_t tlsn);
+        void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid,
+                           uint64_t txid, uint64_t tlsn);
+
+        /**
+         * Worker helper function to process mutations to a table with no primary key.
+         */
+        void _process_rows_no_primary(MutableTablePtr table, uint64_t xid,
+                                      uint64_t txid, uint64_t tlsn);
 
         /**
          * Helper function to find the enclosing page for a key given an ordered set of contiguous
