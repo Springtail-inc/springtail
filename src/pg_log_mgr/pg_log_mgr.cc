@@ -85,6 +85,8 @@ namespace springtail::pg_log_mgr {
             PgTransactionPtr last_xact = xact_list.back();
             _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
         }
+
+        return lsn;
     }
 
     void
@@ -106,7 +108,7 @@ namespace springtail::pg_log_mgr {
         _state = STATE_SYNCING;
 
         // set stall state
-        _stall_pipeline = PIPELINE_STALL_INIT;
+        _stall_pipeline = true;
 
         // initiate table copy
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this, true);
@@ -115,16 +117,12 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread(bool full_sync)
     {
-        assert (_stall_pipeline != PIPELINE_STALL_NONE);
+        assert (_stall_pipeline);
 
         if (full_sync) {
             // full sync, copy all tables
-            PgCopyTable copy_table(_db_id);
-            copy_table.copy_all_tables();
         } else {
             // incremental sync, copy only changed tables
-            PgCopyTable copy_table(_db_id);
-            copy_table.copy_changed_tables();
         }
     }
 
@@ -169,6 +167,7 @@ namespace springtail::pg_log_mgr {
 
         PgCopyData data;
         uint64_t start_offset = logger->offset();
+        bool in_pipeline_stall = false;
 
         while (!_shutdown) {
             _pg_conn.read_data(data);
@@ -184,13 +183,16 @@ namespace springtail::pg_log_mgr {
             bool log_msg_complete = logger->log_data(data);
 
             // get pipeline stall state
-            int pipeline_stall = _stall_pipeline.load();
-            if (pipeline_stall == PIPELINE_STALL_WRITER) {
+            bool pipeline_stall = _stall_pipeline.load();
+
+            if (in_pipeline_stall && !pipeline_stall) {
+                // pipeline stall has been cleared
+                in_pipeline_stall = false;
+                // fall through
+            } else if (in_pipeline_stall && pipeline_stall) {
                 // stall writer until sync is complete
                 continue;
-            }
-
-            if (pipeline_stall == PIPELINE_STALL_INIT) {
+            } else if (!in_pipeline_stall && pipeline_stall) {
                 // initiated stall, rollover log
                 logger->close();
                 logger = this->_create_repl_logger();
@@ -200,8 +202,8 @@ namespace springtail::pg_log_mgr {
                 RedisMgr::get_instance()->get_client()->set(redis::STRING_LOG_RESYNC,
                                                             logger->filename().string());
 
-                // set stall flag to stall writer
-                _stall_pipeline.store(PIPELINE_STALL_WRITER);
+                // set stall flag
+                in_pipeline_stall = true;
 
                 continue;
             }

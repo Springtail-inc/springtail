@@ -287,24 +287,75 @@ namespace springtail {
     }
 
     /**
-     * @brief escape a string
+     * @brief escape a string; a literal not for identifiers
      *        when a connection is available it uses connection encoding
      *
      * @param str string to escape
-     * @return safe ptr to the string, access with .get()
+     * @return string
      */
-    std::unique_ptr<char[]> LibPqConnection::escape_string(const std::string &str)
+    std::string LibPqConnection::escape_string(const std::string &str)
     {
-        std::unique_ptr<char[]> str_ptr(new char[str.length() * 2 + 1]);
-
+        char new_str[str.length() * 2 + 1];
         if (_connection == nullptr) {
-            PQescapeString(str_ptr.get(), str.c_str(), str.length());
+            PQescapeString(new_str, str.c_str(), str.length());
         } else {
-            PQescapeStringConn(const_cast<PGconn *>(_connection), str_ptr.get(),
+            PQescapeStringConn(const_cast<PGconn *>(_connection), new_str,
                                str.c_str(), str.length(), nullptr);
         }
 
-        return str_ptr;
+        return std::string(new_str);
+    }
+
+    std::string LibPqConnection::_escape_identifier(const char *input)
+    {
+        int output_size = 2 * strlen(input) + 1;
+        char output[output_size];
+        const char *p = input;
+        size_t len = 0;
+
+        // Start with a double quote
+        if (len < output_size - 1) {
+            output[len++] = '"';
+        }
+
+        // Escape double quotes
+        while (*p && len < output_size - 1) {
+            if (*p == '"') {
+                if (len < output_size - 2) {
+                    output[len++] = '"';
+                    output[len++] = '"';
+                }
+            } else {
+                output[len++] = *p;
+            }
+            p++;
+        }
+
+        // End with a double quote
+        if (len < output_size - 1) {
+            output[len++] = '"';
+        }
+
+        output[len] = '\0'; // Null-terminate the output
+
+        return std::string(output);
+    }
+
+    std::string LibPqConnection::escape_identifier(const std::string &str)
+    {
+        if (_connection == nullptr) {
+            // just escape quotes, very simple
+            return _escape_identifier(str.c_str());
+        }
+
+        // more complex, use libpq, takes char encoding into account
+        char *new_str = PQescapeIdentifier(_connection, str.c_str(), str.length());
+
+        // copy the string and free the memory
+        std::string ret(new_str);
+        PQfreemem(new_str);
+
+        return ret;
     }
 
     /**
@@ -330,16 +381,16 @@ namespace springtail {
 
         // create key value list for: host, port, dbname, user, password, options
         // escape options
-        std::unique_ptr<char[]> name = escape_string(db_name);
-        std::unique_ptr<char[]> user = escape_string(db_user);
-        std::unique_ptr<char[]> pass = escape_string(db_pass);
+        std::string name = escape_identifier(db_name);
+        std::string user = escape_identifier(db_user);
+        std::string pass = escape_identifier(db_pass);
 
         // setting client encoding to UTF8
         // setting database=replication to put connection in replication mode
         std::string encoding("UTF8");
 
         std::string hosttype;
-        std::unique_ptr<char[]> host;
+        std::string host;
 
         PGconn *connection = nullptr;
 
@@ -358,18 +409,18 @@ namespace springtail {
                 }
 
                 hosttype = "hostaddr";
-                host = escape_string(ip.value());
+                host = escape_identifier(ip.value());
             } else {
                 // allow libpq to do the hostname lookup (using system resolver)
                 hosttype = "host";
-                host = escape_string(db_host);
+                host = escape_identifier(db_host);
             }
 
             // generate connection string
             std::string conninfo = fmt::format("{}={} port={} dbname={} user={} \
                 password={} {}client_encoding={} \
                 options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
-                hosttype, host.get(), db_port, name.get(), user.get(), pass.get(),
+                hosttype, host, db_port, name, user, pass,
                 (replication ? "replication=database ": ""), encoding);
 
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Attempting to connect: {}", conninfo);

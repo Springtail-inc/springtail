@@ -112,12 +112,6 @@ namespace springtail::pg_log_mgr {
         }
 
     protected:
-        enum PIPELINE_STALL : int {
-            PIPELINE_STALL_NONE = 0,
-            PIPELINE_STALL_INIT = 1,
-            PIPELINE_STALL_WRITER = 2
-        };
-
         /** Helper to create log writer -- one per log file */
         PgLogWriterPtr _create_repl_logger();
 
@@ -144,12 +138,8 @@ namespace springtail::pg_log_mgr {
         std::string _slot_name;
         int _port;
 
-        /** stall pipeline flag
-         * 0 - no stall
-         * 1 - stall initiated
-         * 2 - log writer stalled
-         */
-        std::atomic<int> _stall_pipeline = PIPELINE_STALL_NONE;
+        /** stall pipeline flag */
+        std::atomic<bool> _stall_pipeline = false;
 
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
