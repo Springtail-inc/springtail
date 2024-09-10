@@ -18,6 +18,7 @@ rm -rf /tmp/springtail/repl_logs/*
 rm -rf /tmp/springtail/xact_logs/*
 rm -rf /tmp/springtail/xid_mgr/*
 redis-cli flushdb
+redis-cli -n 1 flushdb
 rm -f /tmp/xid_mgr.log /tmp/write_cache.log /tmp/pg_log_mgr.log /tmp/gc.log
 
 # setup the config
@@ -35,13 +36,13 @@ ${PSQL_CMD} < start_replication.sql
 # start the XID mgr
 echo Start XID Mgr...
 XID_DAEMON="${BUILD_DIR}/src/xid_mgr/xid_mgr_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/xid_mgr.log" ${XID_DAEMON} -x 10 --daemon
+${XID_DAEMON} -x 10 --daemon
 sleep 1
 
 # start the SysTblMgr
 echo Start SysTblMgr...
 SYS_TBL_DAEMON="${BUILD_DIR}/src/sys_tbl_mgr/sys_tbl_mgr_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/sys_tbl_mgr.log" ${SYS_TBL_DAEMON} --daemon
+${SYS_TBL_DAEMON} --daemon
 sleep 1
 
 # copy the initial snapshot of the table data
@@ -50,7 +51,7 @@ ${BUILD_DIR}/src/pg_fdw/copy_schema -d springtail -u springtail -s public
 # start the write cache
 echo Start Write Cache...
 WRITE_CACHE_DAEMON="${BUILD_DIR}/src/write_cache/write_cache_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/write_cache.log" ${WRITE_CACHE_DAEMON} --daemon
+${WRITE_CACHE_DAEMON} --daemon
 sleep 1
 
 # start the pg log mgr
@@ -58,13 +59,13 @@ sleep 1
 rm -rdf /tmp/xact_logs /tmp/repl_logs
 mkdir /tmp/xact_logs /tmp/repl_logs
 PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/pg_log_mgr.log" ${PG_LOG_DAEMON} --daemon
+${PG_LOG_DAEMON} --daemon
 sleep 1
 
 # start the garbage collector
 echo Start Garbage Collector...
 GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
-SPRINGTAIL_PROPERTIES="logging.log_path=/tmp/gc.log" ${GC_DAEMON} --daemon
+${GC_DAEMON} --daemon
 sleep 1
 
 # set up the replica database

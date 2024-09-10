@@ -199,7 +199,11 @@ namespace springtail::gc {
             if (entry->do_finalize) {
                 _process_finalize(entry->table, entry->xid);
             } else {
-                _process_rows(entry->table, entry->extent_id, entry->xid, entry->txid, entry->tlsn);
+                if (entry->table->has_primary()) {
+                    _process_rows(entry->table, entry->extent_id, entry->xid, entry->txid, entry->tlsn);
+                } else {
+                    _process_rows_no_primary(entry->table, entry->xid, entry->txid, entry->tlsn);
+                }
             }
 
             // reduce the number of outstanding extents for this table
@@ -465,5 +469,107 @@ namespace springtail::gc {
         // now that we've applied all of the mutations, we need to release these pages back to the
         // cache via the table so that the appropriate callbacks are made when the pages are flushed
         table->release_pages(pages);
+    }
+
+    void
+    Committer::_process_rows_no_primary(MutableTablePtr table,
+                                        uint64_t xid,
+                                        uint64_t txid,
+                                        uint64_t tlsn)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Process rows with no primary key for {}@{}", table->id(), xid);
+        auto schema_mgr = SchemaMgr::get_instance();
+        auto sys_tbl_mgr = sys_tbl_mgr::Client::get_instance();
+
+        // save the schema
+        auto schema = table->schema();
+
+        // get the schema information
+        XidLsn target_xid(xid);
+        auto target_schema = schema_mgr->get_extent_schema(table->db(), table->id(), target_xid);
+
+        // construct a virtual schema from the previous commit XID to the target XID
+        XidLsn access_xid(_committed_xids[table->db()]);
+        auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
+        auto vschema = std::make_shared<VirtualSchema>(meta);
+        auto row_fields = vschema->get_fields();
+
+        uint64_t cursor = 0;
+        bool done = false;
+        while (!done) {
+            // request rows from the write cache for the provided extent ID
+            auto rows = _write_cache->fetch_rows(table->db(), table->id(), constant::UNKNOWN_EXTENT, _committed_xids[table->db()], xid, 100, cursor);
+            if (rows.empty()) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}@{}", table->id(), xid);
+                done = true;
+                break;
+            }
+
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} rows for {}@{}", rows.size(), table->id(), xid);
+
+            // apply the changes to the table
+            for (const auto &row : rows) {
+                // if this data is from before a truncate, ignore it
+                if (txid > 0) {
+                    if (row.xid < txid || (row.xid == txid && row.xid_seq < tlsn)) {
+                        continue;
+                    }
+                }
+
+                // construct a tuple from the row data
+                // 2. apply data mutations by using the virtual schema on top of them
+                //    a. we need to unroll the virtual schema as we pass by each schema change
+
+                // check if we need to update the schema metadata
+                access_xid = { row.xid, row.xid_seq };
+                bool did_shift = _shift_to_xid(meta, access_xid);
+                if (did_shift) {
+                    // update the virtual schema based on the corrected metadata
+                    vschema = std::make_shared<VirtualSchema>(meta);
+                    row_fields = vschema->get_fields();
+                }
+
+                // XXX seems like we've got more copies here than strictly necessary... we could
+                //     instead construct a read-only extent via pointers into the existing data
+                //     object
+
+                // check if we need to apply a table mutation to the extent
+
+                // pass that tuple into the appropriate table mutation
+                switch (row.op) {
+                case (WriteCacheClient::RowOp::INSERT): {
+                    ExtentHeader header(ExtentType(), xid, vschema->row_size(), 0);
+                    Extent extent(header);
+                    extent.deserialize(row.data);
+
+                    auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                    SPDLOG_DEBUG("Insert row {} for {}@{}", value->to_string(), table->id(), xid);
+
+                    // append the row to the table
+                    table->insert(value, xid, constant::UNKNOWN_EXTENT);
+                    break;
+                }
+
+                case (WriteCacheClient::RowOp::UPDATE): {
+                    // note: we should never see an update from a table with no primary key
+                    assert(0);
+                    break;
+                }
+
+                case (WriteCacheClient::RowOp::DELETE): {
+                    ExtentHeader header(ExtentType(), xid, schema->row_size(), 0);
+                    Extent extent(header);
+                    extent.deserialize(row.pkey);
+
+                    auto value = std::make_shared<FieldTuple>(row_fields, extent.back());
+                    SPDLOG_DEBUG("Remove row {} for {}@{}", value->to_string(), table->id(), xid);
+
+                    // remove from the table -- will invoke an index scan
+                    table->remove(value, xid, constant::UNKNOWN_EXTENT);
+                    break;
+                }
+                }
+            }
+        }
     }
 }
