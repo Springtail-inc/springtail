@@ -598,8 +598,8 @@ namespace springtail::gc {
                 // extract the primary key from the message
                 auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
-                // tuple type should be 'K' for primary key
-                assert(delete_msg.type == 'K');
+                // tuple type should be 'K' for primary key or 'O' for non-primary key
+                assert(delete_msg.type == 'K' || delete_msg.type == 'O');
 
                 // generate an extent with a row holding the PG tuple data
                 auto schema = SchemaMgr::get_instance()->get_extent_schema(entry->db_id, entry->table_id,

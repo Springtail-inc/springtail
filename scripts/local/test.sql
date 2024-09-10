@@ -25,11 +25,12 @@ INSERT INTO test_data4 (a, b, c) VALUES (5, 'fiv', now());
 UPDATE test_data4 SET b = 'fivefive' WHERE a = 5;
 COMMIT;
 
--- Test array types
+-- Test array types and also deleting using a non-primary key in the where clause
 BEGIN;
 INSERT INTO test_data2 (a, b) VALUES ('{1, 3}', 'b');
 INSERT INTO test_data2 (a, b) VALUES ('{1, 3, 5}', 'c');
 INSERT INTO test_data2 (a, b) VALUES ('{1, 8, 5}', 'd');
+DELETE FROM test_data2 WHERE b = 'a';
 COMMIT;
 
 -- Test removing and adding a column within a single transaction
@@ -54,4 +55,9 @@ BEGIN;
 INSERT INTO test_data5 (a, b, c) VALUES (5, 'e', now());
 INSERT INTO test_data5 (a, b, c) VALUES (5, 'e', now());
 UPDATE test_data5 SET b = 'E' WHERE a = 5;
+COMMIT;
+
+-- Test deleting a single duplicate row from a table with no primary key
+BEGIN;
+DELETE FROM test_data5 USING (SELECT ctid, ROW_NUMBER() OVER( PARTITION BY b ORDER BY b ) AS row_num FROM test_data5) AS cte WHERE cte.row_num > 1 AND cte.ctid = test_data5.ctid;
 COMMIT;
