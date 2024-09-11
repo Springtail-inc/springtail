@@ -65,7 +65,7 @@ namespace {
         ASSERT_EQ(res->tids.size(), 1);
 
         uint32_t oid = res->tids[0];
-        uint64_t xid = res->target_xid;
+        xid = res->target_xid;
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);

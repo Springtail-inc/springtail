@@ -86,7 +86,8 @@ namespace springtail
         "ON relnamespace=pg_namespace.oid "
         "WHERE relkind = 'r'  -- regular tables "
         "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
-        "AND nspname != 'information_schema'";
+        "AND nspname != 'information_schema' "
+        "ORDER BY pg_class.oid";
 
     /** Get table name, schema name, oid for all tables in a schema */
     static constexpr char TABLES_SCHEMA_QUERY[] =
@@ -97,7 +98,8 @@ namespace springtail
         "WHERE relkind = 'r'  -- regular tables "
         "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
         "AND nspname != 'information_schema' "
-        "AND nspname = '{}'";
+        "AND nspname = '{}' "
+        "ORDER BY pg_class.oid";
 
     /** Get table name, schema name, oid for a single table */
     static constexpr char TABLE_QUERY[] =

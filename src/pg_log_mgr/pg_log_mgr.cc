@@ -164,13 +164,18 @@ namespace springtail::pg_log_mgr {
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
 
-        // go through result tids and update Redis
+        // go through result tids and update Redis with table state info
         for (const auto &tid : res->tids) {
-            // update Redis with table state info
             redis->hset(_redis_sync_table, std::to_string(tid), res->pg_xids);
-
-            // send message to GC via redis queue
         }
+
+        // send table sync message to GC
+        PgXactMsg redis_xact(_db_id, res);
+        _redis_queue.push(redis_xact);
+
+        // done message
+        PgXactMsg redis_xact2(_db_id);
+        _redis_queue.push(redis_xact2);
 
         // clear stall state
         _state = STATE_RUNNING;

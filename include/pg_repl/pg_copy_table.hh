@@ -6,6 +6,8 @@
 #include <vector>
 #include <optional>
 
+#include <common/common.hh>
+
 #include <pg_repl/libpq_connection.hh>
 
 #include <storage/field.hh>
@@ -14,14 +16,45 @@ namespace springtail
 {
     /** Stores the result of a copy operation */
     struct PgCopyResult {
-        std::vector<int32_t> tids;  ///< table ids
-        std::string pg_xids;        ///< xids from pg_current_snapshot()
-        uint64_t target_xid;        ///< target xid
+        uint64_t target_xid;         ///< target xid
+
+        // see: https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-PG-SNAPSHOT
+        uint32_t xmin;               ///< xmin; lowest xid still active
+        uint32_t xmax;               ///< xmax; one past highest completed xid
+        uint32_t xmin_epoch;
+        uint32_t xmax_epoch;
+        std::vector<int32_t> tids;   ///< table ids
+        std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
+        std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
 
         PgCopyResult(const std::vector<int32_t> &tids,
                      const std::string &pg_xids,
-                     uint64_t target_xid) :
-            tids(tids), pg_xids(pg_xids), target_xid(target_xid) {}
+                     uint64_t target_xid)
+            : target_xid(target_xid), tids(tids), pg_xids(pg_xids)
+        {
+            // parse xids
+            std::vector<std::string> xid_parts;
+            common::split_string(":", pg_xids, xid_parts);
+
+            // parse xid parts
+            // xids are xid8 which are 64 bit values, bottom 32 bits are xid, top 32 bits are epoch
+            uint64_t xmin8 = std::strtoull(xid_parts[0].c_str(), nullptr, 10);
+            uint64_t xmax8 = std::strtoull(xid_parts[1].c_str(), nullptr, 10);
+            xmin = static_cast<uint32_t>(xmin8 & 0xFFFFFFFFLL);
+            xmax = static_cast<uint32_t>(xmin8 & 0xFFFFFFFFLL);
+            xmin_epoch = static_cast<uint32_t>(xmin8 >> 32);
+            xmax_epoch = static_cast<uint32_t>(xmax8 >> 32);
+
+            // parse xips
+            if (xid_parts.size() > 2 && !xid_parts[2].empty()) {
+                std::vector<std::string> xip_parts;
+                common::split_string(",", xid_parts[2], xip_parts);
+                for (const auto &xip : xip_parts) {
+                    uint64_t xip8 = std::strtoull(xip.c_str(), nullptr, 10);
+                    xips.push_back(static_cast<uint32_t>(xip8 & 0xFFFFFFFFLL));
+                }
+            }
+        }
     };
     using PgCopyResultPtr = std::shared_ptr<PgCopyResult>;
 
