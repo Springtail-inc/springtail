@@ -100,13 +100,13 @@ namespace springtail::gc {
 
         /** Holds the state for processing an XID. */
         struct State {
-            std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
+            std::shared_ptr<pg_log_mgr::PgXactMsg> entry; ///< The XID entry from the PG log manager.
             bool process_as_stream; ///< True if the XID is in STREAM mode.
             CounterPtr mutation_count; ///< The number of mutations outstanding to the parsers.
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            explicit State(std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry)
+            explicit State(std::shared_ptr<pg_log_mgr::PgXactMsg> entry)
                 : entry(entry),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
@@ -295,7 +295,7 @@ namespace springtail::gc {
             bool _shutdown;
 
             /** Queue for XID messages from the PG log manager. */
-            RedisQueue<pg_log_mgr::PgRedisXactValue> _pg_queue;
+            RedisQueue<pg_log_mgr::PgXactMsg> _pg_queue;
 
             /** Queue for XID messages to the GC committer. */
             RedisQueue<XidReady> _gc_queue;

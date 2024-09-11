@@ -165,11 +165,13 @@ namespace springtail
         /**
          * @brief Internall helper called from copy_db, copy_schema, copy_table
          * @param db_id database id
+         * @param target_xid target xid
          * @param schema_name schema name (optional)
          * @param table_oid table oid (optional)
          * @return PgCopyResultPtr
          */
         static PgCopyResultPtr _internal_copy(uint64_t db_id,
+                                              uint64_t target_xid,
                                               std::optional<std::string> schema_name,
                                               std::optional<std::pair<std::string, std::string>> table_name,
                                               std::optional<uint32_t> table_oid);
@@ -222,7 +224,8 @@ namespace springtail
          * @param table_oid table oid
          * @return PgCopyResultPtr
          */
-        static PgCopyResultPtr copy_db(uint64_t db_id);
+        static PgCopyResultPtr copy_db(uint64_t db_id,
+                                       uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system
@@ -231,6 +234,7 @@ namespace springtail
          * @return PgCopyResultPtr
          */
         static PgCopyResultPtr copy_schema(uint64_t db_id,
+                                           uint64_t xid,
                                            const std::string &schema_name);
 
         /**
@@ -240,6 +244,7 @@ namespace springtail
          * @return PgCopyResultPtr
          */
         static PgCopyResultPtr copy_table(uint64_t db_id,
+                                          uint64_t xid,
                                           uint32_t table_oid);
 
         /**
@@ -250,6 +255,7 @@ namespace springtail
          * @return PgCopyResultPtr
          */
         static PgCopyResultPtr copy_table(uint64_t db_id,
+                                          uint64_t xid,
                                           const std::string &schema_name,
                                           const std::string &table_name);
     };

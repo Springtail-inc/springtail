@@ -233,7 +233,7 @@ namespace {
         }
 
         // fetch the redis xacts and compare
-        RedisQueue<PgRedisXactValue> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+        RedisQueue<PgXactMsg> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
                                                        Properties::get_db_instance_id()));
         auto xacts = queue.range(0, -1);
         std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
@@ -241,13 +241,14 @@ namespace {
         EXPECT_EQ(xact_list.size(), xacts.size());
 
         for (int i = 0; i < xact_list.size(); i++) {
-            EXPECT_EQ(xacts[i].pg_xid, xact_list[i]->xid);
-            EXPECT_EQ(xacts[i].xid, xact_list[i]->springtail_xid);
-            EXPECT_EQ(xacts[i].begin_offset, xact_list[i]->begin_offset);
-            EXPECT_EQ(xacts[i].begin_path, xact_list[i]->begin_path);
-            EXPECT_EQ(xacts[i].commit_offset, xact_list[i]->commit_offset);
-            EXPECT_EQ(xacts[i].commit_path, xact_list[i]->commit_path);
-            EXPECT_EQ(xacts[i].aborted_xids.size(), xact_list[i]->aborted_xids.size());
+            auto &xact_msg = std::get<PgXactMsg::XactMsg>(xacts[i].msg);
+            EXPECT_EQ(xact_msg.pg_xid, xact_list[i]->xid);
+            EXPECT_EQ(xact_msg.xid, xact_list[i]->springtail_xid);
+            EXPECT_EQ(xact_msg.begin_offset, xact_list[i]->begin_offset);
+            EXPECT_EQ(xact_msg.begin_path, xact_list[i]->begin_path);
+            EXPECT_EQ(xact_msg.commit_offset, xact_list[i]->commit_offset);
+            EXPECT_EQ(xact_msg.commit_path, xact_list[i]->commit_path);
+            EXPECT_EQ(xact_msg.aborted_xids.size(), xact_list[i]->aborted_xids.size());
         }
     }
 

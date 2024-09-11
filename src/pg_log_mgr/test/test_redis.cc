@@ -23,8 +23,10 @@ namespace {
         uint32_t pg_xid = 100;
         std::set<uint32_t> aborted_xids = {10, 20};
 
-        PgRedisXactValue xact(begin_path, commit_path, db_id, begin_offset, commit_offset,
+        PgXactMsg xact_msg(begin_path, commit_path, db_id, begin_offset, commit_offset,
                               xact_lsn, xid, pg_xid, aborted_xids);
+
+        auto &xact = std::get<PgXactMsg::XactMsg>(xact_msg.msg);
 
         ASSERT_EQ(xact.begin_path, begin_path);
         ASSERT_EQ(xact.commit_path, commit_path);
@@ -49,14 +51,15 @@ namespace {
         uint32_t pg_xid = 100;
         std::set<uint32_t> aborted_xids = {10, 20};
 
-        PgRedisXactValue xact(begin_path, commit_path, db_id, begin_offset, commit_offset,
-                              xact_lsn, xid, pg_xid, aborted_xids);
+        PgXactMsg xact_msg(begin_path, commit_path, db_id, begin_offset, commit_offset,
+                           xact_lsn, xid, pg_xid, aborted_xids);
 
-        std::string str = xact.serialize();
+        std::string str = xact_msg.serialize();
 
         std::cout << str << std::endl;
 
-        PgRedisXactValue xact2(str);
+        PgXactMsg xact_msg2(str);
+        auto &xact2 = std::get<PgXactMsg::XactMsg>(xact_msg2.msg);
 
         ASSERT_EQ(xact2.begin_path, begin_path);
         ASSERT_EQ(xact2.commit_path, commit_path);

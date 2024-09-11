@@ -10,6 +10,8 @@
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 
+#include <xid_mgr/xid_mgr_client.hh>
+
 #include <test/services.hh>
 
 using namespace springtail;
@@ -56,8 +58,10 @@ namespace {
         std::string table_name = "test_pgcopy";
         std::string schema_name = "public";
 
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
         // perform the table copy
-        PgCopyResultPtr res = PgCopyTable::copy_table(db_id, schema_name, table_name);
+        PgCopyResultPtr res = PgCopyTable::copy_table(db_id, xid+1, schema_name, table_name);
         ASSERT_EQ(res->tids.size(), 1);
 
         uint32_t oid = res->tids[0];

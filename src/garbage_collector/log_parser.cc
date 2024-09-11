@@ -177,14 +177,22 @@ namespace springtail::gc {
             if (_state == nullptr) {
                 // if nothing ready in backlog, pull an XID from redis
                 // note: block for 1 second
-                auto entry = _pg_queue.pop(_worker_id, 1);
-                if (entry == nullptr) {
+                auto xact_msg = _pg_queue.pop(_worker_id, 1);
+                if (xact_msg == nullptr) {
                     // nothing ready, loop and try again
                     continue;
                 }
 
+                if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
+                    // XXX handle table sync message
+                    continue;
+                }
+
+                assert (xact_msg->type == pg_log_mgr::PgXactMsg::Type::XACT_MSG);
+                auto &entry = std::get<pg_log_mgr::PgXactMsg::XactMsg>(xact_msg->msg);
+
                 // update the schema dependencies from Redis
-                _backlog->update_deps(entry->db_id);
+                _backlog->update_deps(entry.db_id);
 
                 _state = std::make_shared<State>(entry);
             }

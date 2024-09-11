@@ -18,6 +18,7 @@
 #include <common/properties.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_copy_table.hh>
 
 #include <pg_log_mgr/pg_log_queue.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
@@ -43,16 +44,21 @@ namespace springtail::pg_log_mgr {
     public:
         /** convenience type for the shared transaction queue */
         using PgTransactionQueuePtr = std::shared_ptr<ConcurrentQueue<PgTransaction>>;
+        using StringPtr = std::shared_ptr<std::string>;
 
         /** replication and transaction log prefixes and suffix */
         static constexpr char const * const LOG_PREFIX_REPL = "pg_log_repl_";
         static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 
+        // db state
         static constexpr char const * const STATE_STARTING = "starting";
         static constexpr char const * const STATE_RUNNING = "running";
         static constexpr char const * const STATE_SYNCING = "synchronizing";
         static constexpr char const * const STATE_STOPPED = "stopped";
+
+        /** redis worker id for redis sync queue */
+        static constexpr char const * const REDIS_WORKER_ID = "pg_log_mgr";
 
         /**
          * @brief Construct a new Pg Log Mgr object
@@ -74,13 +80,16 @@ namespace springtail::pg_log_mgr {
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
                  int port)
-        : _db_id(db_id), _host(host), _db_name(db_name), _user_name(user_name),
+        : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
+          _host(host), _db_name(db_name), _user_name(user_name),
           _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()))
+          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+          _redis_sync_table(fmt::format(redis::HASH_SYNC_TABLE_STATE, _db_instance_id, _db_id))
         {}
 
         /**
@@ -90,10 +99,13 @@ namespace springtail::pg_log_mgr {
          */
         PgLogMgr(const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path)
-        : _db_id(1), _repl_log_path(repl_log_path),
+        : _db_id(1), _db_instance_id(Properties::get_db_instance_id()),
+          _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()))
+          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
+          _redis_sync_table(fmt::format(redis::HASH_SYNC_TABLE_STATE, _db_instance_id, _db_id))
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -126,6 +138,7 @@ namespace springtail::pg_log_mgr {
         static constexpr int LOG_ROLLOVER_SIZE_BYTES = 128 * 1024 * 1024;
 
         uint64_t _db_id;                      ///< db id
+        uint64_t _db_instance_id;             ///< db instance id
 
         std::string _state;                   ///< current state of the log manager
 
@@ -139,11 +152,11 @@ namespace springtail::pg_log_mgr {
         int _port;
 
         /** stall pipeline flag */
-        std::atomic<bool> _stall_pipeline = false;
+        std::atomic<bool> _stall_pipeline{false};
 
         PgReplConnection _pg_conn;            ///< postgres replication connection
         int _proto_version;                   ///< postgres protocol version
-        std::atomic<bool> _shutdown = false;  ///< shutdown flag
+        std::atomic<bool> _shutdown{false};   ///< shutdown flag
 
         ///// Startup
         /** init startup, clear out all state */
@@ -177,9 +190,14 @@ namespace springtail::pg_log_mgr {
         ///// Stage 3 of pipeline, mapping pg xids to xids; notify GC
         std::filesystem::path _xact_log_path; ///< xact log base path
         std::thread _xact_thread;             ///< xact worker thread
-        uint64_t _next_xid=0;                 ///< next xid in xid range
+        std::atomic<uint64_t> _next_xid{0};    ///< next xid in xid range
 
-        RedisQueue<PgRedisXactValue> _redis_queue; ///< redis queue for GC
+        /** Get next xid */
+        uint64_t _get_next_xid() {
+            return _next_xid.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        RedisQueue<PgXactMsg> _redis_queue; ///< redis queue for GC
 
         /** Redis sorted set for oid to xid mapping */
         std::mutex _oid_set_mutex;
@@ -192,10 +210,15 @@ namespace springtail::pg_log_mgr {
         void _push_xact_to_redis(const PgTransactionPtr xact);
 
         //// Table copy
-
+        RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
+        std::string _redis_sync_table;     ///< redis key for table sync hset
         std::thread _table_copy_thread;    ///< table copy thread
-        void _copy_thread(bool full_sync); ///< table copy thread fn
 
+        /** Copy table thread; waits on table sync queue */
+        void _copy_thread();
+
+        /** Process copy table results; insert into redis */
+        void _process_copy_results(PgCopyResultPtr res);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

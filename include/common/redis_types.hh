@@ -80,7 +80,7 @@ namespace springtail::redis {
      * Table sync hash set, key is the table OID/TID, value is 'xmin:xmax:xid,xid,xid...'
      * args: <db_instance_id>, <db_id>
      */
-    static constexpr char SET_SYNC_TABLE_STATE[] = "set:sync_table_state:{}:{}";
+    static constexpr char HASH_SYNC_TABLE_STATE[] = "set:sync_table_state:{}:{}";
 
     /**
      * Queue for table sync requests; value is the table OID/TID

@@ -388,8 +388,18 @@ namespace springtail
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
 
-        // assumes table oid is set, and the schema is populated
-         // create the table metadata
+        // drop the existing table if it exists
+        if (TableMgr::get_instance()->exists(db_id, table_oid, xid.xid)) {
+            PgMsgDropTable drop_msg{0, // pg lsn
+                                    static_cast<uint32_t>(_schema.table_oid),
+                                    0, // pg xid
+                                    _schema.schema_name,
+                                    _schema.table_name};
+
+            TableMgr::get_instance()->drop_table(db_id, xid, drop_msg);
+        }
+
+        // create the table metadata
         PgMsgTable create_msg{0, // pg lsn
                               static_cast<uint32_t>(_schema.table_oid),
                               0, // pg xid
@@ -398,7 +408,6 @@ namespace springtail
                               _map_to_pg_msg(_schema.columns, _schema.pkeys)};
 
         // note: we create the system metadata at the previous XID
-        // XXX need to fix this
         TableMgr::get_instance()->create_table(db_id, xid, create_msg);
         ++xid.lsn;
 
@@ -625,41 +634,44 @@ namespace springtail
 
     PgCopyResultPtr
     PgCopyTable::copy_table(uint64_t db_id,
-                             uint32_t table_oid)
+                            uint64_t xid,
+                            uint32_t table_oid)
     {
-        return _internal_copy(db_id, std::nullopt, std::nullopt, table_oid);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oid);
     }
 
     PgCopyResultPtr
     PgCopyTable::copy_schema(uint64_t db_id,
+                             uint64_t xid,
                              const std::string &schema_name)
     {
-        return _internal_copy(db_id, schema_name, std::nullopt, std::nullopt);
+        return _internal_copy(db_id, xid, schema_name, std::nullopt, std::nullopt);
     }
 
     PgCopyResultPtr
-    PgCopyTable::copy_db(uint64_t db_id)
+    PgCopyTable::copy_db(uint64_t db_id, uint64_t xid)
     {
-        return _internal_copy(db_id, std::nullopt, std::nullopt, std::nullopt);
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt);
     }
 
     PgCopyResultPtr
     PgCopyTable:: copy_table(uint64_t db_id,
+                             uint64_t xid,
                              const std::string &schema_name,
                              const std::string &table_name)
     {
-        return _internal_copy(db_id, std::nullopt, std::pair{schema_name, table_name}, std::nullopt);
+        return _internal_copy(db_id, xid, std::nullopt, std::pair{schema_name, table_name}, std::nullopt);
     }
 
     PgCopyResultPtr
     PgCopyTable::_internal_copy(uint64_t db_id,
+                                uint64_t xid,
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
                                 std::optional<uint32_t> table_oid)
     {
-        // get committed xid and set target xid
-        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-        XidLsn target_xid(xid + 1, 0);
+        // set target xid
+        XidLsn target_xid(xid, 0);
 
         // create copy table object and connect to db
         PgCopyTable copy_table;

@@ -242,7 +242,8 @@ namespace springtail
         enum : uint8_t {
             TYPE_COMMIT = 0,        ///< normal commit or stream commit
             TYPE_STREAM_START = 1,  ///< stream start
-            TYPE_STREAM_ABORT = 2   ///< stream abort
+            TYPE_STREAM_ABORT = 2,  ///< stream abort
+            TYPE_PIPELINE_STALL = 3 ///< stall pipeline
         };
 
         uint64_t begin_offset;   ///< offset to start of block header
