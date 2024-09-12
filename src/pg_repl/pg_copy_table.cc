@@ -8,6 +8,8 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <common/thread_pool.hh>
+
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_copy_table.hh>
@@ -110,7 +112,7 @@ namespace springtail
         "WHERE relkind = 'r'  -- regular tables "
         "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
         "AND nspname != 'information_schema' "
-        "AND pg_class.oid::integer = {}";
+        "AND pg_class.oid::integer in ({}) ";
 
     /**
      * @brief Connect to database
@@ -634,15 +636,21 @@ namespace springtail
         return;
     }
 
-    PgCopyResultPtr
-    PgCopyTable::copy_table(uint64_t db_id,
-                            uint64_t xid,
-                            uint32_t table_oid)
+    void
+    PgCopyTable::_end_copy()
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oid);
+        _connection.end_transaction();
     }
 
-    PgCopyResultPtr
+    std::vector<PgCopyResultPtr>
+    PgCopyTable::copy_tables(uint64_t db_id,
+                            uint64_t xid,
+                            std::vector<uint32_t> table_oids)
+    {
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
+    }
+
+    std::vector<PgCopyResultPtr>
     PgCopyTable::copy_schema(uint64_t db_id,
                              uint64_t xid,
                              const std::string &schema_name)
@@ -650,37 +658,76 @@ namespace springtail
         return _internal_copy(db_id, xid, schema_name, std::nullopt, std::nullopt);
     }
 
-    PgCopyResultPtr
+    std::vector<PgCopyResultPtr>
     PgCopyTable::copy_db(uint64_t db_id, uint64_t xid)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt);
     }
 
-    PgCopyResultPtr
-    PgCopyTable:: copy_table(uint64_t db_id,
-                             uint64_t xid,
-                             const std::string &schema_name,
-                             const std::string &table_name)
+    std::vector<PgCopyResultPtr>
+    PgCopyTable::copy_table(uint64_t db_id,
+                            uint64_t xid,
+                            const std::string &schema_name,
+                            const std::string &table_name)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::pair{schema_name, table_name}, std::nullopt);
     }
 
-    PgCopyResultPtr
-    PgCopyTable::_internal_copy(uint64_t db_id,
-                                uint64_t xid,
-                                std::optional<std::string> schema_name,
-                                std::optional<std::pair<std::string, std::string>> schema_table,
-                                std::optional<uint32_t> table_oid)
+    void
+    PgCopyTable::_worker(uint64_t db_id,
+                         uint64_t target_xid,
+                         CopyQueuePtr copy_queue,
+                         PgCopyResultPtr result)
     {
-        // set target xid
-        XidLsn target_xid(xid, 0);
-
         // create copy table object and connect to db
         PgCopyTable copy_table;
         copy_table.connect(db_id);
 
-        // start transaction and get the xids
-        std::string xid_str = copy_table._get_xact_xids();
+        XidLsn xid(target_xid, 0);
+
+        // start transaction and get the xids associated w/snapshot
+        std::string snapshot = copy_table._get_xact_xids();
+        result->set_snapshot(snapshot);
+
+        // iterate through the copy queue
+        while (true) {
+            // get the next copy request
+            CopyRequestPtr request = copy_queue->pop();
+            if (request == nullptr) {
+                if (copy_queue->empty() && copy_queue->is_shutdown()) {
+                    break;
+                }
+                continue;
+            }
+
+            // copy the table
+            copy_table._copy_table(db_id,
+                                   xid,
+                                   request->table_name,
+                                   request->schema_name,
+                                   request->table_oid);
+
+            // add the table oid to the result
+            result->add_table(request->table_oid);
+        }
+
+        // end the copy
+        copy_table._end_copy();
+        copy_table.disconnect();
+    }
+
+    std::vector<PgCopyResultPtr>
+    PgCopyTable::_internal_copy(uint64_t db_id,
+                                uint64_t target_xid,
+                                std::optional<std::string> schema_name,
+                                std::optional<std::pair<std::string, std::string>> schema_table,
+                                std::optional<std::vector<uint32_t>> table_tids)
+    {
+        CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
+
+        // create copy table object and connect to db
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
 
         // fetch the table oids
         std::vector<std::tuple<std::string, std::string, int32_t>> table_oids;
@@ -691,9 +738,10 @@ namespace springtail
             // escape the schema name
             std::string schema = copy_table._connection.escape_identifier(schema_name.value());
             copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
-        } else if (table_oid.has_value()) {
-            // by table oid
-            copy_table._get_table_oids(fmt::format(TABLE_QUERY, table_oid.value()), table_oids);
+        } else if (table_tids.has_value()) {
+            // by table oids
+            std::string tids = common::join_string(",", table_tids.value().begin(), table_tids.value().end());
+            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids);
         } else if (schema_table.has_value()) {
             // by schema, table pair
             std::string schema = copy_table._connection.escape_identifier(schema_table.value().first);
@@ -704,25 +752,43 @@ namespace springtail
             copy_table._get_table_oids(TABLES_QUERY, table_oids);
         }
 
-        std::vector<int32_t> table_oids_int;
+        // close this connection
+        copy_table._end_copy();
+        copy_table.disconnect();
+
+        // create a worker thread to copy the tables
+        std::vector<std::thread> workers;
+        std::vector<PgCopyResultPtr> table_results;
+        for (int i = 0; i < WORKER_THREADS; i++) {
+            PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>();
+            table_results.push_back(copy_result);
+            workers.push_back(std::thread(&PgCopyTable::_worker,
+                              &copy_table, db_id, target_xid, copy_queue, copy_result));
+        }
 
         // iterate through the tables and copy them
         for (const auto &table_tuple : table_oids) {
             SPDLOG_DEBUG("Dumping table {}", std::get<0>(table_tuple));
 
-            copy_table._copy_table(db_id,
-                                   target_xid,
-                                   std::get<0>(table_tuple),  // table name
-                                   std::get<1>(table_tuple),  // schema name
-                                   std::get<2>(table_tuple)); // table oid
+            // add the table to the copy queue
+            copy_queue->push(std::make_shared<CopyRequest>(std::get<0>(table_tuple),  // table name
+                                                           std::get<1>(table_tuple),  // schema name
+                                                           std::get<2>(table_tuple))); // table oid
+        }
 
-            table_oids_int.push_back(std::get<2>(table_tuple));
+        // shutdown the copy queue; blocks until queue is empty
+        copy_queue->shutdown();
+        assert (copy_queue->empty());
+
+        // join the worker threads
+        for (auto &worker : workers) {
+            worker.join();
         }
 
         // finalize the system tables
-        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid);
 
         // create result object
-        return std::make_shared<PgCopyResult>(table_oids_int, xid_str, target_xid.xid);
+        return table_results;
     }
 } // namespace springtail

@@ -49,10 +49,10 @@ dump_tables_in_schema(const PostgresConnection &conn,
 
     uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
-    PgCopyResultPtr res = PgCopyTable::copy_schema(db_id, xid+1, schema_name);
+    std::vector<PgCopyResultPtr> res = PgCopyTable::copy_schema(db_id, xid+1, schema_name);
 
     // update the xid mgr
-    XidMgrClient::get_instance()->commit_xid(db_id, res->target_xid, false);
+    XidMgrClient::get_instance()->commit_xid(db_id, res[0]->target_xid, false);
 }
 
 int

@@ -218,7 +218,7 @@ namespace springtail::pg_log_mgr {
         void _copy_thread();
 
         /** Process copy table results; insert into redis */
-        void _process_copy_results(PgCopyResultPtr res);
+        void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

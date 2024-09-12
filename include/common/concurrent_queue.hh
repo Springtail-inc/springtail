@@ -155,6 +155,11 @@ namespace springtail {
             }
         }
 
+        /** is queue shutdown */
+        bool is_shutdown() {
+            return _shutdown;
+        }
+
     protected:
         /** max number of elements in queue */
         std::size_t _limit=-1;

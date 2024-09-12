@@ -108,6 +108,11 @@ namespace springtail {
               _redis(RedisMgr::get_instance()->get_client())
         { }
 
+        uint64_t size()
+        {
+            return _redis->llen(_key);
+        }
+
         /**
          * @brief Push item onto queue.
          * @param key list key

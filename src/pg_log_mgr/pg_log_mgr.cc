@@ -123,7 +123,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_copy_thread()
     {
-        PgCopyResultPtr res = nullptr;
+        std::vector<PgCopyResultPtr> res;
 
         // check initial state on thread startup
         if (_state == STATE_STARTING) {
@@ -136,9 +136,12 @@ namespace springtail::pg_log_mgr {
             // intiate full db copy, set results in redis
             res = PgCopyTable::copy_db(_db_id, _get_next_xid());
             _process_copy_results(res);
+            res.clear();
         }
 
         while (!_shutdown) {
+            std::vector<uint32_t> table_ids;
+
             // block on redis table sync queue w/timeout for shutdown
             StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
             if (table_id_ptr == nullptr) {
@@ -152,26 +155,42 @@ namespace springtail::pg_log_mgr {
             // stall pg replication pipeline
             _stall_pipeline = true;
 
-            // initiate copy table on single table
-            res = PgCopyTable::copy_table(_db_id, strtol(table_id_ptr->c_str(), nullptr, 10), _get_next_xid());
+            // populate the tables to copy; check for more work
+            table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
+            while (_redis_sync_queue.size() > 0) {
+                table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
+                if (table_id_ptr == nullptr) {
+                    break;
+                }
+                table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
+            }
+
+            // copy tables
+            res = PgCopyTable::copy_tables(_db_id, _get_next_xid(), table_ids);
             _process_copy_results(res);
             _redis_sync_queue.commit(REDIS_WORKER_ID);
+
+            // cleanup
+            table_ids.clear();
+            res.clear();
         }
     }
 
     void
-    PgLogMgr::_process_copy_results(PgCopyResultPtr res)
+    PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
 
-        // go through result tids and update Redis with table state info
-        for (const auto &tid : res->tids) {
-            redis->hset(_redis_sync_table, std::to_string(tid), res->pg_xids);
-        }
+        for (const auto &r : res) {
+            // go through result tids and update Redis with table state info
+            for (const auto &tid : r->tids) {
+                redis->hset(_redis_sync_table, std::to_string(tid), r->pg_xids);
+            }
 
-        // send table sync message to GC
-        PgXactMsg redis_xact(_db_id, res);
-        _redis_queue.push(redis_xact);
+            // send table sync message to GC
+            PgXactMsg redis_xact(_db_id, r);
+            _redis_queue.push(redis_xact);
+        }
 
         // done message
         PgXactMsg redis_xact2(_db_id);
@@ -180,6 +199,7 @@ namespace springtail::pg_log_mgr {
         // clear stall state
         _state = STATE_RUNNING;
         Properties::set_db_state(_db_id, _state);
+
         _stall_pipeline = false;
     }
 

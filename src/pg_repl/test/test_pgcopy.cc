@@ -61,11 +61,12 @@ namespace {
         uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
         // perform the table copy
-        PgCopyResultPtr res = PgCopyTable::copy_table(db_id, xid+1, schema_name, table_name);
-        ASSERT_EQ(res->tids.size(), 1);
+        std::vector<PgCopyResultPtr> res = PgCopyTable::copy_table(db_id, xid+1, schema_name, table_name);
+        ASSERT_EQ(res.size(), 1);
+        ASSERT_EQ(res[0]->tids.size(), 1);
 
-        uint32_t oid = res->tids[0];
-        xid = res->target_xid;
+        uint32_t oid = res[0]->tids[0];
+        xid = res[0]->target_xid;
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);
