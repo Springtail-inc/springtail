@@ -736,7 +736,7 @@ namespace springtail
         if (schema_name.has_value()) {
             // by schema name, need to escape the schema name
             // escape the schema name
-            std::string schema = copy_table._connection.escape_identifier(schema_name.value());
+            std::string schema = copy_table._connection.escape_string(schema_name.value());
             copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
         } else if (table_tids.has_value()) {
             // by table oids
@@ -744,8 +744,8 @@ namespace springtail
             copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids);
         } else if (schema_table.has_value()) {
             // by schema, table pair
-            std::string schema = copy_table._connection.escape_identifier(schema_table.value().first);
-            std::string table = copy_table._connection.escape_identifier(schema_table.value().second);
+            std::string schema = copy_table._connection.escape_string(schema_table.value().first);
+            std::string table = copy_table._connection.escape_string(schema_table.value().second);
             copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
         } else {
             // all tables in db
@@ -759,7 +759,7 @@ namespace springtail
         // create a worker thread to copy the tables
         std::vector<std::thread> workers;
         std::vector<PgCopyResultPtr> table_results;
-        for (int i = 0; i < WORKER_THREADS; i++) {
+        for (int i = 0; i < std::min(static_cast<std::size_t>(WORKER_THREADS), table_oids.size()); i++) {
             PgCopyResultPtr copy_result = std::make_shared<PgCopyResult>();
             table_results.push_back(copy_result);
             workers.push_back(std::thread(&PgCopyTable::_worker,
@@ -777,7 +777,7 @@ namespace springtail
         }
 
         // shutdown the copy queue; blocks until queue is empty
-        copy_queue->shutdown();
+        copy_queue->shutdown(true);
         assert (copy_queue->empty());
 
         // join the worker threads

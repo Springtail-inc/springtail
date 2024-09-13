@@ -75,6 +75,10 @@ namespace springtail {
             }
 
             if (_queue.empty()) {
+                write_lock.unlock();
+                if (_shutdown) {
+                    _cv_shutdown.notify_all();
+                }
                 return nullptr;
             }
 
@@ -129,10 +133,19 @@ namespace springtail {
         }
 
         /** Shutdown queue */
-        void shutdown()
+        void shutdown(bool wait=false)
         {
-            _shutdown = true;
-            _cv_pop.notify_all();
+            if (!_shutdown) {
+                _shutdown = true;
+                _cv_pop.notify_all();
+            }
+
+            if (wait) {
+                std::unique_lock<std::mutex> write_lock{_mutex};
+                while (!_queue.empty()) {
+                    _cv_shutdown.wait(write_lock);
+                }
+            }
         }
 
         /** is queue empty */
@@ -169,6 +182,8 @@ namespace springtail {
         std::condition_variable _cv_pop;
         /** condition variable to wait on if queue is full */
         std::condition_variable _cv_push;
+        /** condition variable to wait on empty for shutdown */
+        std::condition_variable _cv_shutdown;
         /** internal queue */
         std::queue<Tptr> _queue;
         /** shutdown flag */

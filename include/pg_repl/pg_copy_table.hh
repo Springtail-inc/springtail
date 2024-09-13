@@ -46,7 +46,7 @@ namespace springtail
             uint64_t xmin8 = std::strtoull(xid_parts[0].c_str(), nullptr, 10);
             uint64_t xmax8 = std::strtoull(xid_parts[1].c_str(), nullptr, 10);
             xmin = static_cast<uint32_t>(xmin8 & 0xFFFFFFFFLL);
-            xmax = static_cast<uint32_t>(xmin8 & 0xFFFFFFFFLL);
+            xmax = static_cast<uint32_t>(xmax8 & 0xFFFFFFFFLL);
             xmin_epoch = static_cast<uint32_t>(xmin8 >> 32);
             xmax_epoch = static_cast<uint32_t>(xmax8 >> 32);
 

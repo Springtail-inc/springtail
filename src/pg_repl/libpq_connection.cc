@@ -381,9 +381,9 @@ namespace springtail {
 
         // create key value list for: host, port, dbname, user, password, options
         // escape options
-        std::string name = escape_identifier(db_name);
-        std::string user = escape_identifier(db_user);
-        std::string pass = escape_identifier(db_pass);
+        std::string name = escape_string(db_name);
+        std::string user = escape_string(db_user);
+        std::string pass = escape_string(db_pass);
 
         // setting client encoding to UTF8
         // setting database=replication to put connection in replication mode
@@ -409,16 +409,16 @@ namespace springtail {
                 }
 
                 hosttype = "hostaddr";
-                host = escape_identifier(ip.value());
+                host = escape_string(ip.value());
             } else {
                 // allow libpq to do the hostname lookup (using system resolver)
                 hosttype = "host";
-                host = escape_identifier(db_host);
+                host = escape_string(db_host);
             }
 
             // generate connection string
-            std::string conninfo = fmt::format("{}={} port={} dbname={} user={} \
-                password={} {}client_encoding={} \
+            std::string conninfo = fmt::format("{}='{}' port={} dbname='{}' user='{}' \
+                password='{}' {}client_encoding={} \
                 options='-c datestyle=ISO -c intervalstyle=postgres -c extra_float_digits=3'",
                 hosttype, host, db_port, name, user, pass,
                 (replication ? "replication=database ": ""), encoding);

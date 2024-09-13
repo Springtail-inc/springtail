@@ -92,7 +92,8 @@ namespace springtail::pg_log_mgr {
             _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
         }
 
-        // XXX need to add back table sync worker items to redis sync queue
+        // need to add back table sync worker items to redis sync queue
+        _redis_sync_queue.abort(REDIS_WORKER_ID);
 
         return lsn;
     }
