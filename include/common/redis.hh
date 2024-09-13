@@ -181,6 +181,16 @@ namespace springtail {
         }
 
         /**
+         * @brief Logically performs a commmit() and then a push() of that element onto another queue.
+         */
+        void commit_and_move(const std::string &worker_id,
+                             const std::string &queue)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->rpoplpush(worker_key, queue);
+        }
+
+        /**
          * @brief Logically performs a pop() and complete() in a single operation.
          *
          * @param timeout_sec timeout in seconds (0=block forever)

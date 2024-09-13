@@ -52,11 +52,15 @@ namespace springtail::gc {
               _parsers(parser_count)
         {
             _backlog = std::make_shared<Backlog>();
+            _sync_tracker = std::make_shared<SyncTracker>();
             _parser_queue = std::make_shared<ParserQueue>();
 
+            _dispatcher = std::make_shared<Dispatcher>(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+                                                                   Properties::get_db_instance_id()),
+                                                       _backlog, _sync_tracker);
+
             for (auto &reader : _readers) {
-                reader = std::make_shared<Reader>(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()),
-                                                   _backlog, _parser_queue);
+                reader = std::make_shared<Reader>(_backlog, _parser_queue);
             }
 
             for (auto &parser : _parsers) {
@@ -66,6 +70,8 @@ namespace springtail::gc {
 
         void run()
         {
+            _dispatcher_thread = std::thread(&Dispatcher::run, _dispatcher.get());
+
             for (auto &reader : _readers) {
                 _reader_threads.push_back(std::thread(&Reader::run, reader.get()));
             }
@@ -100,20 +106,21 @@ namespace springtail::gc {
 
         /** Holds the state for processing an XID. */
         struct State {
-            std::shared_ptr<pg_log_mgr::PgXactMsg> entry; ///< The XID entry from the PG log manager.
+            std::shared_ptr<pg_log_mgr::PgXactMsg> msg;
+            pg_log_mgr::PgXactMsg::XactMsg &entry; ///< The XID entry from the PG log manager.
             bool process_as_stream; ///< True if the XID is in STREAM mode.
             CounterPtr mutation_count; ///< The number of mutations outstanding to the parsers.
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
             explicit State(std::shared_ptr<pg_log_mgr::PgXactMsg> entry)
-                : entry(entry),
+                : entry(std::get<pg_log_mgr::PgXactMsg::XactMsg>(entry->msg)),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
                   lsn(0)
             { }
         };
-        typedef std::shared_ptr<State> StatePtr;
+        using StatePtr = std::shared_ptr<State>;
 
         /**
          * Maintains two structures:
@@ -198,6 +205,85 @@ namespace springtail::gc {
         };
         using BacklogPtr = std::shared_ptr<Backlog>;
 
+        /**
+         * A structure to track the metadata around a table sync.  Used to determine if individual
+         * mutations should be skipped due to an ongoing table sync.
+         */
+        struct SyncTracker {
+        public:
+            /**
+             * Add the metadata for a given table sync into the tracker.
+             */
+            void add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg);
+
+            /**
+             * Remove a given table from the sync tracker.  Called after we have passed all of the
+             * skipable transaction records.
+             */
+            void clear_sync(uint64_t db_id, uint64_t table_id);
+
+            /**
+             * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
+             */
+            bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid, uint32_t pg_epoch) const;
+
+        private:
+            /**
+             * Internal class representing the XID metadata for an individual table sync.
+             */
+            class XidRecord {
+            public:
+                XidRecord(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
+                    : _xmax(sync_msg.xmax),
+                      _xmax_epoch(sync_msg.xmax_epoch),
+                      _inflight(sync_msg.xips.begin(), sync_msg.xips.end())
+                { }
+
+                /**
+                 * Returns true if the given XID should be skipped given the stored metadata.
+                 */
+                bool
+                should_skip(uint32_t xid,
+                            uint32_t epoch) const
+                {
+                    // check if the xid's epoch is past the xmax's epoch
+                    if (epoch > _xmax_epoch) {
+                        return false; // don't skip
+                    }
+
+                    // check if the xid's epoch is before the xmax's epoch
+                    if (epoch < _xmax_epoch) {
+                        // if so, it should be skipped unless it was part of the in-flight transactions
+                        if (_inflight.contains(xid)) {
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    // we know the epochs match, so compare the actual xids
+                    // don't skip if the txn came after xmax since it is either in-flight or started after the snapshot
+                    if (xid >= _xmax) {
+                        return false;
+                    }
+
+                    // if the xid came before xmax but was inflight, then don't skip
+                    if (_inflight.contains(xid)) {
+                        return false;
+                    }
+                    return true;
+                }
+
+            private:
+                uint32_t _xmax;
+                uint32_t _xmax_epoch;
+                std::set<uint32_t> _inflight;
+            };
+
+        private:
+            mutable boost::shared_mutex _mutex;
+            std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _sync_map;
+        };
+        using SyncTrackerPtr = std::shared_ptr<SyncTracker>;
 
         /** A message from a Reader to a Parser. */
         struct ParserEntry {
@@ -212,10 +298,49 @@ namespace springtail::gc {
                 : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id), db_id(db_id)
             { }
         };
+        using ParserQueue = ConcurrentQueue<ParserEntry>;
+        using ParserQueuePtr = std::shared_ptr<ParserQueue>;
 
-        typedef ConcurrentQueue<ParserEntry> ParserQueue;
-        typedef std::shared_ptr<ParserQueue> ParserQueuePtr;
+        /**
+         * Reads XID commit messages coming from the PgLogMgr via the Redis queue.  Handles any
+         * in-order processing requirements before passing the message to a Reader thread (e.g.,
+         * processing table sync metadata).
+         */
+        class Dispatcher {
+        public:
+            Dispatcher(const std::string &pg_queue_key,
+                       BacklogPtr backlog,
+                       SyncTrackerPtr sync_tracker)
+                : _pg_queue(pg_queue_key),
+                  _backlog(backlog),
+                  _sync_tracker(sync_tracker)
+            {
+                // XXX it's potentially expensive to construct a generator each time
+                _worker_id = boost::uuids::to_string(boost::uuids::random_generator()());
+            }
 
+            /**
+             * Main loop for the Dispatcher thread.
+             */
+            void run();
+
+        private:
+            /** Unique ID of the worker.  Used for two-phase commit within the Redis queue. */
+            std::string _worker_id;
+
+            /** Shutdown flag. */
+            bool _shutdown = false;
+
+            /** Queue for XID messages from the PgLogMgr. */
+            RedisQueue<pg_log_mgr::PgXactMsg> _pg_queue;
+
+            /** A shared backlog queue for blocked XIDs. */
+            BacklogPtr _backlog;
+
+            /** Metadata for in-flight table syncs. */
+            SyncTrackerPtr _sync_tracker;
+        };
+        using DispatcherPtr = std::shared_ptr<Dispatcher>;
 
         /**
          * Reads XID commit messages and processes them by reading the individual WAL entries from
@@ -227,12 +352,11 @@ namespace springtail::gc {
          */
         class Reader {
         public:
-            Reader(const std::string &pg_queue_key,
-                   BacklogPtr backlog,
+            Reader(BacklogPtr backlog,
                    ParserQueuePtr parser_queue)
                 : _shutdown(false),
-                  _pg_queue(pg_queue_key),
                   _gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
+                  _reader_queue(fmt::format(redis::QUEUE_GC1_READER, Properties::get_db_instance_id())),
                   _backlog(backlog),
                   _parser_queue(parser_queue)
             {
@@ -294,11 +418,11 @@ namespace springtail::gc {
             /** Shutdown flag. */
             bool _shutdown;
 
-            /** Queue for XID messages from the PG log manager. */
-            RedisQueue<pg_log_mgr::PgXactMsg> _pg_queue;
-
             /** Queue for XID messages to the GC committer. */
             RedisQueue<XidReady> _gc_queue;
+
+            /** Queue to pass messages from the Dispatcher thread to the Reader threads. */
+            RedisQueue<pg_log_mgr::PgXactMsg> _reader_queue;
 
             /** A shared backlog queue for blocked XIDs. */
             BacklogPtr _backlog;
@@ -315,7 +439,7 @@ namespace springtail::gc {
             /** For managing the DDL statements in Redis. */
             RedisDDL _redis_ddl;
         };
-        typedef std::shared_ptr<Reader> ReaderPtr;
+        using ReaderPtr = std::shared_ptr<Reader>;
 
 
         /**
@@ -347,9 +471,15 @@ namespace springtail::gc {
             ParserQueuePtr _parser_queue;
             WriteCacheClient * const _write_cache;
         };
-        typedef std::shared_ptr<Parser> ParserPtr;
+        using ParserPtr = std::shared_ptr<Parser>;
 
     private:
+        /** The dispatcher object. */
+        DispatcherPtr _dispatcher;
+
+        /** The thread for the dispatcher object. */
+        std::thread _dispatcher_thread;
+
         /** A set of reader objects. */
         std::vector<ReaderPtr> _readers;
 
@@ -367,6 +497,9 @@ namespace springtail::gc {
 
         /** The shared backlog among the Readers */
         BacklogPtr _backlog;
+
+        /** Metadata for in-flight table syncs. */
+        SyncTrackerPtr _sync_tracker;
     };
 
 }

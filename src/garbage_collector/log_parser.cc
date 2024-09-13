@@ -168,6 +168,73 @@ namespace springtail::gc {
     }
 
     void
+    LogParser::SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto record = std::make_shared<XidRecord>(sync_msg);
+        for (int32_t table_id : sync_msg.tids) {
+            _sync_map[sync_msg.db_id][table_id] = record;
+        }
+    }
+
+    void
+    LogParser::SyncTracker::clear_sync(uint64_t db_id,
+                                       uint64_t table_id)
+    {
+        boost::unique_lock lock(_mutex);
+
+        auto db_i = _sync_map.find(db_id);
+        db_i->second.erase(table_id);
+        if (db_i->second.empty()) {
+            _sync_map.erase(db_i);
+        }
+    }
+
+    bool
+    LogParser::SyncTracker::should_skip(uint64_t db_id,
+                                        uint64_t table_id,
+                                        uint32_t pg_xid,
+                                        uint32_t pg_epoch) const
+    {
+        boost::shared_lock lock(_mutex);
+
+        auto db_i = _sync_map.find(db_id);
+        if (db_i == _sync_map.end()) {
+            return false;
+        }
+
+        auto table_i = db_i->second.find(table_id);
+        if (table_i == db_i->second.end()) {
+            return false;
+        }
+
+        return table_i->second->should_skip(pg_xid, pg_epoch);
+    }
+
+    void
+    LogParser::Dispatcher::run() {
+        std::string reader_queue = fmt::format(redis::QUEUE_GC1_READER, Properties::get_db_instance_id());
+
+        // loop until we are asked to shutdown
+        while (!_shutdown) {
+            // pull items from the PgLogMgr queue and process any table sync messages
+            auto xact_msg = _pg_queue.pop(_worker_id, 1);
+            if (xact_msg == nullptr) {
+                continue;
+            }
+
+            // record the table sync metadata
+            if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
+                _sync_tracker->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(xact_msg->msg));
+            }
+
+            // pass the operation on to the Reader threads
+            _pg_queue.commit_and_move(_worker_id, reader_queue);
+        }
+    }
+
+    void
     LogParser::Reader::run()
     {
         // loop until we are asked to shutdown; on shutdown drain the backlog
@@ -177,14 +244,19 @@ namespace springtail::gc {
             if (_state == nullptr) {
                 // if nothing ready in backlog, pull an XID from redis
                 // note: block for 1 second
-                auto xact_msg = _pg_queue.pop(_worker_id, 1);
+                auto xact_msg = _reader_queue.pop(_worker_id, 1);
                 if (xact_msg == nullptr) {
                     // nothing ready, loop and try again
                     continue;
                 }
 
                 if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
-                    // XXX handle table sync message
+                    // XXX shift the sync'd table into place?
+                    continue;
+                }
+
+                if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_END_MSG) {
+                    // XXX handle the sync end message -- if all of the necessary XIDs are skipped then can issue a commit (via Committer?)
                     continue;
                 }
 
@@ -194,21 +266,15 @@ namespace springtail::gc {
                 // update the schema dependencies from Redis
                 _backlog->update_deps(entry.db_id);
 
-                _state = std::make_shared<State>(entry);
+                _state = std::make_shared<State>(xact_msg);
             }
 
-            SPDLOG_INFO("Process XID: {}", _state->entry->xid);
-
-            // XXX check if the transaction is a table copy
-            if (false) {
-                // if so, mark the table as being in the "sync" state and record the PG xid at which the snapshot is taking place as well as the PG xids that should *not* be ignored for this table when processing additional records prior to the snapshot's PG xid.
-                continue;
-            }
+            SPDLOG_INFO("Process XID: {}", _state->entry.xid);
 
             // once we have an XID, scan the individual mutations from the log
-            uint64_t begin_offset = _state->entry->begin_offset;
-            uint64_t commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
-                ? _state->entry->commit_offset
+            uint64_t begin_offset = _state->entry.begin_offset;
+            uint64_t commit_offset = (_state->entry.begin_path == _state->entry.commit_path)
+                ? _state->entry.commit_offset
                 : -1;
 
             std::vector<char> filter = START_FILTER;
@@ -216,9 +282,9 @@ namespace springtail::gc {
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}", _state->entry->xid, _state->entry->begin_path, begin_offset);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}", _state->entry.xid, _state->entry.begin_path, begin_offset);
 
-                _reader.set_file(_state->entry->begin_path, begin_offset, commit_offset);
+                _reader.set_file(_state->entry.begin_path, begin_offset, commit_offset);
 
                 bool end_of_stream = false;
                 while (!end_of_stream && !blocked) {
@@ -236,13 +302,13 @@ namespace springtail::gc {
                         continue;
                     }
 
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Got msg {}", _state->entry->xid, static_cast<uint8_t>(msg->msg_type));
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Got msg {}", _state->entry.xid, static_cast<uint8_t>(msg->msg_type));
 
                     // handle the message
                     switch(msg->msg_type) {
                     case PgMsgEnum::BEGIN: {
                         auto &begin_msg = std::get<PgMsgBegin>(msg->msg);
-                        if (begin_msg.xid == _state->entry->pg_xid) {
+                        if (begin_msg.xid == _state->entry.pg_xid) {
                             filter = BEGIN_FILTER;
                         }
                         break;
@@ -257,7 +323,7 @@ namespace springtail::gc {
 
                     case PgMsgEnum::STREAM_START: {
                         auto &stream_start_msg = std::get<PgMsgStreamStart>(msg->msg);
-                        if (stream_start_msg.xid == _state->entry->pg_xid) {
+                        if (stream_start_msg.xid == _state->entry.pg_xid) {
                             _state->process_as_stream = true;
                             filter = STREAM_START_FILTER;
                         }
@@ -272,7 +338,7 @@ namespace springtail::gc {
 
                     case PgMsgEnum::STREAM_COMMIT: {
                         auto &stream_commit_msg = std::get<PgMsgStreamCommit>(msg->msg);
-                        if (stream_commit_msg.xid == _state->entry->pg_xid) {
+                        if (stream_commit_msg.xid == _state->entry.pg_xid) {
                             // stop processing
                             end_of_stream = true;
                             done = true;
@@ -283,40 +349,40 @@ namespace springtail::gc {
                     case PgMsgEnum::INSERT: {
                         auto &insert_msg = std::get<PgMsgInsert>(msg->msg);
 
-                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
+                        blocked = _process_mutation(_state->entry.pg_xid, _state->entry.xid,
                                                     insert_msg.rel_id, msg,
-                                                    _state->entry->begin_path, offset);
+                                                    _state->entry.begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::DELETE: {
                         auto &delete_msg = std::get<PgMsgDelete>(msg->msg);
 
-                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
+                        blocked = _process_mutation(_state->entry.pg_xid, _state->entry.xid,
                                                     delete_msg.rel_id, msg,
-                                                    _state->entry->begin_path, offset);
+                                                    _state->entry.begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::UPDATE: {
                         auto &update_msg = std::get<PgMsgUpdate>(msg->msg);
 
-                        blocked = _process_mutation(_state->entry->pg_xid, _state->entry->xid,
+                        blocked = _process_mutation(_state->entry.pg_xid, _state->entry.xid,
                                                     update_msg.rel_id, msg,
-                                                    _state->entry->begin_path, offset);
+                                                    _state->entry.begin_path, offset);
                         break;
                     }
                     case PgMsgEnum::TRUNCATE: {
                         auto &truncate_msg = std::get<PgMsgTruncate>(msg->msg);
 
                         // check if we should skip processing this message
-                        if (_state->process_as_stream && !_check_xid(_state->entry->pg_xid)) {
+                        if (_state->process_as_stream && !_check_xid(_state->entry.pg_xid)) {
                             // skip the entry
                             blocked = false;
                         } else {
                             // check all of the tables referenced by the truncate
                             // note: there may be multiple due to CASCADE
                             for (auto rel_id : truncate_msg.rel_ids) {
-                                blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
-                                                         rel_id, _state->entry->begin_path, offset);
+                                blocked = _check_backlog(_state->entry.db_id, _state->entry.xid,
+                                                         rel_id, _state->entry.begin_path, offset);
                                 if (blocked) {
                                     break;
                                 }
@@ -325,7 +391,7 @@ namespace springtail::gc {
                             if (!blocked) {
                                 for (auto rel_id : truncate_msg.rel_ids) {
                                     _state->mutation_count->increment();
-                                    auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry->xid, _state->lsn, rel_id, _state->entry->db_id);
+                                    auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, _state->entry.xid, _state->lsn, rel_id, _state->entry.db_id);
                                     _parser_queue->push(entry);
                                 }
                             }
@@ -338,18 +404,18 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
-                                                 table_msg.oid, _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry.db_id, _state->entry.xid,
+                                                 table_msg.oid, _state->entry.begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_table(_state->entry->db_id, xid, table_msg);
+                            XidLsn xid(_state->entry.xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_table(_state->entry.db_id, xid, table_msg);
 
                             // note: we don't notify the backlog until the entire XID is
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry.db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -359,17 +425,17 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
-                                                 table_msg.oid, _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry.db_id, _state->entry.xid,
+                                                 table_msg.oid, _state->entry.begin_path, offset);
                         if (!blocked) {
                             // XXX need to stall the pipeline in some cases, eg type change
 
                             // apply the schema change
-                            XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(_state->entry->db_id, xid, table_msg);
+                            XidLsn xid(_state->entry.xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(_state->entry.db_id, xid, table_msg);
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry.db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -379,12 +445,12 @@ namespace springtail::gc {
 
                         // schema changes should be applied in-order, so need to block this
                         // operation if there are earlier un-applied schema changes
-                        blocked = _check_backlog(_state->entry->db_id, _state->entry->xid,
-                                                 drop_msg.oid, _state->entry->begin_path, offset);
+                        blocked = _check_backlog(_state->entry.db_id, _state->entry.xid,
+                                                 drop_msg.oid, _state->entry.begin_path, offset);
                         if (!blocked) {
                             // apply the schema change
-                            XidLsn xid(_state->entry->xid, _state->lsn);
-                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(_state->entry->db_id, xid, drop_msg);
+                            XidLsn xid(_state->entry.xid, _state->lsn);
+                            auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(_state->entry.db_id, xid, drop_msg);
 
                             // XXX also perform a truncation of the table by queueing this message?
                             _state->mutation_count->increment();
@@ -393,7 +459,7 @@ namespace springtail::gc {
                             //       processed since there might be additional schema changes
 
                             // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                            _redis_ddl.add_ddl(_state->entry->db_id, xid.xid, ddl_stmt);
+                            _redis_ddl.add_ddl(_state->entry.db_id, xid.xid, ddl_stmt);
                         }
                         break;
                     }
@@ -411,18 +477,18 @@ namespace springtail::gc {
                 }
 
                 // prepare to scan the next file
-                if (_state->entry->begin_path == _state->entry->commit_path) {
+                if (_state->entry.begin_path == _state->entry.commit_path) {
                     // XXX can this ever be hit?  Would it be an error to not have seen a commit?
                     SPDLOG_WARN("No more files to scan, but didn't see commit");
                     done = true;
                 } else {
                     // XXX how to get the next file?
-                    _state->entry->begin_path = fs::get_next_file(_state->entry->begin_path,
+                    _state->entry.begin_path = fs::get_next_file(_state->entry.begin_path,
                                                                   pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
                                                                   pg_log_mgr::PgLogMgr::LOG_SUFFIX);
                     begin_offset = 0;
-                    commit_offset = (_state->entry->begin_path == _state->entry->commit_path)
-                        ? _state->entry->commit_offset
+                    commit_offset = (_state->entry.begin_path == _state->entry.commit_path)
+                        ? _state->entry.commit_offset
                         : -1;
                 }
             }
@@ -432,7 +498,7 @@ namespace springtail::gc {
 
             // if the XID is fully processed, perform cleanup
             if (done) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Waiting for completion", _state->entry->xid);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Waiting for completion", _state->entry.xid);
 
                 // wait for the parsers to complete the work for this XID
                 _state->mutation_count->wait();
@@ -442,11 +508,11 @@ namespace springtail::gc {
                 // write_cache->set_lookup();
 
                 // clear the dependencies and commit the entry in the Redis queue
-                _backlog->clear_dep(_state->entry->db_id, _state->entry->xid);
-                _pg_queue.commit(_worker_id);
+                _backlog->clear_dep(_state->entry.db_id, _state->entry.xid);
+                _reader_queue.commit(_worker_id);
 
-                _gc_queue.push(XidReady(_state->entry->db_id, _state->entry->xid));
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", _state->entry->xid);
+                _gc_queue.push(XidReady(_state->entry.db_id, _state->entry.xid));
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", _state->entry.xid);
             }
         }
     }
@@ -460,11 +526,11 @@ namespace springtail::gc {
     bool
     LogParser::Reader::_check_xid(uint64_t pg_xid)
     {
-        if (_state->entry->pg_xid == pg_xid) {
+        if (_state->entry.pg_xid == pg_xid) {
             return true;
         }
 
-        if (_state->entry->aborted_xids.find(pg_xid) != _state->entry->aborted_xids.end()) {
+        if (_state->entry.aborted_xids.find(pg_xid) != _state->entry.aborted_xids.end()) {
             return false;
         }
 
@@ -483,8 +549,8 @@ namespace springtail::gc {
         // change has been applied.
         if (_backlog->check(db_id, oid, xid)) {
             // halt processing this XID until earlier schema changes have been applied
-            _state->entry->begin_path = file;
-            _state->entry->begin_offset = _reader.offset();
+            _state->entry.begin_path = file;
+            _state->entry.begin_offset = _reader.offset();
 
             _backlog->push(db_id, oid, xid, _state);
             return true;
@@ -507,13 +573,13 @@ namespace springtail::gc {
         }
 
         // check if we need to block for schema changes
-        if (_check_backlog(_state->entry->db_id, xid, rel_id, file, offset)) {
+        if (_check_backlog(_state->entry.db_id, xid, rel_id, file, offset)) {
             return true;
         }
 
         // otherwise we queue this message for processing
         _state->mutation_count->increment();
-        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id, _state->entry->db_id);
+        auto entry = std::make_shared<ParserEntry>(msg, _state->mutation_count, xid, _state->lsn, rel_id, _state->entry.db_id);
         _parser_queue->push(entry);
 
         return false;
