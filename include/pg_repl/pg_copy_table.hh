@@ -27,7 +27,7 @@ namespace springtail
         std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
         std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
 
-        PgCopyResult() = default;
+        explicit PgCopyResult(uint64_t target_xid) : target_xid(target_xid) {}
 
         void add_table(int32_t tid)
         {

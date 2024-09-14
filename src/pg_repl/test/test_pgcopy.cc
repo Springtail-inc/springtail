@@ -62,11 +62,16 @@ namespace {
 
         // perform the table copy
         std::vector<PgCopyResultPtr> res = PgCopyTable::copy_table(db_id, xid+1, schema_name, table_name);
+        SPDLOG_DEBUG("Doing copy at: {}", xid+1);
         ASSERT_EQ(res.size(), 1);
         ASSERT_EQ(res[0]->tids.size(), 1);
 
         uint32_t oid = res[0]->tids[0];
         xid = res[0]->target_xid;
+
+        // commit the xid
+        SPDLOG_DEBUG("Committing xid: {}", xid);
+        XidMgrClient::get_instance()->commit_xid(db_id, xid, false);
 
         // create an access table
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);
@@ -78,6 +83,8 @@ namespace {
         int count = 0;
         std::string prev = "";
         for (auto &row : *table) {
+            std::cout << fields->at(1)->get_text(row) << std::endl;
+
             if (prev != "") {
                 ASSERT_GT(fields->at(1)->get_text(row), prev);
             }
