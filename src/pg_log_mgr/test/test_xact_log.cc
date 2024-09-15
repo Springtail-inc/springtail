@@ -106,8 +106,7 @@ namespace {
         ASSERT_EQ(msg3.pg_xid, 1);
         ASSERT_EQ(msg3.aborted_xids.size(), 2);
 
-        PgCopyResultPtr copy_res = std::make_shared<PgCopyResult>();
-        copy_res->target_xid = 43534;
+        PgCopyResultPtr copy_res = std::make_shared<PgCopyResult>(43534);
         copy_res->set_snapshot("1234:2345:3456,7893");
         copy_res->add_table(54);
         copy_res->add_table(67);
