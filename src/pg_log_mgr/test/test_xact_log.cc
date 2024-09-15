@@ -3,6 +3,7 @@
 
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
+#include <pg_log_mgr/pg_redis_xact.hh>
 
 using namespace springtail;
 using namespace springtail::pg_log_mgr;
@@ -85,4 +86,48 @@ namespace {
         ASSERT_EQ(xact_map[2]->begin_path, std::filesystem::path("/tmp/test_xlog/test_3.log"));
     }
 
+    TEST(XactTestMsg, test_msg)
+    {
+        PgXactMsg msg("/tmp/test_xlog/test_1.log", "/tmp/test_xlog/test_2.log", 1, 1, 100, 1000, 5, 1, {10, 20});
+
+        std::string str = msg.serialize();
+
+        PgXactMsg msg2(str);
+        PgXactMsg::XactMsg msg3 = std::get<PgXactMsg::XactMsg>(msg2.msg);
+
+        ASSERT_EQ(msg2.type, PgXactMsg::Type::XACT_MSG);
+        ASSERT_EQ(msg3.begin_path, std::filesystem::path("/tmp/test_xlog/test_1.log"));
+        ASSERT_EQ(msg3.commit_path, "/tmp/test_xlog/test_2.log");
+        ASSERT_EQ(msg3.db_id, 1);
+        ASSERT_EQ(msg3.begin_offset, 1);
+        ASSERT_EQ(msg3.commit_offset, 100);
+        ASSERT_EQ(msg3.xact_lsn, 1000);
+        ASSERT_EQ(msg3.xid, 5);
+        ASSERT_EQ(msg3.pg_xid, 1);
+        ASSERT_EQ(msg3.aborted_xids.size(), 2);
+
+        PgCopyResultPtr copy_res = std::make_shared<PgCopyResult>();
+        copy_res->target_xid = 43534;
+        copy_res->set_snapshot("1234:2345:3456,7893");
+        copy_res->add_table(54);
+        copy_res->add_table(67);
+
+        PgXactMsg msg4(1, copy_res);
+        str = msg4.serialize();
+
+        PgXactMsg msg5(str);
+        PgXactMsg::TableSyncMsg msg6 = std::get<PgXactMsg::TableSyncMsg>(msg5.msg);
+
+        ASSERT_EQ(msg5.type, PgXactMsg::Type::TABLE_SYNC_MSG);
+        ASSERT_EQ(msg6.db_id, 1);
+        ASSERT_EQ(msg6.target_xid, 43534);
+        ASSERT_EQ(msg6.xmin, 1234);
+        ASSERT_EQ(msg6.xmax, 2345);
+        ASSERT_EQ(msg6.tids.size(), 2);
+        ASSERT_EQ(msg6.tids[0], 54);
+        ASSERT_EQ(msg6.tids[1], 67);
+        ASSERT_EQ(msg6.xips.size(), 2);
+        ASSERT_EQ(msg6.xips[0], 3456);
+        ASSERT_EQ(msg6.xips[1], 7893);
+    }
 }
