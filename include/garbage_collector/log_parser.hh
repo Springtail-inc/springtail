@@ -53,12 +53,9 @@ namespace springtail::gc {
             : _parser_queue(std::make_shared<ParserQueue>()),
               _reader(_parser_queue),
               _reader_threads(reader_count),
-              _parsers(parser_count)
-        {
-            for (auto &parser : _parsers) {
-                parser = std::make_shared<Parser>(_parser_queue);
-            }
-        }
+              _parser(_parser_queue),
+              _parser_threads(parser_count)
+        { }
 
         void run()
         {
@@ -66,8 +63,8 @@ namespace springtail::gc {
                 thread = std::thread(&Reader::run, &_reader);
             }
 
-            for (auto &parser : _parsers) {
-                _parser_threads.push_back(std::thread(&Parser::run, parser.get()));
+            for (auto &thread : _parser_threads) {
+                thread = std::thread(&Parser::run, &_parser);
             }
         }
 
@@ -214,6 +211,11 @@ namespace springtail::gc {
              * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
              */
             bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+
+            /**
+             * Checks if the tracker has any entries for a given database.
+             */
+            bool empty(uint64_t db_id) const;
 
         private:
             /**
@@ -394,8 +396,7 @@ namespace springtail::gc {
         class Parser {
         public:
             explicit Parser(ParserQueuePtr parser_queue)
-                : _parser_queue(parser_queue),
-                  _write_cache(WriteCacheClient::get_instance())
+                : _parser_queue(parser_queue)
             { }
 
             /**
@@ -414,7 +415,6 @@ namespace springtail::gc {
 
         private:
             ParserQueuePtr _parser_queue;
-            WriteCacheClient * const _write_cache;
         };
         using ParserPtr = std::shared_ptr<Parser>;
 
@@ -428,8 +428,8 @@ namespace springtail::gc {
         /** A set of reader threads.  Thread operation defined by Reader. */
         std::vector<std::thread> _reader_threads;
 
-        /** A set of parser objects. */
-        std::vector<ParserPtr> _parsers;
+        /** The parser object. */
+        Parser _parser;
 
         /** A pool of parser threads that perform lookups for individual mutations. */
         std::vector<std::thread> _parser_threads;

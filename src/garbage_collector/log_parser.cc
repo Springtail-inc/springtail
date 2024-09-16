@@ -210,7 +210,13 @@ namespace springtail::gc {
         }
 
         // if the db_map is empty, then all tables have been cleared
-        return db_map.empty();
+        if (db_map.empty()) {
+            // if empty, clear the database entry
+            _sync_map.erase(db_i);
+            return true;
+        }
+
+        return false;
     }
 
     bool
@@ -231,6 +237,21 @@ namespace springtail::gc {
         }
 
         return table_i->second->should_skip(pg_xid);
+    }
+
+    bool
+    LogParser::SyncTracker::empty(uint64_t db_id) const
+    {
+        boost::shared_lock lock(_mutex);
+
+        auto db_i = _sync_map.find(db_id);
+        if (db_i == _sync_map.end()) {
+            return true;
+        }
+
+        // note: should never be empty since we remove the entry if it becomes empty
+        assert(!db_i->second.empty());
+        return false;
     }
 
     void
@@ -257,16 +278,27 @@ namespace springtail::gc {
 
                     // record the table sync metadata
                     if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
-                        bool sync_start = _sync_tracker.add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(xact_msg->msg));
-                        
+                        const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(xact_msg->msg);
+
+                        bool sync_start = _sync_tracker.add_sync(msg);
                         if (sync_start) {
-                            // XXX if this is the first table sync, issue a message to the Committer to stop committing XIDs
+                            // this is the first table sync, issue a message to the Committer to stop committing XIDs
+                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_START, msg.db_id));
                         }
                         continue;
                     }
 
                     if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_END_MSG) {
-                        // XXX handle the sync end message -- if all of the necessary XIDs are skipped then can issue a commit (via Committer?)
+                        // handle the sync end message
+                        const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncEndMsg>(xact_msg->msg);
+
+                        // note: if the sync tracker is empty, it means that the database was idle
+                        //       during the table syncs, so we can notify for a "commit" immediately
+                        //       which will do the table rotates and move the database back to the
+                        //       ready state
+                        if (_sync_tracker.empty(msg.db_id)) {
+                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id));
+                        }
                         continue;
                     }
 
@@ -512,10 +544,10 @@ namespace springtail::gc {
                     SPDLOG_WARN("No more files to scan, but didn't see commit");
                     done = true;
                 } else {
-                    // XXX how to get the next file?
+                    // get the next file in the log rotation
                     state->entry.begin_path = fs::get_next_file(state->entry.begin_path,
-                                                                  pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
-                                                                  pg_log_mgr::PgLogMgr::LOG_SUFFIX);
+                                                                pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
+                                                                pg_log_mgr::PgLogMgr::LOG_SUFFIX);
                     begin_offset = 0;
                     commit_offset = (state->entry.begin_path == state->entry.commit_path)
                         ? state->entry.commit_offset
@@ -549,9 +581,10 @@ namespace springtail::gc {
                     // the sync metadata can be released for any tables based on the pg XID
                     bool all_clear = _sync_tracker.clear_syncs(state->entry.db_id, state->entry.pg_xid);
                     if (all_clear) {
-                        // if this XID is an indication that the ongoing table syncs are aligned, then
-                        // we can push a message to perform a commit at the last seen XID
-                        // XXX _gc_queue.push(XidReady());
+                        // if this XID is an indication that the ongoing table syncs are aligned,
+                        // then we can push a message to perform a commit at the previously seen XID
+                        // (before committing the currently processed XID)
+                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id));
                     }
 
                     // XXX notify the ExtentMapper that the XID has been fully processed
@@ -675,6 +708,8 @@ namespace springtail::gc {
     void
     LogParser::Parser::run()
     {
+        WriteCacheClient * const write_cache = WriteCacheClient::get_instance();
+
         while (true) {
             // wait for a work item
             auto entry = _parser_queue->pop();
@@ -727,9 +762,9 @@ namespace springtail::gc {
                 data.data = extent->serialize();
                 data.op = WriteCacheClient::RowOp::INSERT;
 
-                _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
                 if (extent_id != constant::UNKNOWN_EXTENT) {
-                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
+                    write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                 }
                 break;
             }
@@ -764,9 +799,9 @@ namespace springtail::gc {
                 data.pkey = extent->serialize();
                 data.op = WriteCacheClient::RowOp::DELETE;
 
-                _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
                 if (extent_id != constant::UNKNOWN_EXTENT) {
-                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
+                    write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                 }
                 break;
             }
@@ -801,8 +836,8 @@ namespace springtail::gc {
                     data.data = new_extent->serialize();
                     data.op = WriteCacheClient::RowOp::UPDATE;
 
-                    _write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
-                    _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
+                    write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
+                    write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);
                 } else {
                     // generate extents for the delete data and insert data
                     auto pkey_schema = schema;
@@ -843,13 +878,13 @@ namespace springtail::gc {
                     insert_data.data = new_extent->serialize();
                     insert_data.op = WriteCacheClient::RowOp::INSERT;
 
-                    _write_cache->add_rows(entry->db_id, table->id(), old_extent_id, { delete_data });
-                    _write_cache->add_rows(entry->db_id, table->id(), new_extent_id, { insert_data });
+                    write_cache->add_rows(entry->db_id, table->id(), old_extent_id, { delete_data });
+                    write_cache->add_rows(entry->db_id, table->id(), new_extent_id, { insert_data });
                     if (old_extent_id != constant::UNKNOWN_EXTENT) {
-                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, old_extent_id);
+                        write_cache->set_lookup(entry->db_id, table->id(), entry->xid, old_extent_id);
                     }
                     if (new_extent_id != constant::UNKNOWN_EXTENT) {
-                        _write_cache->set_lookup(entry->db_id, table->id(), entry->xid, new_extent_id);
+                        write_cache->set_lookup(entry->db_id, table->id(), entry->xid, new_extent_id);
                     }
                 }
                 break;
@@ -858,7 +893,7 @@ namespace springtail::gc {
                 // record the truncate into the write cache look-aside
                 WriteCacheClient::TableChange change{ entry->xid, entry->lsn,
                                                       WriteCacheClient::TableOp::TRUNCATE };
-                _write_cache->add_table_change(entry->db_id, table->id(), change);
+                write_cache->add_table_change(entry->db_id, table->id(), change);
                 break;
             }
             default:
