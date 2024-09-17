@@ -256,6 +256,10 @@ namespace springtail
         std::set<uint32_t> aborted_xids;   ///< stream subxacts that aborted
         std::filesystem::path begin_path;  ///< log path containing begin message
         std::filesystem::path commit_path; ///< log path containing commit message
+
+        PgTransaction(uint8_t type) : type(type) {}
+
+        PgTransaction() = default;
     };
     using PgTransactionPtr = std::shared_ptr<PgTransaction>;
 

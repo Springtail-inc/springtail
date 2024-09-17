@@ -125,6 +125,16 @@ namespace springtail {
         }
 
         /**
+         * @brief Push serialized items onto queue.
+         * @param values vector of serialized values
+         * @return uint64_t items on list
+         */
+        uint64_t push(const std::vector<std::string> &values)
+        {
+            return _redis->lpush(_key, values.begin(), values.end());
+        }
+
+        /**
          * @brief Pop item from queue (list).
          *
          * To support a two-phase commit, we move the item from the primary queue to separate list
