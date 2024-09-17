@@ -37,6 +37,7 @@ namespace springtail {
 
         void ping(thrift::xid_mgr::Status& _return) override;
         void commit_xid(thrift::xid_mgr::Status& _return, const int64_t db_id, const thrift::xid_mgr::xid_t xid, bool has_schema_changes) override;
+        void record_ddl_change(thrift::xid_mgr::Status& _return, const int64_t db_id, const thrift::xid_mgr::xid_t xid) override;
         thrift::xid_mgr::xid_t get_committed_xid(const int64_t db_id, thrift::xid_mgr::xid_t schema_xid) override;
 
     private:

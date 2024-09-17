@@ -251,9 +251,10 @@ namespace springtail::sys_tbl_mgr {
         boost::unique_lock wlock(_write_mutex);
 
         // finalize the mutated tables at the _target_xid
-        std::map<uint64_t, std::vector<uint64_t>> roots;
+        // XXX we currently don't store the metadata, but re-read it from the roots file each time
+        std::map<uint64_t, TableMetadata> md_map;
         for (const auto &entry : _write[request.db_id]) {
-            roots[entry.first] = entry.second->finalize();
+            md_map[entry.first] = entry.second->finalize();
         }
 
         // block all read access while we swap access roots

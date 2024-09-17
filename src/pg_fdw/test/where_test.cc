@@ -70,7 +70,8 @@ namespace {
             _populate_table(mtable, target_xid);
 
             // finalize the empty table
-            mtable->finalize();
+            auto &&metadata = mtable->finalize();
+            TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;
         }

@@ -414,16 +414,17 @@ namespace springtail {
         StorageCache::get_instance()->drop_for_truncate(_data_file);
 
         // clear the indexes
-        std::vector<uint64_t> roots{constant::UNKNOWN_EXTENT};
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT };
         _primary_index->truncate();
 
         for (auto secondary : _secondary_indexes) {
-            roots.push_back(constant::UNKNOWN_EXTENT);
+            metadata.roots.push_back(constant::UNKNOWN_EXTENT);
             secondary->truncate();
         }
 
         // update the roots and stats
-        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, 0);
+        sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
     }
 
     StorageCache::PagePtr
@@ -554,7 +555,7 @@ namespace springtail {
         }
     }
 
-    std::vector<uint64_t>
+    TableMetadata
     MutableTable::finalize()
     {
         // in the case of having an (initially) empty table, there are no invalidations... we can
@@ -564,31 +565,31 @@ namespace springtail {
 
             StorageCache::get_instance()->put(_empty_page);
             _empty_page = nullptr;
-
-            // XXX should we still call StorageCache::flush() to make sure that the file is sync()'d?
         }
 
         // flush the dirty data pages of the table to disk
         StorageCache::get_instance()->flush(_data_file);
 
         // now flush the indexes, capturing the roots
-        std::vector<uint64_t> roots;
-        roots.push_back(_primary_index->finalize());
-
+        TableMetadata metadata;
+        metadata.roots.push_back(_primary_index->finalize());
         for (auto secondary : _secondary_indexes) {
-            roots.push_back(secondary->finalize());
+            metadata.roots.push_back(secondary->finalize());
         }
+        metadata.stats = _stats;
 
+#if 0
         // update the roots and stats in the system tables for non-system tables
         // note: don't currently keep table roots or table stats for system tables
         if (_id > constant::MAX_SYSTEM_TABLE_ID) {
             sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, roots, _stats.row_count);
         }
+#endif
 
         // store the roots into a look-aside root file
         // XXX maybe we only need to do this for system tables?  or even just the table_roots table?
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
-        for (auto root : roots) {
+        for (auto root : metadata.roots) {
             auto &&row = extent->append();
             _roots_root_f->set_uint64(row, root);
         }
@@ -606,7 +607,7 @@ namespace springtail {
         std::filesystem::rename(_table_dir / constant::ROOTS_TMP_FILE,
                                 _table_dir / constant::ROOTS_FILE);
 
-        return roots;
+        return metadata;
     }
 
     void

@@ -198,8 +198,7 @@ namespace springtail::sys_tbl_mgr {
     Client::update_roots(uint64_t db_id,
                          uint64_t table_id,
                          uint64_t xid,
-                         const std::vector<uint64_t> &roots,
-                         uint64_t row_count)
+                         const TableMetadata &metadata)
     {
         ThriftClient c = _get_client();
         Status result;
@@ -208,8 +207,8 @@ namespace springtail::sys_tbl_mgr {
         request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
-        request.roots.insert(request.roots.end(), roots.begin(), roots.end());
-        request.stats.row_count = row_count;
+        request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+        request.stats.row_count = metadata.stats.row_count;
 
         c.client->update_roots(result, request);
 

@@ -27,8 +27,8 @@ find_program(
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
 # set variables for thrift schema .thrift file and generated .h
-# file(GLOB THRIFT_FILES "*.thrift")
-set(THRIFT_FILES write_cache.thrift xid_mgr.thrift sys_tbl_mgr.thrift)
+file(GLOB THRIFT_FILES "*.thrift")
+# set(THRIFT_FILES write_cache.thrift xid_mgr.thrift sys_tbl_mgr.thrift)
 
 # iterate over all thrift files; generate the cpp and h files and link them into libraries
 foreach(THRIFT_FILE ${THRIFT_FILES})
@@ -69,6 +69,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
         COMMAND mkdir -p ${THRIFT_INCLUDE_DIR}
         COMMAND ${THRIFT_COMPILER} -I ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types -out ${THRIFT_GEN_DIR} ${THRIFT_FILE_PATH}
         COMMAND ${CP_COMMAND} ${THRIFT_GEN_DIR}/*.h ${THRIFT_INCLUDE_DIR}
+	COMMAND touch ${THRIFT_GEN_FILES} # seem to need this to ensure dependencies are honored
         DEPENDS ${THRIFT_FILE_PATH}
         COMMENT "Generating thrift files for ${THRIFT_FILE_PATH} into ${THRIFT_GEN_DIR}"
     )
