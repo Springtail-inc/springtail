@@ -232,10 +232,9 @@ namespace springtail {
     TableMgr::update_roots(uint64_t db_id,
                            uint64_t table_id,
                            uint64_t target_xid,
-                           const std::vector<uint64_t> &roots,
-                           const TableStats &stats)
+                           const TableMetadata &metadata)
     {
-        sys_tbl_mgr::Client::get_instance()->update_roots(db_id, table_id, target_xid, roots, stats.row_count);
+        sys_tbl_mgr::Client::get_instance()->update_roots(db_id, table_id, target_xid, metadata);
     }
 
     MutableTablePtr

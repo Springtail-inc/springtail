@@ -46,6 +46,13 @@ namespace springtail::xid_mgr {
         void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
 
         /**
+         * @brief Record a DDL change without doing a commit.  Used for table sync operations.
+         * @param db_id database id
+         * @param xid xid to commit
+         */
+        void record_ddl_change(uint64_t db_id, uint64_t xid);
+
+        /**
          * @brief Get the latest committed xid object
          * @param db_id database id
          * @param schema_xid last known schema xid
@@ -109,8 +116,6 @@ namespace springtail::xid_mgr {
 
         /**
          * @brief Write committed xid to file (if larger than last value)
-         * @param db_id database id
-         * @param xid xid to write
          */
         void _write_committed_xids();
 
@@ -123,6 +128,13 @@ namespace springtail::xid_mgr {
          * @brief Sync committed xids to disk
          */
         void _sync_thread_func();
+
+        /**
+         * @brief Add an entry to the DDL history
+         * @param db_id database id
+         * @param xid xid to write
+         */
+        void _add_history(uint64_t db_id, uint64_t xid);
     };
     using PartitionPtr = std::shared_ptr<Partition>;
 }

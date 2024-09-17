@@ -128,6 +128,18 @@ namespace springtail::xid_mgr {
     }
 
     void
+    Partition::_add_history(uint64_t db_id,
+                            uint64_t xid)
+    {
+        auto it = _history.find(db_id);
+        if (it == _history.end()) {
+            _history[db_id] = {xid};
+        } else {
+            it->second.push_back(xid);
+        }
+    }
+
+    void
     Partition::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes)
     {
         std::unique_lock lock(_map_mutex);
@@ -143,17 +155,20 @@ namespace springtail::xid_mgr {
 
         // if the XID contains schema changes, add it to the history
         if (has_schema_changes) {
-            auto it = _history.find(db_id);
-            if (it == _history.end()) {
-                _history[db_id] = {xid};
-            } else {
-                it->second.push_back(xid);
-            }
+            _add_history(db_id, xid);
         }
 
         lock.unlock();
 
         // XXX check if we can clean up history?  or do we need a background thread for that?
+    }
+
+    void
+    Partition::record_ddl_change(uint64_t db_id,
+                                 uint64_t xid)
+    {
+        std::unique_lock lock(_map_mutex);
+        _add_history(db_id, xid);
     }
 
     uint64_t

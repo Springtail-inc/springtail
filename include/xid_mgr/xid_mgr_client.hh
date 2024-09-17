@@ -41,6 +41,13 @@ namespace springtail {
         void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_change);
 
         /**
+         * @brief Record DDL change.  Used for handling table sync.
+         * @param db_id database id
+         * @param xid xid to commit
+         */
+        void record_ddl_change(uint64_t db_id, uint64_t xid);
+
+        /**
          * @brief Get the latest committed xid
          * @param db_id database id
          * @param schema_xid last known schema xid

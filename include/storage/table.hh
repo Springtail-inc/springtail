@@ -11,15 +11,11 @@ namespace springtail {
      * Structure to hold table statistics.  Currently only holds the row count of the table.
      */
     struct TableStats {
-        uint64_t row_count;
-
-        TableStats()
-            : row_count(0)
-        { }
+        uint64_t row_count = 0;
     };
 
     /**
-     * Structure to hold table metadata required to create a table.
+     * Structure to hold table metadata required to record a table snapshot.
      */
     struct TableMetadata {
         std::vector<uint64_t> roots;
@@ -384,7 +380,7 @@ namespace springtail {
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
          * system tables.
          */
-        std::vector<uint64_t> finalize();
+        TableMetadata finalize();
 
         /**
          * Returns the schema of the table.

@@ -65,7 +65,7 @@ namespace springtail {
          * Update the roots of a table.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t target_xid,
-                          const std::vector<uint64_t> &roots, const TableStats &stats);
+                          const TableMetadata &metadata);
 
         /**
          * Finalize all outstanding system metadata mutations.

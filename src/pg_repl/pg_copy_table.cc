@@ -457,10 +457,11 @@ namespace springtail
             table->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
         }
 
-        auto roots = table->finalize();
+        // flush the table data to disk
+        auto &&metadata = table->finalize();
 
         // store the roots into the system table
-        TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, roots, {});
+        TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, metadata);
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)

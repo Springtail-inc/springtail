@@ -63,6 +63,13 @@ namespace springtail::xid_mgr {
         void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
 
         /**
+         * @brief Record a DDL change without doing a commit.  Used for table sync operations.
+         * @param db_id database id
+         * @param xid xid to commit
+         */
+        void record_ddl_change(uint64_t db_id, uint64_t xid);
+
+        /**
          * @brief Get the latest committed xid object
          * @param db_id database id
          * @param schema_xid last known schema xid

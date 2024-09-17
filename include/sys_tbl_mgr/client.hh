@@ -54,7 +54,7 @@ namespace springtail::sys_tbl_mgr {
          * Call update_roots() on the SysTblMgr.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid,
-                          const std::vector<uint64_t> &roots, uint64_t row_count);
+                          const TableMetadata &metadata);
 
         /**
          * Call finalize() on the SysTblMgr.
