@@ -31,8 +31,8 @@ namespace springtail {
      * An object that holds all of the information about a column over a given xid range.
      */
     struct SchemaColumn {
-        uint64_t xid;
-        uint64_t lsn;
+        uint64_t xid = 0;
+        uint64_t lsn = 0;
         std::string name;
         uint32_t position;  ///< position and postgres column ID, can have holes
         SchemaType type;
@@ -41,7 +41,7 @@ namespace springtail {
         bool nullable;
         std::optional<uint32_t> pkey_position; ///< position in primary key, if any, 0 based no holes
         std::optional<std::string> default_value;
-        SchemaUpdateType update_type;
+        SchemaUpdateType update_type = SchemaUpdateType::NEW_COLUMN;
 
         SchemaColumn() = default;
 
@@ -64,8 +64,7 @@ namespace springtail {
               exists(exists),
               nullable(nullable),
               pkey_position(pkey_position),
-              default_value(default_value),
-              update_type(SchemaUpdateType::NEW_COLUMN)
+              default_value(default_value)
         { }
 
         SchemaColumn(const std::string_view &name,
@@ -75,22 +74,22 @@ namespace springtail {
                      bool nullable,
                      std::optional<uint32_t> pkey_position=std::optional<uint32_t>(),
                      std::optional<std::string> default_value=std::optional<std::string>())
-            : xid(0),
-              lsn(0),
-              name(name),
+            : name(name),
               position(position),
               type(type),
               pg_type(pg_type),
               nullable(nullable),
               pkey_position(pkey_position),
-              default_value(default_value),
-              update_type(SchemaUpdateType::NEW_COLUMN)
+              default_value(default_value)
         { }
 
         /**
          * Default copy constructor.
          */
         SchemaColumn(const SchemaColumn &column) = default;
+
+        /** Default move constructor. */
+        // SchemaColumn(SchemaColumn &&column) = default;
     };
 
     /**

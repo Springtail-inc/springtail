@@ -38,7 +38,8 @@ struct TableRequest {
     1: i64 db_id,
     2: i64 xid,
     3: i64 lsn,
-    4: TableInfo table
+    4: TableInfo table,
+    5: i64 snapshot_xid
 }
 
 struct DropTableRequest {
@@ -59,7 +60,8 @@ struct UpdateRootsRequest {
     2: i64 xid,
     3: i64 table_id,
     4: list<i64> roots,
-    5: TableStats stats
+    5: TableStats stats,
+    6: i64 snapshot_xid
 }
 
 struct FinalizeRequest {
@@ -75,7 +77,8 @@ struct GetRootsRequest {
 
 struct GetRootsResponse {
     1: list<i64> roots,
-    2: TableStats stats
+    2: TableStats stats,
+    3: i64 snapshot_xid
 }
 
 struct GetSchemaRequest {

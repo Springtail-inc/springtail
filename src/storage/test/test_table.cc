@@ -73,30 +73,25 @@ namespace {
         TablePtr
         _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<Table>(_db_id,
-                                           table_id,
-                                           xid,
-                                           _base_dir / fmt::format("{}", table_id),
-                                           _primary_keys,
-                                           _secondary_keys,
-                                           roots,
-                                           _schema,
-                                           TableStats());
+            TableMetadata tbl_meta;
+            tbl_meta.roots = roots;
+            tbl_meta.snapshot_xid = 1;
+
+            return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
+                                           _primary_keys, _secondary_keys,
+                                           tbl_meta, _schema);
         }
 
         MutableTablePtr
         _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<MutableTable>(_db_id,
-                                                  table_id,
-                                                  xid - 1,
-                                                  xid,
-                                                  roots,
-                                                  _base_dir / fmt::format("{}", table_id),
-                                                  _primary_keys,
-                                                  _secondary_keys,
-                                                  _schema,
-                                                  TableStats());
+            TableMetadata tbl_meta;
+            tbl_meta.roots = roots;
+            tbl_meta.snapshot_xid = 1;
+
+            return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
+                                                  _primary_keys, _secondary_keys,
+                                                  tbl_meta, _schema);
         }
 
         std::shared_ptr<Tuple>

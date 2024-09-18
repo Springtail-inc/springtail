@@ -63,16 +63,6 @@ namespace springtail
     };
     using PgCopyResultPtr = std::shared_ptr<PgCopyResult>;
 
-    /** Stores the column schema for the table being copied */
-    struct PgColumn {
-        std::string name;
-        int32_t pg_type;
-        std::optional<std::string> default_value;
-        int32_t position;
-        bool is_nullable;
-        bool is_pkey;
-    };
-
     /** Stores the table schema for table being copied */
     struct PgTableSchema {
         std::string db_name;
@@ -80,7 +70,7 @@ namespace springtail
         std::string table_name;
         std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
         int32_t table_oid;
-        std::vector<PgColumn> columns;
+        std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
         std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
     };
@@ -159,21 +149,6 @@ namespace springtail
          * @brief Free the copy buffer from _get_next_data()
          */
         void _release_data();
-
-        /**
-         * @brief Convert pg columns to internal pg msg schema columns
-         * @param pg_columns input pg columns
-         * @param pkeys primary keys
-         * @return std::vector<PgMsgSchemaColumn>
-         */
-        std::vector<PgMsgSchemaColumn> _map_to_pg_msg(const std::vector<PgColumn> pg_columns,
-                                                      const std::vector<std::string> pkeys);
-
-        /**
-         * find element in vector and get distance from begin iterator
-         * used to find primary key position
-         */
-        int _get_vec_pos(const std::vector<std::string> vec, const std::string element);
 
         /**
          * @brief Parse row received from copy table command

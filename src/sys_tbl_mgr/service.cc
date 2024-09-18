@@ -78,6 +78,9 @@ namespace springtail::sys_tbl_mgr {
         // add roots and stats entry -- may get overwritten later if data is added to the table
         auto roots_info = std::make_shared<GetRootsResponse>();
         roots_info->roots.push_back(constant::UNKNOWN_EXTENT);
+        roots_info->stats.row_count = 0;
+        roots_info->snapshot_xid = request.snapshot_xid;
+
         _set_roots_info(request.db_id, request.table.id, xid, roots_info);
 
         // add schemas entries for each column
@@ -237,6 +240,7 @@ namespace springtail::sys_tbl_mgr {
         auto info = std::make_shared<GetRootsResponse>();
         info->roots = request.roots;
         info->stats = request.stats;
+        info->snapshot_xid = request.snapshot_xid;
 
         _set_roots_info(request.db_id, request.table_id, xid, info);
 
@@ -381,7 +385,7 @@ namespace springtail::sys_tbl_mgr {
         auto info = std::make_shared<TableInfo>();
         info->id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i);
         info->xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
-        info->lsn = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
+        info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(*row_i);
         info->schema = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row_i);
         info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row_i);
         info->exists = exists;
@@ -464,10 +468,16 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // retrieve the root extent ID of the primary
-        auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+        const std::string &eid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::EXTENT_ID].name;
+        auto eid_f = roots_t->extent_schema()->get_field(eid);
         roots_info->roots.push_back(eid_f->get_uint64(*rrow_i));
 
-        // get the root of the table's primary index
+        // retrieve the snapshot XID (use the primary index row)
+        const std::string &sxid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
+        auto sxid_f = roots_t->extent_schema()->get_field(sxid);
+        roots_info->snapshot_xid = sxid_f->get_uint64(*rrow_i);
+
+        // access the stats table
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
         auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
 
@@ -504,7 +514,8 @@ namespace springtail::sys_tbl_mgr {
         auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
         for (int index_id = 0; index_id < roots_info->roots.size(); ++index_id) {
             uint64_t root = roots_info->roots[index_id];
-            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root);
+            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root,
+                                                          roots_info->snapshot_xid);
             table_roots_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}",

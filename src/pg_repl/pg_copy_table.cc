@@ -8,6 +8,8 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
 #include <common/thread_pool.hh>
 
 #include <pg_repl/exception.hh>
@@ -228,9 +230,11 @@ namespace springtail
             int rows = _connection.ntuples();
             _schema.columns.resize(rows);
 
+            uint32_t pkey_pos = 0;
             for (int i = 0; i < rows; i++) {
                 // add column to schema
-                PgColumn column;
+                // PgColumn column;
+                SchemaColumn column;
 
                 // column_name string
                 column.name = _connection.get_string(i, 0);
@@ -239,7 +243,7 @@ namespace springtail
                 column.position = _connection.get_int32(i, 1);
 
                 // is_nullable varchar
-                column.is_nullable = _connection.get_boolean(i, 2);
+                column.nullable = _connection.get_boolean(i, 2);
 
                 // column_default varchar
                 column.default_value = _connection.get_string_optional(i, 3);
@@ -248,19 +252,17 @@ namespace springtail
                 column.pg_type = _connection.get_int32(i, 4);
 
                 // is primary key
-                column.is_pkey = _connection.get_boolean(i, 5);
+                bool is_pkey = _connection.get_boolean(i, 5);
+                if (is_pkey) {
+                    column.pkey_position = pkey_pos++;
+                }
 
                 SPDLOG_DEBUG_MODULE(LOG_PG_REPL,
                                     "Column: {} type={} position={} nullable={} default_value={} pkey={}",
-                                    column.name, column.pg_type, column.position, column.is_nullable,
-                                    column.default_value.value_or("NULL"), column.is_pkey);
+                                    column.name, column.pg_type, column.position, column.nullable,
+                                    column.default_value.value_or("NULL"), column.pkey_position);
 
-                _schema.columns[i] = column;
-
-                // add the key to the list of pkeys
-                if (column.is_pkey) {
-                    _schema.pkeys.push_back(column.name);
-                }
+                _schema.columns[i] = std::move(column);
             }
         } catch (...) {
             _connection.clear();
@@ -342,43 +344,6 @@ namespace springtail
         _connection.free_copy_buffer();
     }
 
-    std::vector<PgMsgSchemaColumn>
-    PgCopyTable::_map_to_pg_msg(const std::vector<PgColumn> pg_columns,
-                                const std::vector<std::string> pkeys)
-    {
-        std::vector<PgMsgSchemaColumn> columns;
-        columns.reserve(pg_columns.size());
-        for(const PgColumn &pg_col : pg_columns){
-            columns.push_back(PgMsgSchemaColumn{
-                    pg_col.name,
-                    static_cast<uint8_t>(pg_msg::convert_pg_type(pg_col.pg_type)),
-                    pg_col.pg_type,
-                    pg_col.default_value,
-                    pg_col.position,
-                    pg_col.is_pkey ? _get_vec_pos(pkeys, pg_col.name) : -1, // pk_position
-                    pg_col.is_nullable,
-                    pg_col.is_pkey,
-                    // TODO: we assume false since we don't support generated fields right now
-                    false  // is_generated
-                });
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "PKEY? {} {}", columns.back().is_pkey, columns.back().pk_position);
-        }
-        return columns;
-    }
-
-    int
-    PgCopyTable::_get_vec_pos(const std::vector<std::string> vec,
-                              const std::string element)
-    {
-        auto it = std::find(vec.begin(), vec.end(), element);
-        if (it == vec.end()) {
-            return -1;
-        } else {
-            return std::distance(vec.begin(), it);
-        }
-    }
-
     void
     PgCopyTable::_copy_table(uint64_t db_id,
                              springtail::XidLsn &xid,
@@ -392,6 +357,53 @@ namespace springtail
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
 
+        // store the system table operations in a JSON array
+        nlohmann::json ops;
+
+        // generate a DropTableRequest message
+        {
+            sys_tbl_mgr::DropTableRequest request;
+            request.db_id = db_id;
+            request.xid = xid.xid;
+            request.lsn = 0;
+            request.table_id = table_oid;
+            request.schema = _schema.schema_name;
+            request.name = _schema.table_name;
+            auto &&drop_json = common::thrift_to_json<sys_tbl_mgr::DropTableRequest>(request);
+            ops.push_back(drop_json);
+        }
+
+        // generate a TableRequest message
+        {
+            sys_tbl_mgr::TableRequest request;
+            request.db_id = db_id;
+            request.xid = xid.xid;
+            request.lsn = 1;
+            request.table.id = table_oid;
+            request.table.schema = _schema.schema_name;
+            request.table.name = _schema.table_name;
+            for (const auto &col : _schema.columns) {
+                sys_tbl_mgr::TableColumn column;
+                column.__set_name(col.name);
+                column.__set_type(static_cast<int8_t>(col.type));
+                column.__set_pg_type(col.pg_type);
+                column.__set_position(col.position);
+                column.__set_is_nullable(col.nullable);
+                column.__set_is_generated(false);
+                if (col.pkey_position) {
+                    column.__set_pk_position(*col.pkey_position);
+                }
+                if (col.default_value) {
+                    column.__set_default_value(*col.default_value);
+                }
+
+                request.table.columns.push_back(column);
+            }
+            auto &&create_json = common::thrift_to_json<sys_tbl_mgr::TableRequest>(request);
+            ops.push_back(create_json);
+        }
+
+#if 0
         // drop the existing table if it exists
         if (TableMgr::get_instance()->exists(db_id, table_oid, xid.xid)) {
             PgMsgDropTable drop_msg{0, // pg lsn
@@ -414,8 +426,10 @@ namespace springtail
         // note: we create the system metadata at the previous XID
         TableMgr::get_instance()->create_table(db_id, xid, create_msg);
         ++xid.lsn;
+#endif
 
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, _schema.table_oid, xid.xid, xid.xid);
+        auto schema = std::make_shared<ExtentSchema>(_schema.columns);
+        auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid, schema);
 
         // start the COPY
         _prepare_copy();
@@ -460,8 +474,26 @@ namespace springtail
         // flush the table data to disk
         auto &&metadata = table->finalize();
 
+        {
+            sys_tbl_mgr::UpdateRootsRequest request;
+            request.db_id = db_id;
+            request.xid = xid.xid;
+            request.table_id = table_oid;
+            request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+            request.stats.row_count = metadata.stats.row_count;
+            request.snapshot_xid = metadata.snapshot_xid;
+            auto &&update_json = common::thrift_to_json<sys_tbl_mgr::UpdateRootsRequest>(request);
+            ops.push_back(update_json);
+        }
+
+        // store the system table operations into redis for the GC-2
+        auto &&key = fmt::format(redis::HASH_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
+        RedisMgr::get_instance()->get_client()->hset(key, std::to_string(table_oid), ops.dump());
+
+#if 0
         // store the roots into the system table
         TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, metadata);
+#endif
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)

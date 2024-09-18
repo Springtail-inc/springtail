@@ -9,10 +9,12 @@
 #include <vector>
 #include <optional>
 
-
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/exception.hh>
+
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/protocol/TJSONProtocol.h>
 
 namespace springtail {
     /**
@@ -93,6 +95,35 @@ namespace springtail {
                 token = string_value.substr(start_pos);
                 outvec.push_back(std::move(token));
             }
+        }
+
+        template <typename T>
+        nlohmann::json
+        thrift_to_json(const T &obj)
+        {
+            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
+            apache::thrift::protocol::TJSONProtocol protocol(buffer);
+
+            // serialize the object
+            obj.write(&protocol);
+
+            return nlohmann::json::parse(buffer->getBufferAsString());
+        }
+
+        template <typename T>
+        T
+        json_to_thrift(const nlohmann::json &json)
+        {
+            std::string data = json.dump();
+            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>
+                (const_cast<uint8_t *>(data.c_str()), data.size());
+            apache::thrift::protocol::TJSONProtocol protocol(buffer);
+
+            // deserialize the object
+            T obj;
+            obj.read(&protocol);
+
+            return obj;
         }
     }
 }

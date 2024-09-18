@@ -56,7 +56,8 @@ namespace springtail::sys_tbl {
         { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
         { "index_id", 2, SchemaType::UINT64, INT8OID, false, 1 },
         { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
-        { "extent_id", 4, SchemaType::UINT64, INT8OID, false }
+        { "extent_id", 4, SchemaType::UINT64, INT8OID, false },
+        { "snapshot_xid", 5, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<SchemaColumn> TableRoots::Primary::SCHEMA = {
