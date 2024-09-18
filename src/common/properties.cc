@@ -285,6 +285,9 @@ namespace springtail {
         // get the redis client and lookup the db ids from the db_instance config
         std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
         redis_client->hset(db_instance_state_hash, std::to_string(db_id), state);
+
+        // publish the state
+        redis_client->publish(std::format(redis::PUBSUB_DB_STATE_CHANGES, db_instance_id, db_id), state);
     }
 
     std::string

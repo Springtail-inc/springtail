@@ -52,12 +52,6 @@ namespace springtail::pg_log_mgr {
         static constexpr char const * const LOG_PREFIX_XACT = "pg_log_xact_";
         static constexpr char const * const LOG_SUFFIX = ".log";
 
-        // redis db state
-        static constexpr char const * const REDIS_STATE_STARTING = "starting";
-        static constexpr char const * const REDIS_STATE_RUNNING = "running";
-        static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
-        static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
-
         /** redis worker id for redis sync queue */
         static constexpr char const * const REDIS_WORKER_ID = "pg_log_mgr";
 
@@ -148,13 +142,12 @@ namespace springtail::pg_log_mgr {
             STATE_SYNC_STALL,   ///< stall state during sync
             STATE_SYNCING,      ///< syncing state (doing table copies)
             STATE_REPLAYING,    ///< replaying state (replaying logs)
+            STATE_REPLAY_DONE,  ///< replay done, waiting for running from GC
             STATE_STOPPED
         };
 
         uint64_t _db_id;                      ///< db id
         uint64_t _db_instance_id;             ///< db instance id
-
-        std::string _state;                   ///< current state of the log manager
 
         // connection params
         std::string _host;
@@ -235,8 +228,11 @@ namespace springtail::pg_log_mgr {
 
         //// Table copy
         RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
-        std::string _redis_sync_table;     ///< redis key for table sync hset
-        std::thread _table_copy_thread;    ///< table copy thread
+        std::string _redis_sync_table;             ///< redis key for table sync hset
+        std::thread _table_copy_thread;            ///< table copy thread
+
+        /** Do the table copies; return the results */
+        void _do_table_copies(std::optional<std::vector<uint32_t>> table_ids = std::nullopt);
 
         /** Copy table thread; waits on table sync queue */
         void _copy_thread();
@@ -246,6 +242,15 @@ namespace springtail::pg_log_mgr {
 
         /** Replay xaction logs to redis GC queue; blocks other msgs from being queued */
         void _replay_xact_logs();
+
+        //// Redis pub/sub
+        std::thread _redis_thread;          ///< redis pub/sub thread
+
+        /** Redis pub/sub thread entry point */
+        void _redis_pubsub_thread();
+
+        /** Handle state change; callback from Redis pubsub */
+        void _handle_external_state_change(const std::string &new_state);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

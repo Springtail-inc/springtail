@@ -86,7 +86,7 @@ namespace springtail::common {
     private:
         StateEnum _current_state;         ///< Current state
         mutable std::shared_mutex _mutex; ///< Mutex for state
-        std::condition_variable_any _cv;      ///< Condition variable for state
+        std::condition_variable_any _cv;  ///< Condition variable for state
     };
 
 }

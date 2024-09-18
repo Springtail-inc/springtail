@@ -2,7 +2,14 @@
 
 namespace springtail::redis {
 
-    ///// Config DB paths accessed via Properties::
+    ///// Config DB paths accessed via Properties (DB=0)::
+
+    // redis db state
+    static constexpr char const * const REDIS_STATE_STARTUP = "startup";
+    static constexpr char const * const REDIS_STATE_INITIALIZE = "initialize";
+    static constexpr char const * const REDIS_STATE_RUNNING = "running";
+    static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
+    static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
 
     /**
      * Config for database instance: var db_instance_id (hashset)
@@ -27,6 +34,29 @@ namespace springtail::redis {
      * args: db_instance_id
      */
     static constexpr char DB_INSTANCE_STATE[] = "instance_state:{}";
+
+    //// For publish/subscribe (DB 0)
+
+    /**
+     * Pubsub channel for all DB instance config changes
+     * args: <db_instance_id>
+     * message: TBD
+     */
+    static constexpr char PUBSUB_DB_INSTANCE_UPDATES[] = "pubsub:instance_config_updates:{}";
+
+    /**
+     * Pubsub channel for all DB config changes
+     * args: <db_instance_id>, <db_id>
+     * message: TBD
+     */
+    static constexpr char PUBSUB_DB_UPDATES[] = "pubsub:db_config_updates:{}:{}";
+
+    /**
+     * Pubsub channel for all DB state changes
+     * args: <db_instance_id>, <db_id>
+     * message: <new state>
+     */
+    static constexpr char PUBSUB_DB_STATE_CHANGES[] = "pubsub:db_state_changes:{}:{}";
 
     //// Data DB (1) accessed via RedisClient::
 

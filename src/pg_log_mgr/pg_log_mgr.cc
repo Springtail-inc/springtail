@@ -25,11 +25,11 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::startup()
     {
-        _state = Properties::get_db_state(_db_id);
+        std::string state = Properties::get_db_state(_db_id);
 
         uint64_t lsn = INVALID_LSN;
 
-        if (_state == REDIS_STATE_STARTING) {
+        if (state == redis::REDIS_STATE_INITIALIZE) {
             _startup_init();
         } else {
             lsn = _startup_running();
@@ -101,6 +101,10 @@ namespace springtail::pg_log_mgr {
         // need to add back table sync worker items to redis sync queue
         _redis_sync_queue.abort(REDIS_WORKER_ID);
 
+        // set state to running
+        Properties::set_db_state(_db_id, redis::REDIS_STATE_RUNNING);
+
+        // set internal state to running
         _internal_state.set(STATE_RUNNING);
 
         return lsn;
@@ -129,28 +133,57 @@ namespace springtail::pg_log_mgr {
     }
 
     void
+    PgLogMgr::_handle_external_state_change(const std::string &new_state)
+    {
+        StateEnum internal_state = _internal_state.get();
+
+        if (new_state == redis::REDIS_STATE_RUNNING) {
+            // if the new state is running, then we should have been in the replay done state
+            if (internal_state == STATE_REPLAY_DONE) {
+                _internal_state.test_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
+            } else {
+                assert(internal_state == STATE_STARTUP);
+            }
+        }
+    }
+
+    void
+    PgLogMgr::_redis_pubsub_thread()
+    {
+        // create subscriber for redis pubsub, set timeout to 5 secs.
+        RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(5);
+
+        // subscribe to the state change channel
+        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id, _db_id);
+        subscriber->subscribe(state_change_channel);
+
+        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
+            if (channel == state_change_channel) {
+                _handle_external_state_change(msg);
+            }
+        });
+
+        while (!_shutdown) {
+            try {
+                // consume from subscriber, timeout is set above
+                subscriber->consume();
+            } catch (const sw::redis::TimeoutError &e) {
+                // timeout, check for shutdown
+                continue;
+            } catch (const sw::redis::Error &e) {
+                SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
+                break;
+            }
+        }
+    }
+
+    void
     PgLogMgr::_copy_thread()
     {
-        std::vector<PgCopyResultPtr> res;
-
         // check initial state on thread startup
         // if in startup_sync state then switch to syncing
-        if (_internal_state.test_and_set(STATE_STARTUP_SYNC, STATE_SYNC_STALL)) {
-            // update redis state
-            Properties::set_db_state(_db_id, REDIS_STATE_SYNCING);
-
-            _notify_xact_start_sync();
-
-            // wait for sync state
-            _internal_state.wait_for_state(STATE_SYNCING);
-
-            // intiate full db copy, set results in redis
-            res = PgCopyTable::copy_db(_db_id, _get_next_xid());
-            _process_copy_results(res);
-            res.clear();
-
-            // replay xact logs (queued during stall)
-            _replay_xact_logs();
+        if (_internal_state.is(STATE_STARTUP_SYNC)) {
+            _do_table_copies();
         }
 
         while (!_shutdown) {
@@ -162,19 +195,6 @@ namespace springtail::pg_log_mgr {
                 continue; // timeout, check for shutdown
             }
 
-            // wait for running state; then set state to STATE_SYNCING
-            // XXX need to handle shutdown somehow
-            _internal_state.wait_and_set(STATE_RUNNING, STATE_SYNC_STALL);
-
-            // notify xact handler to rollover log
-            _notify_xact_start_sync();
-
-            // at this point the pipeline has stalled; update redis state
-            _state = REDIS_STATE_SYNCING;
-            Properties::set_db_state(_db_id, _state);
-
-            _internal_state.wait_for_state(STATE_SYNCING);
-
             // populate the tables to copy; check for more work
             table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
             while (_redis_sync_queue.size() > 0) {
@@ -185,29 +205,56 @@ namespace springtail::pg_log_mgr {
                 table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
             }
 
-            // copy tables
-            res = PgCopyTable::copy_tables(_db_id, _get_next_xid(), table_ids);
-            _process_copy_results(res);
+            if (table_ids.size() == 0) {
+                continue;
+            }
 
-            // replay xact logs (queued during stall)
-            _replay_xact_logs();
+            // copy tables
+            _do_table_copies(table_ids);
 
             // update redis state
             _redis_sync_queue.commit(REDIS_WORKER_ID);
-
-            // cleanup
-            table_ids.clear();
-            res.clear();
         }
     }
 
     void
+    PgLogMgr::_do_table_copies(std::optional<std::vector<uint32_t>> table_ids)
+    {
+        // set state to sync stall
+        _internal_state.set(STATE_SYNC_STALL);
+
+        // notify xact handler to rollover log
+        _notify_xact_start_sync();
+
+        // set db state to syncing
+        Properties::set_db_state(_db_id, redis::REDIS_STATE_SYNCING);
+
+        // wait for pipeline stall to complete
+        _internal_state.wait_for_state(STATE_SYNCING);
+
+        // copy tables
+        std::vector<PgCopyResultPtr> res;
+        if (table_ids.has_value()) {
+            res = PgCopyTable::copy_tables(_db_id, _get_next_xid(), table_ids.value());
+        } else {
+            res = PgCopyTable::copy_db(_db_id, _get_next_xid());
+        }
+        _process_copy_results(res);
+
+        // replay xact logs (queued during stall)
+        _replay_xact_logs();
+    }
+
+
+    void
     PgLogMgr::_notify_xact_start_sync()
     {
+        // push a message onto xact handler's queue to stall the pipeline
         assert(_internal_state.is(STATE_SYNC_STALL));
         PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_PIPELINE_STALL);
         _xact_queue->push(xact);
     }
+
 
     void
     PgLogMgr::_process_copy_results(const std::vector<PgCopyResultPtr> &res)
@@ -314,7 +361,6 @@ namespace springtail::pg_log_mgr {
                 // possible data has been consumed by keep alive
                 continue;
             }
-
 
             // log data, if data message is complete then record start/end offsets
             if (logger->log_data(data)) {

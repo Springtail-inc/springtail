@@ -49,6 +49,11 @@ namespace springtail {
      */
     class RedisMgr {
     public:
+        using SubscriberPtr = std::shared_ptr<sw::redis::Subscriber>;
+
+        static constexpr int REDIS_CONFIG_DB = 0;
+        static constexpr int REDIS_DATA_DB = 1;
+
         /**
          * @brief Get the singleton instance object
          * @return RedisMgr*
@@ -68,6 +73,15 @@ namespace springtail {
             return _redis;
         }
 
+        /**
+         * Get a subscriber object to be used for pub/sub
+         * Creates a new connection to Redis, so should be reusued
+         * Caller must catch sw::redis::TimeoutError
+         * @param timeout_secs timeout in seconds
+         * @return SubscriberPtr
+         */
+        SubscriberPtr get_subscriber(int timeout_secs=5);
+
     protected:
         /** internal singleton instance */
         static RedisMgr *_instance;
@@ -83,6 +97,9 @@ namespace springtail {
         ~RedisMgr() {}
 
     private:
+        sw::redis::ConnectionOptions     _connect_options;
+        sw::redis::ConnectionPoolOptions _pool_options;
+
         // delete copy constructor
         RedisMgr(const RedisMgr &)       = delete;
         void operator=(const RedisMgr &) = delete;
