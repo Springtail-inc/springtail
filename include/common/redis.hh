@@ -13,6 +13,28 @@
 #include <common/json.hh>
 
 namespace springtail {
+
+    /** Redis exception type */
+    class RedisError : public Error {
+    public:
+        RedisError() { }
+        RedisError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    /** Redis not found exception */
+    class RedisNotFoundError : public RedisError {
+        // constructor to take in a string
+    public:
+        RedisNotFoundError(const std::string &error)
+            : RedisError(error)
+        { }
+        const char *what() const noexcept {
+            return "Key not found";
+        }
+    };
+
     /**
      * @brief Redis connection wrapper, derives from Redis object
      *        For adding future functionality; redis::Redis is threadsafe

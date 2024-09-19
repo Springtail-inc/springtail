@@ -208,7 +208,7 @@ namespace springtail
         if (_connection.ntuples() == 0) {
             SPDLOG_ERROR("Table not found: {}.{}", schema_name, table_name);
             _connection.clear();
-            throw PgQueryError();
+            throw PgTableNotFoundError();
         }
 
         if (_connection.nfields() != 6) {
@@ -700,15 +700,23 @@ namespace springtail
                 continue;
             }
 
-            // copy the table
-            copy_table._copy_table(db_id,
-                                   xid,
-                                   request->table_name,
-                                   request->schema_name,
-                                   request->table_oid);
+            try {
+                // copy the table
+                copy_table._copy_table(db_id,
+                                       xid,
+                                       request->table_name,
+                                       request->schema_name,
+                                       request->table_oid);
 
-            // add the table oid to the result
-            result->add_table(request->table_oid);
+                // add the table oid to the result
+                result->add_table(request->table_oid);
+
+            } catch (PgTableNotFoundError &e) {
+                SPDLOG_ERROR("Table not found: {}.{}", request->schema_name, request->table_name);
+            } catch (PgQueryError &e) {
+                SPDLOG_ERROR("Error copying table: {}.{}", request->schema_name, request->table_name);
+                assert(false);
+            }
         }
 
         // end the copy

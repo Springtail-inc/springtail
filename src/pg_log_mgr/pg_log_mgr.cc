@@ -25,7 +25,15 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::startup()
     {
-        std::string state = Properties::get_db_state(_db_id);
+        // get db state from Redis, default to RUNNING
+        std::string state;
+        try {
+            state = Properties::get_db_state(_db_id);
+        } catch (RedisNotFoundError &e) {
+            // db state not found, assume initial state
+            state = redis::REDIS_STATE_RUNNING;
+            Properties::set_db_state(_db_id, state);
+        }
 
         uint64_t lsn = INVALID_LSN;
 
