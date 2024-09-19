@@ -86,8 +86,8 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  -- regular tables "
-        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "WHERE relkind = 'r'  "         // regular tables "
+        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas "
         "AND nspname != 'information_schema' "
         "ORDER BY pg_class.oid";
 
@@ -97,8 +97,8 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  -- regular tables "
-        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "WHERE relkind = 'r' "          // regular tables
+        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
         "AND nspname != 'information_schema' "
         "AND nspname = '{}' "
         "ORDER BY pg_class.oid";
@@ -109,8 +109,8 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  -- regular tables "
-        "AND nspname NOT LIKE 'pg_%'  -- exclude system schemas "
+        "WHERE relkind = 'r'  "         // regular tables
+        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
         "AND nspname != 'information_schema' "
         "AND pg_class.oid::integer in ({}) ";
 
@@ -792,9 +792,6 @@ namespace springtail
         for (auto &worker : workers) {
             worker.join();
         }
-
-        // finalize the system tables
-        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid);
 
         // create result object
         return table_results;

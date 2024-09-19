@@ -38,7 +38,11 @@ namespace springtail::pg_log_mgr {
     void
     PgXactLogWriter::close()
     {
-        std::cout << "Closing file: " << _file.c_str() << ", fd=" << _fd << std::endl;
+        if (_fd == -1) {
+            return;
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Xact log writer closing file: {}, fd={}", _file.c_str(), _fd);
         if (_shutdown) {
             return;
         }
