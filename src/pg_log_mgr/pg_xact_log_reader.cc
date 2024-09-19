@@ -14,20 +14,30 @@
 
 namespace springtail::pg_log_mgr {
 
-    void
-    PgXactLogReader::scan_file(const std::filesystem::path &file, uint64_t committed_xid)
+    int
+    PgXactLogReader::next(int max_records, std::vector<PgTransactionPtr> &committed_xacts)
     {
-        _open(file);
+        int records = 0;
 
-        bool eof = false;
+        if (_current_file.empty()) {
+            return records;
+        }
 
-        while (!eof) {
+        // read in records until max_records or end of file
+        while (records < max_records) {
             // read header
             // 4B message length + 3B magic + 1B Type
             char header[8];
             _stream.read(header, 8);
             if (_stream.eof()) {
-                break;
+                _stream.close();
+                // get next file
+                _current_file = fs::get_next_file(_current_file, _file_prefix, _file_suffix);
+                if (_current_file.empty() || !std::filesystem::exists(_current_file)) {
+                    break;
+                }
+                _open(_current_file);
+                continue;
             }
 
             // read log header
@@ -52,34 +62,45 @@ namespace springtail::pg_log_mgr {
                 case PgTransaction::TYPE_STREAM_ABORT:
                     _read_stream_msg(msg_len, type);
                     break;
-                case PgTransaction::TYPE_COMMIT:
-                    _read_commit(msg_len, committed_xid);
+                case PgTransaction::TYPE_COMMIT: {
+                    PgTransactionPtr xact = _read_commit(msg_len, _min_xid);
+                    if (xact != nullptr) {
+                        committed_xacts.push_back(xact);
+                        records++;
+                    }
                     break;
+                }
                 default:
                     SPDLOG_ERROR("Unknown message type: {}", type);
                     throw Error("Unknown message type");
             }
             assert(!_stream.eof());
         }
+        return records;
     }
 
     void
-    PgXactLogReader::scan_all_files(uint64_t committed_xid)
+    PgXactLogReader::begin()
     {
         // find first file
-        std::filesystem::path file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
-        if (file.empty()) {
+        _current_file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
+        if (_current_file.empty()) {
             return;
         }
 
+        _open(_current_file);
+    }
+
+    void
+    PgXactLogReader::begin(const std::filesystem::path &file)
+    {
         // iterate through all files, finding next file and scanning each
-        while (true) {
-            scan_file(file, committed_xid);
-            file = fs::get_next_file(file, _file_prefix, _file_suffix);
-            if (!std::filesystem::exists(file)) {
-                break;
-            }
+        if (!std::filesystem::exists(file)) {
+            return;
         }
+        _current_file = file;
+
+        _open(_current_file);
     }
 
     void
@@ -92,7 +113,7 @@ namespace springtail::pg_log_mgr {
         }
     }
 
-    void
+    PgTransactionPtr
     PgXactLogReader::_read_commit(uint32_t msg_len, uint64_t committed_xid)
     {
         // 4B postgres XID + 8B springtail XID +
@@ -120,7 +141,7 @@ namespace springtail::pg_log_mgr {
         // if xid is less than or equal to committed_xid, then skip
         if (springtail_xid <= committed_xid) {
             // it is safe to return since we read in entire record
-            return;
+            return nullptr;
         }
 
         // update max springtail xid
@@ -178,9 +199,7 @@ namespace springtail::pg_log_mgr {
 
         assert(offset == msg_len);
 
-        _xact_list.push_back(xact);
-
-        return;
+        return xact;
     }
 
     void

@@ -46,9 +46,9 @@ namespace {
             return _create_xact_logger();
         }
 
-        void process_xact(PgTransactionPtr xact, PgXactLogWriterPtr xact_writer)
+        void process_xact(PgTransactionPtr xact)
         {
-            _process_xact(xact, xact_writer);
+            _process_xact(xact);
         }
     };
 
@@ -223,7 +223,7 @@ namespace {
                 PgTransactionPtr xact = _queue->pop();
 
                 // process the transaction
-                _log_mgr->process_xact(xact, xact_writer);
+                _log_mgr->process_xact(xact);
 
                 // store it for comparison if of type commit
                 if (xact->type == PgTransaction::TYPE_COMMIT) {

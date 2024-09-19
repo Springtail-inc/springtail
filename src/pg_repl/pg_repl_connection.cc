@@ -29,16 +29,7 @@ namespace springtail
     static constexpr char CURRENT_LSN_SQL[] = "SELECT pg_current_wal_lsn()";
     static constexpr char CONFIRMED_FLUSH_LSN_SQL[] = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{}'";
 
-    /**
-     * @brief Constructor
-     *
-     * @param db_port server port; usually 5432
-     * @param db_host server hostname
-     * @param db_name server database name
-     * @param db_user server username
-     * @param db_pass server password
-     * @param slot_name replication slot name
-     */
+
     PgReplConnection::PgReplConnection(const int db_port,
                                        const std::string &db_host,
                                        const std::string &db_name,
@@ -56,20 +47,12 @@ namespace springtail
     {}
 
 
-    /**
-     * @brief Destructor
-     */
     PgReplConnection::~PgReplConnection()
     {
         close();
     }
 
 
-    /**
-     * @brief Connect to server using params from constructor
-     * @throws PgIOError on connection failure
-     * @throws PgQueryError on failure to set search path
-     */
     void
     PgReplConnection::connect()
     {
@@ -81,9 +64,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Close connection; stop streaming
-     */
     void
     PgReplConnection::close()
     {
@@ -101,13 +81,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Start streaming at specified LSN,
-     *
-     * @param LSN LSN to start streaming from; INVALID_LSN (0) specifies server current LSN
-     * @throws PgStreamingError if connection is already streaming
-     * @throws PgQueryError if replication command failed
-     */
     void
     PgReplConnection::start_streaming(LSN_t LSN)
     {
@@ -193,10 +166,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief End streaming; close streaming connection
-     *        hide errors, as not useful at this point, as connection is being closed
-     */
     void
     PgReplConnection::end_streaming()
     {
@@ -232,13 +201,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Check the data stream for waiting data
-     *
-     * @param timeout_secs timeout in seconds; 0 return immediately
-     * @return true if has data, false otherwise
-     * @throws PgIOError on stream error
-     */
     bool
     PgReplConnection::_check_data_stream(int timeout_secs)
     {
@@ -261,13 +223,8 @@ namespace springtail
     }
 
 
-    /**
-     * @brief No data received handle timeout, wait for more data
-     * @return true if has data, false otherwise
-     * @throws PgIOError on stream error
-     */
     bool
-    PgReplConnection::_handle_timeout()
+    PgReplConnection::wait_for_data(int timeout_secs=READ_TIMEOUT_SEC)
     {
 
         if (_started_streaming) {
@@ -287,18 +244,10 @@ namespace springtail
         }
 
         // select wait on data stream
-        return _check_data_stream(READ_TIMEOUT_SEC);
+        return _check_data_stream(timeout_secs);
     }
 
 
-    /**
-     * @brief Send data on streaming connection
-     *
-     * @param buffer buffer to send
-     * @param length length of data within buffer
-     * @param msg_type type of message (optional; default COPY_DATA message)
-     * @throws PgIOError on send error
-     */
     void
     PgReplConnection::_send_copy_data(const char *buffer,
                                       int length,
@@ -330,16 +279,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read data from streaming connection
-     *
-     * @param buffer buffer to receive into
-     * @param length length of data to read
-     * @param async  flag to specify read should be non-blocking (optional; default=true)
-     * @returns bytes read
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     */
     int
     PgReplConnection::_recv_copy_data(char *buffer,
                                       int length,
@@ -352,7 +291,7 @@ namespace springtail
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read raw copy data: len={}\n", r);
 
             if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
-                r = _handle_timeout();
+                r = wait_for_data();
                 if (r >= 0) {
                     // either data is now available or it isn't
                     // either way go around again.
@@ -375,11 +314,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read in full message header (1B msg type; 4B length)
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     */
     void
     PgReplConnection::_read_msg_header()
     {
@@ -415,9 +349,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Helper to dump out error response
-     */
     void
     PgReplConnection::_dump_error_response()
     {
@@ -439,12 +370,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read in message data; may be partial message
-     * @param async flag to specify operation is non-blocking (optional; default=true)
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     */
     void
     PgReplConnection::_read_msg_data(bool async=true)
     {
@@ -473,13 +398,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Skipping over current message
-     *
-     * @param size data to skip
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     */
     void
     PgReplConnection::_skip_message()
     {
@@ -500,13 +418,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read in copy data header; sets the copy message length
-     *
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     * @throws PgCopyDoneError if copy done is returned
-     */
     void
     PgReplConnection::_read_copy_header()
     {
@@ -542,13 +453,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read in the copy data, decoding the msg and processing keep alives
-     *
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     * @throws PgCopyDoneError if copy done is returned
-     */
     void
     PgReplConnection::_read_copy_data()
     {
@@ -598,15 +502,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Read copy data from server; will block
-     *
-     * @param dataOut  Reference to hold output buffer and length; freed on
-     *                 next call to readData
-     * @throws PgIOError on receive error
-     * @throws PgNotConnectedError if connection has closed
-     * @throws PgNotStreamingError if connection is not streaming
-     */
     void
     PgReplConnection::read_data(PgCopyData &dataOut)
     {
@@ -658,11 +553,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Decode keep alive
-     * @return number of bytes consumed
-     * @throws PgMessageToSmallError if buffer not big enough for message
-     */
     int
     PgReplConnection::_process_keep_alive(const char *buffer, int length)
     {
@@ -710,11 +600,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Decode xlog data header
-     * @return number of bytes consumed
-     * @throws PgMessageToSmallError if buffer not big enough for message
-     */
     int
     PgReplConnection::_process_xlog_header(const char *buffer, int length)
     {
@@ -748,10 +633,6 @@ namespace springtail
         return pos;
     }
 
-    /**
-     * @brief Fast forward the data stream to current LSN (ack to server)
-     * @throws PgQueryError if query to get current LSN fails
-     */
     void
     PgReplConnection::_fast_forward_stream()
     {
@@ -792,14 +673,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Encode the standby message into pre-allocated buffer of at least 34B
-     *
-     * @param last_received_lsn last received lsn (write position)
-     * @param last_flushed_lsn last flushed lsn (flushed position)
-     * @param send_time time for this send (pg msecs)
-     * @return size of buffer returned
-     */
     int
     PgReplConnection::_encode_standby_status_msg(int64_t send_time,
                                                  char replybuf[34])
@@ -830,10 +703,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Send standby status feedback message to server
-     * @throws PgIOError on send error
-     */
     void
     PgReplConnection::_send_standby_status_msg()
     {
@@ -852,12 +721,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Check if slot exists
-     *
-     * @return true if slot exists, false otherwise
-     * @throws PgQueryError on error
-     */
     bool
     PgReplConnection::check_slot_exists()
     {
@@ -868,15 +731,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Check if the slot exists on the server
-     *
-     * @param restart_lsn_out output param: restart LSN
-     * @param flushed_lsn_out output param: last flushed LSN
-     *
-     * @return true if slot exists, false otherwise
-     * @throws PgQueryError on error
-     */
     bool
     PgReplConnection::check_slot_exists(LSN_t &restart_lsn_out,
                                         LSN_t &flushed_lsn_out)
@@ -920,12 +774,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Drop replication slot
-     *
-     * @throws PgQueryError on error
-     * @throws PgStreamingError if already streaming
-     */
     void
     PgReplConnection::drop_replication_slot()
     {
@@ -952,14 +800,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Create replication slot
-     *
-     * @param export_snapshot should export be create (true/false)
-     * @param temporary is replication slot temporary
-     * @throws PgStreamingError if streaming already started
-     * @throws PgQueryError on query error
-     */
     void
     PgReplConnection::create_replication_slot(bool export_snapshot,
                                               bool temporary)
@@ -1033,11 +873,6 @@ namespace springtail
     }
 
 
-    /**
-     * @brief Update last flushed lsn, we are safe to move log forward to here
-     *
-     * @param lsn LSN indicating safe point to truncate log up to
-     */
     void
     PgReplConnection::set_last_flushed_LSN(LSN_t lsn)
     {
@@ -1063,20 +898,14 @@ namespace springtail
         }
     }
 
-    /**
-     * @brief Get server version
-     * @return get remote server version; -1 if not set
-     */
+
     int
     PgReplConnection::get_server_version() noexcept
     {
         return _server_version;
     }
 
-    /**
-     * @brief Get pgoutput protocol version
-     * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
-     */
+
     int
     PgReplConnection::get_protocol_version() noexcept
     {

@@ -139,35 +139,111 @@ namespace springtail
         /** last time data was flushed */
         std::atomic<int64_t> _last_flushed_time;
 
+        /**
+         * @brief Send standby status feedback message to server
+         * @throws PgIOError on send error
+         */
         void _send_standby_status_msg();
 
+        /**
+         * @brief Fast forward the data stream to current LSN (ack to server)
+         * @throws PgQueryError if query to get current LSN fails
+         */
         void _fast_forward_stream();
 
-        // return true if data, false otherwise
+        /**
+         * @brief Check the data stream for waiting data
+         * @param timeout_secs timeout in seconds; 0 return immediately
+         * @return true if has data, false otherwise
+         * @throws PgIOError on stream error
+         */
         bool _check_data_stream(int timeout_secs);
 
+        /**
+         * @brief Decode xlog data header
+         * @return number of bytes consumed
+         * @throws PgMessageToSmallError if buffer not big enough for message
+         */
         int _process_xlog_header(const char *buffer, int length);
 
+        /**
+         * @brief Decode keep alive
+         * @return number of bytes consumed
+         * @throws PgMessageToSmallError if buffer not big enough for message
+         */
         int _process_keep_alive(const char *buffer, int length);
 
+        /**
+         * @brief Read in full message header (1B msg type; 4B length)
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         */
         void _read_msg_header();
 
+        /**
+         * @brief Read in message data; may be partial message
+         * @param async flag to specify operation is non-blocking (optional; default=true)
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         */
         void _read_msg_data(bool async);
 
+        /**
+         * @brief Read in copy data header; sets the copy message length
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         * @throws PgCopyDoneError if copy done is returned
+         */
         void _read_copy_header();
 
+        /**
+         * @brief Read in the copy data, decoding the msg and processing keep alives
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         * @throws PgCopyDoneError if copy done is returned
+         */
         void _read_copy_data();
 
+        /**
+         * @brief Send data on streaming connection
+         * @param buffer buffer to send
+         * @param length length of data within buffer
+         * @param msg_type type of message (optional; default COPY_DATA message)
+         * @throws PgIOError on send error
+         */
         void _send_copy_data(const char *buffer, int length, char cmd);
 
+        /**
+         * @brief Read data from streaming connection
+         * @param buffer buffer to receive into
+         * @param length length of data to read
+         * @param async  flag to specify read should be non-blocking (optional; default=true)
+         * @returns bytes read
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         */
         int _recv_copy_data(char *buffer, int length, bool async);
 
-        bool _handle_timeout();
-
+        /**
+         * @brief Skipping over current message
+         * @param size data to skip
+         * @throws PgIOError on receive error
+         * @throws PgNotConnectedError if connection has closed
+         */
         void _skip_message();
 
+        /**
+         * @brief Helper to dump out error response
+         */
         void _dump_error_response();
 
+        /**
+         * @brief Encode the standby message into pre-allocated buffer of at least 34B
+         * @param last_received_lsn last received lsn (write position)
+         * @param last_flushed_lsn last flushed lsn (flushed position)
+         * @param send_time time for this send (pg msecs)
+         * @return size of buffer returned
+         */
         int _encode_standby_status_msg(int64_t send_time,
                                        char replybuf[34]);
 
@@ -201,7 +277,9 @@ namespace springtail
         ~PgReplConnection();
 
         /**
-         * @brief Connect to db
+         * @brief Connect to server using params from constructor
+         * @throws PgIOError on connection failure
+         * @throws PgQueryError on failure to set search path
          */
         void connect();
 
@@ -221,7 +299,7 @@ namespace springtail
 
         /**
          * @brief Stop streaming; close streaming connection
-         * @throws PqQueryError if end streaming command failed
+         *       hide errors, as not useful at this point, as connection is being closed
          */
         void end_streaming();
 
@@ -234,10 +312,8 @@ namespace springtail
 
         /**
          * @brief Check if the slot exists on the server
-         *
          * @param restart_lsn_out output param: restart LSN
          * @param flushed_lsn_out output param: last flushed LSN
-         *
          * @return true if slot exists, false otherwise
          * @throws PgQueryError on error
          */
@@ -247,7 +323,6 @@ namespace springtail
 
         /**
          * @brief Create the replication slot
-         *
          * @param export_snapshot export the snapshot
          * @param temporary temporary slot; per session
          * @throws PgStreamingError if streaming already started
@@ -265,7 +340,6 @@ namespace springtail
 
         /**
          * @brief Read WAL data from server; blocks
-         *
          * @param dataOut Output data, must be preallocated
          * @throws PgIOError on receive error
          * @throws PgNotConnectedError if connection has closed
@@ -291,5 +365,12 @@ namespace springtail
          * @return pgoutput protocol version (1, 2, 3, 4) -- usually 2; -1 if not set
          */
         int get_protocol_version() noexcept;
+
+        /**
+         * @brief Check if the stream has data; blocking for timeout_secs
+         * @param timeout_secs timeout in seconds (0 for no timeout)
+         * @return true if stream is has data, false otherwise
+         */
+        bool wait_for_data(int timeout_secs);
     };
 }

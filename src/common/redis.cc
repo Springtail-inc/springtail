@@ -29,21 +29,20 @@ namespace springtail {
     RedisMgr::RedisMgr()
     {
         nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-        sw::redis::ConnectionOptions connect_options;
-        sw::redis::ConnectionPoolOptions pool_options;
 
         int keep_alive_secs;
 
-        Json::get_to<std::string>(json, "host", connect_options.host, "localhost");
-        Json::get_to<std::string>(json, "user", connect_options.user, "user");
-        Json::get_to<std::string>(json, "password", connect_options.password);
-        Json::get_to<int>(json, "port", connect_options.port, 6379);
-        Json::get_to<int>(json, "db", connect_options.db, 0);
+        Json::get_to<std::string>(json, "host", _connect_options.host, "localhost");
+        Json::get_to<std::string>(json, "user", _connect_options.user, "user");
+        Json::get_to<std::string>(json, "password", _connect_options.password);
+        Json::get_to<int>(json, "port", _connect_options.port, 6379);
+        Json::get_to<int>(json, "db", _connect_options.db, REDIS_DATA_DB);
         Json::get_to<int>(json, "keep_alive_sec", keep_alive_secs, 30);
 
-        connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
-        connect_options.keep_alive = true;
-        connect_options.resp = 3;
+        _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
+        _connect_options.keep_alive = true;
+        _connect_options.resp = 3;
+        _connect_options.socket_timeout = std::chrono::milliseconds(0);
 
         nlohmann::json pool_json;
         if (!Json::get_to(json, "pool", pool_json)) {
@@ -57,13 +56,13 @@ namespace springtail {
         Json::get_to(pool_json, "max_idle_secs", max_idle_secs, 0);
         Json::get_to(pool_json, "max_connection_lifetime_secs", max_connection_lifetime_secs, 0);
 
-        pool_options.size = pool_size;
-        pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
-        pool_options.connection_lifetime = std::chrono::seconds(max_connection_lifetime_secs);
+        _pool_options.size = pool_size;
+        _pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
+        _pool_options.connection_lifetime = std::chrono::seconds(max_connection_lifetime_secs);
 
-        _redis = std::make_shared<RedisClient>(connect_options, pool_options);
+        _redis = std::make_shared<RedisClient>(_connect_options, _pool_options);
 
-        SPDLOG_INFO("Connected to redis server: {}", connect_options.host);
+        SPDLOG_INFO("Connected to redis server: {}", _connect_options.host);
     }
 
     void
@@ -75,6 +74,27 @@ namespace springtail {
         }
     }
 
+    RedisMgr::SubscriberPtr
+    RedisMgr::get_subscriber(int timeoutsecs)
+    {
+        // create new redis connection for use with subscriber
+        // copy the connection options, change the db to the config db
+        sw::redis::ConnectionOptions     connect_options;
+        connect_options.host = _connect_options.host;
+        connect_options.port = _connect_options.port;
+        connect_options.user = _connect_options.user;
+        connect_options.password = _connect_options.password;
+        connect_options.db = REDIS_CONFIG_DB;
+        connect_options.keep_alive = _connect_options.keep_alive;
+        connect_options.keep_alive_s = _connect_options.keep_alive_s;
+        connect_options.resp = _connect_options.resp;
+
+        // this is the real timeout for the subscriber consume() call
+        connect_options.socket_timeout = std::chrono::seconds(timeoutsecs);
+
+        auto redis = std::make_shared<sw::redis::Redis>(_connect_options);
+        return std::make_shared<sw::redis::Subscriber>(redis->subscriber());
+    }
 
 }
 

@@ -20,7 +20,7 @@ namespace {
 
         void TearDown() override {
             // remove the directory
-            std::filesystem::remove_all("/tmp/test_xlog/");
+            //std::filesystem::remove_all("/tmp/test_xlog/");
         }
     };
 
@@ -56,10 +56,12 @@ namespace {
         writer.close();
 
         // read the log file and verify
-        PgXactLogReader reader("/tmp/test_xlog", "test_", ".log");
-        reader.scan_all_files(0);
+        PgXactLogReader reader("/tmp/test_xlog", "test_", ".log", 0);
+        reader.begin();
 
-        auto xacts = reader.get_xact_list();
+        std::vector<PgTransactionPtr> xacts;
+        reader.next(100, xacts);
+
         ASSERT_EQ(xacts.size(), 1);
 
         ASSERT_EQ(xacts[0]->type, PgTransaction::TYPE_COMMIT);

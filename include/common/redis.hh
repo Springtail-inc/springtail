@@ -13,6 +13,28 @@
 #include <common/json.hh>
 
 namespace springtail {
+
+    /** Redis exception type */
+    class RedisError : public Error {
+    public:
+        RedisError() { }
+        RedisError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    /** Redis not found exception */
+    class RedisNotFoundError : public RedisError {
+        // constructor to take in a string
+    public:
+        RedisNotFoundError(const std::string &error)
+            : RedisError(error)
+        { }
+        const char *what() const noexcept {
+            return "Key not found";
+        }
+    };
+
     /**
      * @brief Redis connection wrapper, derives from Redis object
      *        For adding future functionality; redis::Redis is threadsafe
@@ -49,6 +71,11 @@ namespace springtail {
      */
     class RedisMgr {
     public:
+        using SubscriberPtr = std::shared_ptr<sw::redis::Subscriber>;
+
+        static constexpr int REDIS_CONFIG_DB = 0;
+        static constexpr int REDIS_DATA_DB = 1;
+
         /**
          * @brief Get the singleton instance object
          * @return RedisMgr*
@@ -68,6 +95,15 @@ namespace springtail {
             return _redis;
         }
 
+        /**
+         * Get a subscriber object to be used for pub/sub
+         * Creates a new connection to Redis, so should be reusued
+         * Caller must catch sw::redis::TimeoutError
+         * @param timeout_secs timeout in seconds
+         * @return SubscriberPtr
+         */
+        SubscriberPtr get_subscriber(int timeout_secs=5);
+
     protected:
         /** internal singleton instance */
         static RedisMgr *_instance;
@@ -83,6 +119,9 @@ namespace springtail {
         ~RedisMgr() {}
 
     private:
+        sw::redis::ConnectionOptions     _connect_options;
+        sw::redis::ConnectionPoolOptions _pool_options;
+
         // delete copy constructor
         RedisMgr(const RedisMgr &)       = delete;
         void operator=(const RedisMgr &) = delete;
@@ -122,6 +161,16 @@ namespace springtail {
         uint64_t push(const T &value)
         {
             return _redis->lpush(_key, static_cast<std::string>(value));
+        }
+
+        /**
+         * @brief Push serialized items onto queue.
+         * @param values vector of serialized values
+         * @return uint64_t items on list
+         */
+        uint64_t push(const std::vector<std::string> &values)
+        {
+            return _redis->lpush(_key, values.begin(), values.end());
         }
 
         /**

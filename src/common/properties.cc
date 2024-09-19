@@ -210,7 +210,7 @@ namespace springtail {
             RedisClientPtr redis_client = _get_redis_client();
             std::optional<std::string> db_id_str = redis_client->hget(db_instance_key, "database_ids");
             if (!db_id_str.has_value()) {
-                throw Error("Error missing database_ids in redis");
+                throw RedisNotFoundError("Error missing database_ids in redis");
             }
 
             // convert to json
@@ -247,7 +247,7 @@ namespace springtail {
         std::string db_config_key = std::format(redis::DB_CONFIG, db_instance_id);
         std::optional<std::string> db_config_str = redis_client->hget(db_config_key, std::to_string(db_id));
         if (!db_config_str.has_value()) {
-            throw Error("Error missing db_config_id in redis");
+            throw RedisNotFoundError("Error missing db_config_id in redis");
         }
 
         // convert to json
@@ -265,9 +265,9 @@ namespace springtail {
 
         // get the redis client and lookup the db ids from the db_instance config
         std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
-        std::optional<std::string> db_state_str = redis_client->get(std::to_string(db_id));
+        std::optional<std::string> db_state_str = redis_client->hget(db_instance_state_hash, std::to_string(db_id));
         if (!db_state_str.has_value()) {
-            throw Error("Error missing db_state in redis");
+            throw RedisNotFoundError("Error missing db_state in redis");
         }
 
         return db_state_str.value();
@@ -285,6 +285,9 @@ namespace springtail {
         // get the redis client and lookup the db ids from the db_instance config
         std::string db_instance_state_hash = std::format(redis::DB_INSTANCE_STATE, db_instance_id);
         redis_client->hset(db_instance_state_hash, std::to_string(db_id), state);
+
+        // publish the state
+        redis_client->publish(std::format(redis::PUBSUB_DB_STATE_CHANGES, db_instance_id, db_id), state);
     }
 
     std::string
@@ -337,7 +340,7 @@ namespace springtail {
         std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, db_instance_id);
         std::optional<std::string> db_instance_str = redis_client->hget(db_instance_key, "primary_db");
         if (!db_instance_str.has_value()) {
-            throw Error("Error missing db_instance_id in redis");
+            throw RedisNotFoundError("Error missing db_instance_id in redis");
         }
 
         // convert to json
@@ -358,14 +361,7 @@ namespace springtail {
 
         std::optional<std::string> fdw_config_str = redis_client->hget(fdw_key, fdw_id);
         if (!fdw_config_str.has_value()) {
-
-            std::vector<std::string> fdw_ids;
-            redis_client->hgetall(fdw_key, std::back_inserter(fdw_ids));
-            for (auto &fdw : fdw_ids) {
-                SPDLOG_WARN("Found FDW: {}", fdw);
-            }
-
-            throw Error("Error missing fdw_config in redis");
+            throw RedisNotFoundError("Error missing fdw_config in redis");
         }
 
         // convert to json

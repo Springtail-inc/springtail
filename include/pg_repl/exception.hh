@@ -31,6 +31,12 @@ namespace springtail {
         }
     };
 
+    class PgTableNotFoundError: public PgConnectionError {
+        const char *what() const noexcept {
+            return "Table not found";
+        }
+    };
+
     class PgQueryError : public PgConnectionError {
         const char *what() const noexcept {
             return "An error occurred executing the query";
