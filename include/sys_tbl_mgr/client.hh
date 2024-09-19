@@ -81,6 +81,12 @@ namespace springtail::sys_tbl_mgr {
          */
         bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
+        /**
+         * Call swap_sync_table() on the SysTblMgr.
+         */
+        std::string swap_sync_table(const TableRequest &create, const UpdateRootsRequest &roots);
+
+
     protected:
         /** Singleton write cache client instance */
         static Client *_instance;

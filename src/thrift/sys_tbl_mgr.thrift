@@ -147,4 +147,8 @@ service Service {
 
     // checks if the table exists at a given xid/lsn
     bool exists(1: ExistsRequest request)
+
+    // performs a drop + create + update_roots as a single operation
+    // to support swapping a newly synced table into place
+    DDLStatement swap_sync_table(1: TableRequest create, 2: UpdateRootsRequest roots);
 }

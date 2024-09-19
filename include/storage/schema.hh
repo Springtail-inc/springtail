@@ -87,9 +87,6 @@ namespace springtail {
          * Default copy constructor.
          */
         SchemaColumn(const SchemaColumn &column) = default;
-
-        /** Default move constructor. */
-        // SchemaColumn(SchemaColumn &&column) = default;
     };
 
     /**

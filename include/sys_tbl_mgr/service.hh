@@ -70,6 +70,11 @@ namespace springtail::sys_tbl_mgr {
         /** Returns a boolean indicating if the table exists at a given XID. */
         bool exists(const ExistsRequest &request) override;
 
+        /** Performs a drop (if needed), create, and update_roots for a given table to swap it's
+            newly synced data into place at a given XID.  Returns a JSON array of DDL statements to
+            update the FDWs. */
+        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
+
     private:
         // CACHE FOR NAMES
 
@@ -226,6 +231,22 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The ID of the system table.
          */
         MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id);
+
+        /**
+         * Performs a create_table() assuming that the correct locks are already held.
+         */
+        nlohmann::json _create_table(const TableRequest &request);
+
+        /**
+         * Performs a drop_table() assuming that the correct locks are already held.
+         */
+        nlohmann::json _drop_table(const DropTableRequest &request);
+
+        /**
+         * Performs an update_roots() assuming that the correct locks are already held.
+         */
+        void _update_roots(const UpdateRootsRequest &request);
+
 
 
         // VARIABLES

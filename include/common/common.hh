@@ -116,7 +116,8 @@ namespace springtail {
         {
             std::string data = json.dump();
             auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>
-                (const_cast<uint8_t *>(data.c_str()), data.size());
+                (const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(data.c_str())),
+                 data.size());
             apache::thrift::protocol::TJSONProtocol protocol(buffer);
 
             // deserialize the object

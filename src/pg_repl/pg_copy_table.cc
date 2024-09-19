@@ -360,19 +360,6 @@ namespace springtail
         // store the system table operations in a JSON array
         nlohmann::json ops;
 
-        // generate a DropTableRequest message
-        {
-            sys_tbl_mgr::DropTableRequest request;
-            request.db_id = db_id;
-            request.xid = xid.xid;
-            request.lsn = 0;
-            request.table_id = table_oid;
-            request.schema = _schema.schema_name;
-            request.name = _schema.table_name;
-            auto &&drop_json = common::thrift_to_json<sys_tbl_mgr::DropTableRequest>(request);
-            ops.push_back(drop_json);
-        }
-
         // generate a TableRequest message
         {
             sys_tbl_mgr::TableRequest request;
@@ -402,31 +389,6 @@ namespace springtail
             auto &&create_json = common::thrift_to_json<sys_tbl_mgr::TableRequest>(request);
             ops.push_back(create_json);
         }
-
-#if 0
-        // drop the existing table if it exists
-        if (TableMgr::get_instance()->exists(db_id, table_oid, xid.xid)) {
-            PgMsgDropTable drop_msg{0, // pg lsn
-                                    static_cast<uint32_t>(_schema.table_oid),
-                                    0, // pg xid
-                                    _schema.schema_name,
-                                    _schema.table_name};
-
-            TableMgr::get_instance()->drop_table(db_id, xid, drop_msg);
-        }
-
-        // create the table metadata
-        PgMsgTable create_msg{0, // pg lsn
-                              static_cast<uint32_t>(_schema.table_oid),
-                              0, // pg xid
-                              _schema.schema_name,
-                              _schema.table_name,
-                              _map_to_pg_msg(_schema.columns, _schema.pkeys)};
-
-        // note: we create the system metadata at the previous XID
-        TableMgr::get_instance()->create_table(db_id, xid, create_msg);
-        ++xid.lsn;
-#endif
 
         auto schema = std::make_shared<ExtentSchema>(_schema.columns);
         auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid, schema);
@@ -474,6 +436,7 @@ namespace springtail
         // flush the table data to disk
         auto &&metadata = table->finalize();
 
+        // pack the table metadata operation
         {
             sys_tbl_mgr::UpdateRootsRequest request;
             request.db_id = db_id;
@@ -487,13 +450,9 @@ namespace springtail
         }
 
         // store the system table operations into redis for the GC-2
-        auto &&key = fmt::format(redis::HASH_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
-        RedisMgr::get_instance()->get_client()->hset(key, std::to_string(table_oid), ops.dump());
-
-#if 0
-        // store the roots into the system table
-        TableMgr::get_instance()->update_roots(db_id, _schema.table_oid, xid.xid, metadata);
-#endif
+        auto &&key = fmt::format(redis::QUEUE_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
+        RedisQueue<std::string> sync_table_q(key);
+        sync_table_q.push(ops.dump());
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)

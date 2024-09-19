@@ -58,17 +58,27 @@ namespace springtail::sys_tbl_mgr {
     Service::create_table(DDLStatement& _return,
                           const TableRequest &request)
     {
+        // acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_write_mutex);
+
+        // perform the CREATE TABLE
+        auto &&ddl = _create_table(request);
+
+        // serialize the JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_create_table(const TableRequest &request)
+    {
+        XidLsn xid(request.xid, request.lsn);
+
+        // initialize the ddl statement
         nlohmann::json ddl;
         ddl["action"] = "create";
         ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
         ddl["tid"] = request.table.id;
         ddl["columns"] = nlohmann::json::array();
-
-        // 1. acquire a shared lock to ensure no one is doing a finalize?
-        boost::shared_lock lock(_write_mutex);
-        XidLsn xid(request.xid, request.lsn);
-
-        // 2. update the system tables with the relevant data
 
         // add table name
         auto table_info = std::make_shared<TableInfo>(request.table.id, request.xid, request.lsn,
@@ -136,7 +146,7 @@ namespace springtail::sys_tbl_mgr {
 
         //    f. XXX anything to do for secondary indexes?
 
-        _return.__set_statement(nlohmann::to_string(ddl));
+        return ddl;
     }
 
     void
@@ -192,12 +202,24 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
+        // hold a shared lock to prevent a concurrent finalize()
+        boost::shared_lock lock(_write_mutex);
+
+        // perform the DROP TABLE
+        auto &&ddl = _drop_table(request);
+
+        // serialize the ddl JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_drop_table(const DropTableRequest &request)
+    {
+        // initialize the ddl json
         nlohmann::json ddl;
         ddl["action"] = "drop";
         ddl["tid"] = request.table_id;
         ddl["table"] = fmt::format("{}.{}", request.schema, request.name);
-
-        boost::shared_lock lock(_write_mutex);
 
         // mark the table as dropped in the table_names
         auto table_info = std::make_shared<TableInfo>(request.table_id,
@@ -226,15 +248,24 @@ namespace springtail::sys_tbl_mgr {
         }
         _set_schema_info(request.db_id, request.table_id, changes);
 
-        _return.__set_statement(nlohmann::to_string(ddl));
+        return ddl;
     }
 
     void
     Service::update_roots(Status& _return,
                           const UpdateRootsRequest &request)
     {
+        // hold a shared lock to prevent a concurrent finalize()
         boost::shared_lock lock(_write_mutex);
 
+        // update the metadata and return
+        _update_roots(request);
+        _return.__set_status(StatusCode::SUCCESS);
+    }
+
+    void
+    Service::_update_roots(const UpdateRootsRequest &request)
+    {
         XidLsn xid(request.xid);
 
         auto info = std::make_shared<GetRootsResponse>();
@@ -243,8 +274,6 @@ namespace springtail::sys_tbl_mgr {
         info->snapshot_xid = request.snapshot_xid;
 
         _set_roots_info(request.db_id, request.table_id, xid, info);
-
-        _return.__set_status(StatusCode::SUCCESS);
     }
 
     void
@@ -337,6 +366,46 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
         auto info = _get_table_info(request.db_id, request.table_id, xid);
         return (info != nullptr);
+    }
+
+    void
+    Service::swap_sync_table(DDLStatement &_return,
+                             const TableRequest &create,
+                             const UpdateRootsRequest &roots)
+    {
+        nlohmann::json ddls;
+
+        // 1. acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_write_mutex);
+
+        // 2. retrieve the table information at the end of the target XID
+        XidLsn xid(create.xid, constant::MAX_LSN);
+        auto info = _get_table_info(create.db_id, create.table.id, xid);
+
+        // 3. if the table exists at the end of the XID, perform a drop
+        if (info != nullptr) {
+            DropTableRequest drop;
+            drop.db_id = create.db_id;
+            drop.table_id = create.table.id;
+            drop.xid = create.xid;
+            drop.lsn = create.lsn - 1;
+            drop.schema = create.table.schema;
+            drop.name = create.table.name;
+
+            auto &&drop_ddl = this->_drop_table(drop);
+            ddls.push_back(drop_ddl);
+        }
+
+        // 4. perform a create table
+        assert(create.lsn == constant::MAX_LSN - 1);
+        auto &&create_ddl = this->_create_table(create);
+        ddls.push_back(create_ddl);
+
+        // 5. update the metadata of the table
+        this->_update_roots(roots);
+
+        // 6. serialize the ddl json and return
+        _return.__set_statement(nlohmann::to_string(ddls));
     }
 
 

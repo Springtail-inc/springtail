@@ -55,7 +55,7 @@ namespace springtail::gc {
         }
 
         /** Serialize an XidReady into a string to store in redis. */
-        std::string serialize() const {
+        explicit operator std::string() const {
             if (_type == Type::XACT_MSG) {
                 return fmt::format("{}:{}:{}", static_cast<char>(_type), _db_id, _xid);
             } else {

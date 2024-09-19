@@ -46,28 +46,58 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-#if 0
-                // read the set of tables that were actively being synced from redis
-                std::string hash_table = fmt::format(redis::HASH_SYNC_TABLE_STATE,
-                                                     Properties::get_db_instance_id(), db_id);
-                // XXX need the table offsets and sync XID
-                for () {
-                    // write out their new roots at the commit XID
+                nlohmann::json ddls;
+                RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
+                                                                 Properties::get_db_instance_id(), db_id));
+
+                // go through the hash of sys tbl operations
+                auto ops_str = sync_table_q.pop(_worker_id);
+                while (ops_str != nullptr) {
+                    auto json = nlohmann::json::parse(*ops_str);
+
+                    // perform the operations at the SysTblMgr
+                    auto client = sys_tbl_mgr::Client::get_instance();
+
+                    // perform the table swap
+                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
+                    create.xid = completed_xid;
+                    create.lsn = constant::MAX_LSN - 1;
+
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+                    roots.xid = completed_xid;
+
+                    auto ddl_str = client->swap_sync_table(create, roots);
+
+                    // store the ddl mutations for the FDWs
+                    auto ddl_ops = nlohmann::json::parse(ddl_str);
+                    assert(ddl_ops.is_array());
+                    for (int i = 0; i < ddl_ops.size(); ++i) {
+                        ddls.push_back(ddl_ops[i]);
+                    }
+
+                    // get the next set of operations
+                    sync_table_q.commit(_worker_id);
+                    ops_str = sync_table_q.pop(_worker_id);
                 }
 
                 // perform a commit to the XidMgr
                 _xid_mgr->commit_xid(db_id, completed_xid, true);
 
-                // XXX notify the FDW of the new table schemas
+                // notify the FDW of the schema changes
+                _redis_ddl.commit_ddl(db_id, completed_xid, ddls);
 
-                // clear the sync table hash -- race condition against another sync?
+#if 0
+                // clear the sync table hash
+                // note: when the GC-1 issues a TABLE_SYNC_COMMIT it will block processing until the
+                //       database is back in the running state to avoid any potential race condition
+                //       against another table re-sync
                 _redis.hdel(hash_table, table_ids); // XXX
 
                 // notify everyone that the database is now in the "ready" state
-                // note: the LogParser should be stalled until it sees this message to avoid race conditions
+                // note: the LogParser will be stalled until it sees this message to avoid race conditions
                 _redis_pub_sub.notify("ready"); // XXX
-
 #endif
+
                 // allow commits on future XIDs
                 _block_commit.erase(db_id);
 

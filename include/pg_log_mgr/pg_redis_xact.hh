@@ -69,7 +69,7 @@ namespace springtail::pg_log_mgr {
                 }
             }
 
-            std::string serialize() const
+            explicit operator std::string() const
             {
                 std::string xid_str = fmt::format("{}:", aborted_xids.size());
                 for (auto xid : aborted_xids) {
@@ -132,7 +132,7 @@ namespace springtail::pg_log_mgr {
             }
 
             /** Serialize table sync message to string */
-            std::string serialize() const
+            explicit operator std::string() const
             {
                 return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}",
                     db_id, target_xid, xmin, xmax, xmin_epoch, xmax_epoch,
@@ -153,7 +153,7 @@ namespace springtail::pg_log_mgr {
                 db_id = std::stoull(string_value);
             }
 
-            std::string serialize() const
+            explicit operator std::string() const
             {
                 return fmt::format("{}", db_id);
             }
@@ -231,17 +231,17 @@ namespace springtail::pg_log_mgr {
          * @brief Serialize data to string
          * @return std::string
          */
-        std::string serialize() const
+        explicit operator std::string() const
         {
             if (type == XACT_MSG) {
                 const auto &xact_msg = std::get<XactMsg>(msg);
-                return xact_msg.serialize() + ":X";
+                return static_cast<std::string>(xact_msg) + ":X";
             } else if (type == TABLE_SYNC_MSG) {
                 const auto &table_sync_msg = std::get<TableSyncMsg>(msg);
-                return table_sync_msg.serialize() + ":T";
+                return static_cast<std::string>(table_sync_msg) + ":T";
             } else if (type == TABLE_SYNC_END_MSG) {
                 const auto &table_sync_end_msg = std::get<TableSyncEndMsg>(msg);
-                return table_sync_end_msg.serialize() + ":E";
+                return static_cast<std::string>(table_sync_end_msg) + ":E";
             } else {
                 assert(false);
             }
@@ -271,7 +271,7 @@ namespace springtail::pg_log_mgr {
             xid = std::stoull(split[1]);
         }
 
-        std::string serialize() const
+        explicit operator std::string() const
         {
             return fmt::format("{}:{}", oid, xid);
         }

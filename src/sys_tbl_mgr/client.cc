@@ -142,6 +142,7 @@ namespace springtail::sys_tbl_mgr {
         DDLStatement result;
 
         auto &&request = _gen_table_request(db_id, xid, msg);
+
         c.client->create_table(result, request);
 
         if (result.statement.empty()) {
@@ -391,5 +392,19 @@ namespace springtail::sys_tbl_mgr {
         return c.client->exists(request);
     }
     
+    std::string
+    Client::swap_sync_table(const TableRequest &create,
+                            const UpdateRootsRequest &roots)
+    {
+        ThriftClient c = _get_client();
+        DDLStatement result;
+
+        c.client->swap_sync_table(result, create, roots);
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+
+        return result.statement;
+    }
 
 } // namespace

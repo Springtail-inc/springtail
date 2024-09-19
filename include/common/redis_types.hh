@@ -103,8 +103,9 @@ namespace springtail::redis {
     static constexpr char STRING_LOG_RESYNC[] = "string:log_resync:{}:{}";
 
     /**
-     * Hash set holding the table drop, create and update_roots metadata for each table sync.  Stored as a JSON array of JSON objects.
+     * List holding the table operations (drop, create and update_roots) for each table sync.  Each
+     * entry in the list is stored as a JSON array of JSON objects.
      * args: <db_instance_id>, <db_id>
      */
-    static constexpr char HASH_SYNC_TABLE_OPS[] = "hash:sync_table_ops:{}:{}";
+    static constexpr char QUEUE_SYNC_TABLE_OPS[] = "queue:sync_table_ops:{}:{}";
 }

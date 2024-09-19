@@ -90,7 +90,7 @@ namespace {
     {
         PgXactMsg msg("/tmp/test_xlog/test_1.log", "/tmp/test_xlog/test_2.log", 1, 1, 100, 1000, 5, 1, {10, 20});
 
-        std::string str = msg.serialize();
+        std::string str = static_cast<std::string>(msg);
 
         PgXactMsg msg2(str);
         PgXactMsg::XactMsg msg3 = std::get<PgXactMsg::XactMsg>(msg2.msg);
@@ -112,7 +112,7 @@ namespace {
         copy_res->add_table(67);
 
         PgXactMsg msg4(1, copy_res);
-        str = msg4.serialize();
+        str = static_cast<std::string>(msg4);
 
         PgXactMsg msg5(str);
         PgXactMsg::TableSyncMsg msg6 = std::get<PgXactMsg::TableSyncMsg>(msg5.msg);

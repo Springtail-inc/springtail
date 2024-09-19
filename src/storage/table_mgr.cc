@@ -225,7 +225,7 @@ namespace springtail {
         tbl_meta.snapshot_xid = 1;
 
         XidLsn xid(access_xid);
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, sys_tbl::TableNames::ID, xid);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
         // XXX note that the table stats are currently broken for system tables... would need a way to bootstrap
 

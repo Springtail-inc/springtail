@@ -98,7 +98,7 @@ namespace springtail {
      * queue.  If two-phase commit is not required, a consumer can also call pop_and_commit() which
      * will atomically perform a pop() and commit().
      *
-     * @tparam T value type, should implement std::string serialize().
+     * @tparam T value type, should be castable to a std::string
      */
     template<typename T>
     class RedisQueue {
@@ -121,7 +121,7 @@ namespace springtail {
          */
         uint64_t push(const T &value)
         {
-            return _redis->lpush(_key, value.serialize());
+            return _redis->lpush(_key, static_cast<std::string>(value));
         }
 
         /**
@@ -253,7 +253,7 @@ namespace springtail {
          */
         uint64_t add(const T &value, const uint64_t score=0)
         {
-            std::string value_string = value.serialize();
+            std::string value_string = static_cast<std::string>(value);
             return RedisMgr::get_instance()->get_client()->zadd(_key, value_string, score);
         }
 
@@ -264,7 +264,7 @@ namespace springtail {
          */
         uint64_t remove(const T &value)
         {
-            std::string value_string = value.serialize();
+            std::string value_string = static_cast<std::string>(value);
             return RedisMgr::get_instance()->get_client()->zrem(_key, value_string);
         }
 

@@ -54,7 +54,7 @@ namespace {
         PgXactMsg xact_msg(begin_path, commit_path, db_id, begin_offset, commit_offset,
                            xact_lsn, xid, pg_xid, aborted_xids);
 
-        std::string str = xact_msg.serialize();
+        std::string str = static_cast<std::string>(xact_msg);
 
         std::cout << str << std::endl;
 

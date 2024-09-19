@@ -120,6 +120,7 @@ namespace springtail::gc {
         WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
 
         RedisQueue<XidReady> _redis; ///< The redis queue to communicate between the LogParser and the Committer.
+
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
 
