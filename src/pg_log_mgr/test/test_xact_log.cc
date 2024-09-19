@@ -20,7 +20,7 @@ namespace {
 
         void TearDown() override {
             // remove the directory
-            std::filesystem::remove_all("/tmp/test_xlog/");
+            //std::filesystem::remove_all("/tmp/test_xlog/");
         }
     };
 

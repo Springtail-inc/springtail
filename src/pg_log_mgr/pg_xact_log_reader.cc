@@ -33,7 +33,7 @@ namespace springtail::pg_log_mgr {
                 _stream.close();
                 // get next file
                 _current_file = fs::get_next_file(_current_file, _file_prefix, _file_suffix);
-                if (_current_file.empty()) {
+                if (_current_file.empty() || !std::filesystem::exists(_current_file)) {
                     break;
                 }
                 _open(_current_file);
@@ -83,7 +83,7 @@ namespace springtail::pg_log_mgr {
     PgXactLogReader::begin()
     {
         // find first file
-        std::filesystem::path _current_file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
+        _current_file = fs::find_earliest_modified_file(_base_dir, _file_prefix, _file_suffix);
         if (_current_file.empty()) {
             return;
         }
