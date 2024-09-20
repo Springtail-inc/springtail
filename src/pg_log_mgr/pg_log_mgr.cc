@@ -581,7 +581,7 @@ namespace springtail::pg_log_mgr {
                                  xact->commit_offset, xact->xact_lsn,
                                  xid, xact->xid, xact->aborted_xids);
 
-            msgs.push_back(redis_xact.serialize());
+            msgs.push_back(static_cast<std::string>(redis_xact));
         }
 
         _redis_queue.push(msgs);
