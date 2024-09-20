@@ -35,6 +35,14 @@ namespace springtail::pg_log_mgr {
             Properties::set_db_state(_db_id, state);
         }
 
+        // reset state if we were stuck in syncing
+        if (state == redis::REDIS_STATE_SYNCING) {
+            // XXX need to handle, not sure whether to reset to running or initialize
+            assert(false);
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
+
         uint64_t lsn = INVALID_LSN;
 
         if (state == redis::REDIS_STATE_INITIALIZE) {
@@ -147,11 +155,14 @@ namespace springtail::pg_log_mgr {
 
         if (new_state == redis::REDIS_STATE_RUNNING) {
             // if the new state is running, then we should have been in the replay done state
-            if (internal_state == STATE_REPLAY_DONE) {
-                _internal_state.test_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
-            } else {
-                assert(internal_state == STATE_STARTUP);
+            if (internal_state == STATE_REPLAYING) {
+                // if in replaying, wait for replay done before switching to running
+                // XXX this blocks the pubsub thread until replay is done
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
+                _internal_state.wait_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
             }
+            // if in replay done set to running
+            _internal_state.test_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
         }
     }
 
@@ -167,6 +178,7 @@ namespace springtail::pg_log_mgr {
 
         subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
             if (channel == state_change_channel) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
                 _handle_external_state_change(msg);
             }
         });
@@ -240,6 +252,8 @@ namespace springtail::pg_log_mgr {
         // wait for pipeline stall to complete
         _internal_state.wait_for_state(STATE_SYNCING);
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; state=synchronizing");
+
         // copy tables
         std::vector<PgCopyResultPtr> res;
         if (table_ids.has_value()) {
@@ -271,6 +285,9 @@ namespace springtail::pg_log_mgr {
 
         assert(_internal_state.is(STATE_SYNCING));
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to redis");
+
+
         for (const auto &r : res) {
             // go through result tids and update Redis with table state info
             for (const auto &tid : r->tids) {
@@ -288,6 +305,8 @@ namespace springtail::pg_log_mgr {
 
         // process stalled messages; set state to replaying
         _internal_state.set(STATE_REPLAYING);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
     }
 
 
@@ -296,6 +315,8 @@ namespace springtail::pg_log_mgr {
     {
         assert(_internal_state.is(STATE_REPLAYING));
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs");
+
         // replay xact log after a copy
         PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, 0);
         xact_reader.begin(_xact_sync_log_file);
@@ -303,17 +324,22 @@ namespace springtail::pg_log_mgr {
             // go through log and fetch batches of transactions to send to redis
             std::vector<PgTransactionPtr> committed_xacts;
             int num_xacts = xact_reader.next(MAX_REDIS_BATCH_SIZE, committed_xacts);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs: num_xacts={}", num_xacts);
+            assert (num_xacts == committed_xacts.size());
             if (num_xacts == 0) {
                 break;
             }
             _push_xacts_to_redis(committed_xacts);
         }
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs done");
+
         // rollover xact logger
         _create_xact_logger();
 
-        // set state to running
-        _internal_state.set(STATE_RUNNING);
+        // set state to replay done if we are in replaying state
+        // this unblocks the xact handler
+        _internal_state.set(STATE_REPLAY_DONE);
     }
 
     void
@@ -485,7 +511,7 @@ namespace springtail::pg_log_mgr {
         StateEnum state = _internal_state.get();
         if (state == STATE_REPLAYING) {
             // replaying state, block further messages
-            _internal_state.wait_for_state(STATE_RUNNING);
+            _internal_state.wait_for_state(STATE_REPLAY_DONE);
             // fall through to running state
         }
 
@@ -504,7 +530,8 @@ namespace springtail::pg_log_mgr {
         xact->springtail_xid = xid;
         _xact_logger->log_commit(xact);
 
-        if (_internal_state.is(STATE_RUNNING)) {
+        // block until we are in running state or replay done state
+        if (!_internal_state.is(STATE_RUNNING) && !_internal_state.is(STATE_REPLAY_DONE)) {
             return;
         }
 
