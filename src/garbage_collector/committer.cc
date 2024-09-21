@@ -86,17 +86,11 @@ namespace springtail::gc {
                 // notify the FDW of the schema changes
                 _redis_ddl.commit_ddl(db_id, completed_xid, ddls);
 
-#if 0
-                // clear the sync table hash
-                // note: when the GC-1 issues a TABLE_SYNC_COMMIT it will block processing until the
-                //       database is back in the running state to avoid any potential race condition
-                //       against another table re-sync
-                _redis.hdel(hash_table, table_ids); // XXX
-
                 // notify everyone that the database is now in the "ready" state
-                // note: the LogParser will be stalled until it sees this message to avoid race conditions
-                _redis_pub_sub.notify("ready"); // XXX
-#endif
+                Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
+
+                // signal the GC-1 LogParser that it can unblock and continue operation
+                _parser_notify.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, db_id));
 
                 // allow commits on future XIDs
                 _block_commit.erase(db_id);

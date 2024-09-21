@@ -91,6 +91,13 @@ namespace springtail::redis {
      */
     static constexpr char QUEUE_GC_XID_READY[] = "queue:gc_xid_ready:{}";
 
+    /**
+     * Queue from the GC-2 back to the GC-1.  Passes an XidReady object to notify when a table sync
+     * commit has been processed and the GC-1 can unblock.
+     * args: <db_instance_id>
+     */
+    static constexpr char QUEUE_GC_PARSER_NOTIFY[] = "queue:gc_parser_notify:{}";
+
     //// For RedisDDL
 
     /**

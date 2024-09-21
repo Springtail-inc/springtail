@@ -133,38 +133,75 @@ namespace springtail::gc {
                 next_dep_xid = *j->second.begin();
             }
 
-            // find the set of XIDs waiting on this OID
-            auto &&xid_set_i = _oid_backlog.find({ db_id, oid });
-
-            // note: there might not be any XIDs waiting on this OID, despite the dependency
-            if (xid_set_i != _oid_backlog.end()) {
-                auto &blocked_xids = xid_set_i->second;
-
-                // release XIDs blocked on this OID
-                auto &&xid_i = blocked_xids.begin();
-                while (xid_i != blocked_xids.end()) {
-                    if (next_dep_xid && *xid_i > next_dep_xid) {
-                        break;
-                    }
-
-                    // move the request to the ready queue
-                    auto &&b = _backlog.find({ db_id, *xid_i });
-                    _ready.push_front(b->second.second);
-                    _backlog.erase(b);
-
-                    blocked_xids.erase(xid_i);
-                    xid_i = blocked_xids.begin();
-                }
-
-                // clear the entry for this OID
-                if (blocked_xids.empty()) {
-                    _oid_backlog.erase(xid_set_i);
-                }
-            }
+            // unblock any XIDs that were waiting on this table
+            _unblock_xids(db_id, oid, next_dep_xid);
         }
 
         // clear this XID from the list of blockers
         _xid_map.erase(i);
+    }
+
+    void
+    LogParser::Backlog::clear_table(uint64_t db_id,
+                                    uint64_t oid)
+    {
+        boost::unique_lock lock(_mutex);
+
+        // clear the record of XIDs that contain blocking operations for this table, since they won't be applied
+        _table_deps.erase({ db_id, oid });
+
+        // unblock any XIDs that were waiting on this table
+        _unblock_xids(db_id, oid);
+    }
+
+    void
+    LogParser::Backlog::_unblock_xids(uint64_t db_id,
+                                      uint64_t oid,
+                                      uint64_t next_dep_xid)
+    {
+        // find the set of XIDs waiting on this OID
+        auto &&xid_set_i = _oid_backlog.find({ db_id, oid });
+
+        // note: there might not be any XIDs waiting on this OID, despite the dependency
+        if (xid_set_i != _oid_backlog.end()) {
+            auto &blocked_xids = xid_set_i->second;
+
+            // release XIDs blocked on this OID
+            auto &&xid_i = blocked_xids.begin();
+            while (xid_i != blocked_xids.end()) {
+                if (next_dep_xid && *xid_i > next_dep_xid) {
+                    break;
+                }
+
+                // move the request to the ready queue
+                auto &&b = _backlog.find({ db_id, *xid_i });
+                _ready.push_front(b->second.second);
+                _backlog.erase(b);
+
+                blocked_xids.erase(xid_i);
+                xid_i = blocked_xids.begin();
+            }
+
+            // clear the entry for this OID
+            if (blocked_xids.empty()) {
+                _oid_backlog.erase(xid_set_i);
+            }
+        }
+    }
+
+
+    bool
+    LogParser::SyncTracker::mark_resync(uint64_t db_id,
+                                        uint64_t table_id)
+    {
+        boost::unique_lock lock(_mutex);
+
+        bool first_table = _resync_map[db_id].empty() && !_sync_map.contains(db_id);
+
+        // add the table to the resync map; will get removed when add_sync() is called
+        _resync_map[db_id].insert(table_id);
+
+        return first_table;
     }
 
     bool
@@ -172,14 +209,25 @@ namespace springtail::gc {
     {
         boost::unique_lock lock(_mutex);
 
+        // check the resync map for the db
+        auto resync_i = _resync_map.find(sync_msg.db_id);
+
         // check if this is the first table(s) to be added for syncing
         auto &db_map = _sync_map[sync_msg.db_id];
-        bool first_table = db_map.empty();
+        bool first_table = db_map.empty() && (resync_i == _resync_map.end());
 
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
         for (int32_t table_id : sync_msg.tids) {
-            db_map[table_id] = record;
+            resync_i->second.erase(table_id); // remove the table from the resync map
+            db_map[table_id] = record; // add the record to the sync map
+        }
+
+        // remove the db from the map if the table set is empty
+        if (resync_i != _resync_map.end()) {
+            if (resync_i->second.empty()) {
+                _resync_map.erase(resync_i);
+            }
         }
 
         return first_table;
@@ -226,6 +274,15 @@ namespace springtail::gc {
     {
         boost::shared_lock lock(_mutex);
 
+        // first check the resync map
+        auto resync_i = _resync_map.find(db_id);
+        if (resync_i != _resync_map.end()) {
+            if (resync_i->second.contains(table_id)) {
+                return true; // if the table is present, skip
+            }
+        }
+
+        // then check the sync map
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
             return false;
@@ -244,14 +301,23 @@ namespace springtail::gc {
     {
         boost::shared_lock lock(_mutex);
 
-        auto db_i = _sync_map.find(db_id);
-        if (db_i == _sync_map.end()) {
-            return true;
+        // check for entries in the resync map
+        auto resync_i = _resync_map.find(db_id);
+        if (resync_i != _resync_map.end()) {
+            // note: should never be empty since we remove the entry if it becomes empty
+            assert(!resync_i->second.empty());
+            return false;
         }
 
-        // note: should never be empty since we remove the entry if it becomes empty
-        assert(!db_i->second.empty());
-        return false;
+        // check for entries in the sync map
+        auto db_i = _sync_map.find(db_id);
+        if (db_i != _sync_map.end()) {
+            // note: should never be empty since we remove the entry if it becomes empty
+            assert(!db_i->second.empty());
+            return false;
+        }
+
+        return true;
     }
 
     void
@@ -297,7 +363,13 @@ namespace springtail::gc {
                         //       which will do the table rotates and move the database back to the
                         //       ready state
                         if (_sync_tracker.empty(msg.db_id)) {
+                            // pass the commit to the GC-2 Committer
                             _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id));
+
+                            // block until the Committer notifies us that the commit is complete
+                            // XXX this actually blocks all databases, but logically we only need to
+                            //     block one and could process messages for the others
+                            _parser_notify.pop_and_commit();
                         }
                         continue;
                     }
@@ -421,9 +493,15 @@ namespace springtail::gc {
                             // check all of the tables referenced by the truncate
                             // note: there may be multiple due to CASCADE
                             for (auto rel_id : truncate_msg.rel_ids) {
-                                blocked = _check_backlog(state, rel_id, offset);
-                                if (blocked) {
-                                    break;
+                                // check if we should skip this specific truncate due to ongoing table sync
+                                bool skip = _sync_tracker.should_skip(state->entry.db_id, rel_id,
+                                                                      state->entry.pg_xid);
+                                if (!skip) {
+                                    // if we aren't skipping then we can check the backlog to see if we need to block
+                                    blocked = _check_backlog(state, rel_id, offset);
+                                    if (blocked) {
+                                        break;
+                                    }
                                 }
                             }
 
@@ -483,14 +561,30 @@ namespace springtail::gc {
                             // operation if there are earlier un-applied schema changes
                             blocked = _check_backlog(state, table_msg.oid, offset);
                             if (!blocked) {
-                                // XXX need to stall the pipeline in some cases, eg type change
-
                                 // apply the schema change
                                 XidLsn xid(state->entry.xid, state->lsn);
                                 auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->alter_table(state->entry.db_id, xid, table_msg);
 
-                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                // need to re-sync the table in some cases, eg type change
+                                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                                if (action.get<std::string>() == "resync") {
+                                    // mark the table to be ignored in the _sync_tracker
+                                    _sync_tracker.mark_resync(state->entry.db_id, table_msg.oid);
+
+                                    // clear the table from the backlog in case any other threads
+                                    // are waiting for mutations to it (since those mutations will
+                                    // now be ignored)
+                                    _backlog.clear_table(state->entry.db_id, table_msg.oid);
+
+                                    // notify the PgLogParser to resync the table
+                                    auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
+                                                           Properties::get_db_instance_id(), state->entry.db_id);
+                                    RedisQueue<std::string> table_sync_queue(key);
+                                    table_sync_queue.push(std::to_string(table_msg.oid));
+                                } else {
+                                    // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                                    _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                }
                             }
                         }
                         break;

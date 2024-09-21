@@ -191,8 +191,13 @@ namespace springtail::sys_tbl_mgr {
             // note: _generate_update() sets the necessary elements of the ddl
             auto history = _generate_update(info->columns, request.table.columns, xid, ddl);
 
-            // write the column change to the schemas table and update the cache
-            _set_schema_info(request.db_id, request.table.id, { history });
+            // we won't apply any changes to the system tables in these cases
+            if (history.update_type != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
+                history.update_type != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
+
+                // write the column change to the schemas table and update the cache
+                _set_schema_info(request.db_id, request.table.id, { history });
+            }
         }
 
         _return.__set_statement(nlohmann::to_string(ddl));
@@ -1097,7 +1102,7 @@ namespace springtail::sys_tbl_mgr {
                 return update;
             }
 
-            if (entry.is_nullable != new_col.is_nullable) {
+            if (!entry.is_nullable && new_col.is_nullable) {
                 // copy the new column details
                 update.column = new_col;
 
@@ -1113,24 +1118,29 @@ namespace springtail::sys_tbl_mgr {
                 return update;
             }
 
+            if (entry.is_nullable && !new_col.is_nullable) {
+                // a column going from nullable to not-nullable results in NULL values being
+                // populated with a default, which aren't sent via the log
+                ddl["action"] = "resync";
+                update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
+
+                return update;
+            }
+
             if (entry.pg_type != new_col.pg_type) {
-                // copy the new column details
-                update.column = new_col;
-
-                // mark them as a TYPE_CHANGE update
-                update.update_type = static_cast<int8_t>(SchemaUpdateType::TYPE_CHANGE);
-                update.exists = true;
-
-                // set the DDL statement
-                ddl["action"] = "col_type";
-                ddl["column"]["name"] = update.column.name;
-                ddl["column"]["type"] = update.column.pg_type;
+                // a column type-change requires a table re-sync
+                ddl["action"] = "resync";
+                update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
 
                 return update;
             }
         }
 
-        // XXX can there be a schema change that results in no changes on the Springtail side?
-        assert(false);
+        // there may be changes to the schema that don't result in changes on the Springtail side,
+        // e.g., a change in the default value
+        ddl["action"] = "no_change";
+        update.update_type = static_cast<int8_t>(SchemaUpdateType::NO_CHANGE);
+
+        return update;
     }
 }

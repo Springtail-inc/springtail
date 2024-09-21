@@ -24,7 +24,8 @@ namespace springtail {
         REMOVE_COLUMN = 1,
         NAME_CHANGE = 2,
         NULLABLE_CHANGE = 3,
-        TYPE_CHANGE = 4
+        RESYNC = 4,
+        NO_CHANGE = 5
     };
 
     /**

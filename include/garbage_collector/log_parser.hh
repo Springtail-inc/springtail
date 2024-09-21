@@ -160,6 +160,25 @@ namespace springtail::gc {
              */
             void clear_dep(uint64_t db_id, uint64_t xid);
 
+            /**
+             * Clears any requests blocked on the provided table.  Used to unblock processing that
+             * was blocked on a table that has been selected for resync.
+             * @param db_id The DB of the table.
+             * @param oid The OID of the table.
+             */
+            void clear_table(uint64_t db_id, uint64_t oid);
+
+        private:
+            /**
+             * Unblocks any XIDs that were waiting on the table.  Optionally only releases XIDs
+             * before a provided "next dependent XID," allowing earlier XIDs to proceed since they
+             * can't be dependent on changes in later XIDs.
+             * @param db_id The DB of the table.
+             * @param oid The OID of the table.
+             * @param next_dep_xid If non-zero, used to limit the set of XIDs that are unblocked.
+             */
+            void _unblock_xids(uint64_t db_id, uint64_t oid, uint64_t next_dep_xid = 0);
+
         private:
             using DbXid = std::pair<uint64_t, uint64_t>;
             using DbOid = std::pair<uint64_t, uint64_t>;
@@ -196,6 +215,13 @@ namespace springtail::gc {
          */
         struct SyncTracker {
         public:
+            /**
+             * Marks that the LogParser has issued a resync request for the given table so that
+             * mutations can be ignored.  This record is replaced by a full XidRecord when
+             * add_sync() is called from the message coming through the log.
+             */
+            bool mark_resync(uint64_t db_id, uint64_t table_id);
+
             /**
              * Add the metadata for a given table sync into the tracker.
              */
@@ -273,6 +299,10 @@ namespace springtail::gc {
 
             /** db -> table -> XidRecord containing table sync details. */
             std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _sync_map;
+
+            /** db-> table indicating that a resync was issued but we haven't seen the
+                TABLE_SYNC_MSG log entry for the table yet. */
+            std::map<uint64_t, std::set<uint64_t>> _resync_map;
         };
 
 
@@ -305,6 +335,7 @@ namespace springtail::gc {
             Reader(ParserQueuePtr parser_queue)
                 : _shutdown(false),
                   _gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
+                  _parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, Properties::get_db_instance_id())),
                   _reader_queue(fmt::format(redis::QUEUE_GC1_READER, Properties::get_db_instance_id())),
                   _parser_queue(parser_queue)
             { }
@@ -360,8 +391,11 @@ namespace springtail::gc {
             /** Shutdown flag. */
             std::atomic<bool> _shutdown;
 
-            /** Queue for XID messages to the GC committer. */
+            /** Queue for XID messages to the GC-2 committer. */
             RedisQueue<XidReady> _gc_queue;
+
+            /** Queue for notify messages from the GC-2 committer back to the GC-1 after a table sync commit. */
+            RedisQueue<XidReady> _parser_notify;
 
             /** Queue to pass messages from the Dispatcher thread to the Reader threads. */
             RedisQueue<pg_log_mgr::PgXactMsg> _reader_queue;

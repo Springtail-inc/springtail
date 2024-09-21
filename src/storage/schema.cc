@@ -430,8 +430,9 @@ namespace springtail {
                     _field_map[update.name] = _make_default_value(old_field, *(update.default_value));
                 }
                 break;
-            case (SchemaUpdateType::TYPE_CHANGE):
-                throw SchemaError("Can't handle column type changes yet");
+            default:
+                // note: we shouldn't see any other update types in the schema history
+                assert(0);
             }
         }
 

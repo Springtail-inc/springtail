@@ -36,6 +36,7 @@ namespace springtail::gc {
     public:
         Committer(uint32_t worker_count)
             : _redis(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
+              _parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, Properties::get_db_instance_id())),
               _worker_count(worker_count)
         {
             _xid_mgr = XidMgrClient::get_instance();
@@ -120,6 +121,9 @@ namespace springtail::gc {
         WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
 
         RedisQueue<XidReady> _redis; ///< The redis queue to communicate between the LogParser and the Committer.
+
+        /** Queue for notify messages from the GC-2 committer back to the GC-1 after a table sync commit. */
+        RedisQueue<XidReady> _parser_notify;
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
