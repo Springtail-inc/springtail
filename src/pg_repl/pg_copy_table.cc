@@ -86,8 +86,8 @@ namespace springtail
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
-        "WHERE relkind = 'r'  "         // regular tables "
-        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas "
+        "WHERE relkind = 'r'  "         // regular tables
+        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
         "AND nspname != 'information_schema' "
         "ORDER BY pg_class.oid";
 

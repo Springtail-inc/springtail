@@ -340,6 +340,8 @@ namespace springtail::pg_log_mgr {
         // set state to replay done if we are in replaying state
         // this unblocks the xact handler
         _internal_state.set(STATE_REPLAY_DONE);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Internal state set to: replay_done");
     }
 
     void
@@ -485,7 +487,7 @@ namespace springtail::pg_log_mgr {
                 _create_xact_logger();
 
                 // record in redis the log file
-                RedisMgr::get_instance()->get_client()->set(redis::STRING_LOG_RESYNC,
+                RedisMgr::get_instance()->get_client()->set(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id),
                                                             _xact_logger->file().string());
 
                 _xact_sync_log_file = _xact_logger->file();
