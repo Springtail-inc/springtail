@@ -51,8 +51,10 @@ namespace springtail::pg_log_mgr {
             lsn = _startup_running();
         }
 
-        // initiate table copy thread
-        // do this before we start streaming
+        // initiate the pubsub thread; do this before copy thread
+        _pubsub_thread = std::thread(&PgLogMgr::_redis_pubsub_thread, this);
+
+        // initiate table copy thread; do this before we start streaming
         _table_copy_thread = std::thread(&PgLogMgr::_copy_thread, this);
 
         // start streaming
@@ -163,6 +165,7 @@ namespace springtail::pg_log_mgr {
             }
             // if in replay done set to running
             _internal_state.test_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
         }
     }
 
@@ -189,6 +192,7 @@ namespace springtail::pg_log_mgr {
                 subscriber->consume();
             } catch (const sw::redis::TimeoutError &e) {
                 // timeout, check for shutdown
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Timeout on consume");
                 continue;
             } catch (const sw::redis::Error &e) {
                 SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
@@ -212,6 +216,7 @@ namespace springtail::pg_log_mgr {
             // block on redis table sync queue w/timeout for shutdown
             StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
             if (table_id_ptr == nullptr) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Timeout on table sync queue");
                 continue; // timeout, check for shutdown
             }
 
@@ -340,6 +345,8 @@ namespace springtail::pg_log_mgr {
         // set state to replay done if we are in replaying state
         // this unblocks the xact handler
         _internal_state.set(STATE_REPLAY_DONE);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Internal state set to: replay_done");
     }
 
     void
@@ -485,7 +492,7 @@ namespace springtail::pg_log_mgr {
                 _create_xact_logger();
 
                 // record in redis the log file
-                RedisMgr::get_instance()->get_client()->set(redis::STRING_LOG_RESYNC,
+                RedisMgr::get_instance()->get_client()->set(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id),
                                                             _xact_logger->file().string());
 
                 _xact_sync_log_file = _xact_logger->file();

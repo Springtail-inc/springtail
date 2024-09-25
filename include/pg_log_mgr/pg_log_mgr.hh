@@ -244,7 +244,7 @@ namespace springtail::pg_log_mgr {
         void _replay_xact_logs();
 
         //// Redis pub/sub
-        std::thread _redis_thread;          ///< redis pub/sub thread
+        std::thread _pubsub_thread;          ///< redis pub/sub thread
 
         /** Redis pub/sub thread entry point */
         void _redis_pubsub_thread();
