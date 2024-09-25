@@ -336,7 +336,7 @@ namespace springtail::gc {
                 : _shutdown(false),
                   _gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
                   _parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, Properties::get_db_instance_id())),
-                  _reader_queue(fmt::format(redis::QUEUE_GC1_READER, Properties::get_db_instance_id())),
+                  _reader_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id())),
                   _parser_queue(parser_queue)
             { }
 

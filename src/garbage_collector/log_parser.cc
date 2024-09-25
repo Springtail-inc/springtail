@@ -219,7 +219,9 @@ namespace springtail::gc {
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
         for (int32_t table_id : sync_msg.tids) {
-            resync_i->second.erase(table_id); // remove the table from the resync map
+            if (resync_i != _resync_map.end()) {
+                resync_i->second.erase(table_id); // remove the table from the resync map
+            }
             db_map[table_id] = record; // add the record to the sync map
         }
 
@@ -339,30 +341,39 @@ namespace springtail::gc {
                     auto xact_msg = _reader_queue.pop(worker_id, 1);
                     if (xact_msg == nullptr) {
                         // nothing ready, loop and try again
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "No messages available");
                         continue;
                     }
 
                     // record the table sync metadata
                     if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
                         const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(xact_msg->msg);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_MSG on {}", msg.db_id);
 
                         bool sync_start = _sync_tracker.add_sync(msg);
                         if (sync_start) {
+                            SPDLOG_DEBUG_MODULE(LOG_GC, "First TABLE_SYNC_MSG on {}", msg.db_id);
+
                             // this is the first table sync, issue a message to the Committer to stop committing XIDs
                             _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_START, msg.db_id));
                         }
+
+                        _reader_queue.commit(worker_id);
                         continue;
                     }
 
                     if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_END_MSG) {
                         // handle the sync end message
                         const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncEndMsg>(xact_msg->msg);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_END_MSG on {}", msg.db_id);
 
                         // note: if the sync tracker is empty, it means that the database was idle
                         //       during the table syncs, so we can notify for a "commit" immediately
                         //       which will do the table rotates and move the database back to the
                         //       ready state
                         if (_sync_tracker.empty(msg.db_id)) {
+                            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {}", msg.db_id);
+
                             // pass the commit to the GC-2 Committer
                             _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id));
 
@@ -371,6 +382,8 @@ namespace springtail::gc {
                             //     block one and could process messages for the others
                             _parser_notify.pop_and_commit();
                         }
+
+                        _reader_queue.commit(worker_id);
                         continue;
                     }
 
@@ -400,7 +413,8 @@ namespace springtail::gc {
             bool done = false;
             bool blocked = false;
             while (!done && !blocked) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}", state->entry.xid, state->entry.begin_path, begin_offset);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Read file {} {}",
+                                    state->entry.xid, state->entry.begin_path, begin_offset);
 
                 _reader.set_file(state->entry.begin_path, begin_offset, commit_offset);
 

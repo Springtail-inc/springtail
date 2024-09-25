@@ -251,6 +251,9 @@ namespace springtail
                 // atttypid oid
                 column.pg_type = _connection.get_int32(i, 4);
 
+                // springtail type
+                column.type = pg_msg::convert_pg_type(column.pg_type);
+
                 // is primary key
                 bool is_pkey = _connection.get_boolean(i, 5);
                 if (is_pkey) {

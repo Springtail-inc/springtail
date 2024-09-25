@@ -78,14 +78,6 @@ namespace springtail::redis {
     static constexpr char SET_PG_OID_XIDS[] = "set:pg_xid_oids:{}:{}";
 
     /**
-     * Queue used within the GC-1 to communicate between the LogParser::Dispatcher and the
-     * LogParser::Reader.
-     *
-     * args: <db_instance_id>
-     */
-    static constexpr char QUEUE_GC1_READER[] = "queue:gc1_reader:{}";
-
-    /**
      * Queue between the GC-1 and GC-2.  Passes an XidReady object.
      * args: <db_instance_id>
      */
