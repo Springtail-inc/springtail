@@ -252,7 +252,7 @@ namespace {
         _finalize();
 
         // add a column col3
-        msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 3, 0, true, false});
+        msg.columns.push_back({"col3", static_cast<uint8_t>(SchemaType::INT32), 0, "0", 3, 0, false, false});
         _alter_table(msg);
 
         // rename the table x => y
@@ -260,8 +260,8 @@ namespace {
         _alter_table(msg);
 
         // set default value for col3
-        msg.columns[2].default_value = "0";
-        msg.columns[2].is_nullable = false;
+        msg.columns[2].default_value = std::nullopt;
+        msg.columns[2].is_nullable = true;
         _alter_table(msg);
 
         // verify the virtual schema creation from the cache prior to finalize
