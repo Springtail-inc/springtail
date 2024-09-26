@@ -74,7 +74,7 @@ namespace {
         XidMgrClient::get_instance()->commit_xid(db_id, xid, false);
 
         // create an access table
-        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, oid, xid);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

@@ -30,8 +30,7 @@ main(int argc,
                            sys_tbl::TableStats::ID }) {
         auto table = TableMgr::get_instance()->get_table(db_id,
                                                          table_id,
-                                                         constant::LATEST_XID,
-                                                         constant::MAX_LSN);
+                                                         constant::LATEST_XID);
         auto fields = table->extent_schema()->get_fields();
 
         std::cout << fmt::format("TABLE: {}", table_id) << std::endl;

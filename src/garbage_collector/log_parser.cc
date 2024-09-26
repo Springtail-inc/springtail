@@ -370,7 +370,6 @@ namespace springtail::gc {
                     auto xact_msg = _reader_queue.pop(worker_id, 1);
                     if (xact_msg == nullptr) {
                         // nothing ready, loop and try again
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "No messages available");
                         continue;
                     }
 
@@ -862,7 +861,7 @@ namespace springtail::gc {
             SPDLOG_INFO("Parser got work item for: {}", entry->xid);
 
             // get the table information for the mutation
-            auto table = TableMgr::get_instance()->get_table(entry->db_id, entry->table_id, entry->xid, entry->lsn);
+            auto table = TableMgr::get_instance()->get_table(entry->db_id, entry->table_id, entry->xid);
 
             // if has a primary key, perform a lookup in the primary index to determine the affected extent_id
             //     note: this should be safe, even in the face of schema changes, since a primary key

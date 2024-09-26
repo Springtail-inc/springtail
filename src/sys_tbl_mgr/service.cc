@@ -362,7 +362,7 @@ namespace springtail::sys_tbl_mgr {
     {
         boost::shared_lock lock(_read_mutex);
 
-        XidLsn xid(request.xid);
+        XidLsn xid(request.xid, constant::MAX_LSN);
 
         // make sure that the table exists at this XID
         auto table_info = _get_table_info(request.db_id, request.table_id, xid);
@@ -375,6 +375,7 @@ namespace springtail::sys_tbl_mgr {
 
         _return.__set_roots(info->roots);
         _return.__set_stats(info->stats);
+        _return.__set_snapshot_xid(info->snapshot_xid);
     }
 
     void
@@ -1023,7 +1024,7 @@ namespace springtail::sys_tbl_mgr {
 
         // otherwise create an interface to the table and cache it
         auto &&access_xid = _get_access_xid(db_id);
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, access_xid.xid, access_xid.lsn);
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, access_xid.xid);
 
         // cache the table interface
         cache[table_id] = table;

@@ -49,8 +49,7 @@ namespace springtail {
     TablePtr
     TableMgr::get_table(uint64_t db_id,
                         uint64_t table_id,
-                        uint64_t xid,
-                        uint64_t lsn)
+                        uint64_t xid)
     {
         boost::shared_lock lock(_mutex);
 
@@ -63,7 +62,8 @@ namespace springtail {
         auto &&tbl_meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, table_id, xid);
 
         // construct the table and return it
-        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, {xid, lsn});
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
+                                                                   {xid, constant::MAX_LSN});
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                        schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
                                        tbl_meta, schema);

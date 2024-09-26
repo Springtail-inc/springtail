@@ -30,9 +30,10 @@ namespace springtail {
         static void shutdown();
 
         /**
-         * Read the table metadata for the requested table ID.
+         * Read the table metadata for the requested table ID.  Note that Table objects's are always
+         * constructed at lsn == MAX_LSN within the provided xid.
          */
-        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn);
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
          * Returns a boolean indicating if the table exists at a given xid/lsn.

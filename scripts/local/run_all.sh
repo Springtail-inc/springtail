@@ -62,9 +62,6 @@ PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"
 ${PG_LOG_DAEMON} --daemon
 sleep 1
 
-# XXX
-exit
-
 # start the garbage collector
 echo Start Garbage Collector...
 GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"
@@ -75,7 +72,7 @@ sleep 1
 python3 ../fdw_import.py
 
 # verify the snapshot by running a query against the FDW
-echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}
+# echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}
 
 # now we are ready to modify the data
 # ${PSQL_CMD} < test.sql

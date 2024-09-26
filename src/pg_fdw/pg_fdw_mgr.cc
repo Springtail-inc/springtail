@@ -169,7 +169,7 @@ namespace springtail::pg_fdw {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_create_state: db_id: {}, tid: {}, xid: {}, pg_xid: {}",
                             db_id, tid, xid, pg_xid);
 
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, constant::MAX_LSN);
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
         PgFdwState *state = new PgFdwState{table, tid, xid};
 
         return state;
@@ -1094,8 +1094,7 @@ namespace springtail::pg_fdw {
 
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
-                                                         schema_xid,
-                                                         constant::MAX_LSN);
+                                                         schema_xid);
         // get field array
         auto fields = table->extent_schema()->get_fields();
 
@@ -1169,12 +1168,10 @@ namespace springtail::pg_fdw {
 
         // get the schemas table
         table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Schemas::ID,
-                                                    schema_xid,
-                                                    constant::MAX_LSN);
+                                                    schema_xid);
 
         auto idx_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::Indexes::ID,
-                                                             schema_xid,
-                                                             constant::MAX_LSN);
+                                                             schema_xid);
 
         auto idx_fields = idx_table->extent_schema()->get_fields();
 

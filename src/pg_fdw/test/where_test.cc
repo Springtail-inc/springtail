@@ -269,7 +269,7 @@ namespace {
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
             // don't call create state as it calls xid mgr, just create state
-            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid, constant::MAX_LSN);
+            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
             PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
 
             // begin the scan
