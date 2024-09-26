@@ -98,8 +98,9 @@ namespace springtail::gc {
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            explicit State(std::shared_ptr<pg_log_mgr::PgXactMsg> entry)
-                : entry(std::get<pg_log_mgr::PgXactMsg::XactMsg>(entry->msg)),
+            explicit State(std::shared_ptr<pg_log_mgr::PgXactMsg> msg)
+                : msg(msg),
+                  entry(std::get<pg_log_mgr::PgXactMsg::XactMsg>(msg->msg)),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
                   lsn(0)
