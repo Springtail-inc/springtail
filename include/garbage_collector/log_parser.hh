@@ -219,19 +219,25 @@ namespace springtail::gc {
              * Marks that the LogParser has issued a resync request for the given table so that
              * mutations can be ignored.  This record is replaced by a full XidRecord when
              * add_sync() is called from the message coming through the log.
+             *
+             * @return true if this is the first table from this sync-set
              */
             bool mark_resync(uint64_t db_id, uint64_t table_id);
 
             /**
              * Add the metadata for a given table sync into the tracker.
+             *
+             * @return true if this is the first table from this sync-set
              */
             bool add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg);
 
             /**
              * Remove a given table from the sync tracker.  Called after we have passed all of the
              * skipable transaction records.
+             *
+             * @return 0 if still in progress, otherwise the max assigned XID among the syncs
              */
-            bool clear_syncs(uint64_t db_id, uint32_t pg_xid);
+            uint64_t clear_syncs(uint64_t db_id, uint32_t pg_xid);
 
             /**
              * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
@@ -240,8 +246,10 @@ namespace springtail::gc {
 
             /**
              * Checks if the tracker has any entries for a given database.
+             * 
+             * @return 0 if still in progress, otherwise the max XID seen among the syncs
              */
-            bool empty(uint64_t db_id) const;
+            uint64_t get_xid_if_empty(uint64_t db_id);
 
         private:
             /**
@@ -303,6 +311,9 @@ namespace springtail::gc {
             /** db-> table indicating that a resync was issued but we haven't seen the
                 TABLE_SYNC_MSG log entry for the table yet. */
             std::map<uint64_t, std::set<uint64_t>> _resync_map;
+
+            /** db -> xid hold the max target XID seen in the sync-set for a given db. */
+            std::map<uint64_t, uint64_t> _max_xid;
         };
 
 

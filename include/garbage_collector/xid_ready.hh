@@ -21,12 +21,13 @@ namespace springtail::gc {
 
         /** Constructor for messages that aren't XACT_MSG. */
         XidReady(const Type &type,
-                 uint64_t db_id)
+                 uint64_t db_id,
+                 uint64_t xid = 0)
             : _type(type),
               _db_id(db_id),
-              _xid(0)
+              _xid(xid)
         {
-            assert(type != Type::XACT_MSG);
+            assert(_type != Type::XACT_MSG);
         }
 
         /** Constructor for messages that are XACT_MSG. */
@@ -49,18 +50,12 @@ namespace springtail::gc {
             // set the internal values
             _type = Type(split[0][0]);
             _db_id = std::stoull(split[1]);
-            _xid = (_type == Type::XACT_MSG)
-                ? std::stoull(split[2])
-                : 0;
+            _xid = std::stoull(split[2]);
         }
 
         /** Serialize an XidReady into a string to store in redis. */
         explicit operator std::string() const {
-            if (_type == Type::XACT_MSG) {
-                return fmt::format("{}:{}:{}", static_cast<char>(_type), _db_id, _xid);
-            } else {
-                return fmt::format("{}:{}", static_cast<char>(_type), _db_id);
-            }
+            return fmt::format("{}:{}:{}", static_cast<char>(_type), _db_id, _xid);
         }
 
         /** A getter for the type. */
@@ -75,7 +70,6 @@ namespace springtail::gc {
 
         /** A getter for the XID. */
         uint64_t xid() const {
-            assert(_type == Type::XACT_MSG);
             return _xid;
         }
 

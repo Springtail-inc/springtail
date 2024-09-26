@@ -147,6 +147,10 @@ namespace springtail {
               _redis(RedisMgr::get_instance()->get_client())
         { }
 
+        /**
+         * @brief Return the length of the queue.
+         * @return The length of the queue
+         */
         uint64_t size()
         {
             return _redis->llen(_key);
@@ -200,6 +204,29 @@ namespace springtail {
         }
 
         /**
+         * @brief Try to pop an item from queue (list).
+         *
+         * Operates identically to pop() except that if no elements exist in the list, it returns
+         * immediately with a nullptr.
+         *
+         * @param worker_id The unique ID of the worker.
+         * @return A pointer to the value if a value was received, nullptr if timedout
+         */
+        std::shared_ptr<T> try_pop(const std::string &worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+
+            // remove from the main queue and move to the worker queue
+            auto &&res = _redis->rpoplpush(_key, worker_key);
+            // note: blmove() not available yet in redis++
+            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
+            if (res) {
+                return std::make_shared<T>(*res);
+            }
+            return nullptr;
+        }
+
+        /**
          * @brief Commit a worker's active item.
          *
          * Removes the worker's item from it's separate list to complete the two-phase commit.
@@ -224,6 +251,7 @@ namespace springtail {
         void abort(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            // XXX this actually places it in the wrong place... we need to use lmove() to effectively rpoprpush()
             _redis->rpoplpush(worker_key, _key);
             // note: lmove() not available yet in redis++
             // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");

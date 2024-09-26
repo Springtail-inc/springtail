@@ -46,17 +46,24 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}", db_id, completed_xid);
+
                 nlohmann::json ddls;
                 RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
                                                                  Properties::get_db_instance_id(), db_id));
 
+                // note: Need to check the completed XID against the most recent XID assigned during
+                //       the table syncs.  If the completed XID before the table sync XID, then set
+                //       the completed XID to the table sync XID
+                completed_xid = std::max(completed_xid, result->xid());
+
+                // for operations at the SysTblMgr
+                auto client = sys_tbl_mgr::Client::get_instance();
+
                 // go through the hash of sys tbl operations
-                auto ops_str = sync_table_q.pop(_worker_id);
+                auto ops_str = sync_table_q.try_pop(_worker_id);
                 while (ops_str != nullptr) {
                     auto json = nlohmann::json::parse(*ops_str);
-
-                    // perform the operations at the SysTblMgr
-                    auto client = sys_tbl_mgr::Client::get_instance();
 
                     // perform the table swap
                     auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
@@ -77,8 +84,13 @@ namespace springtail::gc {
 
                     // get the next set of operations
                     sync_table_q.commit(_worker_id);
-                    ops_str = sync_table_q.pop(_worker_id);
+                    ops_str = sync_table_q.try_pop(_worker_id);
                 }
+
+                SPDLOG_INFO("(Re-)created all synced tables: {}@{}", db_id, completed_xid);
+
+                // finalize the system metadata
+                client->finalize(db_id, completed_xid);
 
                 // perform a commit to the XidMgr
                 _xid_mgr->commit_xid(db_id, completed_xid, true);

@@ -36,17 +36,6 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    Service::Service()
-    {
-        // call into the XID Mgr to get the latest committed XID
-        // XXX this needs to be fixed
-        auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid(1, 0);
-
-        _access_xid = XidLsn(xid);
-        _target_xid = xid + 1;
-    }
-
     void
     Service::ping(Status& _return)
     {
@@ -127,6 +116,7 @@ namespace springtail::sys_tbl_mgr {
 
         // update the primary index information
         if (!primary_keys.empty()) {
+            auto target_xid = _get_target_xid(request.db_id);
             auto indexes_t = _get_mutable_system_table(request.db_id, sys_tbl::Indexes::ID);
             auto fields = sys_tbl::Indexes::Data::fields(request.table.id,
                                                          constant::INDEX_PRIMARY,
@@ -140,7 +130,7 @@ namespace springtail::sys_tbl_mgr {
                 fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
                 indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
-                                  _target_xid, constant::UNKNOWN_EXTENT);
+                                  target_xid, constant::UNKNOWN_EXTENT);
             }
         }
 
@@ -281,12 +271,62 @@ namespace springtail::sys_tbl_mgr {
         _set_roots_info(request.db_id, request.table_id, xid, info);
     }
 
+    XidLsn
+    Service::_get_access_xid(uint64_t db_id)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        auto access_i = _access_xid.find(db_id);
+        if (access_i != _access_xid.end()) {
+            return access_i->second;
+        }
+
+        auto xid_mgr = XidMgrClient::get_instance();
+        auto xid = xid_mgr->get_committed_xid(1, 0);
+
+        _access_xid[db_id] = XidLsn(xid);
+        _target_xid[db_id] = xid + 1;
+
+        return XidLsn(xid);
+    }
+
+    uint64_t
+    Service::_get_target_xid(uint64_t db_id)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        auto target_i = _target_xid.find(db_id);
+        if (target_i != _target_xid.end()) {
+            return target_i->second;
+        }
+
+        auto xid_mgr = XidMgrClient::get_instance();
+        auto xid = xid_mgr->get_committed_xid(1, 0);
+
+        _access_xid[db_id] = XidLsn(xid);
+        _target_xid[db_id] = xid + 1;
+
+        return xid + 1;
+    }
+
+    void
+    Service::_set_xids(uint64_t db_id,
+                       const XidLsn &access_xid,
+                       uint64_t target_xid)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        _access_xid[db_id] = access_xid;
+        _target_xid[db_id] = target_xid;
+    }
+
     void
     Service::finalize(Status& _return,
                       const FinalizeRequest &request)
     {
         // block all mutations
         boost::unique_lock wlock(_write_mutex);
+
+        auto target_xid = _get_target_xid(request.db_id);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}",
+                            request.db_id, request.xid, target_xid);
 
         // finalize the mutated tables at the _target_xid
         // XXX we currently don't store the metadata, but re-read it from the roots file each time
@@ -298,12 +338,12 @@ namespace springtail::sys_tbl_mgr {
         // block all read access while we swap access roots
         boost::unique_lock rlock(_read_mutex);
 
-        // move the _access_xid to the _target_xid and update the access roots
-        _access_xid = XidLsn(_target_xid);
+        // validate the current target XID against the requested XID
+        assert(target_xid <= request.xid);
 
-        // move the _target_xid to just beyond the provided target xid
-        assert(_target_xid <= request.xid);
-        _target_xid = request.xid + 1;
+        // move the access_xid to the target_xid, and move the target_xid to just beyond the
+        // provided request xid
+        _set_xids(request.db_id, XidLsn(target_xid), request.xid + 1);
 
         // note: we could update the table pointers?
         //       or maybe cache the roots to avoid reading the roots file?
@@ -397,19 +437,28 @@ namespace springtail::sys_tbl_mgr {
             drop.schema = create.table.schema;
             drop.name = create.table.name;
 
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}",
+                                drop.db_id, drop.table_id, drop.xid, drop.lsn);
+
             auto &&drop_ddl = this->_drop_table(drop);
             ddls.push_back(drop_ddl);
         }
 
         // 4. perform a create table
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create table: {}:{} @ {}:{}",
+                            create.db_id, create.table.id, create.xid, create.lsn);
+
         assert(create.lsn == constant::MAX_LSN - 1);
         auto &&create_ddl = this->_create_table(create);
         ddls.push_back(create_ddl);
 
         // 5. update the metadata of the table
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}",
+                            create.db_id, create.table.id, create.xid, create.lsn);
         this->_update_roots(roots);
 
         // 6. serialize the ddl json and return
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
         _return.__set_statement(nlohmann::to_string(ddls));
     }
 
@@ -480,6 +529,7 @@ namespace springtail::sys_tbl_mgr {
         lock.unlock();
 
         // record the change to the system table
+        auto target_xid = _get_target_xid(db_id);
         auto table_names_t = _get_mutable_system_table(db_id, sys_tbl::TableNames::ID);
         auto tuple = sys_tbl::TableNames::Data::tuple(table_info->schema,
                                                       table_info->name,
@@ -487,7 +537,7 @@ namespace springtail::sys_tbl_mgr {
                                                       table_info->xid,
                                                       table_info->lsn,
                                                       table_info->exists);
-        table_names_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+        table_names_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
     }
 
     void
@@ -585,12 +635,13 @@ namespace springtail::sys_tbl_mgr {
         lock.unlock();
 
         // update the table_roots
+        auto target_xid = _get_target_xid(db_id);
         auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
         for (int index_id = 0; index_id < roots_info->roots.size(); ++index_id) {
             uint64_t root = roots_info->roots[index_id];
             auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root,
                                                           roots_info->snapshot_xid);
-            table_roots_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+            table_roots_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}",
                                 table_id, xid.xid, xid.lsn, index_id, roots_info->roots[index_id]);
@@ -599,7 +650,7 @@ namespace springtail::sys_tbl_mgr {
         // update the table_stats
         auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
         auto tuple = sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats.row_count);
-        table_stats_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+        table_stats_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated stats {}@{}:{} - {}",
                             table_id, xid.xid, xid.lsn, roots_info->stats.row_count);
@@ -622,13 +673,14 @@ namespace springtail::sys_tbl_mgr {
         auto info = std::make_shared<GetSchemaResponse>();
 
         // first read the columns from the schemas table
-        XidLsn xid = std::min(access_xid, _access_xid);
+        XidLsn &&current_xid = _get_access_xid(db_id);
+        XidLsn xid = std::min(access_xid, current_xid);
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, xid.xid, xid.lsn);
 
         auto &&columns = _read_schema_columns(db_id, table_id, xid);
 
         // if the requested access XID is ahead of the on-disk XID, apply changes from the cache
-        if (access_xid > _access_xid) {
+        if (access_xid > current_xid) {
             _apply_schema_cache_history(db_id, table_id, access_xid, columns);
         }
 
@@ -643,14 +695,14 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // now collect any history between access_xid and target_xid
-        xid = std::min(_access_xid, target_xid);
+        xid = std::min(current_xid, target_xid);
         if (access_xid < xid) {
             // read any history from the on-disk table
             auto &&history = _read_schema_history(db_id, table_id, access_xid, xid);
             info->history.insert(info->history.end(), history.begin(), history.end());
         }
 
-        xid = std::max(access_xid, _access_xid);
+        xid = std::max(access_xid, current_xid);
         if (target_xid > xid) {
             // read any history from the cache
             auto &&history = _get_schema_cache_history(db_id, table_id, xid, target_xid);
@@ -919,6 +971,7 @@ namespace springtail::sys_tbl_mgr {
     {
         std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         auto schemas_t = _get_mutable_system_table(db_id, sys_tbl::Schemas::ID);
+        auto target_xid = _get_target_xid(db_id);
 
         // add the column change history to the cache
         for (auto &history : columns) {
@@ -944,7 +997,7 @@ namespace springtail::sys_tbl_mgr {
                                                        value,
                                                        history.update_type);
 
-            schemas_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+            schemas_t->upsert(tuple, target_xid, constant::UNKNOWN_EXTENT);
         }
     }
 
@@ -969,7 +1022,8 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // otherwise create an interface to the table and cache it
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, _access_xid.xid, _access_xid.lsn);
+        auto &&access_xid = _get_access_xid(db_id);
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, access_xid.xid, access_xid.lsn);
 
         // cache the table interface
         cache[table_id] = table;
@@ -990,7 +1044,9 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // otherwise create an interface to the table and cache it
-        MutableTablePtr table = TableMgr::get_instance()->get_mutable_table(db_id, table_id, _access_xid.xid, _target_xid);
+        auto &&access_xid = _get_access_xid(db_id);
+        auto &&target_xid = _get_target_xid(db_id);
+        MutableTablePtr table = TableMgr::get_instance()->get_mutable_table(db_id, table_id, access_xid.xid, target_xid);
 
         // save the mutable table into the cache
         cache[table_id] = table;

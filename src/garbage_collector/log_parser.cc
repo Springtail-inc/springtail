@@ -209,33 +209,51 @@ namespace springtail::gc {
     {
         boost::unique_lock lock(_mutex);
 
-        // check the resync map for the db
-        auto resync_i = _resync_map.find(sync_msg.db_id);
-
-        // check if this is the first table(s) to be added for syncing
-        auto &db_map = _sync_map[sync_msg.db_id];
-        bool first_table = db_map.empty() && (resync_i == _resync_map.end());
-
-        // make a record of the table mapping(s)
-        auto record = std::make_shared<XidRecord>(sync_msg);
-        for (int32_t table_id : sync_msg.tids) {
-            if (resync_i != _resync_map.end()) {
-                resync_i->second.erase(table_id); // remove the table from the resync map
-            }
-            db_map[table_id] = record; // add the record to the sync map
+        // update the max XID seen
+        auto xid_i = _max_xid.find(sync_msg.db_id);
+        if (xid_i == _max_xid.end()) {
+            _max_xid[sync_msg.db_id] = sync_msg.target_xid;
+        } else {
+            xid_i->second = std::max(xid_i->second, sync_msg.target_xid);
         }
 
-        // remove the db from the map if the table set is empty
+        // clear the resync map for the provided tables in the db
+        auto resync_i = _resync_map.find(sync_msg.db_id);
         if (resync_i != _resync_map.end()) {
+            for (int32_t table_id : sync_msg.tids) {
+                resync_i->second.erase(table_id); // remove the table from the resync map
+            }
+
+            // remove the db from the map if the table set is empty
             if (resync_i->second.empty()) {
                 _resync_map.erase(resync_i);
             }
         }
 
+        // find the db in the _sync_map
+        auto db_i = _sync_map.find(sync_msg.db_id);
+
+        // check if this is the first table(s) to be added for syncing
+        bool first_table = ((db_i == _sync_map.end()) && (resync_i == _resync_map.end()));
+
+        // see if this sync occurred on an idle database
+        if (sync_msg.xmin == sync_msg.xmax && sync_msg.xips.empty()) {
+            // if so, nothing to record
+            return first_table;
+        }
+
+        auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
+
+        // make a record of the table mapping(s)
+        auto record = std::make_shared<XidRecord>(sync_msg);
+        for (int32_t table_id : sync_msg.tids) {
+            db_map[table_id] = record; // add the record to the sync map
+        }
+
         return first_table;
     }
 
-    bool
+    uint64_t
     LogParser::SyncTracker::clear_syncs(uint64_t db_id,
                                         uint32_t pg_xid)
     {
@@ -244,7 +262,7 @@ namespace springtail::gc {
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
-            return false;
+            return 0;
         }
         auto &db_map = db_i->second;
 
@@ -263,10 +281,16 @@ namespace springtail::gc {
         if (db_map.empty()) {
             // if empty, clear the database entry
             _sync_map.erase(db_i);
-            return true;
+
+            // return the max target XID seen among the table syncs
+            auto xid_i = _max_xid.find(db_id);
+            uint64_t xid = xid_i->second;
+            _max_xid.erase(xid_i);
+
+            return xid;
         }
 
-        return false;
+        return 0;
     }
 
     bool
@@ -298,17 +322,17 @@ namespace springtail::gc {
         return table_i->second->should_skip(pg_xid);
     }
 
-    bool
-    LogParser::SyncTracker::empty(uint64_t db_id) const
+    uint64_t
+    LogParser::SyncTracker::get_xid_if_empty(uint64_t db_id)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock lock(_mutex);
 
         // check for entries in the resync map
         auto resync_i = _resync_map.find(db_id);
         if (resync_i != _resync_map.end()) {
             // note: should never be empty since we remove the entry if it becomes empty
             assert(!resync_i->second.empty());
-            return false;
+            return 0;
         }
 
         // check for entries in the sync map
@@ -316,10 +340,15 @@ namespace springtail::gc {
         if (db_i != _sync_map.end()) {
             // note: should never be empty since we remove the entry if it becomes empty
             assert(!db_i->second.empty());
-            return false;
+            return 0;
         }
 
-        return true;
+        // return the max target XID seen among the table syncs
+        auto xid_i = _max_xid.find(db_id);
+        uint64_t xid = xid_i->second;
+        _max_xid.erase(xid_i);
+
+        return xid;
     }
 
     void
@@ -371,11 +400,12 @@ namespace springtail::gc {
                         //       during the table syncs, so we can notify for a "commit" immediately
                         //       which will do the table rotates and move the database back to the
                         //       ready state
-                        if (_sync_tracker.empty(msg.db_id)) {
+                        uint64_t sync_xid = _sync_tracker.get_xid_if_empty(msg.db_id);
+                        if (sync_xid) {
                             SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {}", msg.db_id);
 
                             // pass the commit to the GC-2 Committer
-                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id));
+                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id, sync_xid));
 
                             // block until the Committer notifies us that the commit is complete
                             // XXX this actually blocks all databases, but logically we only need to
@@ -687,12 +717,12 @@ namespace springtail::gc {
 
                     // we know that all earlier XIDs have completed at this point, so we can check if
                     // the sync metadata can be released for any tables based on the pg XID
-                    bool all_clear = _sync_tracker.clear_syncs(state->entry.db_id, state->entry.pg_xid);
-                    if (all_clear) {
+                    uint64_t sync_xid = _sync_tracker.clear_syncs(state->entry.db_id, state->entry.pg_xid);
+                    if (sync_xid) {
                         // if this XID is an indication that the ongoing table syncs are aligned,
                         // then we can push a message to perform a commit at the previously seen XID
                         // (before committing the currently processed XID)
-                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id));
+                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id, sync_xid));
                     }
 
                     // XXX notify the ExtentMapper that the XID has been fully processed

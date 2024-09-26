@@ -34,8 +34,6 @@ namespace springtail::sys_tbl_mgr {
         static void shutdown();
 
     public:
-        Service();
-
         /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
 
@@ -248,6 +246,20 @@ namespace springtail::sys_tbl_mgr {
         void _update_roots(const UpdateRootsRequest &request);
 
 
+        /**
+         * Retrieve the current access XID for a db.
+         */
+        XidLsn _get_access_xid(uint64_t db_id);
+
+        /**
+         * Retrieve the current target XID for a db.
+         */
+        uint64_t _get_target_xid(uint64_t db_id);
+
+        /**
+         * Set the access and target XIDs.
+         */
+        void _set_xids(uint64_t db_id, const XidLsn &access_xid, uint64_t target_xid);
 
         // VARIABLES
 
@@ -256,6 +268,15 @@ namespace springtail::sys_tbl_mgr {
 
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;
+
+        /** Mutex to protect the XID maps. */
+        boost::mutex _xid_mutex;
+
+        /** XID at which the service is currently reading data for a given DB. */
+        std::map<uint64_t, XidLsn> _access_xid;
+
+        /** XID to which the service is currently committing data for a given DB. */
+        std::map<uint64_t, uint64_t> _target_xid;
 
         /**
          * Locked for read when accessing the read-only tables.  Unique lock when finalizing and
@@ -268,12 +289,6 @@ namespace springtail::sys_tbl_mgr {
          * swapping the XID.
          */
         boost::shared_mutex _write_mutex;
-
-        /** XID at which the service is currently reading data. */
-        XidLsn _access_xid;
-
-        /** XID to which the service is currently committing data. */
-        uint64_t _target_xid;
 
         /** The read-only interface for the system tables to service get requests. */
         std::map<uint64_t, std::map<uint64_t, TablePtr>> _read;

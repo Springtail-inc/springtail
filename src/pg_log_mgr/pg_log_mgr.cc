@@ -43,8 +43,11 @@ namespace springtail::pg_log_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
-        uint64_t lsn = INVALID_LSN;
+        // fetch latest xid from xid mgr
+        XidMgrClient *xid_mgr = XidMgrClient::get_instance();
+        _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
+        uint64_t lsn = INVALID_LSN;
         if (state == redis::REDIS_STATE_INITIALIZE) {
             _startup_init();
         } else {
@@ -76,10 +79,6 @@ namespace springtail::pg_log_mgr {
         if (!latest_log.empty()) {
             lsn = PgMsgStreamReader::scan_log(latest_log, true);
         }
-
-        // fetch latest xid from xid mgr
-        XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
         //// Replay xact logs
 

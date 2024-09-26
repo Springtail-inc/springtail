@@ -98,7 +98,7 @@ namespace springtail::sys_tbl {
                   uint64_t extent_id,
                   uint64_t snapshot_xid)
             {
-                auto fields = std::make_shared<FieldArray>(4);
+                auto fields = std::make_shared<FieldArray>(5);
                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
                 fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
