@@ -30,7 +30,11 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
+                // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
+
+                // commit this work item and continue
+                _redis.commit(_worker_id);
                 continue;
             }
 
@@ -107,6 +111,8 @@ namespace springtail::gc {
                 // allow commits on future XIDs
                 _block_commit.erase(db_id);
 
+                // commit this work item and continue
+                _redis.commit(_worker_id);
                 continue;
             }
 

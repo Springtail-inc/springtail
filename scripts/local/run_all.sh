@@ -62,6 +62,8 @@ PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"
 ${PG_LOG_DAEMON} --daemon
 sleep 1
 
+exit
+
 # start the garbage collector
 echo Start Garbage Collector...
 GC_DAEMON="${BUILD_DIR}/src/garbage_collector/gc_daemon"

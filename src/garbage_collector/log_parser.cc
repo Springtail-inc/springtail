@@ -56,6 +56,8 @@ namespace springtail::gc {
             return;
         }
 
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Blocking db {} @ xid {} on table {}", db_id, xid, oid);
+
         // now add the depencency to the backlog
         _backlog[{ db_id, xid }] = { oid, entry };
         _oid_backlog[{ db_id, oid }].insert(xid);
@@ -116,6 +118,8 @@ namespace springtail::gc {
     {
         boost::unique_lock lock(_mutex);
 
+        SPDLOG_DEBUG_MODULE(LOG_GC, "clear_dep: db {}, xid {}", db_id, xid);
+
         auto i = _xid_map.find({ db_id, xid });
         if (i == _xid_map.end()) {
             return;
@@ -128,7 +132,9 @@ namespace springtail::gc {
 
             // if we removed the last dependency on this OID, release all blocked XIDs
             uint64_t next_dep_xid = 0;
-            if (!j->second.empty()) {
+            if (j->second.empty()) {
+                _table_deps.erase(j);
+            } else {
                 // if there are still dependencies, we can only release XIDs that are less than this one
                 next_dep_xid = *j->second.begin();
             }
@@ -146,6 +152,8 @@ namespace springtail::gc {
                                     uint64_t oid)
     {
         boost::unique_lock lock(_mutex);
+
+        SPDLOG_DEBUG_MODULE(LOG_GC, "clear_table: db {}, oid {}", db_id, oid);
 
         // clear the record of XIDs that contain blocking operations for this table, since they won't be applied
         _table_deps.erase({ db_id, oid });
@@ -172,6 +180,8 @@ namespace springtail::gc {
                 if (next_dep_xid && *xid_i > next_dep_xid) {
                     break;
                 }
+
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Unblocking db {} @ xid {}", db_id, *xid_i);
 
                 // move the request to the ready queue
                 auto &&b = _backlog.find({ db_id, *xid_i });
@@ -624,7 +634,7 @@ namespace springtail::gc {
                                                            Properties::get_db_instance_id(), state->entry.db_id);
                                     RedisQueue<std::string> table_sync_queue(key);
                                     table_sync_queue.push(std::to_string(table_msg.oid));
-                                } else {
+                                } else if (action.get<std::string>() != "no_change") {
                                     // record the DDL statement for this change into Redis to eventually be provided to the FDWs
                                     _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
                                 }
@@ -650,8 +660,9 @@ namespace springtail::gc {
                                 XidLsn xid(state->entry.xid, state->lsn);
                                 auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_table(state->entry.db_id, xid, drop_msg);
 
-                                // XXX also perform a truncation of the table by queueing this message?
-                                state->mutation_count->increment();
+                                // note: considered doing a truncate, but shouldn't be necessary
+                                //       since we check for table existence when we perform a lookup
+                                //       for the roots
 
                                 // note: we don't notify the backlog until the entire XID is
                                 //       processed since there might be additional schema changes
@@ -672,6 +683,9 @@ namespace springtail::gc {
 
                 // if we can stop processing, fast exit
                 if (blocked || done) {
+                    if (blocked) {
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Blocked {}", state->entry.xid);
+                    }
                     continue;
                 }
 

@@ -65,7 +65,8 @@ namespace springtail::sys_tbl_mgr {
         // initialize the ddl statement
         nlohmann::json ddl;
         ddl["action"] = "create";
-        ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
+        ddl["schema"] = request.table.schema;
+        ddl["table"] = request.table.name;
         ddl["tid"] = request.table.id;
         ddl["columns"] = nlohmann::json::array();
 

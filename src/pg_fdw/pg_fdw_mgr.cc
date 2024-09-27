@@ -706,12 +706,15 @@ namespace springtail::pg_fdw {
 
     std::string
     PgFdwMgr::_gen_fdw_table_sql(const std::string &server_name,
+                                 const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
                                  std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
         // no schema name needed
-        std::string create = fmt::format("CREATE FOREIGN TABLE {} (\n", quote_identifier(table.c_str()));
+        std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
+                                         quote_identifier(schema.c_str()),
+                                         quote_identifier(table.c_str()));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
@@ -812,7 +815,8 @@ namespace springtail::pg_fdw {
             }
 
             // generate the CREATE TABLE statement
-            return _gen_fdw_table_sql(server_name, ddl.at("table"), ddl.at("tid"), columns);
+            return _gen_fdw_table_sql(server_name, ddl.at("schema"), ddl.at("table"),
+                                      ddl.at("tid"), columns);
         }
 
         if (action == "rename") {
@@ -871,6 +875,7 @@ namespace springtail::pg_fdw {
         }
 
         // can't currently support other kinds of DDL mutations
+        SPDLOG_ERROR("Bad DDL statement: {}", action.get<std::string>());
         assert(0);
     }
 
@@ -1019,7 +1024,7 @@ namespace springtail::pg_fdw {
             columns.push_back({ column.name, type_name, column.nullable });
         }
 
-        return _gen_fdw_table_sql(server, table_name, tid, columns);
+        return _gen_fdw_table_sql(server, CATALOG_SCHEMA_NAME, table_name, tid, columns);
     }
 
     List *
@@ -1033,31 +1038,36 @@ namespace springtail::pg_fdw {
         // go through system tables, make sure that they are not excluded and add them to the list
         if (!((exclude && table_set.contains(CATALOG_TABLE_NAMES)) ||
               (limit && !table_set.contains(CATALOG_TABLE_NAMES)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_NAMES, sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_NAMES,
+                                        sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_ROOTS)) ||
               (limit && !table_set.contains(CATALOG_TABLE_ROOTS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_ROOTS, sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_ROOTS,
+                                        sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_INDEXES)) ||
               (limit && !table_set.contains(CATALOG_TABLE_INDEXES)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_INDEXES, sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_INDEXES,
+                                        sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_SCHEMAS)) ||
               (limit && !table_set.contains(CATALOG_TABLE_SCHEMAS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_SCHEMAS, sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_SCHEMAS,
+                                        sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
         if (!((exclude && table_set.contains(CATALOG_TABLE_STATS)) ||
               (limit && !table_set.contains(CATALOG_TABLE_STATS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_STATS, sys_tbl::TableStats::ID, sys_tbl::TableStats::Data::SCHEMA);
+            sql = _gen_fdw_system_table(server, CATALOG_TABLE_STATS,
+                                        sys_tbl::TableStats::ID, sys_tbl::TableStats::Data::SCHEMA);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
@@ -1187,7 +1197,8 @@ namespace springtail::pg_fdw {
 
                 if (!current_table.empty()) {
                     // dump this table
-                    std::string sql = _gen_fdw_table_sql(server, current_table, current_tid, columns);
+                    std::string sql = _gen_fdw_table_sql(server, schema, current_table,
+                                                         current_tid, columns);
                     commands = lappend(commands, pstrdup(sql.c_str()));
                 }
 
@@ -1224,7 +1235,7 @@ namespace springtail::pg_fdw {
         // process last table
         if (columns.size() > 0) {
             // dump this table
-            std::string sql = _gen_fdw_table_sql(server, current_table, current_tid, columns);
+            std::string sql = _gen_fdw_table_sql(server, schema, current_table, current_tid, columns);
             commands = lappend(commands, pstrdup(sql.c_str()));
         }
 
