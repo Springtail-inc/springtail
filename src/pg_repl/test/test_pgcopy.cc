@@ -4,12 +4,15 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 #include <common/logging.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
 
 #include <pg_repl/pg_copy_table.hh>
 
 #include <storage/table.hh>
 #include <storage/table_mgr.hh>
 
+#include <sys_tbl_mgr/client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <test/services.hh>
@@ -68,6 +71,37 @@ namespace {
 
         uint32_t oid = res[0]->tids[0];
         xid = res[0]->target_xid;
+
+        // apply the system table changes
+        auto client = sys_tbl_mgr::Client::get_instance();
+        RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
+                                                         Properties::get_db_instance_id(), db_id));
+        std::string worker_id = "test_worker";
+        auto ops_str = sync_table_q.try_pop(worker_id);
+        while (ops_str != nullptr) {
+            auto json = nlohmann::json::parse(*ops_str);
+
+            // perform the table swap
+            // note: we wait to perform this operation in the GC-2 to ensure that all system
+            //       table mutations up to this XID have already been applied, otherwise we
+            //       could potentially get a stray column added before the swap XID showing
+            //       up in the schema since it wouldn't get deleted by the DROP TABLE
+            auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
+            create.xid = xid;
+            create.lsn = constant::MAX_LSN - 1;
+
+            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+            roots.xid = xid;
+
+            client->swap_sync_table(create, roots);
+
+            // get the next set of operations
+            sync_table_q.commit(worker_id);
+            ops_str = sync_table_q.try_pop(worker_id);
+        }
+
+        // finalize the system metadata
+        client->finalize(db_id, xid);
 
         // commit the xid
         SPDLOG_DEBUG("Committing xid: {}", xid);

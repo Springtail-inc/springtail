@@ -70,6 +70,10 @@ namespace springtail::gc {
                     auto json = nlohmann::json::parse(*ops_str);
 
                     // perform the table swap
+                    // note: we wait to perform this operation in the GC-2 to ensure that all system
+                    //       table mutations up to this XID have already been applied, otherwise we
+                    //       could potentially get a stray column added before the swap XID showing
+                    //       up in the schema since it wouldn't get deleted by the DROP TABLE
                     auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
                     create.xid = completed_xid;
                     create.lsn = constant::MAX_LSN - 1;
