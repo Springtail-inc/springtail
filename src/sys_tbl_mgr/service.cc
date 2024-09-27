@@ -696,12 +696,13 @@ namespace springtail::sys_tbl_mgr {
 
         // first read the columns from the schemas table
         XidLsn &&read_xid = _get_read_xid(db_id);
-        XidLsn xid = std::min(access_xid, read_xid);
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, xid.xid, xid.lsn);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, access_xid.xid, access_xid.lsn);
 
-        auto &&columns = _read_schema_columns(db_id, table_id, xid);
+        // note: we always try to read data from disk up to the access_xid in case some of the data
+        //       past the read_xid has already made it to disk
+        auto &&columns = _read_schema_columns(db_id, table_id, access_xid);
 
-        // if the requested access XID is ahead of the on-disk XID, apply changes from the cache
+        // if the requested access XID is ahead of the read XID, apply changes from the cache
         if (access_xid > read_xid) {
             _apply_schema_cache_history(db_id, table_id, access_xid, columns);
         }
@@ -717,14 +718,13 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // now collect any history between access_xid and target_xid
-        xid = std::min(read_xid, target_xid);
-        if (access_xid < xid) {
-            // read any history from the on-disk table
-            auto &&history = _read_schema_history(db_id, table_id, access_xid, xid);
-            info->history.insert(info->history.end(), history.begin(), history.end());
-        }
+        // note: we read any history from the on-disk table since there might always be some history
+        //       on disk if the on-disk data is ahead of the read_xid
+        auto &&history = _read_schema_history(db_id, table_id, access_xid, target_xid);
+        info->history.insert(info->history.end(), history.begin(), history.end());
 
-        xid = std::max(access_xid, read_xid);
+        // if the target is ahead of the guaranteed on-disk data then don't need to check the in-memory data
+        XidLsn xid = std::max(access_xid, read_xid);
         if (target_xid > xid) {
             // read any history from the cache
             auto &&history = _get_schema_cache_history(db_id, table_id, xid, target_xid);

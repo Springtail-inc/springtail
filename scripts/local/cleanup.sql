@@ -23,3 +23,4 @@ DROP TABLE test_data2;
 DROP TABLE test_data3;
 DROP TABLE test_data4;
 DROP TABLE test_data5;
+DROP TABLE test_data6;
