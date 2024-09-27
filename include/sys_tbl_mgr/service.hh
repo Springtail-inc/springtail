@@ -247,19 +247,19 @@ namespace springtail::sys_tbl_mgr {
 
 
         /**
-         * Retrieve the current access XID for a db.
+         * Retrieve the current read XID for a db.
          */
-        XidLsn _get_access_xid(uint64_t db_id);
+        XidLsn _get_read_xid(uint64_t db_id);
 
         /**
-         * Retrieve the current target XID for a db.
+         * Retrieve the current write XID for a db.
          */
-        uint64_t _get_target_xid(uint64_t db_id);
+        uint64_t _get_write_xid(uint64_t db_id);
 
         /**
-         * Set the access and target XIDs.
+         * Set the read and write XIDs.
          */
-        void _set_xids(uint64_t db_id, const XidLsn &access_xid, uint64_t target_xid);
+        void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
 
@@ -272,11 +272,11 @@ namespace springtail::sys_tbl_mgr {
         /** Mutex to protect the XID maps. */
         boost::mutex _xid_mutex;
 
-        /** XID at which the service is currently reading data for a given DB. */
-        std::map<uint64_t, XidLsn> _access_xid;
+        /** XID at which the service is currently reading system table data for a given DB. */
+        std::map<uint64_t, XidLsn> _read_xid;
 
-        /** XID to which the service is currently committing data for a given DB. */
-        std::map<uint64_t, uint64_t> _target_xid;
+        /** XID to which the service is currently committing system table data for a given DB. */
+        std::map<uint64_t, uint64_t> _write_xid;
 
         /**
          * Locked for read when accessing the read-only tables.  Unique lock when finalizing and

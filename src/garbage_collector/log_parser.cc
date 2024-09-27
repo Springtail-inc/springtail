@@ -156,10 +156,27 @@ namespace springtail::gc {
         SPDLOG_DEBUG_MODULE(LOG_GC, "clear_table: db {}, oid {}", db_id, oid);
 
         // clear the record of XIDs that contain blocking operations for this table, since they won't be applied
-        _table_deps.erase({ db_id, oid });
+        auto table_i = _table_deps.find({ db_id, oid });
+        if (table_i != _table_deps.end()) {
+            // remove the table from each XID
+            for (auto xid : table_i->second) {
+                auto xid_i = _xid_map.find({ db_id, xid });
+                if (xid_i != _xid_map.end()) {
+                    // remove the table from the set of tables this XID modifies
+                    xid_i->second.erase(oid);
+                    if (xid_i->second.empty()) {
+                        // if the set of tables is empty, remove this XID entirely
+                        _xid_map.erase(xid_i);
+                    }
+                }
+            }
 
-        // unblock any XIDs that were waiting on this table
-        _unblock_xids(db_id, oid);
+            // remove the table dependencies
+            _table_deps.erase(table_i);
+
+            // unblock any XIDs that were waiting on this table
+            _unblock_xids(db_id, oid);
+        }
     }
 
     void

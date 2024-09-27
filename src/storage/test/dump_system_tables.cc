@@ -16,7 +16,8 @@ main(int argc,
         return 1;
     }
 
-    springtail_init();
+    // no logging
+    springtail_init(std::nullopt, std::nullopt, LOG_NONE);
 
     // takes the database ID from the first argument
     uint64_t db_id = std::stoull(argv[1]);
@@ -34,6 +35,12 @@ main(int argc,
         auto fields = table->extent_schema()->get_fields();
 
         std::cout << fmt::format("TABLE: {}", table_id) << std::endl;
+
+        for (const auto &name : table->extent_schema()->column_order()) {
+            std::cout << name << ":";
+        }
+        std::cout << std::endl;
+
         for (auto row : (*table)) {
             std::cout << FieldTuple(fields, row).to_string() << std::endl;
         }
