@@ -36,19 +36,6 @@ target_link_libraries(springtail_pg_fdw
 )
 #add_dsymutil_command(springtail_pg_fdw)
 
-add_executable(copy_schema test/copy_schema.cc)
-target_include_directories(copy_schema
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-)
-target_link_libraries(copy_schema
-    PRIVATE springtail_common
-    PRIVATE springtail_pg
-    PRIVATE springtail_storage
-    PRIVATE springtail_sys_tbl_mgr
-    PRIVATE Boost::program_options
-)
-add_dsymutil_command(copy_schema)
-
 add_executable(dump_table test/dump_table.cc test/mock_pg.c pg_fdw_mgr.cc)
 target_include_directories(dump_table
     PUBLIC ${PROJECT_SOURCE_DIR}/include

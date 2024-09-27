@@ -2,6 +2,7 @@
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
+#include <pg_log_mgr/pg_log_mgr.hh>
 
 namespace springtail::pg_log_mgr {
     PgLogCoordinator* PgLogCoordinator::_instance {nullptr};
@@ -32,7 +33,7 @@ namespace springtail::pg_log_mgr {
         _shutting_down = true;
 
         std::unique_lock lock(_mutex);
-
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
         for (auto &lm: _log_mgrs) {
             lm.second->shutdown();
             lm.second->join();

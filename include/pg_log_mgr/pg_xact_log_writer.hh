@@ -50,6 +50,12 @@ namespace springtail::pg_log_mgr {
             return _offset;
         }
 
+        /**
+         * @brief Get file path
+         * @return std::filesystem::path
+         */
+        std::filesystem::path file() const { return _file; }
+
     private:
         /** current file path */
         std::filesystem::path _file;

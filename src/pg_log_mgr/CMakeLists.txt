@@ -63,6 +63,24 @@ target_link_libraries(test_pg_log_redis
 target_include_directories(test_pg_log_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_pg_log_redis)
 
+add_executable(dump_xact_log test/dump_xact_log.cc)
+target_link_libraries(dump_xact_log
+    PUBLIC springtail_pglog
+           springtail_common)
+target_include_directories(dump_xact_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_dsymutil_command(dump_xact_log)
+
+# dump_repl_log
+add_executable(dump_repl_log test/dump_repl_log.cc)
+target_include_directories(dump_repl_log
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(dump_repl_log
+    PUBLIC springtail_pg
+    PRIVATE Boost::program_options
+)
+add_dsymutil_command(dump_repl_log)
+
 gtest_discover_tests(test_log_reader
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
 )

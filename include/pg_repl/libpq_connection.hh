@@ -127,6 +127,15 @@ namespace springtail {
         int32_t get_int32(int row, int col);
 
         /**
+         * @brief Retreive an int64 column value from a query result
+         *
+         * @param row row index
+         * @param col col index
+         * @return int64 value for row/col
+         */
+        int64_t get_int64(int row, int col);
+
+        /**
          * @brief Retreive a string column value from a query result; maintains NULL value
          *
          * @param row row index
@@ -155,12 +164,20 @@ namespace springtail {
         bool get_boolean(int row, int col);
 
         /**
-         * @brief escape a string
+         * @brief escape a string; a literal not for identifiers
          *
          * @param str string to escape
-         * @return safe ptr to the string, access with .get()
+         * @return string with escaped characters
          */
-        std::unique_ptr<char[]> escape_string(const std::string &str);
+        std::string escape_string(const std::string &str);
+
+        /**
+         * @brief escape an identifier; not for literals
+         *
+         * @param str string to escape
+         * @return string with escaped characters
+         */
+        std::string escape_identifier(const std::string &str);
 
         /**
          * @brief Connection libpq helper; generate connection info string
@@ -238,5 +255,8 @@ namespace springtail {
 
         /** Copy buffer pointer */
         char *_buffer = nullptr;
+
+        /** Simple version of escape identifier */
+        std::string _escape_identifier(const char *str);
     };
 };

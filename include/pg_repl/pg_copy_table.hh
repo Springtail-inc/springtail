@@ -3,6 +3,10 @@
 #include <cstdio>
 #include <string>
 #include <memory>
+#include <vector>
+#include <optional>
+
+#include <common/common.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -10,29 +14,66 @@
 
 namespace springtail
 {
+    /** Stores the result of a copy operation */
+    struct PgCopyResult {
+        uint64_t target_xid;         ///< target xid
 
-    /** Stores the column schema for the table being copied */
-    struct PgColumn {
-        std::string name;
-        int32_t pg_type;
-        std::optional<std::string> default_value;
-        int32_t position;
-        bool is_nullable;
-        bool is_pkey;
+        // see: https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-PG-SNAPSHOT
+        uint32_t xmin;               ///< xmin; lowest xid still active
+        uint32_t xmax;               ///< xmax; one past highest completed xid
+        uint32_t xmin_epoch;
+        uint32_t xmax_epoch;
+        std::vector<int32_t> tids;   ///< table ids
+        std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
+        std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
+
+        explicit PgCopyResult(uint64_t target_xid) : target_xid(target_xid) {}
+
+        void add_table(int32_t tid)
+        {
+            tids.push_back(tid);
+        }
+
+        void set_snapshot(const std::string &pg_xids)
+        {
+            this->pg_xids = pg_xids;
+            // parse xids: xmin:xmax:xids
+            std::vector<std::string> xid_parts;
+            common::split_string(":", pg_xids, xid_parts);
+
+            // parse xid parts
+            // xids are xid8 which are 64 bit values, bottom 32 bits are xid, top 32 bits are epoch
+            uint64_t xmin8 = std::strtoull(xid_parts[0].c_str(), nullptr, 10);
+            uint64_t xmax8 = std::strtoull(xid_parts[1].c_str(), nullptr, 10);
+            xmin = static_cast<uint32_t>(xmin8 & 0xFFFFFFFFLL);
+            xmax = static_cast<uint32_t>(xmax8 & 0xFFFFFFFFLL);
+            xmin_epoch = static_cast<uint32_t>(xmin8 >> 32);
+            xmax_epoch = static_cast<uint32_t>(xmax8 >> 32);
+
+            // parse xips (in progress xids)
+            if (xid_parts.size() > 2 && !xid_parts[2].empty()) {
+                std::vector<std::string> xip_parts;
+                common::split_string(",", xid_parts[2], xip_parts);
+                for (const auto &xip : xip_parts) {
+                    uint64_t xip8 = std::strtoull(xip.c_str(), nullptr, 10);
+                    xips.push_back(static_cast<uint32_t>(xip8 & 0xFFFFFFFFLL));
+                }
+            }
+        }
     };
+    using PgCopyResultPtr = std::shared_ptr<PgCopyResult>;
 
     /** Stores the table schema for table being copied */
     struct PgTableSchema {
         std::string db_name;
         std::string schema_name;
         std::string table_name;
-        std::string xids;                // txid_current_snapshot(); xmin:xmax:xids
+        std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
         int32_t table_oid;
-        std::vector<PgColumn> columns;
+        std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
         std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
     };
-
 
     /**
      * @brief Serialize data for a single table from a remote
@@ -41,17 +82,26 @@ namespace springtail
     class PgCopyTable {
 
     private:
-        /** magic number for header of the file */
-        static inline constexpr uint32_t HEADER_MAGIC = 0x43219876;
-
         /** header of copy data signature */
         static inline constexpr char COPY_SIGNATURE[] = "PGCOPY\n\377\r\n\0";
+
+        /** number of worker threads; XXX hardcoded for now */
+        static constexpr int WORKER_THREADS = 4;
+
+        /** Request to worker thread to process table */
+        struct CopyRequest {
+            std::string table_name;
+            std::string schema_name;
+            int32_t table_oid;
+        };
+        using CopyRequestPtr = std::shared_ptr<CopyRequest>;
+        using CopyQueue = ConcurrentQueue<CopyRequest>;
+        using CopyQueuePtr = std::shared_ptr<CopyQueue>;
 
         LibPqConnection _connection;
         std::string _db_name;
         std::string _schema_name;
         std::string _table_name;
-        std::string _filename;
 
         bool _oid_flag = false;
 
@@ -64,22 +114,19 @@ namespace springtail
          *          and is_nullable flag for each table column.  Requires getTableOid() first.
          *
          */
-        void _get_schema();
+        void _set_schema(const std::string &table_name,
+                         const std::string &schema_name,
+                         uint64_t table_oid);
 
         /**
          * @brief Get transaction ids for current transaction snapshot
          * @details calls: SELECT txid_current_snapshot() returns string
          *          in format: "xid_min:xid_max:xid,xid,xid" showing set of
          *          transactions overlapping with current transaction
-         *
+         * @return std::string xid string from pg_current_snapshot()
          * @throws PgQueryError
          */
-        void _get_xact_xids();
-
-        /**
-         * @brief Get table's oid based on schema / table, store in schema
-         */
-        void _get_table_oid();
+        std::string _get_xact_xids();
 
         /**
          * @brief Get secondary index columns for table by oid
@@ -104,21 +151,6 @@ namespace springtail
         void _release_data();
 
         /**
-         * @brief Convert pg columns to internal pg msg schema columns
-         * @param pg_columns input pg columns
-         * @param pkeys primary keys
-         * @return std::vector<PgMsgSchemaColumn>
-         */
-        std::vector<PgMsgSchemaColumn> _map_to_pg_msg(const std::vector<PgColumn> pg_columns,
-                                                      const std::vector<std::string> pkeys);
-
-        /**
-         * find element in vector and get distance from begin iterator
-         * used to find primary key position
-         */
-        int _get_vec_pos(const std::vector<std::string> vec, const std::string element);
-
-        /**
          * @brief Parse row received from copy table command
          * @param row input row (copy buffer)
          * @param pos position in row to start parsing (in/out)
@@ -134,32 +166,67 @@ namespace springtail
          */
         int32_t _verify_copy_header(const std::string_view &header);
 
+        /**
+         * @brief Get table oids based on query passed in
+         * @param query query to get table oids
+         * @param table_oids output: table name, schema name, oid
+         */
+        void _get_table_oids(const std::string &query,
+                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+
+        /**
+         * @brief Copy table from remote system
+         */
+        void _copy_table(uint64_t db_id,
+                         springtail::XidLsn &xid,
+                         const std::string &table_name,
+                         const std::string &schema_name,
+                         uint64_t table_oid);
+
+        /**
+         * @brief End the copy, commit the transaction
+         */
+        void _end_copy();
+
+        /**
+         * @brief Worker thread for copying tables
+         * Listens on copy_queue for table copy requests
+         * @param db_id database id
+         * @param target_xid target xid
+         * @param copy_queue queue of copy requests
+         * @param result copy result (output)
+         */
+        void _worker(uint64_t db_id,
+                     uint64_t target_xid,
+                     CopyQueuePtr copy_queue,
+                     PgCopyResultPtr result);
+
+        /**
+         * @brief Internall helper called from copy_db, copy_schema, copy_table
+         * @param db_id database id
+         * @param target_xid target xid
+         * @param schema_name schema name (optional)
+         * @param table_oid table oid (optional)
+         * @return PgCopyResultPtrs
+         */
+        static std::vector<PgCopyResultPtr> _internal_copy(uint64_t db_id,
+            uint64_t target_xid,
+            std::optional<std::string> schema_name,
+            std::optional<std::pair<std::string, std::string>> table_name,
+            std::optional<std::vector<uint32_t>> table_oids);
+
     public:
 
         /**
-         * @brief Constructor for copying table from remote system and writing to file
-         *
-         * @param db_name database name
-         * @param schema_name schema name
-         * @param table_name table name
-         * @param filename output filename
+         * @brief Constructor for copying table from remote system
          */
-        PgCopyTable(const std::string &db_name,
-                    const std::string &schema_name,
-                    const std::string &table_name,
-                    const std::string filename) :
-            _db_name(db_name),
-            _schema_name(schema_name),
-            _table_name(table_name),
-            _filename(filename)
-        {}
+        PgCopyTable() {}
 
         /**
-         * @brief Empty constructor for reading data back from file
-         * @param filename input filename
+         * @brief Constructor for copying table from remote system
+         * @param db_name name of the database
          */
-        PgCopyTable(const std::string filename) : _filename(filename)
-        {}
+        PgCopyTable(const std::string &db_name) : _db_name(db_name) {}
 
         ~PgCopyTable()
         {
@@ -169,11 +236,9 @@ namespace springtail
 
         /**
          * @brief Connect to database; call prior to copyToFile
-         *
          * @param hostname DB hostname
          * @param username DB username
          * @param password DB password
-         * @param snapshot Snapshot ID
          * @param port     DB port
          */
         void connect(const std::string &hostname,
@@ -182,14 +247,55 @@ namespace springtail
                      const int port);
 
         /**
+         * @brief Connect to database, get config from Properties
+         * @param db_id database id
+         */
+        void connect(uint64_t db_id);
+
+        /**
          * @brief Disconnect connection; should be done after copy is finished
          */
         void disconnect();
 
         /**
-         * @brief Copy remote table data into Springtail starting at a given internal XID
-         * @param xid The XID at which the table is to become available.
+         * @brief Copy all tables from remote system
+         * @param db_id database id
+         * @param table_oid table oid
+         * @return PgCopyResultPtr
          */
-        int32_t copy_to_springtail(uint64_t db_id, XidLsn &xid);
+        static std::vector<PgCopyResultPtr>
+            copy_db(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Copy all tables in single schema from remote system
+         * @param db_id database id
+         * @param table_oid table oid
+         * @return PgCopyResultPtr
+         */
+        static std::vector<PgCopyResultPtr>
+            copy_schema(uint64_t db_id, uint64_t xid,
+                        const std::string &schema_name);
+
+        /**
+         * @brief Copy a single table from remote system
+         * @param db_id database id
+         * @param table_oid table oids (vector)
+         * @return PgCopyResultPtr
+         */
+        static std::vector<PgCopyResultPtr>
+            copy_tables(uint64_t db_id, uint64_t xid,
+                        std::vector<uint32_t> table_oids);
+
+        /**
+         * @brief Copy a single table from remote system
+         * @param db_id database id
+         * @param schema_name schema name
+         * @param table_name table name
+         * @return PgCopyResultPtr
+         */
+        static std::vector<PgCopyResultPtr>
+            copy_table(uint64_t db_id, uint64_t xid,
+                       const std::string &schema_name,
+                       const std::string &table_name);
     };
 }

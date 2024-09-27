@@ -13,6 +13,28 @@
 #include <common/json.hh>
 
 namespace springtail {
+
+    /** Redis exception type */
+    class RedisError : public Error {
+    public:
+        RedisError() { }
+        RedisError(const std::string &error)
+            : Error(error)
+        { }
+    };
+
+    /** Redis not found exception */
+    class RedisNotFoundError : public RedisError {
+        // constructor to take in a string
+    public:
+        RedisNotFoundError(const std::string &error)
+            : RedisError(error)
+        { }
+        const char *what() const noexcept {
+            return "Key not found";
+        }
+    };
+
     /**
      * @brief Redis connection wrapper, derives from Redis object
      *        For adding future functionality; redis::Redis is threadsafe
@@ -49,6 +71,11 @@ namespace springtail {
      */
     class RedisMgr {
     public:
+        using SubscriberPtr = std::shared_ptr<sw::redis::Subscriber>;
+
+        static constexpr int REDIS_CONFIG_DB = 0;
+        static constexpr int REDIS_DATA_DB = 1;
+
         /**
          * @brief Get the singleton instance object
          * @return RedisMgr*
@@ -68,6 +95,15 @@ namespace springtail {
             return _redis;
         }
 
+        /**
+         * Get a subscriber object to be used for pub/sub
+         * Creates a new connection to Redis, so should be reusued
+         * Caller must catch sw::redis::TimeoutError
+         * @param timeout_secs timeout in seconds
+         * @return SubscriberPtr
+         */
+        SubscriberPtr get_subscriber(int timeout_secs=5);
+
     protected:
         /** internal singleton instance */
         static RedisMgr *_instance;
@@ -83,6 +119,9 @@ namespace springtail {
         ~RedisMgr() {}
 
     private:
+        sw::redis::ConnectionOptions     _connect_options;
+        sw::redis::ConnectionPoolOptions _pool_options;
+
         // delete copy constructor
         RedisMgr(const RedisMgr &)       = delete;
         void operator=(const RedisMgr &) = delete;
@@ -98,7 +137,7 @@ namespace springtail {
      * queue.  If two-phase commit is not required, a consumer can also call pop_and_commit() which
      * will atomically perform a pop() and commit().
      *
-     * @tparam T value type, should implement std::string serialize().
+     * @tparam T value type, should be castable to a std::string
      */
     template<typename T>
     class RedisQueue {
@@ -109,6 +148,15 @@ namespace springtail {
         { }
 
         /**
+         * @brief Return the length of the queue.
+         * @return The length of the queue
+         */
+        uint64_t size()
+        {
+            return _redis->llen(_key);
+        }
+
+        /**
          * @brief Push item onto queue.
          * @param key list key
          * @param value value to queue
@@ -116,7 +164,17 @@ namespace springtail {
          */
         uint64_t push(const T &value)
         {
-            return _redis->lpush(_key, value.serialize());
+            return _redis->lpush(_key, static_cast<std::string>(value));
+        }
+
+        /**
+         * @brief Push serialized items onto queue.
+         * @param values vector of serialized values
+         * @return uint64_t items on list
+         */
+        uint64_t push(const std::vector<std::string> &values)
+        {
+            return _redis->lpush(_key, values.begin(), values.end());
         }
 
         /**
@@ -137,6 +195,29 @@ namespace springtail {
 
             // remove from the main queue and move to the worker queue
             auto &&res = _redis->brpoplpush(_key, worker_key, timeout_sec);
+            // note: blmove() not available yet in redis++
+            // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
+            if (res) {
+                return std::make_shared<T>(*res);
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Try to pop an item from queue (list).
+         *
+         * Operates identically to pop() except that if no elements exist in the list, it returns
+         * immediately with a nullptr.
+         *
+         * @param worker_id The unique ID of the worker.
+         * @return A pointer to the value if a value was received, nullptr if timedout
+         */
+        std::shared_ptr<T> try_pop(const std::string &worker_id)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+
+            // remove from the main queue and move to the worker queue
+            auto &&res = _redis->rpoplpush(_key, worker_key);
             // note: blmove() not available yet in redis++
             // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
             if (res) {
@@ -170,9 +251,20 @@ namespace springtail {
         void abort(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            // XXX this actually places it in the wrong place... we need to use lmove() to effectively rpoprpush()
             _redis->rpoplpush(worker_key, _key);
             // note: lmove() not available yet in redis++
             // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");
+        }
+
+        /**
+         * @brief Logically performs a commmit() and then a push() of that element onto another queue.
+         */
+        void commit_and_move(const std::string &worker_id,
+                             const std::string &queue)
+        {
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->rpoplpush(worker_key, queue);
         }
 
         /**
@@ -207,6 +299,14 @@ namespace springtail {
             return result;
         }
 
+        /**
+         * @brief Clear the queue.
+         */
+        void clear()
+        {
+            _redis->del(_key);
+        }
+
     private:
         std::string _key;       ///< The unique key within Redis for this queue.
         RedisClientPtr _redis; ///< A connection to Redis.
@@ -230,7 +330,7 @@ namespace springtail {
          */
         uint64_t add(const T &value, const uint64_t score=0)
         {
-            std::string value_string = value.serialize();
+            std::string value_string = static_cast<std::string>(value);
             return RedisMgr::get_instance()->get_client()->zadd(_key, value_string, score);
         }
 
@@ -241,7 +341,7 @@ namespace springtail {
          */
         uint64_t remove(const T &value)
         {
-            std::string value_string = value.serialize();
+            std::string value_string = static_cast<std::string>(value);
             return RedisMgr::get_instance()->get_client()->zrem(_key, value_string);
         }
 

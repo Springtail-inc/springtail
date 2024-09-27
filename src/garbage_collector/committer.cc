@@ -14,9 +14,11 @@ namespace springtail::gc {
             _worker_threads.push_back(std::thread(&Committer::_run_worker, this));
         }
 
+        // XXX we are currently processing XIDs one at a time, but we should eventually bundle
+        //     together XID ranges when possible.  It makes sense to do this when the FDW nodes can
+        //     do their own roll-forward.
+
         // enter a loop polling for data from the write cache
-        // XXX we are currently processing XIDs one at a time, but we should bundle together XID
-        //     ranges whenever possible.
         while (!_shutdown) {
             // figure out if there's an XID to process
             // note: this is a blocking call that will timeout after 60s
@@ -25,25 +27,110 @@ namespace springtail::gc {
                 continue; // got a timeout, try again
             }
             uint64_t db_id = result->db_id();
-            uint64_t xid = result->xid();
 
-            // initialize the committed XID for this database if needed
-            uint64_t committed_xid;
-            auto itr = _committed_xids.find(db_id);
-            if (itr == _committed_xids.end()) {
-                committed_xid = _xid_mgr->get_committed_xid(db_id, 0);
-            } else {
-                committed_xid = itr->second;
+            // handle a TABLE_SYNC_START
+            if (result->type() == XidReady::Type::TABLE_SYNC_START) {
+                // stop performing commits on this db until the table syncs are complete and aligned
+                _block_commit.insert(db_id);
+
+                // commit this work item and continue
+                _redis.commit(_worker_id);
+                continue;
             }
 
-            SPDLOG_INFO("Commit XID: {}", xid);
+            // initialize the most recently completed XID for this database if needed
+            uint64_t completed_xid;
+            auto itr = _completed_xids.find(db_id);
+            if (itr == _completed_xids.end()) {
+                completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
+            } else {
+                completed_xid = itr->second;
+            }
+            SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
+
+            // handle a TABLE_SYNC_COMMIT
+            if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}", db_id, completed_xid);
+
+                nlohmann::json ddls;
+                RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
+                                                                 Properties::get_db_instance_id(), db_id));
+
+                // note: Need to check the completed XID against the most recent XID assigned during
+                //       the table syncs.  If the completed XID before the table sync XID, then set
+                //       the completed XID to the table sync XID
+                completed_xid = std::max(completed_xid, result->xid());
+
+                // for operations at the SysTblMgr
+                auto client = sys_tbl_mgr::Client::get_instance();
+
+                // go through the hash of sys tbl operations
+                auto ops_str = sync_table_q.try_pop(_worker_id);
+                while (ops_str != nullptr) {
+                    auto json = nlohmann::json::parse(*ops_str);
+
+                    // perform the table swap
+                    // note: we wait to perform this operation in the GC-2 to ensure that all system
+                    //       table mutations up to this XID have already been applied, otherwise we
+                    //       could potentially get a stray column added before the swap XID showing
+                    //       up in the schema since it wouldn't get deleted by the DROP TABLE
+                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
+                    create.xid = completed_xid;
+                    create.lsn = constant::MAX_LSN - 1;
+
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+                    roots.xid = completed_xid;
+
+                    auto ddl_str = client->swap_sync_table(create, roots);
+
+                    // store the ddl mutations for the FDWs
+                    auto ddl_ops = nlohmann::json::parse(ddl_str);
+                    assert(ddl_ops.is_array());
+                    for (int i = 0; i < ddl_ops.size(); ++i) {
+                        ddls.push_back(ddl_ops[i]);
+                    }
+
+                    // get the next set of operations
+                    sync_table_q.commit(_worker_id);
+                    ops_str = sync_table_q.try_pop(_worker_id);
+                }
+
+                SPDLOG_INFO("(Re-)created all synced tables: {}@{}", db_id, completed_xid);
+
+                // finalize the system metadata
+                client->finalize(db_id, completed_xid);
+
+                // perform a commit to the XidMgr
+                _xid_mgr->commit_xid(db_id, completed_xid, true);
+
+                // notify the FDW of the schema changes
+                _redis_ddl.commit_ddl(db_id, completed_xid, ddls);
+
+                // notify everyone that the database is now in the "ready" state
+                Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
+
+                // signal the GC-1 LogParser that it can unblock and continue operation
+                _parser_notify.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, db_id));
+
+                // allow commits on future XIDs
+                _block_commit.erase(db_id);
+
+                // commit this work item and continue
+                _redis.commit(_worker_id);
+                continue;
+            }
+
+            // note: from here we know we have an XACT_MSG
+            assert(result->type() == XidReady::Type::XACT_MSG);
+            uint64_t xid = result->xid();
+            SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
 
             // find every table associated with this XID
             uint64_t table_cursor = 0;
             bool tid_done = false;
             while (!tid_done) {
                 // query the write cache for the tables modified through this XID
-                auto table_list = _write_cache->list_tables(db_id, committed_xid, xid, 100, table_cursor);
+                auto table_list = _write_cache->list_tables(db_id, completed_xid, xid, 100, table_cursor);
 
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} tables from the write cache", table_list.size());
 
@@ -58,7 +145,7 @@ namespace springtail::gc {
                     uint64_t txid = 0, tlsn = 0;
 
                     // retrieve the set of table changes for this table
-                    auto table_changes = _write_cache->fetch_table_changes(db_id, tid, committed_xid, xid);
+                    auto table_changes = _write_cache->fetch_table_changes(db_id, tid, completed_xid, xid);
                     for (auto &&change : table_changes) {
                         // if any of the changes are a truncate, then we will ignore all row
                         // mutations before the last truncate XID/LSN
@@ -70,7 +157,7 @@ namespace springtail::gc {
                     }
 
                     // construct the mutable table object
-                    auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, committed_xid, xid, true);
+                    auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, completed_xid, xid, true);
 
                     // check if we need to perform a table truncate
                     if (txid > 0) {
@@ -84,7 +171,7 @@ namespace springtail::gc {
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(db_id, tid, committed_xid, xid, 100, extent_cursor);
+                        auto extent_list = _write_cache->list_extents(db_id, tid, completed_xid, xid, 100, extent_cursor);
 
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
@@ -150,18 +237,24 @@ namespace springtail::gc {
             // retrieve any schema changes available in Redis
             auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
 
-            // commit the completed XID
-            _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
-            _committed_xids[db_id] = xid;
+            // check if we are doing an active table sync, in which case we have to block commits
+            if (!_block_commit.contains(db_id)) {
+                // commit the completed XID
+                _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
+            } else if (!ddls.is_null()) {
+                // don't commit, but record any DDL changes to the history
+                _xid_mgr->record_ddl_change(db_id, xid);
+            }
+            _completed_xids[db_id] = xid;
 
             // push any DDL changes to the FDWs
             if (!ddls.is_null()) {
                 _redis_ddl.commit_ddl(db_id, xid, ddls);
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_GC, "XID committed {}", xid);
+            SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
 
-            // mark the XID as complete in the redis queue
+            // mark the XID message as complete in the redis queue
             _redis.commit(_worker_id);
 
             // clear the DDL dependency data from the redis SortedSet
@@ -222,10 +315,16 @@ namespace springtail::gc {
     Committer::_process_finalize(MutableTablePtr table,
                                  uint64_t xid)
     {
+        // note: we should never be updating the system tables through the Committer
+        assert(table->id() > constant::MAX_SYSTEM_TABLE_ID);
+
         SPDLOG_DEBUG_MODULE(LOG_GC, "Finalize table {}@{}", table->id(), xid);
 
         // finalize the table
-        auto roots = table->finalize();
+        auto &&metadata = table->finalize();
+
+        // update the system table roots
+        TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
     }
 
     StorageCache::PagePtr
@@ -364,7 +463,7 @@ namespace springtail::gc {
         //       correct schema for the target XID
 
         // construct a virtual schema from the previous commit XID to the target XID
-        XidLsn access_xid(_committed_xids[table->db()]);
+        XidLsn access_xid(_completed_xids[table->db()]);
         auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
         auto vschema = std::make_shared<VirtualSchema>(meta);
         auto row_fields = vschema->get_fields();
@@ -374,7 +473,7 @@ namespace springtail::gc {
         bool done = false;
         while (!done) {
             // request rows from the write cache for the provided extent ID
-            auto rows = _write_cache->fetch_rows(table->db(), table->id(), extent_id, _committed_xids[table->db()], xid, 100, cursor);
+            auto rows = _write_cache->fetch_rows(table->db(), table->id(), extent_id, _completed_xids[table->db()], xid, 100, cursor);
             if (rows.empty()) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}:{}@{}", table->id(), extent_id, xid);
                 done = true;
@@ -489,7 +588,7 @@ namespace springtail::gc {
         auto target_schema = schema_mgr->get_extent_schema(table->db(), table->id(), target_xid);
 
         // construct a virtual schema from the previous commit XID to the target XID
-        XidLsn access_xid(_committed_xids[table->db()]);
+        XidLsn access_xid(_completed_xids[table->db()]);
         auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
         auto vschema = std::make_shared<VirtualSchema>(meta);
         auto row_fields = vschema->get_fields();
@@ -498,7 +597,7 @@ namespace springtail::gc {
         bool done = false;
         while (!done) {
             // request rows from the write cache for the provided extent ID
-            auto rows = _write_cache->fetch_rows(table->db(), table->id(), constant::UNKNOWN_EXTENT, _committed_xids[table->db()], xid, 100, cursor);
+            auto rows = _write_cache->fetch_rows(table->db(), table->id(), constant::UNKNOWN_EXTENT, _completed_xids[table->db()], xid, 100, cursor);
             if (rows.empty()) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "No more rows for {}@{}", table->id(), xid);
                 done = true;

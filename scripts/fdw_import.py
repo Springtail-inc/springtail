@@ -98,8 +98,8 @@ db_schemas = {}
 
 # fetch the db name and schemas for each database
 for db_id in db_ids:
-    db_key = 'db_config:' + str(db_instance_id) + ':' + str(db_id)
-    db = json.loads(r.get(db_key))
+    db_key = 'db_config:' + str(db_instance_id) # + ':' + str(db_id)
+    db = json.loads(r.hget(db_key, str(db_id)))
     dbname = db['name']
     schemas = db['schemas'].keys()
     db_schemas[dbname] = {'id': db_id, 'schemas': schemas }

@@ -38,7 +38,8 @@ struct TableRequest {
     1: i64 db_id,
     2: i64 xid,
     3: i64 lsn,
-    4: TableInfo table
+    4: TableInfo table,
+    5: i64 snapshot_xid
 }
 
 struct DropTableRequest {
@@ -59,7 +60,8 @@ struct UpdateRootsRequest {
     2: i64 xid,
     3: i64 table_id,
     4: list<i64> roots,
-    5: TableStats stats
+    5: TableStats stats,
+    6: i64 snapshot_xid
 }
 
 struct FinalizeRequest {
@@ -75,7 +77,8 @@ struct GetRootsRequest {
 
 struct GetRootsResponse {
     1: list<i64> roots,
-    2: TableStats stats
+    2: TableStats stats,
+    3: i64 snapshot_xid
 }
 
 struct GetSchemaRequest {
@@ -107,6 +110,13 @@ struct GetSchemaResponse {
     2: list<ColumnHistory> history
 }
 
+struct ExistsRequest {
+    1: i64 db_id,
+    2: i64 table_id,
+    3: i64 xid,
+    4: i64 lsn
+}
+
 // the interface for managing the system tables
 service Service {
     Status ping(),
@@ -130,8 +140,15 @@ service Service {
     GetRootsResponse get_roots(1: GetRootsRequest request),
 
     // retrieve the schema information for a given table at a given xid/lsn
-    GetSchemaResponse get_schema(1: GetSchemaRequest request)
+    GetSchemaResponse get_schema(1: GetSchemaRequest request),
 
     // retrieve the schema information for a given table at a given xid/lsn with changes up to the target xid/lsn
-    GetSchemaResponse get_target_schema(1: GetTargetSchemaRequest request)
+    GetSchemaResponse get_target_schema(1: GetTargetSchemaRequest request),
+
+    // checks if the table exists at a given xid/lsn
+    bool exists(1: ExistsRequest request)
+
+    // performs a drop + create + update_roots as a single operation
+    // to support swapping a newly synced table into place
+    DDLStatement swap_sync_table(1: TableRequest create, 2: UpdateRootsRequest roots);
 }

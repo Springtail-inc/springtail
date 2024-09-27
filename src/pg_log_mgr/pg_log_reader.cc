@@ -95,7 +95,7 @@ namespace springtail::pg_log_mgr {
     {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Begin: xid={}, xact_lsn={}\n", begin_msg.xid, begin_msg.xact_lsn);
 
-        PgTransactionPtr xact = std::make_shared<PgTransaction>();
+        PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
         xact->begin_path = _current_path;
         xact->begin_offset = _reader.header_offset();
         xact->xact_lsn = begin_msg.xact_lsn;
@@ -115,6 +115,8 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
+        assert (xact->type == PgTransaction::TYPE_COMMIT);
+
         // set transaction path and end offset
         xact->commit_path = _current_path;
         xact->commit_offset = _reader.offset();
@@ -133,17 +135,16 @@ namespace springtail::pg_log_mgr {
         }
 
         // new transaction
-        PgTransactionPtr xact = std::make_shared<PgTransaction>();
+        PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_COMMIT);
         xact->begin_path = _current_path;
         xact->begin_offset = _reader.header_offset();
         xact->xid = start_msg.xid;
         _xact_map.insert({xact->xid, xact});
 
-        PgTransactionPtr stream_xact = std::make_shared<PgTransaction>();
+        PgTransactionPtr stream_xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_STREAM_START);
         stream_xact->begin_path = _current_path;
         stream_xact->begin_offset = _reader.header_offset();
         stream_xact->xid = start_msg.xid;
-        stream_xact->type = PgTransaction::TYPE_STREAM_START;
 
         _queue->push(stream_xact);
     }
@@ -167,7 +168,8 @@ namespace springtail::pg_log_mgr {
         xact->commit_path = _current_path;
         xact->commit_offset = _reader.offset();
         xact->xact_lsn = commit_msg.xact_lsn;
-        xact->type = PgTransaction::TYPE_COMMIT;
+
+        assert (xact->type == PgTransaction::TYPE_COMMIT);
 
         _xact_map.erase(itr);
         _queue->push(xact);

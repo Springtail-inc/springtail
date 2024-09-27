@@ -88,6 +88,16 @@ namespace springtail {
 
     }
 
+    void
+    XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
+    {
+        ThriftClient c = _get_client();
+        thrift::xid_mgr::Status result;
+
+        c.client->record_ddl_change(result, db_id, xid);
+
+    }
+
     uint64_t
     XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     {

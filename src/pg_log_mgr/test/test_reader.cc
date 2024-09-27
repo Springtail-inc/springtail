@@ -32,7 +32,7 @@ namespace {
         using PgLogMgr::PgLogMgr;
         TestLogMgr(const std::filesystem::path &repl_log_path,
                    const std::filesystem::path &xact_log_path)
-            : PgLogMgr(repl_log_path, xact_log_path)
+            : PgLogMgr(repl_log_path, xact_log_path) // XXX NOTE: hardcodes db_id=1
         {
         }
 
@@ -46,9 +46,9 @@ namespace {
             return _create_xact_logger();
         }
 
-        void process_xact(PgTransactionPtr xact, PgXactLogWriterPtr xact_writer)
+        void process_xact(PgTransactionPtr xact)
         {
-            _process_xact(xact, xact_writer);
+            _process_xact(xact);
         }
     };
 
@@ -203,6 +203,12 @@ namespace {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
+        // init the redis queue
+        RedisQueue<PgXactMsg> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+                                                Properties::get_db_instance_id()));
+
+        queue.clear();
+
         // initialize the log mgr
         PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 
@@ -223,7 +229,7 @@ namespace {
                 PgTransactionPtr xact = _queue->pop();
 
                 // process the transaction
-                _log_mgr->process_xact(xact, xact_writer);
+                _log_mgr->process_xact(xact);
 
                 // store it for comparison if of type commit
                 if (xact->type == PgTransaction::TYPE_COMMIT) {
@@ -233,21 +239,20 @@ namespace {
         }
 
         // fetch the redis xacts and compare
-        RedisQueue<PgRedisXactValue> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
-                                                       Properties::get_db_instance_id()));
         auto xacts = queue.range(0, -1);
         std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
 
-        EXPECT_EQ(xact_list.size(), xacts.size());
+        ASSERT_EQ(xact_list.size(), xacts.size());
 
         for (int i = 0; i < xact_list.size(); i++) {
-            EXPECT_EQ(xacts[i].pg_xid, xact_list[i]->xid);
-            EXPECT_EQ(xacts[i].xid, xact_list[i]->springtail_xid);
-            EXPECT_EQ(xacts[i].begin_offset, xact_list[i]->begin_offset);
-            EXPECT_EQ(xacts[i].begin_path, xact_list[i]->begin_path);
-            EXPECT_EQ(xacts[i].commit_offset, xact_list[i]->commit_offset);
-            EXPECT_EQ(xacts[i].commit_path, xact_list[i]->commit_path);
-            EXPECT_EQ(xacts[i].aborted_xids.size(), xact_list[i]->aborted_xids.size());
+            auto &xact_msg = std::get<PgXactMsg::XactMsg>(xacts[i].msg);
+            EXPECT_EQ(xact_msg.pg_xid, xact_list[i]->xid);
+            EXPECT_EQ(xact_msg.xid, xact_list[i]->springtail_xid);
+            EXPECT_EQ(xact_msg.begin_offset, xact_list[i]->begin_offset);
+            EXPECT_EQ(xact_msg.begin_path, xact_list[i]->begin_path);
+            EXPECT_EQ(xact_msg.commit_offset, xact_list[i]->commit_offset);
+            EXPECT_EQ(xact_msg.commit_path, xact_list[i]->commit_path);
+            EXPECT_EQ(xact_msg.aborted_xids.size(), xact_list[i]->aborted_xids.size());
         }
     }
 

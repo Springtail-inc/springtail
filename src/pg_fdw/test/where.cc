@@ -46,7 +46,7 @@ bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, Qu
 
 void search(uint64_t db_id, int val, QualOpName op)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, 57455, 8, constant::MAX_LSN);
+    TablePtr table = TableMgr::get_instance()->get_table(db_id, 57455, 8);
     std::optional<Table::Iterator> iter_start = std::nullopt;
     std::optional<Table::Iterator> iter_end = std::nullopt;
 

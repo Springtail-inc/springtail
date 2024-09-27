@@ -34,8 +34,6 @@ namespace springtail::sys_tbl_mgr {
         static void shutdown();
 
     public:
-        Service();
-
         /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
 
@@ -66,6 +64,14 @@ namespace springtail::sys_tbl_mgr {
         /** Retrieve the schema information for a given table at a given XID/LSN along with the
             history of any changes to bring it to a target XID/LSN. */
         void get_target_schema(GetSchemaResponse& _return, const GetTargetSchemaRequest &request) override;
+
+        /** Returns a boolean indicating if the table exists at a given XID. */
+        bool exists(const ExistsRequest &request) override;
+
+        /** Performs a drop (if needed), create, and update_roots for a given table to swap it's
+            newly synced data into place at a given XID.  Returns a JSON array of DDL statements to
+            update the FDWs. */
+        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
 
     private:
         // CACHE FOR NAMES
@@ -224,6 +230,36 @@ namespace springtail::sys_tbl_mgr {
          */
         MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id);
 
+        /**
+         * Performs a create_table() assuming that the correct locks are already held.
+         */
+        nlohmann::json _create_table(const TableRequest &request);
+
+        /**
+         * Performs a drop_table() assuming that the correct locks are already held.
+         */
+        nlohmann::json _drop_table(const DropTableRequest &request);
+
+        /**
+         * Performs an update_roots() assuming that the correct locks are already held.
+         */
+        void _update_roots(const UpdateRootsRequest &request);
+
+
+        /**
+         * Retrieve the current read XID for a db.
+         */
+        XidLsn _get_read_xid(uint64_t db_id);
+
+        /**
+         * Retrieve the current write XID for a db.
+         */
+        uint64_t _get_write_xid(uint64_t db_id);
+
+        /**
+         * Set the read and write XIDs.
+         */
+        void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
 
@@ -232,6 +268,15 @@ namespace springtail::sys_tbl_mgr {
 
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;
+
+        /** Mutex to protect the XID maps. */
+        boost::mutex _xid_mutex;
+
+        /** XID at which the service is currently reading system table data for a given DB. */
+        std::map<uint64_t, XidLsn> _read_xid;
+
+        /** XID to which the service is currently committing system table data for a given DB. */
+        std::map<uint64_t, uint64_t> _write_xid;
 
         /**
          * Locked for read when accessing the read-only tables.  Unique lock when finalizing and
@@ -244,12 +289,6 @@ namespace springtail::sys_tbl_mgr {
          * swapping the XID.
          */
         boost::shared_mutex _write_mutex;
-
-        /** XID at which the service is currently reading data. */
-        XidLsn _access_xid;
-
-        /** XID to which the service is currently committing data. */
-        uint64_t _target_xid;
 
         /** The read-only interface for the system tables to service get requests. */
         std::map<uint64_t, std::map<uint64_t, TablePtr>> _read;

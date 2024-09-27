@@ -7,6 +7,8 @@
 #include <storage/csv_field.hh>
 #include <storage/table.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
 #include <test/services.hh>
 
 using namespace springtail;
@@ -71,30 +73,25 @@ namespace {
         TablePtr
         _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<Table>(_db_id,
-                                           table_id,
-                                           xid,
-                                           _base_dir / fmt::format("{}", table_id),
-                                           _primary_keys,
-                                           _secondary_keys,
-                                           roots,
-                                           _schema,
-                                           TableStats());
+            TableMetadata tbl_meta;
+            tbl_meta.roots = roots;
+            tbl_meta.snapshot_xid = 1;
+
+            return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
+                                           _primary_keys, _secondary_keys,
+                                           tbl_meta, _schema);
         }
 
         MutableTablePtr
         _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
         {
-            return std::make_shared<MutableTable>(_db_id,
-                                                  table_id,
-                                                  xid - 1,
-                                                  xid,
-                                                  roots,
-                                                  _base_dir / fmt::format("{}", table_id),
-                                                  _primary_keys,
-                                                  _secondary_keys,
-                                                  _schema,
-                                                  TableStats());
+            TableMetadata tbl_meta;
+            tbl_meta.roots = roots;
+            tbl_meta.snapshot_xid = 1;
+
+            return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
+                                                  _primary_keys, _secondary_keys,
+                                                  tbl_meta, _schema);
         }
 
         std::shared_ptr<Tuple>
@@ -164,15 +161,17 @@ namespace {
         uint64_t access_xid = 1, target_xid = 1;
 
         // create a mutable table
-        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1000, target_xid, roots);
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        auto table = _create_table(1000, access_xid, roots);
+        auto table = _create_table(1000, access_xid, metadata.roots);
 
         // get a key that doesn't exist since the table is empty
         auto key = _create_key("aaaa");
@@ -189,18 +188,20 @@ namespace {
         uint64_t access_xid = 1, target_xid = 2;
 
         // create a mutable table
-        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1001, target_xid, roots);
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
         _populate_table(mtable, target_xid);
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        auto table = _create_table(1001, access_xid, roots);
+        auto table = _create_table(1001, access_xid, metadata.roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -223,8 +224,9 @@ namespace {
         uint64_t access_xid = 2, target_xid = 3;
 
         // create a mutable table
-        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1002, target_xid, roots);
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
         _populate_table(mtable, target_xid);
@@ -280,11 +282,12 @@ namespace {
         }
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        auto table = _create_table(1002, access_xid, roots);
+        auto table = _create_table(1002, access_xid, metadata.roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -332,22 +335,24 @@ namespace {
         uint64_t access_xid = 3, target_xid = 4;
 
         // create a mutable table
-        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1003, target_xid, roots);
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
         _populate_table(mtable, target_xid);
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table for lookup
         access_xid = target_xid;
-        auto table = _create_table(1003, access_xid, roots);
+        auto table = _create_table(1003, access_xid, metadata.roots);
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = _create_mtable(1003, target_xid, roots);
+        mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // remove rows with unknown positions
         // note: rows with table_id == 1
@@ -378,11 +383,12 @@ namespace {
         }
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        table = _create_table(1003, access_xid, roots);
+        table = _create_table(1003, access_xid, metadata.roots);
 
         // verify the data at this point
         int count = 0;
@@ -418,7 +424,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = _create_mtable(1003, target_xid, roots);
+        mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // update some row data with unknown positions
         // note: rows with table_id = 6
@@ -456,11 +462,12 @@ namespace {
         }
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        table = _create_table(1003, access_xid, roots);
+        table = _create_table(1003, access_xid, metadata.roots);
 
         // verify the data at this point
         count = 0;
@@ -501,7 +508,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = _create_mtable(1003, target_xid, roots);
+        mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // upsert some missing rows with unknown positions
         // note: original rows with table_id = 1
@@ -539,11 +546,12 @@ namespace {
         }
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        table = _create_table(1003, access_xid, roots);
+        table = _create_table(1003, access_xid, metadata.roots);
 
         count = 0;
         prev = "";
@@ -589,7 +597,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = _create_mtable(1003, target_xid, roots);
+        mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // upsert some existing rows with unknown positions
         // note: rows with table_id = 3
@@ -627,11 +635,12 @@ namespace {
         }
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table
         access_xid = target_xid;
-        table = _create_table(1003, access_xid, roots);
+        table = _create_table(1003, access_xid, metadata.roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
@@ -689,18 +698,20 @@ namespace {
         uint64_t access_xid = 8, target_xid = 9;
 
         // create a mutable table
-        std::vector<uint64_t> roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
-        auto mtable = _create_mtable(1004, target_xid, roots);
+        TableMetadata metadata;
+        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows
         _populate_table(mtable, target_xid);
 
         // finalize the table
-        roots = mtable->finalize();
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
         // create an access table and identify extents to be mutated
         access_xid = target_xid;
-        auto table = _create_table(1004, access_xid, roots);
+        auto table = _create_table(1004, access_xid, metadata.roots);
 
         std::map<uint64_t, std::vector<TuplePtr>> tuple_map;
 
@@ -720,7 +731,7 @@ namespace {
 
         // create a new mutable table with a later XID target
         ++target_xid;
-        mtable = _create_mtable(1004, target_xid, roots);
+        mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // mutate the individual extents in separate concurrent threads
         PhasedThreadTest<Request> tester;
@@ -733,10 +744,11 @@ namespace {
         // finalize and verify the table
         tester.set_verify([this, mtable, target_xid]() {
             // create an access table
-            auto roots = mtable->finalize();
+            TableMetadata metadata = mtable->finalize();
+            sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
 
             auto access_xid = target_xid;
-            auto table = _create_table(1004, access_xid, roots);
+            auto table = _create_table(1004, access_xid, metadata.roots);
 
             // ensure that it has all of the expected rows through both the primary and secondary index
             // and that everything else works as expected (find, lower_bound, etc)

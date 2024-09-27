@@ -87,6 +87,7 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t INDEX_ID = 1;
             static constexpr uint32_t XID = 2;
             static constexpr uint32_t EXTENT_ID = 3;
+            static constexpr uint32_t SNAPSHOT_XID = 4;
 
             static const std::vector<SchemaColumn> SCHEMA;
 
@@ -94,13 +95,15 @@ namespace springtail::sys_tbl {
             tuple(uint64_t table_id,
                   uint64_t index_id,
                   uint64_t xid,
-                  uint64_t extent_id)
+                  uint64_t extent_id,
+                  uint64_t snapshot_xid)
             {
-                auto fields = std::make_shared<FieldArray>(4);
+                auto fields = std::make_shared<FieldArray>(5);
                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
                 fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
                 fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
                 fields->at(EXTENT_ID) = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+                fields->at(SNAPSHOT_XID) = std::make_shared<ConstTypeField<uint64_t>>(snapshot_xid);
                 return std::make_shared<FieldTuple>(fields, nullptr);
             }
         };

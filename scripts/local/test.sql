@@ -61,3 +61,14 @@ COMMIT;
 BEGIN;
 DELETE FROM test_data5 USING (SELECT ctid, ROW_NUMBER() OVER( PARTITION BY b ORDER BY b ) AS row_num FROM test_data5) AS cte WHERE cte.row_num > 1 AND cte.ctid = test_data5.ctid;
 COMMIT;
+
+-- Test creating a table and then changing the type of a column to force a table re-sync
+BEGIN;
+CREATE TABLE test_data6 (a TEXT NULL);
+INSERT INTO test_data6 (a) VALUES ('1'), ('2'), ('3'), ('4');
+COMMIT;
+
+BEGIN;
+ALTER TABLE test_data6 ALTER COLUMN a TYPE INT USING a::INTEGER;
+COMMIT;
+

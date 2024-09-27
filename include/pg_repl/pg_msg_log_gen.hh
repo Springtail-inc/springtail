@@ -26,8 +26,6 @@ namespace springtail {
         static constexpr char PG_VALUE_TRUE[] = "true";   ///< true value
         static constexpr char PG_VALUE_FALSE[] = "false"; ///< false value
 
-        static constexpr int PG_WRAP_LSN_BYTES = 128;     ///< wrap lsn after this many bytes
-
         /**
          * @brief Construct a new Pg Log Gen object
          * @param file_name output filename
@@ -124,13 +122,12 @@ namespace springtail {
     private:
         std::filesystem::path _file_name; ///< file name
         FILE *_fp;                        ///< file pointer
-        int _bytes_written = 0;           ///< bytes written, reset after PG_WRAP_LSN_BYTES
         int _header_offset = 0;           ///< header offset; where to write header of current message
-        uint64_t _begin_lsn = 0;          ///< begin lsn
+        uint64_t _begin_lsn;              ///< begin lsn
 
         uint32_t _next_table_id = 0;      ///< next table id
         uint32_t _xid = 0;                ///< transaction id
-        uint64_t _lsn = 0;                ///< lsn (incremented for every PG_WRAP_LSN_BYTES written)
+        uint64_t _lsn = 1;                ///< lsn
         uint64_t _commit_ts = 0;          ///< commit timestamp
 
         uint32_t _stream_xid = -1;        ///< current stream transaction id if in stream xact

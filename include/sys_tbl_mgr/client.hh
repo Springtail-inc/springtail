@@ -54,7 +54,7 @@ namespace springtail::sys_tbl_mgr {
          * Call update_roots() on the SysTblMgr.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid,
-                          const std::vector<uint64_t> &roots, uint64_t row_count);
+                          const TableMetadata &metadata);
 
         /**
          * Call finalize() on the SysTblMgr.
@@ -75,6 +75,17 @@ namespace springtail::sys_tbl_mgr {
          * Call get_target_schema() on the SysTblMgr.
          */
         SchemaMetadata get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+
+        /**
+         * Call exists() on the SysTblMgr.
+         */
+        bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Call swap_sync_table() on the SysTblMgr.
+         */
+        std::string swap_sync_table(const TableRequest &create, const UpdateRootsRequest &roots);
+
 
     protected:
         /** Singleton write cache client instance */

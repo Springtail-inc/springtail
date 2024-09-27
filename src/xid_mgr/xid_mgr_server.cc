@@ -244,4 +244,34 @@ namespace springtail::xid_mgr {
 
         return;
     }
+
+    void
+    XidMgrServer::record_ddl_change(uint64_t db_id,
+                                    uint64_t xid)
+    {
+        // note: code is nearly identical to commit_xid()... make sure they stay in sync
+
+        PartitionPtr partition;
+
+        // first try to get partition without write lock
+        std::shared_lock rd_lock(_mutex);
+        partition = _get_partition(db_id, false);
+
+        if (partition != nullptr) {
+            // shared lock held for update
+            partition->record_ddl_change(db_id, xid);
+            return;
+        }
+
+        rd_lock.unlock();
+
+        // if partition is null, then get it with write lock to create new partition
+        // we hold the lock during the commit to preserve space in the partition
+        std::unique_lock wr_lock(_mutex);
+        partition = _get_partition(db_id, true);
+
+        // exclusive lock held for insert/create
+        partition->record_ddl_change(db_id, xid);
+    }
+
 }

@@ -70,7 +70,7 @@ namespace {
         TableMgr::get_instance()->finalize_metadata(db_id, 4);
 
         // verify system table correctness
-        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 5, 0);
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, 5);
         auto fields = table->extent_schema()->get_fields();
         auto row_i = table->begin();
 

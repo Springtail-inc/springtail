@@ -142,6 +142,7 @@ namespace springtail::sys_tbl_mgr {
         DDLStatement result;
 
         auto &&request = _gen_table_request(db_id, xid, msg);
+
         c.client->create_table(result, request);
 
         if (result.statement.empty()) {
@@ -198,8 +199,7 @@ namespace springtail::sys_tbl_mgr {
     Client::update_roots(uint64_t db_id,
                          uint64_t table_id,
                          uint64_t xid,
-                         const std::vector<uint64_t> &roots,
-                         uint64_t row_count)
+                         const TableMetadata &metadata)
     {
         ThriftClient c = _get_client();
         Status result;
@@ -208,8 +208,9 @@ namespace springtail::sys_tbl_mgr {
         request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
-        request.roots.insert(request.roots.end(), roots.begin(), roots.end());
-        request.stats.row_count = row_count;
+        request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+        request.stats.row_count = metadata.stats.row_count;
+        request.snapshot_xid = metadata.snapshot_xid;
 
         c.client->update_roots(result, request);
 
@@ -255,6 +256,7 @@ namespace springtail::sys_tbl_mgr {
         metadata.roots.insert(metadata.roots.end(),
                               result.roots.begin(), result.roots.end());
         metadata.stats.row_count = result.stats.row_count;
+        metadata.snapshot_xid = result.snapshot_xid;
 
         return metadata;
     }
@@ -372,6 +374,37 @@ namespace springtail::sys_tbl_mgr {
         }
 
         return metadata;
+    }
+
+    bool
+    Client::exists(uint64_t db_id,
+                   uint64_t table_id,
+                   const XidLsn &xid)
+    {
+        ThriftClient c = _get_client();
+
+        ExistsRequest request;
+        request.db_id = db_id;
+        request.table_id = table_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+
+        return c.client->exists(request);
+    }
+    
+    std::string
+    Client::swap_sync_table(const TableRequest &create,
+                            const UpdateRootsRequest &roots)
+    {
+        ThriftClient c = _get_client();
+        DDLStatement result;
+
+        c.client->swap_sync_table(result, create, roots);
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+
+        return result.statement;
     }
 
 } // namespace

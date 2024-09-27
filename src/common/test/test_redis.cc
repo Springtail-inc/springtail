@@ -44,12 +44,12 @@ namespace {
                 _value = std::stoull(value);
             }
 
-            std::string serialize() const {
-                return std::to_string(_value);
-            }
-
             uint64_t value() const {
                 return _value;
+            }
+
+            explicit operator std::string() const {
+                return std::to_string(_value);
             }
 
         private:
@@ -62,11 +62,11 @@ namespace {
                 _value = value;
             }
 
-            std::string serialize() const {
+            std::string value() const {
                 return _value;
             }
 
-            std::string value() const {
+            explicit operator std::string() const {
                 return _value;
             }
 

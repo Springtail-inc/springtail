@@ -11,19 +11,16 @@ namespace springtail {
      * Structure to hold table statistics.  Currently only holds the row count of the table.
      */
     struct TableStats {
-        uint64_t row_count;
-
-        TableStats()
-            : row_count(0)
-        { }
+        uint64_t row_count = 0;
     };
 
     /**
-     * Structure to hold table metadata required to create a table.
+     * Structure to hold table metadata required to record a table snapshot.
      */
     struct TableMetadata {
         std::vector<uint64_t> roots;
         TableStats stats;
+        uint64_t snapshot_xid = 0;
     };
 
     /**
@@ -162,12 +159,11 @@ namespace springtail {
         Table(uint64_t db_id,
               uint64_t table_id,
               uint64_t xid,
-              const std::filesystem::path &table_dir,
+              const std::filesystem::path &table_base,
               const std::vector<std::string> &primary_key,
               const std::vector<std::vector<std::string>> &secondary_keys,
-              std::vector<uint64_t> root_offsets,
-              ExtentSchemaPtr schema,
-              const TableStats &stats);
+              const TableMetadata &metadata,
+              ExtentSchemaPtr schema);
 
         /** Returns true if the table has a primary key.  False otherwise. */
         bool has_primary();
@@ -306,15 +302,14 @@ namespace springtail {
          * Mutable table constructor.
          */
         MutableTable(uint64_t db_id,
-                     uint64_t id,
+                     uint64_t table_id,
                      uint64_t access_xid,
                      uint64_t target_xid,
-                     std::vector<uint64_t> root_offsets,
-                     const std::filesystem::path &table_dir,
+                     const std::filesystem::path &table_base,
                      const std::vector<std::string> &primary_key,
                      const std::vector<std::vector<std::string>> &secondary_keys,
+                     const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
-                     const TableStats &stats,
                      bool for_gc = false);
 
         /**
@@ -384,7 +379,7 @@ namespace springtail {
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
          * system tables.
          */
-        std::vector<uint64_t> finalize();
+        TableMetadata finalize();
 
         /**
          * Returns the schema of the table.
@@ -525,6 +520,7 @@ namespace springtail {
 
         uint64_t _access_xid; ///< The access XID for this set of mutations.
         uint64_t _target_xid; ///< The final target XID for this set of mutations.
+        uint64_t _snapshot_xid; ///< The XID of the snapshot that this version of the table started from.
         std::filesystem::path _table_dir; ///< The directory containing the table data.
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 

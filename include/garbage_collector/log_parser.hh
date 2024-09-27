@@ -1,5 +1,7 @@
 #pragma once
 
+#include <boost/thread.hpp>
+
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -48,39 +50,28 @@ namespace springtail::gc {
     public:
         LogParser(uint32_t reader_count,
                   uint32_t parser_count)
-            : _readers(reader_count),
-              _parsers(parser_count)
-        {
-            _backlog = std::make_shared<Backlog>();
-            _parser_queue = std::make_shared<ParserQueue>();
-
-            for (auto &reader : _readers) {
-                reader = std::make_shared<Reader>(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id()),
-                                                   _backlog, _parser_queue);
-            }
-
-            for (auto &parser : _parsers) {
-                parser = std::make_shared<Parser>(_parser_queue);
-            }
-        }
+            : _parser_queue(std::make_shared<ParserQueue>()),
+              _reader(_parser_queue),
+              _reader_threads(reader_count),
+              _parser(_parser_queue),
+              _parser_threads(parser_count)
+        { }
 
         void run()
         {
-            for (auto &reader : _readers) {
-                _reader_threads.push_back(std::thread(&Reader::run, reader.get()));
+            for (auto &thread : _reader_threads) {
+                thread = std::thread(&Reader::run, &_reader);
             }
 
-            for (auto &parser : _parsers) {
-                _parser_threads.push_back(std::thread(&Parser::run, parser.get()));
+            for (auto &thread : _parser_threads) {
+                thread = std::thread(&Parser::run, &_parser);
             }
         }
 
         void shutdown()
         {
             // signal the readers to shutdown
-            for (auto &reader : _readers) {
-                reader->shutdown();
-            }
+            _reader.shutdown();
 
             // wait for the readers to complete
             for (auto &thread : _reader_threads) {
@@ -100,20 +91,22 @@ namespace springtail::gc {
 
         /** Holds the state for processing an XID. */
         struct State {
-            std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry; ///< The XID entry from the PG log manager.
+            std::shared_ptr<pg_log_mgr::PgXactMsg> msg;
+            pg_log_mgr::PgXactMsg::XactMsg &entry; ///< The XID entry from the PG log manager.
             bool process_as_stream; ///< True if the XID is in STREAM mode.
             CounterPtr mutation_count; ///< The number of mutations outstanding to the parsers.
             uint64_t lsn; ///< Maintains the LSN for each mutation within this XID.
 
             State(const State &state) = default;
-            explicit State(std::shared_ptr<pg_log_mgr::PgRedisXactValue> entry)
-                : entry(entry),
+            explicit State(std::shared_ptr<pg_log_mgr::PgXactMsg> msg)
+                : msg(msg),
+                  entry(std::get<pg_log_mgr::PgXactMsg::XactMsg>(msg->msg)),
                   process_as_stream(false),
                   mutation_count(std::make_shared<Counter>()),
                   lsn(0)
             { }
         };
-        typedef std::shared_ptr<State> StatePtr;
+        using StatePtr = std::shared_ptr<State>;
 
         /**
          * Maintains two structures:
@@ -168,6 +161,25 @@ namespace springtail::gc {
              */
             void clear_dep(uint64_t db_id, uint64_t xid);
 
+            /**
+             * Clears any requests blocked on the provided table.  Used to unblock processing that
+             * was blocked on a table that has been selected for resync.
+             * @param db_id The DB of the table.
+             * @param oid The OID of the table.
+             */
+            void clear_table(uint64_t db_id, uint64_t oid);
+
+        private:
+            /**
+             * Unblocks any XIDs that were waiting on the table.  Optionally only releases XIDs
+             * before a provided "next dependent XID," allowing earlier XIDs to proceed since they
+             * can't be dependent on changes in later XIDs.
+             * @param db_id The DB of the table.
+             * @param oid The OID of the table.
+             * @param next_dep_xid If non-zero, used to limit the set of XIDs that are unblocked.
+             */
+            void _unblock_xids(uint64_t db_id, uint64_t oid, uint64_t next_dep_xid = 0);
+
         private:
             using DbXid = std::pair<uint64_t, uint64_t>;
             using DbOid = std::pair<uint64_t, uint64_t>;
@@ -198,6 +210,113 @@ namespace springtail::gc {
         };
         using BacklogPtr = std::shared_ptr<Backlog>;
 
+        /**
+         * A structure to track the metadata around a table sync.  Used to determine if individual
+         * mutations should be skipped due to an ongoing table sync.
+         */
+        struct SyncTracker {
+        public:
+            /**
+             * Marks that the LogParser has issued a resync request for the given table so that
+             * mutations can be ignored.  This record is replaced by a full XidRecord when
+             * add_sync() is called from the message coming through the log.
+             *
+             * @return true if this is the first table from this sync-set
+             */
+            bool mark_resync(uint64_t db_id, uint64_t table_id);
+
+            /**
+             * Add the metadata for a given table sync into the tracker.
+             *
+             * @return true if this is the first table from this sync-set
+             */
+            bool add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg);
+
+            /**
+             * Remove a given table from the sync tracker.  Called after we have passed all of the
+             * skipable transaction records.
+             *
+             * @return 0 if still in progress, otherwise the max assigned XID among the syncs
+             */
+            uint64_t clear_syncs(uint64_t db_id, uint32_t pg_xid);
+
+            /**
+             * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
+             */
+            bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
+
+            /**
+             * Checks if the tracker has any entries for a given database.
+             * 
+             * @return 0 if still in progress, otherwise the max XID seen among the syncs
+             */
+            uint64_t get_xid_if_empty(uint64_t db_id);
+
+        private:
+            /**
+             * Internal class representing the XID metadata for an individual table sync.
+             */
+            class XidRecord {
+            public:
+                XidRecord(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
+                    : _xmax(sync_msg.xmax),
+                      _inflight(sync_msg.xips.begin(), sync_msg.xips.end())
+                { }
+
+                /**
+                 * Returns true if the given XID should be skipped given the stored metadata.
+                 */
+                bool
+                should_skip(uint32_t pg_xid) const
+                {
+                    // do a guess-timate if the pgxid wrapped ahead of xmax
+                    if (pg_xid < (2 << 26) && _xmax > (2 << 30)) {
+                        // we assume that the pg_xid is ahead of xmax
+                        return false;
+                    }
+
+                    // now check if xmax wrapped ahead of the pgxid
+                    if (_xmax < (2 << 26) && pg_xid > (2 << 30)) {
+                        // we assume that xmax is ahead of pg_xid
+                        if (_inflight.contains(pg_xid)) {
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    // note: from here we assume no wrapping
+                    // don't skip if the txn came after xmax since it is either in-flight or started after the snapshot
+                    if (pg_xid >= _xmax) {
+                        return false;
+                    }
+
+                    // if the xid came before xmax but was inflight, then don't skip
+                    if (_inflight.contains(pg_xid)) {
+                        return false;
+                    }
+                    return true;
+                }
+
+            private:
+                uint32_t _xmax;
+                std::set<uint32_t> _inflight;
+            };
+
+        private:
+            /** Mutex to protect access to the _sync_map */
+            mutable boost::shared_mutex _mutex;
+
+            /** db -> table -> XidRecord containing table sync details. */
+            std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _sync_map;
+
+            /** db-> table indicating that a resync was issued but we haven't seen the
+                TABLE_SYNC_MSG log entry for the table yet. */
+            std::map<uint64_t, std::set<uint64_t>> _resync_map;
+
+            /** db -> xid hold the max target XID seen in the sync-set for a given db. */
+            std::map<uint64_t, uint64_t> _max_xid;
+        };
+
 
         /** A message from a Reader to a Parser. */
         struct ParserEntry {
@@ -212,10 +331,8 @@ namespace springtail::gc {
                 : msg(msg), counter(counter), xid(xid), lsn(lsn), table_id(table_id), db_id(db_id)
             { }
         };
-
-        typedef ConcurrentQueue<ParserEntry> ParserQueue;
-        typedef std::shared_ptr<ParserQueue> ParserQueuePtr;
-
+        using ParserQueue = ConcurrentQueue<ParserEntry>;
+        using ParserQueuePtr = std::shared_ptr<ParserQueue>;
 
         /**
          * Reads XID commit messages and processes them by reading the individual WAL entries from
@@ -227,18 +344,13 @@ namespace springtail::gc {
          */
         class Reader {
         public:
-            Reader(const std::string &pg_queue_key,
-                   BacklogPtr backlog,
-                   ParserQueuePtr parser_queue)
+            Reader(ParserQueuePtr parser_queue)
                 : _shutdown(false),
-                  _pg_queue(pg_queue_key),
                   _gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
-                  _backlog(backlog),
+                  _parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, Properties::get_db_instance_id())),
+                  _reader_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, Properties::get_db_instance_id())),
                   _parser_queue(parser_queue)
-            {
-                // XXX it's potentially expensive to construct a generator each time
-                _worker_id = boost::uuids::to_string(boost::uuids::random_generator()());
-            }
+            { }
 
             /**
              * Main loop for the Reader worker threads.
@@ -252,10 +364,12 @@ namespace springtail::gc {
 
         private:
             /**
-             * Checks if the provided XID should be excluded from processing based on the aborted sub-transactions.
-             * @return Returns true if the XID should be processed, false otherwise.
+             * Checks if the provided XID should be excluded from processing based on it being part
+             * of an aborted sub-transaction.
+             * 
+             * @return Returns true if the XID was aborted, false otherwise.
              */
-            bool _check_xid(uint64_t pg_xid);
+            bool _check_aborted_xid(StatePtr state, uint64_t pg_xid);
 
             /**
              * Checks if the provided XID should be blocked based on it's use of the table OID.  If
@@ -263,16 +377,14 @@ namespace springtail::gc {
              *
              * @return Returns true if the XID was blocked, false otherwise.
              */
-            bool _check_backlog(uint64_t db_id, uint64_t xid, uint64_t oid,
-                                const std::filesystem::path &file, uint64_t offset);
+            bool _check_backlog(StatePtr state, uint64_t oid, uint64_t offset);
 
             /**
              * Process a mutation message (insert, update, delete, truncate).  If the mutation
              * processing must be delayed on an earlier schema change, adds the entry to the backlog
              * and returns a flag indicating that the processing should be blocked.
              */
-            bool _process_mutation(uint64_t pg_xid, uint64_t xid, uint64_t rel_id, PgMsgPtr msg,
-                                   const std::filesystem::path &file, uint64_t offset);
+            bool _process_mutation(StatePtr state, uint64_t rel_id, PgMsgPtr msg, uint64_t offset);
 
         private:
             /** The filter to use at the start of processing. */
@@ -288,20 +400,20 @@ namespace springtail::gc {
             static const std::vector<char> STREAM_STOP_FILTER;
 
         private:
-            /** Unique ID of the worker.  Used for two-phase commit within the Redis queue. */
-            std::string _worker_id;
-
             /** Shutdown flag. */
-            bool _shutdown;
+            std::atomic<bool> _shutdown;
 
-            /** Queue for XID messages from the PG log manager. */
-            RedisQueue<pg_log_mgr::PgRedisXactValue> _pg_queue;
-
-            /** Queue for XID messages to the GC committer. */
+            /** Queue for XID messages to the GC-2 committer. */
             RedisQueue<XidReady> _gc_queue;
 
-            /** A shared backlog queue for blocked XIDs. */
-            BacklogPtr _backlog;
+            /** Queue for notify messages from the GC-2 committer back to the GC-1 after a table sync commit. */
+            RedisQueue<XidReady> _parser_notify;
+
+            /** Queue to pass messages from the Dispatcher thread to the Reader threads. */
+            RedisQueue<pg_log_mgr::PgXactMsg> _reader_queue;
+
+            /** A backlog queue for blocked XIDs. */
+            Backlog _backlog;
 
             /** Queue of mutations for the Parser threads. */
             ParserQueuePtr _parser_queue;
@@ -309,13 +421,18 @@ namespace springtail::gc {
             /** Reader for the PG log files. */
             PgMsgStreamReader _reader;
 
-            /** State machine for processing an XID. */
-            StatePtr _state;
-
             /** For managing the DDL statements in Redis. */
             RedisDDL _redis_ddl;
+
+            /** Metadata for in-flight table syncs. */
+            SyncTracker _sync_tracker;
+
+            /** Mutex to control the critical sections of the reader run() loop. */
+            boost::mutex _mutex;
+
+            /** Map of XID -> condition variable.  Used to ensure XIDs are passed to the Committer in-order. */
+            std::map<uint64_t, boost::condition_variable> _xid_map;
         };
-        typedef std::shared_ptr<Reader> ReaderPtr;
 
 
         /**
@@ -325,8 +442,7 @@ namespace springtail::gc {
         class Parser {
         public:
             explicit Parser(ParserQueuePtr parser_queue)
-                : _parser_queue(parser_queue),
-                  _write_cache(WriteCacheClient::get_instance())
+                : _parser_queue(parser_queue)
             { }
 
             /**
@@ -345,28 +461,24 @@ namespace springtail::gc {
 
         private:
             ParserQueuePtr _parser_queue;
-            WriteCacheClient * const _write_cache;
         };
-        typedef std::shared_ptr<Parser> ParserPtr;
+        using ParserPtr = std::shared_ptr<Parser>;
 
     private:
-        /** A set of reader objects. */
-        std::vector<ReaderPtr> _readers;
+        /** The queue between the Reader objects and Parser objects. */
+        ParserQueuePtr _parser_queue;
+
+        /** The reader object. */
+        Reader _reader;
 
         /** A set of reader threads.  Thread operation defined by Reader. */
         std::vector<std::thread> _reader_threads;
 
-        /** A set of parser objects. */
-        std::vector<ParserPtr> _parsers;
+        /** The parser object. */
+        Parser _parser;
 
         /** A pool of parser threads that perform lookups for individual mutations. */
         std::vector<std::thread> _parser_threads;
-
-        /** The queue between the Reader objects and Parser objects. */
-        ParserQueuePtr _parser_queue;
-
-        /** The shared backlog among the Readers */
-        BacklogPtr _backlog;
     };
 
 }

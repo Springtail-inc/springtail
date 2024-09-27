@@ -1,3 +1,5 @@
+#pragma once
+
 #include <map>
 #include <mutex>
 #include <memory>
@@ -29,6 +31,7 @@ namespace springtail::pg_log_mgr {
         /** Remove database */
         void remove_database(uint64_t db_id);
 
+        /** Wait for shutdown of dbs */
         void wait_shutdown();
 
     private:
@@ -43,13 +46,13 @@ namespace springtail::pg_log_mgr {
         static PgLogCoordinator* _init();    ///< Initialize singleton
         static void _shutdown();             ///< Shutdown singleton
 
-        std::atomic<bool> _shutting_down {false}; ///< shutdown flag, set in shutdown()
+        std::atomic<bool> _shutting_down {false};     ///< shutdown flag, set in shutdown()
         std::atomic<bool> _shutdown_complete {false}; ///< shutdown complete flag, set in wait_shutdown()
-        std::mutex _shutdown_mutex; ///< shutdown mutex
-        std::condition_variable _shutdown_cv;  ///< shutdown condition variable
+        std::mutex _shutdown_mutex;                   ///< shutdown mutex
+        std::condition_variable _shutdown_cv;         ///< shutdown condition variable
 
-        std::mutex _mutex;
-        std::map<uint64_t, PgLogMgrPtr> _log_mgrs;
+        std::mutex _mutex;                            ///< mutex for _log_mgrs map
+        std::map<uint64_t, PgLogMgrPtr> _log_mgrs;    ///< map of db_id to log mgr
 
         /** Internal instance shutdown */
         void _internal_shutdown();

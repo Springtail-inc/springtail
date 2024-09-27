@@ -36,17 +36,6 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    Service::Service()
-    {
-        // call into the XID Mgr to get the latest committed XID
-        // XXX this needs to be fixed
-        auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid(1, 0);
-
-        _access_xid = XidLsn(xid);
-        _target_xid = xid + 1;
-    }
-
     void
     Service::ping(Status& _return)
     {
@@ -58,17 +47,30 @@ namespace springtail::sys_tbl_mgr {
     Service::create_table(DDLStatement& _return,
                           const TableRequest &request)
     {
-        nlohmann::json ddl;
-        ddl["action"] = "create";
-        ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
-        ddl["tid"] = request.table.id;
-        ddl["columns"] = nlohmann::json::array();
+        SPDLOG_INFO("got create_table()");
 
-        // 1. acquire a shared lock to ensure no one is doing a finalize?
+        // acquire a shared lock to ensure no one is doing a finalize
         boost::shared_lock lock(_write_mutex);
+
+        // perform the CREATE TABLE
+        auto &&ddl = _create_table(request);
+
+        // serialize the JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_create_table(const TableRequest &request)
+    {
         XidLsn xid(request.xid, request.lsn);
 
-        // 2. update the system tables with the relevant data
+        // initialize the ddl statement
+        nlohmann::json ddl;
+        ddl["action"] = "create";
+        ddl["schema"] = request.table.schema;
+        ddl["table"] = request.table.name;
+        ddl["tid"] = request.table.id;
+        ddl["columns"] = nlohmann::json::array();
 
         // add table name
         auto table_info = std::make_shared<TableInfo>(request.table.id, request.xid, request.lsn,
@@ -78,6 +80,9 @@ namespace springtail::sys_tbl_mgr {
         // add roots and stats entry -- may get overwritten later if data is added to the table
         auto roots_info = std::make_shared<GetRootsResponse>();
         roots_info->roots.push_back(constant::UNKNOWN_EXTENT);
+        roots_info->stats.row_count = 0;
+        roots_info->snapshot_xid = request.snapshot_xid;
+
         _set_roots_info(request.db_id, request.table.id, xid, roots_info);
 
         // add schemas entries for each column
@@ -114,6 +119,7 @@ namespace springtail::sys_tbl_mgr {
 
         // update the primary index information
         if (!primary_keys.empty()) {
+            auto write_xid = _get_write_xid(request.db_id);
             auto indexes_t = _get_mutable_system_table(request.db_id, sys_tbl::Indexes::ID);
             auto fields = sys_tbl::Indexes::Data::fields(request.table.id,
                                                          constant::INDEX_PRIMARY,
@@ -127,19 +133,21 @@ namespace springtail::sys_tbl_mgr {
                 fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
                 indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
-                                  _target_xid, constant::UNKNOWN_EXTENT);
+                                  write_xid, constant::UNKNOWN_EXTENT);
             }
         }
 
         //    f. XXX anything to do for secondary indexes?
 
-        _return.__set_statement(nlohmann::to_string(ddl));
+        return ddl;
     }
 
     void
     Service::alter_table(DDLStatement& _return,
                          const TableRequest &request)
     {
+        SPDLOG_INFO("got alter_table()");
+
         nlohmann::json ddl;
         ddl["tid"] = request.table.id;
         ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
@@ -178,8 +186,13 @@ namespace springtail::sys_tbl_mgr {
             // note: _generate_update() sets the necessary elements of the ddl
             auto history = _generate_update(info->columns, request.table.columns, xid, ddl);
 
-            // write the column change to the schemas table and update the cache
-            _set_schema_info(request.db_id, request.table.id, { history });
+            // we won't apply any changes to the system tables in these cases
+            if (history.update_type != static_cast<int8_t>(SchemaUpdateType::NO_CHANGE) &&
+                history.update_type != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
+
+                // write the column change to the schemas table and update the cache
+                _set_schema_info(request.db_id, request.table.id, { history });
+            }
         }
 
         _return.__set_statement(nlohmann::to_string(ddl));
@@ -189,12 +202,26 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
+        SPDLOG_INFO("got drop_table()");
+
+        // hold a shared lock to prevent a concurrent finalize()
+        boost::shared_lock lock(_write_mutex);
+
+        // perform the DROP TABLE
+        auto &&ddl = _drop_table(request);
+
+        // serialize the ddl JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_drop_table(const DropTableRequest &request)
+    {
+        // initialize the ddl json
         nlohmann::json ddl;
         ddl["action"] = "drop";
         ddl["tid"] = request.table_id;
         ddl["table"] = fmt::format("{}.{}", request.schema, request.name);
-
-        boost::shared_lock lock(_write_mutex);
 
         // mark the table as dropped in the table_names
         auto table_info = std::make_shared<TableInfo>(request.table_id,
@@ -223,48 +250,111 @@ namespace springtail::sys_tbl_mgr {
         }
         _set_schema_info(request.db_id, request.table_id, changes);
 
-        _return.__set_statement(nlohmann::to_string(ddl));
+        return ddl;
     }
 
     void
     Service::update_roots(Status& _return,
                           const UpdateRootsRequest &request)
     {
+        SPDLOG_INFO("got update_roots()");
+
+        // hold a shared lock to prevent a concurrent finalize()
         boost::shared_lock lock(_write_mutex);
 
+        // update the metadata and return
+        _update_roots(request);
+        _return.__set_status(StatusCode::SUCCESS);
+    }
+
+    void
+    Service::_update_roots(const UpdateRootsRequest &request)
+    {
         XidLsn xid(request.xid);
 
         auto info = std::make_shared<GetRootsResponse>();
         info->roots = request.roots;
         info->stats = request.stats;
+        info->snapshot_xid = request.snapshot_xid;
 
         _set_roots_info(request.db_id, request.table_id, xid, info);
+    }
 
-        _return.__set_status(StatusCode::SUCCESS);
+    XidLsn
+    Service::_get_read_xid(uint64_t db_id)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        auto read_i = _read_xid.find(db_id);
+        if (read_i != _read_xid.end()) {
+            return read_i->second;
+        }
+
+        auto xid_mgr = XidMgrClient::get_instance();
+        auto xid = xid_mgr->get_committed_xid(1, 0);
+
+        _read_xid[db_id] = XidLsn(xid);
+        _write_xid[db_id] = xid + 1;
+
+        return XidLsn(xid);
+    }
+
+    uint64_t
+    Service::_get_write_xid(uint64_t db_id)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        auto write_i = _write_xid.find(db_id);
+        if (write_i != _write_xid.end()) {
+            return write_i->second;
+        }
+
+        auto xid_mgr = XidMgrClient::get_instance();
+        auto xid = xid_mgr->get_committed_xid(1, 0);
+
+        _read_xid[db_id] = XidLsn(xid);
+        _write_xid[db_id] = xid + 1;
+
+        return xid + 1;
+    }
+
+    void
+    Service::_set_xids(uint64_t db_id,
+                       const XidLsn &read_xid,
+                       uint64_t write_xid)
+    {
+        boost::unique_lock lock(_xid_mutex);
+        _read_xid[db_id] = read_xid;
+        _write_xid[db_id] = write_xid;
     }
 
     void
     Service::finalize(Status& _return,
                       const FinalizeRequest &request)
     {
+        SPDLOG_INFO("got finalize()");
+
         // block all mutations
         boost::unique_lock wlock(_write_mutex);
 
-        // finalize the mutated tables at the _target_xid
-        std::map<uint64_t, std::vector<uint64_t>> roots;
+        auto write_xid = _get_write_xid(request.db_id);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Finalize system tables: {}@{} >= {}",
+                            request.db_id, request.xid, write_xid);
+
+        // finalize the mutated tables at the write_xid
+        // XXX we currently don't store the metadata, but re-read it from the roots file each time
+        std::map<uint64_t, TableMetadata> md_map;
         for (const auto &entry : _write[request.db_id]) {
-            roots[entry.first] = entry.second->finalize();
+            md_map[entry.first] = entry.second->finalize();
         }
 
         // block all read access while we swap access roots
         boost::unique_lock rlock(_read_mutex);
 
-        // move the _access_xid to the _target_xid and update the access roots
-        _access_xid = XidLsn(_target_xid);
+        // validate the current target XID against the requested XID
+        assert(write_xid <= request.xid);
 
-        // move the _target_xid to just beyond the provided target xid
-        assert(_target_xid <= request.xid);
-        _target_xid = request.xid + 1;
+        // move the read_xid to the request xid, and move the write_xid to just beyond the
+        // provided request xid
+        _set_xids(request.db_id, XidLsn(request.xid), request.xid + 1);
 
         // note: we could update the table pointers?
         //       or maybe cache the roots to avoid reading the roots file?
@@ -281,9 +371,11 @@ namespace springtail::sys_tbl_mgr {
     Service::get_roots(GetRootsResponse& _return,
                        const GetRootsRequest &request)
     {
+        SPDLOG_INFO("got get_roots()");
+
         boost::shared_lock lock(_read_mutex);
 
-        XidLsn xid(request.xid);
+        XidLsn xid(request.xid, constant::MAX_LSN);
 
         // make sure that the table exists at this XID
         auto table_info = _get_table_info(request.db_id, request.table_id, xid);
@@ -296,12 +388,15 @@ namespace springtail::sys_tbl_mgr {
 
         _return.__set_roots(info->roots);
         _return.__set_stats(info->stats);
+        _return.__set_snapshot_xid(info->snapshot_xid);
     }
 
     void
     Service::get_schema(GetSchemaResponse& _return,
                         const GetSchemaRequest &request)
     {
+        SPDLOG_INFO("got get_schema()");
+
         boost::shared_lock lock(_read_mutex);
 
         XidLsn xid(request.xid, request.lsn);
@@ -314,6 +409,8 @@ namespace springtail::sys_tbl_mgr {
     Service::get_target_schema(GetSchemaResponse& _return,
                                const GetTargetSchemaRequest &request)
     {
+        SPDLOG_INFO("got get_target_schema()");
+
         boost::shared_lock lock(_read_mutex);
 
         XidLsn access_xid(request.access_xid, request.access_lsn);
@@ -323,6 +420,70 @@ namespace springtail::sys_tbl_mgr {
 
         _return = *info;
     }
+
+    bool
+    Service::exists(const ExistsRequest &request)
+    {
+        SPDLOG_INFO("got exists()");
+
+        boost::shared_lock lock(_read_mutex);
+
+        XidLsn xid(request.xid, request.lsn);
+        auto info = _get_table_info(request.db_id, request.table_id, xid);
+        return (info != nullptr);
+    }
+
+    void
+    Service::swap_sync_table(DDLStatement &_return,
+                             const TableRequest &create,
+                             const UpdateRootsRequest &roots)
+    {
+        SPDLOG_INFO("got swap_sync_table()");
+
+        nlohmann::json ddls;
+
+        // 1. acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_write_mutex);
+
+        // 2. retrieve the table information at the end of the target XID
+        XidLsn xid(create.xid, constant::MAX_LSN);
+        auto info = _get_table_info(create.db_id, create.table.id, xid);
+
+        // 3. if the table exists at the end of the XID, perform a drop
+        if (info != nullptr) {
+            DropTableRequest drop;
+            drop.db_id = create.db_id;
+            drop.table_id = create.table.id;
+            drop.xid = create.xid;
+            drop.lsn = create.lsn - 1;
+            drop.schema = create.table.schema;
+            drop.name = create.table.name;
+
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}",
+                                drop.db_id, drop.table_id, drop.xid, drop.lsn);
+
+            auto &&drop_ddl = this->_drop_table(drop);
+            ddls.push_back(drop_ddl);
+        }
+
+        // 4. perform a create table
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create table: {}:{} @ {}:{}",
+                            create.db_id, create.table.id, create.xid, create.lsn);
+
+        assert(create.lsn == constant::MAX_LSN - 1);
+        auto &&create_ddl = this->_create_table(create);
+        ddls.push_back(create_ddl);
+
+        // 5. update the metadata of the table
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}",
+                            create.db_id, create.table.id, create.xid, create.lsn);
+        this->_update_roots(roots);
+
+        // 6. serialize the ddl json and return
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
+        _return.__set_statement(nlohmann::to_string(ddls));
+    }
+
 
     Service::TableInfoPtr
     Service::_get_table_info(uint64_t db_id,
@@ -369,7 +530,7 @@ namespace springtail::sys_tbl_mgr {
         auto info = std::make_shared<TableInfo>();
         info->id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i);
         info->xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
-        info->lsn = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
+        info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(*row_i);
         info->schema = fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(*row_i);
         info->name = fields->at(sys_tbl::TableNames::Data::NAME)->get_text(*row_i);
         info->exists = exists;
@@ -390,6 +551,7 @@ namespace springtail::sys_tbl_mgr {
         lock.unlock();
 
         // record the change to the system table
+        auto write_xid = _get_write_xid(db_id);
         auto table_names_t = _get_mutable_system_table(db_id, sys_tbl::TableNames::ID);
         auto tuple = sys_tbl::TableNames::Data::tuple(table_info->schema,
                                                       table_info->name,
@@ -397,7 +559,7 @@ namespace springtail::sys_tbl_mgr {
                                                       table_info->xid,
                                                       table_info->lsn,
                                                       table_info->exists);
-        table_names_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+        table_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
     }
 
     void
@@ -452,10 +614,16 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // retrieve the root extent ID of the primary
-        auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+        const std::string &eid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::EXTENT_ID].name;
+        auto eid_f = roots_t->extent_schema()->get_field(eid);
         roots_info->roots.push_back(eid_f->get_uint64(*rrow_i));
 
-        // get the root of the table's primary index
+        // retrieve the snapshot XID (use the primary index row)
+        const std::string &sxid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
+        auto sxid_f = roots_t->extent_schema()->get_field(sxid);
+        roots_info->snapshot_xid = sxid_f->get_uint64(*rrow_i);
+
+        // access the stats table
         auto stats_t = _get_system_table(db_id, sys_tbl::TableStats::ID);
         auto stats_key_fields = stats_t->extent_schema()->get_sort_fields();
 
@@ -489,11 +657,13 @@ namespace springtail::sys_tbl_mgr {
         lock.unlock();
 
         // update the table_roots
+        auto write_xid = _get_write_xid(db_id);
         auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
         for (int index_id = 0; index_id < roots_info->roots.size(); ++index_id) {
             uint64_t root = roots_info->roots[index_id];
-            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root);
-            table_roots_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root,
+                                                          roots_info->snapshot_xid);
+            table_roots_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}",
                                 table_id, xid.xid, xid.lsn, index_id, roots_info->roots[index_id]);
@@ -502,7 +672,7 @@ namespace springtail::sys_tbl_mgr {
         // update the table_stats
         auto table_stats_t = _get_mutable_system_table(db_id, sys_tbl::TableStats::ID);
         auto tuple = sys_tbl::TableStats::Data::tuple(table_id, xid.xid, roots_info->stats.row_count);
-        table_stats_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+        table_stats_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated stats {}@{}:{} - {}",
                             table_id, xid.xid, xid.lsn, roots_info->stats.row_count);
@@ -525,13 +695,15 @@ namespace springtail::sys_tbl_mgr {
         auto info = std::make_shared<GetSchemaResponse>();
 
         // first read the columns from the schemas table
-        XidLsn xid = std::min(access_xid, _access_xid);
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, xid.xid, xid.lsn);
+        XidLsn &&read_xid = _get_read_xid(db_id);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, access_xid.xid, access_xid.lsn);
 
-        auto &&columns = _read_schema_columns(db_id, table_id, xid);
+        // note: we always try to read data from disk up to the access_xid in case some of the data
+        //       past the read_xid has already made it to disk
+        auto &&columns = _read_schema_columns(db_id, table_id, access_xid);
 
-        // if the requested access XID is ahead of the on-disk XID, apply changes from the cache
-        if (access_xid > _access_xid) {
+        // if the requested access XID is ahead of the read XID, apply changes from the cache
+        if (access_xid > read_xid) {
             _apply_schema_cache_history(db_id, table_id, access_xid, columns);
         }
 
@@ -546,14 +718,13 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // now collect any history between access_xid and target_xid
-        xid = std::min(_access_xid, target_xid);
-        if (access_xid < xid) {
-            // read any history from the on-disk table
-            auto &&history = _read_schema_history(db_id, table_id, access_xid, xid);
-            info->history.insert(info->history.end(), history.begin(), history.end());
-        }
+        // note: we read any history from the on-disk table since there might always be some history
+        //       on disk if the on-disk data is ahead of the read_xid
+        auto &&history = _read_schema_history(db_id, table_id, access_xid, target_xid);
+        info->history.insert(info->history.end(), history.begin(), history.end());
 
-        xid = std::max(access_xid, _access_xid);
+        // if the target is ahead of the guaranteed on-disk data then don't need to check the in-memory data
+        XidLsn xid = std::max(access_xid, read_xid);
         if (target_xid > xid) {
             // read any history from the cache
             auto &&history = _get_schema_cache_history(db_id, table_id, xid, target_xid);
@@ -822,6 +993,7 @@ namespace springtail::sys_tbl_mgr {
     {
         std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         auto schemas_t = _get_mutable_system_table(db_id, sys_tbl::Schemas::ID);
+        auto write_xid = _get_write_xid(db_id);
 
         // add the column change history to the cache
         for (auto &history : columns) {
@@ -847,7 +1019,7 @@ namespace springtail::sys_tbl_mgr {
                                                        value,
                                                        history.update_type);
 
-            schemas_t->upsert(tuple, _target_xid, constant::UNKNOWN_EXTENT);
+            schemas_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
     }
 
@@ -872,7 +1044,8 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // otherwise create an interface to the table and cache it
-        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, _access_xid.xid, _access_xid.lsn);
+        auto &&read_xid = _get_read_xid(db_id);
+        TablePtr table = TableMgr::get_instance()->get_table(db_id, table_id, read_xid.xid);
 
         // cache the table interface
         cache[table_id] = table;
@@ -893,7 +1066,9 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // otherwise create an interface to the table and cache it
-        MutableTablePtr table = TableMgr::get_instance()->get_mutable_table(db_id, table_id, _access_xid.xid, _target_xid);
+        auto &&read_xid = _get_read_xid(db_id);
+        auto &&write_xid = _get_write_xid(db_id);
+        MutableTablePtr table = TableMgr::get_instance()->get_mutable_table(db_id, table_id, read_xid.xid, write_xid);
 
         // save the mutable table into the cache
         cache[table_id] = table;
@@ -1005,7 +1180,7 @@ namespace springtail::sys_tbl_mgr {
                 return update;
             }
 
-            if (entry.is_nullable != new_col.is_nullable) {
+            if (!entry.is_nullable && new_col.is_nullable) {
                 // copy the new column details
                 update.column = new_col;
 
@@ -1021,24 +1196,29 @@ namespace springtail::sys_tbl_mgr {
                 return update;
             }
 
+            if (entry.is_nullable && !new_col.is_nullable) {
+                // a column going from nullable to not-nullable results in NULL values being
+                // populated with a default, which aren't sent via the log
+                ddl["action"] = "resync";
+                update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
+
+                return update;
+            }
+
             if (entry.pg_type != new_col.pg_type) {
-                // copy the new column details
-                update.column = new_col;
-
-                // mark them as a TYPE_CHANGE update
-                update.update_type = static_cast<int8_t>(SchemaUpdateType::TYPE_CHANGE);
-                update.exists = true;
-
-                // set the DDL statement
-                ddl["action"] = "col_type";
-                ddl["column"]["name"] = update.column.name;
-                ddl["column"]["type"] = update.column.pg_type;
+                // a column type-change requires a table re-sync
+                ddl["action"] = "resync";
+                update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
 
                 return update;
             }
         }
 
-        // XXX can there be a schema change that results in no changes on the Springtail side?
-        assert(false);
+        // there may be changes to the schema that don't result in changes on the Springtail side,
+        // e.g., a change in the default value
+        ddl["action"] = "no_change";
+        update.update_type = static_cast<int8_t>(SchemaUpdateType::NO_CHANGE);
+
+        return update;
     }
 }

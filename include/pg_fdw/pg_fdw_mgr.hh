@@ -234,6 +234,7 @@ namespace springtail::pg_fdw {
 
         /** Helper to generate create foreign table sql */
         static std::string _gen_fdw_table_sql(const std::string &server_name,
+                                              const std::string &schema,
                                               const std::string &table,
                                               uint64_t tid,
                                               std::vector<std::tuple<std::string, std::string, bool>> &columns);

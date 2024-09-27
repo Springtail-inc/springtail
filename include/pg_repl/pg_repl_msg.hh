@@ -186,7 +186,6 @@ namespace springtail
         std::string table;
     };
 
-
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
@@ -242,7 +241,8 @@ namespace springtail
         enum : uint8_t {
             TYPE_COMMIT = 0,        ///< normal commit or stream commit
             TYPE_STREAM_START = 1,  ///< stream start
-            TYPE_STREAM_ABORT = 2   ///< stream abort
+            TYPE_STREAM_ABORT = 2,  ///< stream abort
+            TYPE_PIPELINE_STALL = 3 ///< stall pipeline
         };
 
         uint64_t begin_offset;   ///< offset to start of block header
@@ -255,6 +255,10 @@ namespace springtail
         std::set<uint32_t> aborted_xids;   ///< stream subxacts that aborted
         std::filesystem::path begin_path;  ///< log path containing begin message
         std::filesystem::path commit_path; ///< log path containing commit message
+
+        PgTransaction(uint8_t type) : type(type) {}
+
+        PgTransaction() = default;
     };
     using PgTransactionPtr = std::shared_ptr<PgTransaction>;
 

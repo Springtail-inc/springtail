@@ -46,7 +46,7 @@ ${SYS_TBL_DAEMON} --daemon
 sleep 1
 
 # copy the initial snapshot of the table data
-${BUILD_DIR}/src/pg_fdw/copy_schema -d springtail -u springtail -s public
+# ${BUILD_DIR}/src/pg_fdw/copy_schema -d springtail -u springtail -s public
 
 # start the write cache
 echo Start Write Cache...
@@ -55,7 +55,7 @@ ${WRITE_CACHE_DAEMON} --daemon
 sleep 1
 
 # start the pg log mgr
-# echo Start PG Log Mgr...
+echo Start PG Log Mgr...
 rm -rdf /tmp/xact_logs /tmp/repl_logs
 mkdir /tmp/xact_logs /tmp/repl_logs
 PG_LOG_DAEMON="${BUILD_DIR}/src/pg_log_mgr/pg_log_mgr_daemon"

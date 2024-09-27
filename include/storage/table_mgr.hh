@@ -30,14 +30,31 @@ namespace springtail {
         static void shutdown();
 
         /**
-         * Read the table metadata for the requested table ID.
+         * Read the table metadata for the requested table ID.  Note that Table objects's are always
+         * constructed at lsn == MAX_LSN within the provided xid.
          */
-        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn);
+        TablePtr get_table(uint64_t db_id, uint64_t table_id, uint64_t xid);
+
+        /**
+         * Returns a boolean indicating if the table exists at a given xid/lsn.
+         */
+        bool exists(uint64_t db_id, uint64_t table_id, uint64_t xid, uint64_t lsn=constant::MAX_LSN);
 
         /**
          * Returns the MutableTable interface for the requested table ID.
          */
         MutableTablePtr get_mutable_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid, bool for_gc = false);
+
+        /**
+         * Returns a MutableTable that can be used to populate a new snapshot of the given table.
+         * @param db_id The database of the table.
+         * @param table_id The OID of the table.
+         * @param snapshot_xid The XID at which the snapshot is being captured.  Extents will be
+         *                     written at this XID, however, the data itself may not be made
+         *                     available until a later stable XID.
+         * @param schema The ExtentSchema of the table.
+         */
+        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema);
 
         // Functions for managing system metadata
 
@@ -60,7 +77,7 @@ namespace springtail {
          * Update the roots of a table.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t target_xid,
-                          const std::vector<uint64_t> &roots, const TableStats &stats);
+                          const TableMetadata &metadata);
 
         /**
          * Finalize all outstanding system metadata mutations.

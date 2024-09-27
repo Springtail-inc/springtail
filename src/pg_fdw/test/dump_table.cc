@@ -27,8 +27,7 @@ list_tables(uint64_t db_id)
 {
     auto table = TableMgr::get_instance()->get_table(db_id,
                                                      sys_tbl::TableNames::ID,
-                                                     constant::LATEST_XID,
-                                                     constant::MAX_LSN);
+                                                     constant::LATEST_XID);
     // get field array
     auto fields = table->extent_schema()->get_fields();
 
@@ -57,8 +56,7 @@ lookup_table(uint64_t db_id,
     // get the table names table
     auto table = TableMgr::get_instance()->get_table(db_id,
                                                      sys_tbl::TableNames::ID,
-                                                     constant::LATEST_XID,
-                                                     constant::MAX_LSN);
+                                                     constant::LATEST_XID);
     // get field array
     auto fields = table->extent_schema()->get_fields();
 
@@ -118,7 +116,7 @@ dump_table(uint64_t db_id,
            uint64_t tid,
            uint64_t xid)
 {
-    TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid, constant::MAX_LSN);
+    TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
     ExtentSchemaPtr schema = table->extent_schema();
     std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(db_id, tid, { xid, constant::MAX_LSN });
 

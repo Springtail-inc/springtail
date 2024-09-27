@@ -70,7 +70,8 @@ namespace {
             _populate_table(mtable, target_xid);
 
             // finalize the empty table
-            mtable->finalize();
+            auto &&metadata = mtable->finalize();
+            TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;
         }
@@ -268,7 +269,7 @@ namespace {
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
 
             // don't call create state as it calls xid mgr, just create state
-            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid, constant::MAX_LSN);
+            auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
             PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
 
             // begin the scan

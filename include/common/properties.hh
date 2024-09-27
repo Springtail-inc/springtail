@@ -101,8 +101,17 @@ namespace springtail {
         /** Helper to get primary db json for current db instance */
         static nlohmann::json get_primary_db_config();
 
+        /** Helper to get db state */
+        static std::string get_db_state(uint64_t db_id);
+
+        /** Helper to set db state */
+        static void set_db_state(uint64_t db_id, const std::string &state);
+
         /** Helper to get fdw config */
         static nlohmann::json get_fdw_config(const std::string &fdw_id);
+
+
+
 
     private:
         /** static _instance singleton */
