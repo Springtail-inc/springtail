@@ -27,6 +27,12 @@ namespace springtail::pg_log_mgr {
             : _base_dir(base_dir), _file_prefix(file_prefix),
               _file_suffix(file_suffix), _min_xid(min_xid) {}
 
+        PgXactLogReader(const std::string &file_prefix,
+                        const std::string &file_suffix,
+                        uint64_t min_xid=0)
+            : _base_dir("/tmp/springtail"), _file_prefix(file_prefix),
+              _file_suffix(file_suffix), _min_xid(min_xid) {}
+
         /** Destructor, close stream */
         ~PgXactLogReader() {
             if (_stream.is_open()) {

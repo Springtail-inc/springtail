@@ -26,8 +26,15 @@ namespace springtail {
     };
 
     class PgIOError : public PgConnectionError {
+    public:
         const char *what() const noexcept {
             return "An IO error occurred";
+        }
+    };
+
+    class PgIOShutdown : public PgConnectionError {
+        const char *what() const noexcept {
+            return "The connection is being shut down";
         }
     };
 
@@ -76,6 +83,11 @@ namespace springtail {
         { }
     };
 
+    class PgMessageEOFError : public PgMessageError {
+        const char *what() const noexcept {
+            return "Unexpected EOF while reading message";
+        }
+    };
 
     class PgMessageTooSmallError : public PgMessageError {
         const char *what() const noexcept {

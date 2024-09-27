@@ -223,14 +223,24 @@ namespace springtail {
 
         int _proto_version;             ///< protocol version of message block (from header)
 
+        bool _read_hdr = false;         ///< true if header needs to be read (set when opening a new file)
         bool _streaming = false;        ///< true if streaming mode (between stream_start and stream_stop)
+
+        /** Helper to check for eof errors in reading stream */
+        void _check_fail() {
+            if (_stream.fail()) {
+                throw PgMessageEOFError();
+            }
+        }
 
         /** Helper to seek stream based on current offset */
         void _seek_stream() {
             if (_current_offset == _internal_offset) {
                 return;
             }
+            _check_fail();
             _stream.seekg(_current_offset, std::fstream::beg);
+            _check_fail();
             _internal_offset = _current_offset;
         }
 
@@ -238,6 +248,7 @@ namespace springtail {
         uint32_t _recvint32() {
             _seek_stream();
             uint32_t res = recvint32(_stream);
+            _check_fail();
             _current_offset += 4;
             _internal_offset += 4;
             return res;
@@ -247,6 +258,7 @@ namespace springtail {
         uint64_t _recvint64() {
             _seek_stream();
             uint64_t res = recvint64(_stream);
+            _check_fail();
             _current_offset += 8;
             _internal_offset += 8;
             return res;
@@ -256,6 +268,7 @@ namespace springtail {
         uint16_t _recvint16() {
             _seek_stream();
             uint16_t res = recvint16(_stream);
+            _check_fail();
             _current_offset += 2;
             _internal_offset += 2;
             return res;
@@ -265,6 +278,7 @@ namespace springtail {
         uint8_t _recvint8() {
             _seek_stream();
             uint8_t res = recvint8(_stream);
+            _check_fail();
             _current_offset++;
             _internal_offset++;
             return res;
@@ -278,6 +292,7 @@ namespace springtail {
                 // hit eof
                 return false;
             }
+            _check_fail();
             assert(_stream.gcount() == size);
             _current_offset += size;
             _internal_offset += size;

@@ -95,6 +95,7 @@ namespace springtail::pg_log_mgr {
         PgLogMgr(const std::filesystem::path &repl_log_path,
                  const std::filesystem::path &xact_log_path)
         : _db_id(1), _db_instance_id(Properties::get_db_instance_id()),
+          _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
@@ -108,14 +109,26 @@ namespace springtail::pg_log_mgr {
 
         /** Wait for threads */
         void join() {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "joining threads");
             _writer_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "writer thread joined");
             _reader_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "reader thread joined");
             _xact_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "xact thread joined");
+            _table_copy_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
+            _pubsub_thread.join();
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "pubsub thread joined");
         }
 
         /** Set shutdown flag */
         void shutdown() {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "shutting down");
             _shutdown = true;
+
+            // set shutdown flag in pg connection repl class
+            _pg_conn.shutdown();
         }
 
     protected:
@@ -205,6 +218,8 @@ namespace springtail::pg_log_mgr {
         /** Redis sorted set for oid to xid mapping */
         std::mutex _oid_set_mutex;
         std::map<uint64_t, RSSOidValuePtr> _oid_set;
+
+        LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
 
         /** transaction worker -- thread fn */
         void _xact_handler_thread();

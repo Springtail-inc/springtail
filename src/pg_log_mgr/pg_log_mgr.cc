@@ -18,6 +18,7 @@
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <pg_log_mgr/pg_log_coordinator.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -40,6 +41,9 @@ namespace springtail::pg_log_mgr {
             // XXX need to handle, not sure whether to reset to running or initialize
             assert(false);
         }
+
+        // clear out GC redis queue
+        _redis_queue.clear();
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
@@ -74,7 +78,8 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_xact_log_path);
 
         // scan latest replication log and extract ending LSN
-        // XXX if we find an empty log then remove file and go to previous log
+        // if we find an empty log then remove file and go to previous log
+        // if last message is truncated (not complete); truncate log file ignoring that message
         std::filesystem::path latest_log = fs::find_latest_modified_file(_repl_log_path, LOG_PREFIX_REPL, LOG_SUFFIX);
         if (!latest_log.empty()) {
             lsn = PgMsgStreamReader::scan_log(latest_log, true);
@@ -97,6 +102,7 @@ namespace springtail::pg_log_mgr {
             }
             _push_xacts_to_redis(committed_xacts);
             last_xact = committed_xacts.back();
+            committed_xacts.clear();
         }
 
         // update next xid if we find an xid higher than committed xid in the log
@@ -111,8 +117,16 @@ namespace springtail::pg_log_mgr {
 
         // if xact log is behind pg log then we need to catchup before starting to stream
         // find last xact from xact_list, and start from there (file + offset)
+        // inserts into xact queue
         if (last_xact != nullptr) {
             _pg_log_reader.process_log(last_xact->commit_path, last_xact->commit_offset, -1);
+            std::filesystem::path next_log = fs::get_next_file(last_xact->commit_path, LOG_PREFIX_REPL, LOG_SUFFIX);
+
+            // iterate and process xacts from next log file
+            while (!next_log.empty() && std::filesystem::exists(next_log)) {
+                _pg_log_reader.process_log(next_log, 0, -1);
+                next_log = fs::get_next_file(next_log, LOG_PREFIX_REPL, LOG_SUFFIX);
+            }
         }
 
         // need to add back table sync worker items to redis sync queue
@@ -191,7 +205,6 @@ namespace springtail::pg_log_mgr {
                 subscriber->consume();
             } catch (const sw::redis::TimeoutError &e) {
                 // timeout, check for shutdown
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Timeout on consume");
                 continue;
             } catch (const sw::redis::Error &e) {
                 SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
@@ -215,7 +228,6 @@ namespace springtail::pg_log_mgr {
             // block on redis table sync queue w/timeout for shutdown
             StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
             if (table_id_ptr == nullptr) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Timeout on table sync queue");
                 continue; // timeout, check for shutdown
             }
 
@@ -367,6 +379,7 @@ namespace springtail::pg_log_mgr {
         _proto_version = _pg_conn.get_protocol_version();
 
         // start steaming
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting streaming: lsn={}", lsn);
         _pg_conn.start_streaming(lsn);
 
         // create the worker threads
@@ -392,33 +405,56 @@ namespace springtail::pg_log_mgr {
 
         while (!_shutdown) {
             // read data from pg replication connection (blocks)
-            _pg_conn.read_data(data);
+            try {
+                _pg_conn.read_data(data);
+            } catch (const PgIOShutdown &e) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received shutdown signal");
+                break;
+            } catch (const PgConnectionError &e) {
+                SPDLOG_ERROR("Error reading data from pg: {}", e.what());
+                // try reconnecting
+                try {
+                    _pg_conn.reconnect();
+                } catch (const PgConnectionError &e) {
+                    SPDLOG_ERROR("Error reconnecting to pg: {}", e.what());
+                    // shutdown
+                    PgLogCoordinator::get_instance()->shutdown();
+                    break;
+                }
+            }
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}\n",
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
                          data.length, data.msg_length, data.msg_offset);
 
-            if (data.length == 0) {
-                // possible data has been consumed by keep alive
+            if (data.length == 0 || !logger->log_data(data)) {
+                // data has been consumed by keep alive or not full message
                 continue;
             }
 
-            // log data, if data message is complete then record start/end offsets
-            if (logger->log_data(data)) {
-                uint64_t end_offset = logger->offset();
+            // push data to queue, if data message is complete then record start/end offsets
+            uint64_t end_offset = logger->offset();
 
-                // record start/end offsets for this message
-                _logger_queue.push(start_offset, end_offset, logger->filename());
+            // record start/end offsets for this message
+            _logger_queue.push(start_offset, end_offset, logger->filename());
+            start_offset = end_offset;
 
-                // check to see if we should rollover log
-                if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
-                    logger->close();
-                    logger = this->_create_repl_logger();
-                    start_offset = 0;
-                } else {
-                    start_offset = end_offset;
-                }
+            // check to see if we should rollover log
+            if (end_offset > LOG_ROLLOVER_SIZE_BYTES) {
+                logger->close();
+                logger = this->_create_repl_logger();
+                start_offset = 0;
             }
         }
+
+        // shutdown; close logger
+        logger->close();
+
+        // shutdown queues queue
+        _logger_queue.shutdown();
+        _xact_queue->shutdown();
+
+        // shutdown the pg connection
+        _pg_conn.close();
     }
 
     /** Thread for reading log data that is written from writer */
@@ -432,6 +468,8 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
+                                log_entry->path, log_entry->start_offset, log_entry->num_messages);
             _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
                                        log_entry->num_messages);
         }
@@ -509,6 +547,9 @@ namespace springtail::pg_log_mgr {
                 _create_xact_logger();
             }
         }
+
+        // shutdown, close xact logger
+        _xact_logger->close();
     }
 
     void
@@ -528,11 +569,19 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
+        assert (xact->type == PgTransaction::TYPE_COMMIT);
+
+        // check if we've already seen this xact, e.g., during replay
+        if (xact->xact_lsn <= _last_pushed_lsn) {
+            SPDLOG_WARN("Skipping xact (already seen): xact_lsn={}, last_pushed_lsn={}",
+                         xact->xact_lsn, _last_pushed_lsn);
+            return;
+        }
+
         // first allocate an xid for this xact
         uint64_t xid = _get_next_xid();
 
         // next log the data
-        assert (xact->type == PgTransaction::TYPE_COMMIT);
         xact->springtail_xid = xid;
         _xact_logger->log_commit(xact);
 
@@ -564,6 +613,10 @@ namespace springtail::pg_log_mgr {
                              xact->commit_offset, xact->xact_lsn,
                              xid, xact->xid, xact->aborted_xids);
 
+        // track last xact lsn we've pushed to redis
+        assert (xact->xact_lsn > _last_pushed_lsn);
+        _last_pushed_lsn = xact->xact_lsn;
+
         _redis_queue.push(redis_xact);
     }
 
@@ -587,9 +640,15 @@ namespace springtail::pg_log_mgr {
                                  xact->commit_offset, xact->xact_lsn,
                                  xid, xact->xid, xact->aborted_xids);
 
+            // track last xact lsn we've pushed to redis
+            assert (xact->xact_lsn > _last_pushed_lsn);
+            _last_pushed_lsn = xact->xact_lsn;
+
+            // convert to string and push to redis queue
             msgs.push_back(static_cast<std::string>(redis_xact));
         }
 
+        // do an underlying batch/bulk push
         _redis_queue.push(msgs);
     }
 

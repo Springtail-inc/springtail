@@ -92,7 +92,7 @@ namespace springtail {
         // this is the real timeout for the subscriber consume() call
         connect_options.socket_timeout = std::chrono::seconds(timeoutsecs);
 
-        auto redis = std::make_shared<sw::redis::Redis>(_connect_options);
+        auto redis = std::make_shared<sw::redis::Redis>(connect_options);
         return std::make_shared<sw::redis::Subscriber>(redis->subscriber());
     }
 

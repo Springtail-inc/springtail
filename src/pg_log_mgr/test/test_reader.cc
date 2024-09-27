@@ -32,7 +32,7 @@ namespace {
         using PgLogMgr::PgLogMgr;
         TestLogMgr(const std::filesystem::path &repl_log_path,
                    const std::filesystem::path &xact_log_path)
-            : PgLogMgr(repl_log_path, xact_log_path)
+            : PgLogMgr(repl_log_path, xact_log_path) // XXX NOTE: hardcodes db_id=1
         {
         }
 
@@ -203,6 +203,12 @@ namespace {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
+        // init the redis queue
+        RedisQueue<PgXactMsg> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+                                                Properties::get_db_instance_id()));
+
+        queue.clear();
+
         // initialize the log mgr
         PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 
@@ -233,12 +239,10 @@ namespace {
         }
 
         // fetch the redis xacts and compare
-        RedisQueue<PgXactMsg> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
-                                                       Properties::get_db_instance_id()));
         auto xacts = queue.range(0, -1);
         std::reverse(xacts.begin(), xacts.end()); // note: data stored in reverse order in redis
 
-        EXPECT_EQ(xact_list.size(), xacts.size());
+        ASSERT_EQ(xact_list.size(), xacts.size());
 
         for (int i = 0; i < xact_list.size(); i++) {
             auto &xact_msg = std::get<PgXactMsg::XactMsg>(xacts[i].msg);

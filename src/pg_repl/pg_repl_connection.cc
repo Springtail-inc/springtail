@@ -71,13 +71,25 @@ namespace springtail
         try {
             end_streaming();
         } catch (const std::exception &exc) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Exception during close ending streaming: {}\n", exc.what());
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Exception during close ending streaming: {}", exc.what());
         } // we are ending streaming, catch all exceptions
 
         // free the libpq standard connection if open
         if (_connection.get() != nullptr) {
             _connection.reset(nullptr);
         }
+    }
+
+
+    void
+    PgReplConnection::reconnect()
+    {
+        // close streaming and non-streaming connection
+        close();
+        // reconnect non-streaming connection
+        connect();
+        // restart streaming
+        start_streaming(_last_flushed_lsn);
     }
 
 
@@ -124,7 +136,7 @@ namespace springtail
             char *str = _connection->get_value(0, 0);
             LSN = pg_msg::str_to_LSN(str);
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found current LSN: {}\n", LSN);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found current LSN: {}", LSN);
         }
         _last_flushed_lsn = LSN;
 
@@ -147,13 +159,13 @@ namespace springtail
         // send header and then data
         // we do this on using sockets to support non-blocking reads of less
         // than the full message length on the stream connection for copy data
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing copy command: {}\n", cmd);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing copy command: {}", cmd);
         _send_copy_data(cmd_buffer, cmd_length, MSG_QUERY);
 
         // read message header for response; msg type placed in _msg_type
         _read_msg_header();
         if (_msg_type != MSG_COPY_BOTH) {
-            SPDLOG_ERROR("Error could not start WAL streaming: msg type={}\n", _msg_type);
+            SPDLOG_ERROR("Error could not start WAL streaming: msg type={}", _msg_type);
             _stream_connection.reset(nullptr);
             throw PgQueryError();
         }
@@ -213,7 +225,6 @@ namespace springtail
         t.tv_sec = timeout_secs;
 
         // r < 0 error; r == 0 timeout; r > 0 readable socket
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Blocking in select for: secs={}\n", timeout_secs);
         int r = select(_streaming_socket + 1, &fds, nullptr, nullptr, &t);
         if (r < 0) {
             throw PgIOError();
@@ -284,11 +295,9 @@ namespace springtail
                                       int length,
                                       bool async=true)
     {
-        while (true) {
+        while (!_shutdown) {
             int r = recv(_streaming_socket,
                          buffer, length, (async ? MSG_DONTWAIT : 0));
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read raw copy data: len={}\n", r);
 
             if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
                 r = wait_for_data();
@@ -309,8 +318,16 @@ namespace springtail
                 throw PgNotConnectedError();
             }
 
+            if (_shutdown) {
+                break;
+            }
+
             return r;
         }
+
+        assert(_shutdown);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Shutting down recv copy data");
+        throw PgIOShutdown();
     }
 
 
@@ -371,7 +388,7 @@ namespace springtail
 
 
     void
-    PgReplConnection::_read_msg_data(bool async=true)
+    PgReplConnection::_read_msg_data(bool async)
     {
         int to_read = std::min(_copy_msg_length - _copy_msg_offset,
                                COPY_BUFFER_SIZE);
@@ -445,7 +462,7 @@ namespace springtail
             case MSG_PARAM_STATUS:
             default:
                 // skip message for now
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping message: type={}\n", _msg_type);
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping message: type={}", _msg_type);
                 _skip_message();
                 _copy_state = NEW_MSG;
                 return;
@@ -467,7 +484,7 @@ namespace springtail
             int offset = 0;
             switch (_copy_buffer[0]) {
                 case MSG_KEEP_ALIVE:
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found keep alive message\n");
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found keep alive message");
                     offset = _process_keep_alive(_copy_buffer, _copy_buffer_length);
 
                     // there shouldn't be more data
@@ -482,7 +499,7 @@ namespace springtail
                     break;
 
                 case MSG_XLOG_DATA:
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found xlog data\n");
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Found xlog data");
                     offset = _process_xlog_header(_copy_buffer, _copy_buffer_length);
 
                     // adjust msg size to remove xlog header
@@ -495,7 +512,7 @@ namespace springtail
                     break;
 
                 default:
-                    SPDLOG_WARN("Unknown copy data command: {}\n", _copy_buffer[0]);
+                    SPDLOG_WARN("Unknown copy data command: {}", _copy_buffer[0]);
                     throw PgUnknownMessageError();
             }
         }
@@ -570,8 +587,8 @@ namespace springtail
         int64_t send_time = recvint64(&buffer[pos]);
         pos += 8;
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Keep alive msg recvd: wal_end={}, send_time={}\n",
-                            wal_end, send_time);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Keep alive msg recvd: wal_end={}, send_time={}, last_flushed LSN={}",
+                            wal_end, send_time, _last_flushed_lsn);
 
         bool response_requested = false;
         if (length >= (1 + 8 + 8 + 1)) {
@@ -588,9 +605,6 @@ namespace springtail
         }
 
         _last_received_time = send_time;
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Keep alive message: recd wal end LSN={}, last flushed LSN={}\n",
-                            wal_end, _last_flushed_lsn);
 
         if (response_requested) {
             _send_standby_status_msg();
@@ -712,7 +726,7 @@ namespace springtail
         // set applied lsn and flushed lsn to same value
         int len = _encode_standby_status_msg(now, replybuf);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Standby message send: LSN={}\n", _last_flushed_lsn);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Standby message send: LSN={}", _last_flushed_lsn);
 
         // send data
         _send_copy_data(replybuf, len);
@@ -744,7 +758,7 @@ namespace springtail
                                       slot_name);
 
         // execute query
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query check slots: cmd={}\n", cmd);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query check slots: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -756,14 +770,15 @@ namespace springtail
             throw PgQueryError();
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Got command OK or TUPLES_OK tuples={}\n", _connection->ntuples());
-
         if (_connection->ntuples() > 0 && _connection->nfields() == 2) {
             char *restart_lsn_str = _connection->get_value(0, 0);
             char *confirmed_flush_lsn_str = _connection->get_value(0, 1);
 
             restart_lsn_out = pg_msg::str_to_LSN(restart_lsn_str);
             flushed_lsn_out = pg_msg::str_to_LSN(confirmed_flush_lsn_str);
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Slot exists: restart_lsn={}, confirmed_flush_lsn={}",
+                                restart_lsn_out, flushed_lsn_out);
 
             _connection->clear();
             return true;
@@ -786,7 +801,7 @@ namespace springtail
         std::string cmd = fmt::format("DROP_REPLICATION_SLOT {}", slot_name);
 
         // execute query
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query drop replication slot: cmd={}\n", cmd);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query drop replication slot: cmd={}", cmd);
         _connection->exec(cmd);
 
         // process results
@@ -843,7 +858,7 @@ namespace springtail
         const std::string& tmp = s.str();
         const char* cmd = tmp.c_str();
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query create repl slot: cmd={}\n", cmd);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Executing query create repl slot: cmd={}", cmd);
 
         // execute query
         _connection->exec(cmd);
@@ -880,7 +895,7 @@ namespace springtail
             return;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Setting last flushed LSN: lsn={}\n", lsn);
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Setting last flushed LSN: lsn={}", lsn);
 
         int64_t now = get_pgtime_in_millis();
         bool send_standby = false;

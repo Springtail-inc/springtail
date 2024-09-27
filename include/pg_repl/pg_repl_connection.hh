@@ -51,7 +51,7 @@ namespace springtail
         /** timeout for an idle slot -- no lsn received; fast forward stream */
         static inline constexpr int64_t IDLE_SLOT_TIMEOUT_MSEC = 300000L;
         /** read timeout for copy data */
-        static inline constexpr int     READ_TIMEOUT_SEC = 10;
+        static inline constexpr int     READ_TIMEOUT_SEC = 5;
         /** postgres 14 version constant */
         static inline constexpr int     PG_VERS_14 = 140000;
         /** copy buffer size */
@@ -120,6 +120,9 @@ namespace springtail
         int _copy_msg_offset = 0;
         char _msg_type;
 
+        /** shutdown flag */
+        std::atomic<bool> _shutdown = false;
+
         /** simple state machine for where we are in reading in copy data */
         CopyState _copy_state = NEW_MSG;
 
@@ -186,7 +189,7 @@ namespace springtail
          * @throws PgIOError on receive error
          * @throws PgNotConnectedError if connection has closed
          */
-        void _read_msg_data(bool async);
+        void _read_msg_data(bool async=true);
 
         /**
          * @brief Read in copy data header; sets the copy message length
@@ -203,7 +206,6 @@ namespace springtail
          * @throws PgCopyDoneError if copy done is returned
          */
         void _read_copy_data();
-
         /**
          * @brief Send data on streaming connection
          * @param buffer buffer to send
@@ -372,5 +374,17 @@ namespace springtail
          * @return true if stream is has data, false otherwise
          */
         bool wait_for_data(int timeout_secs);
+
+        /**
+         * @brief Reconnect to the server; typically after an IO or connection error
+         */
+        void reconnect();
+
+        /**
+         * @brief Set shutdown flag; expected to be called asynchronously
+         */
+        void shutdown() {
+            _shutdown = true;
+        }
     };
 }

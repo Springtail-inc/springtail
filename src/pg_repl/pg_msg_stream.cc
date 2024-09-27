@@ -40,18 +40,27 @@ namespace springtail {
             return;
         }
 
+        // resync the stream and clear errors
+        _stream.sync();
+        _stream.clear();
+
         // file was already open, so just seek to the new offset
         if (_current_offset != start_offset) {
             _current_offset = start_offset;
             _seek_stream();
         }
+
         // ...and read the header
-        _read_header();
+        _read_hdr = true;
     }
 
     void
     PgMsgStreamReader::_open_file(const std::filesystem::path &file, uint64_t offset)
     {
+        if (_stream.is_open()) {
+            _stream.close();
+        }
+
         _stream.open(file, std::fstream::in | std::fstream::binary);
         if (!_stream.is_open()) {
             throw PgIOError();
@@ -66,7 +75,7 @@ namespace springtail {
         }
 
         // read in the header from new file, this should reset the end_offset
-        _read_header();
+        _read_hdr = true;
     }
 
     bool
@@ -75,6 +84,7 @@ namespace springtail {
         char buffer[PgMsgStreamHeader::SIZE];
         _header_offset = _current_offset;
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading header at offset: {}", _header_offset);
         if (!_read_buffer(buffer, PgMsgStreamHeader::SIZE)) {
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "End of file: {}", _current_path.c_str());
             return false;
@@ -82,7 +92,8 @@ namespace springtail {
 
         PgMsgStreamHeader header(buffer);
         if (header.magic != PgMsgStreamHeader::PG_LOG_MAGIC) {
-            SPDLOG_WARN("Invalid stream header magic number: {}", header.magic);
+            SPDLOG_WARN("Invalid stream header magic number: {}, offset: {}",
+                        header.magic, _current_offset);
             throw PgIOError();
         }
 
@@ -113,44 +124,50 @@ namespace springtail {
             return nullptr;
         }
 
-        // check if we are done reading this message block
-        if (_end_offset == _current_offset) {
-            // if so read the header and check for eof
-            if (!_read_header()) {
-                // hit eof; if we are at the end file, then we are done
-                return nullptr;
+        try {
+            // check if we are done reading this message block
+            if (_read_hdr || _end_offset == _current_offset) {
+                _read_hdr = false;
+                // if so read the header and check for eof
+                if (!_read_header()) {
+                    // hit eof; if we are at the end file, then we are done
+                    return nullptr;
+                }
             }
-        }
 
-        // read the message type
-        char msg_type = _recvint8();
-        bool skip_msg = !_is_message_filtered(msg_type, filter);
-        PgMsgPtr msg = nullptr;
+            // read the message type
+            char msg_type = _recvint8();
+            bool skip_msg = !_is_message_filtered(msg_type, filter);
+            PgMsgPtr msg = nullptr;
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
-                      msg_type, _current_offset, _end_offset, skip_msg);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Reading message type: {}, current_offset: {}, end_offset: {}, skip_msg: {}",
+                        msg_type, _current_offset, _end_offset, skip_msg);
 
-        if (skip_msg) {
-            _skip_msg(msg_type);
-        } else {
-            // current streaming state; may be reset by msg parsing
-            bool is_streaming = _streaming;
+            if (skip_msg) {
+                _skip_msg(msg_type);
+            } else {
+                // current streaming state; may be reset by msg parsing
+                bool is_streaming = _streaming;
 
-            // decode message
-            msg = _decode_msg(msg_type);
-            if (msg != nullptr) {
-                msg->proto_version = _proto_version;
-                msg->is_streaming = is_streaming;
+                // decode message
+                msg = _decode_msg(msg_type);
+                if (msg != nullptr) {
+                    msg->proto_version = _proto_version;
+                    msg->is_streaming = is_streaming;
+                }
             }
-        }
 
-        // sanity check to make sure we didn't go past end of message block
-        if (_current_offset > _end_offset) {
-            SPDLOG_WARN("Overran end of message block");
-            throw PgMessageTooSmallError();
-        }
+            // sanity check to make sure we didn't go past end of message block
+            if (_current_offset > _end_offset) {
+                SPDLOG_WARN("Overran end of message block");
+                throw PgMessageTooSmallError();
+            }
 
-        return msg;
+            return msg;
+        } catch (PgMessageEOFError &e) {
+            SPDLOG_WARN("Unexpected EOF while reading message");
+            return nullptr;
+        }
     }
 
     PgMsgPtr

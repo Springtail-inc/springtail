@@ -443,6 +443,7 @@ namespace springtail {
         }
 
         if (retries >= MAX_RETRY_COUNT) {
+            SPDLOG_ERROR("Failed to connect to database, too many retries: {}", db_name);
             throw PgConnectionError();
         }
 

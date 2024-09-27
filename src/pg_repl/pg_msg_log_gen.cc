@@ -38,12 +38,6 @@ namespace springtail {
         if (::fwrite(data, size, 1, _fp) < 0) {
             throw Error("Failed to write to file: " + _file_name.string());
         }
-
-        _bytes_written += size;
-        if (_bytes_written >= PG_WRAP_LSN_BYTES) {
-            _bytes_written = 0;
-            _lsn++;
-        }
     }
 
     void
@@ -72,6 +66,8 @@ namespace springtail {
         _write_uint32(json_string.size());
 
         _write(json_string.c_str(), json_string.size());
+
+        _lsn++;
     }
 
     nlohmann::json
@@ -282,6 +278,8 @@ namespace springtail {
         _write_uint64(_commit_ts);
         _write_uint32(_xid);
 
+        _lsn++;
+
         return _xid;
     }
 
@@ -303,6 +301,8 @@ namespace springtail {
 
         // increment xid
         _xid++;
+
+        _lsn++;
     }
 
     void
@@ -315,6 +315,8 @@ namespace springtail {
         _write_uint32(1); // number of tables
         _write_uint8(1);  // options for truncate=1
         _write_uint32(table_id);
+
+        _lsn++;
     }
 
     void
@@ -327,6 +329,8 @@ namespace springtail {
         _write_uint32(table_id);
         _write_uint8('N'); // new tuple
         _write_tuple(table_id, _schema_map[table_id], row_columns);
+
+        _lsn++;
     }
 
     void
@@ -348,6 +352,8 @@ namespace springtail {
         _write_tuple(table_id, _pkey_map[table_id], key_columns);
         _write_uint8('N'); // new tuple
         _write_tuple(table_id, _schema_map[table_id], row_columns);
+
+        _lsn++;
     }
 
     void
@@ -366,6 +372,8 @@ namespace springtail {
             _write_uint8('O'); // old tuple
         }
         _write_tuple(table_id, _pkey_map[table_id], key_columns);
+
+        _lsn++;
     }
 
     void
@@ -390,6 +398,8 @@ namespace springtail {
         _write_header(); // stream ops are in their own message
 
         _is_streaming = true;
+
+        _lsn++;
     }
 
     void
@@ -403,6 +413,8 @@ namespace springtail {
         _write_header(); // stream ops are in their own message
 
         _is_streaming = false;
+
+        _lsn++;
     }
 
     void
@@ -427,6 +439,8 @@ namespace springtail {
         _write_header(); // stream ops are in their own message
 
         _in_stream_xact = false;
+
+        _lsn++;
     }
 
     void
@@ -445,6 +459,8 @@ namespace springtail {
         _write_header(); // stream ops are in their own message
 
         _in_stream_xact = false;
+
+        _lsn++;
     }
 
     void

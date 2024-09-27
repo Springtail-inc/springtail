@@ -186,7 +186,6 @@ namespace springtail
         std::string table;
     };
 
-
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,

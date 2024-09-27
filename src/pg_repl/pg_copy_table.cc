@@ -638,8 +638,8 @@ namespace springtail
 
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_tables(uint64_t db_id,
-                            uint64_t xid,
-                            std::vector<uint32_t> table_oids)
+                             uint64_t xid,
+                             std::vector<uint32_t> table_oids)
     {
         return _internal_copy(db_id, xid, std::nullopt, std::nullopt, table_oids);
     }
