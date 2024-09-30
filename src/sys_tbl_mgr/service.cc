@@ -1212,6 +1212,14 @@ namespace springtail::sys_tbl_mgr {
 
                 return update;
             }
+
+            if (entry.pk_position != new_col.pk_position) {
+                // a primary key change requires a table re-sync
+                ddl["action"] = "resync";
+                update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
+
+                return update;
+            }
         }
 
         // there may be changes to the schema that don't result in changes on the Springtail side,
