@@ -51,13 +51,13 @@ function find_compiler() {
 DIR=external/vcpkg
 if [ ! -d ${DIR} ]
 then
-    program_names="gcc  gcc-13"
+    program_names="gcc  gcc-14"
     if ! find_compiler "$program_names"; then
         echo "No suitable gcc compiler found."
         exit 1
     fi
 
-    program_names="g++  g++-13"
+    program_names="g++  g++-14"
     if ! find_compiler "$program_names"; then
         echo "No suitable g++ compiler found."
         exit 1
