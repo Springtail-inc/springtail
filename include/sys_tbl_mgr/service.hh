@@ -86,6 +86,10 @@ namespace springtail::sys_tbl_mgr {
             std::string schema; ///< The schema/namespace of the table.
             std::string name; ///< The name of the table.
             bool exists; ///< A flag indicating if the table exists at this point.
+            TableInfo(uint64_t id, uint64_t xid, uint64_t lsn, const std::string &schema, const std::string &name, bool exists)
+                : id(id), xid(xid), lsn(lsn), schema(schema), name(name), exists(exists)
+            { }
+            TableInfo() = default;
         };
         using TableInfoPtr = std::shared_ptr<TableInfo>;
 
