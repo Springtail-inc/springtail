@@ -5,6 +5,7 @@
 #include <vector>
 #include <cassert>
 #include <future>
+#include <span>
 
 #include <xxhash.h>
 
@@ -194,10 +195,10 @@ namespace springtail {
             Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
             friend bool operator==(const Iterator& a, const Iterator& b) { return a._row.offset == b._row.offset; }
             friend bool operator!= (const Iterator& a, const Iterator& b) { return a._row.offset != b._row.offset; }
-            
+
             Iterator &operator+=(difference_type n) { _row.offset += _row.extent->row_size() * n; return *this; }
             Iterator &operator-=(difference_type n) { _row.offset -= _row.extent->row_size() * n; return *this; }
-            
+
             Iterator operator+(difference_type n) const { Iterator tmp = *this; tmp += n; return tmp; }
             friend Iterator operator+(difference_type n, const Iterator &i) { return i + n; }
             Iterator operator-(difference_type n) const { Iterator tmp = *this; tmp -= n; return tmp; }

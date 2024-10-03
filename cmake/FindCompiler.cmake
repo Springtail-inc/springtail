@@ -49,14 +49,14 @@ set(SEARCH_PATHS
 
 # Find the GCC compiler
 find_program(GCC_C_COMPILER
-    NAMES gcc-13
+    NAMES gcc-14
     HINTS ${SEARCH_PATHS} ENV PATH
     VALIDATOR check_gcc_function
 )
 
 # Find the G++ compiler
 find_program(GCC_CXX_COMPILER
-    NAMES g++-13
+    NAMES g++-14
     HINTS ${SEARCH_PATHS} ENV PATH
     VALIDATOR check_gcc_function
 )

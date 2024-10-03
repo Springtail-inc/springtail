@@ -17,6 +17,7 @@
         "user": "default",
         "password": null,
         "db": 1,
+        "config_db": 0,
         "keep_alive_secs": 30,
         "pool" : {
             "connections" : 10,
@@ -82,7 +83,7 @@
                 "replication_user": "postgres",
                 "password": "springtail"
             },
-            "database_ids": [1]
+            "database_ids": ["1"]
         }
     },
     "databases": {
@@ -90,11 +91,8 @@
             "name": "springtail",
             "replication_slot": "springtail_slot",
             "publication_name": "springtail_pub",
-            "schemas": {
-                "public": {
-                    "include": ["*"],
-                    "exclude": []
-                }
+            "include": {
+                "schemas": ["*"]
             }
         }
     },
