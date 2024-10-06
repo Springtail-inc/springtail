@@ -37,9 +37,9 @@ int main(int argc, char *argv[])
     }
     boost::program_options::notify(vm);
 
-    std::optional<std::filesystem::path> pidfile;
+    std::optional<std::string> pidfile;
     if (vm.count("daemonize")) {
-        pidfile = "/var/springtail/xid_mgr.pid";
+        pidfile = "xid_mgr.pid";
     }
     springtail_init("xid_mgr", pidfile);
 

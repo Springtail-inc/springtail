@@ -217,8 +217,6 @@ namespace springtail {
             db_ids = nlohmann::json::parse(db_id_str.value());
         }
 
-        std::cout << "db_ids: " << db_ids << std::endl;
-
         // iterate through the db_ids and get the db_config_id
         for (auto &db_id_json: db_ids) {
             // get db config based on db_id
@@ -376,6 +374,15 @@ namespace springtail {
 
         // convert to json
         return nlohmann::json::parse(fdw_config_str.value());
+    }
+
+    std::string
+    Properties::get_pid_path()
+    {
+        nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
+        std::string pid_path;
+        Json::get_to<std::string>(props, Properties::PID_PATH, pid_path, "/var/springtail/pids");
+        return pid_path;
     }
 
     void

@@ -25,8 +25,8 @@ from sysutils import (
     stop_daemons,
     clean_fs,
     check_postgres_running,
-    start_brew_postgres,
-    stop_brew_postgres,
+    start_postgres,
+    stop_postgres,
     start_daemons,
     running_daemons)
 
@@ -47,6 +47,7 @@ def cleanup_filesystem(props):
 
 
 def connect_db_instance(props, db_name='postgres'):
+    """Connect to the database instance and return connection."""
     # Get the database instance configuration
     db_instance_config = props.get_db_instance_config()
     db_host = db_instance_config['host']
@@ -86,7 +87,7 @@ def cleanup_db_instance(props):
     pub_name = db_config['publication_name']
 
     if not check_postgres_running():
-        start_brew_postgres()
+        start_postgres()
 
     # Connect to the database ("postgres" database)
     conn = connect_db_instance(props)
@@ -127,7 +128,7 @@ def install_fdw(build_dir):
     print (f"Build dir: {build_dir}")
 
     # stop postgres
-    stop_brew_postgres()
+    stop_postgres()
 
     # copy the extension files to the share directory
     share_dir = os.path.join(share_dir.strip(), 'extension')
@@ -146,7 +147,7 @@ def install_fdw(build_dir):
 
     # start postgres
     print("Starting postgres...")
-    start_brew_postgres()
+    start_postgres()
 
 
 def start_replication(props, build_dir):
@@ -325,10 +326,37 @@ def print_sys_props(props, config_file):
     print("\nSystem properties:")
     print(f"  Config file    : {config_file}")
     print(f"  Mount path     : {props.get_mount_path()}")
+    print(f"  Pid path       : {props.get_pid_path()}")
     print(f"  DB instance ID : {props.get_db_instance_id()}")
     print(f"  Primary DB name: {db_config['name']}")
     print(f"  Primary DB ID  : {db_config['id']}")
     print(f"  FDW ID         : {props.get_fdw_id()}")
+
+
+def check_config(props):
+    """Check the system configuration for invalid settings."""
+    db_instance_config = props.get_db_instance_config()
+    fdw_config = props.get_fdw_config()
+
+    db_host = db_instance_config['host']
+    db_port = db_instance_config['port']
+
+    fdw_host = fdw_config['host']
+    fdw_port = fdw_config['port']
+    fdw_prefix = fdw_config['db_prefix'] if 'db_prefix' in fdw_config else None
+
+    # Check that the primary DB and FDW are not on the same host and port
+    # if fdw_prefix is not set
+    if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
+        raise Exception("Primary DB and FDW cannot be on the same host and port.")
+
+    # Check that the pid path exists; if not try to create it
+    pid_path = props.get_pid_path()
+    if not os.path.exists(pid_path):
+        try:
+            os.makedirs(pid_path, exist_ok=True)
+        except Exception as e:
+            raise Exception(f"Failed to create pid path: {pid_path}")
 
 
 def start(args):
@@ -348,13 +376,16 @@ def start(args):
     # Print the system properties
     print_sys_props(props, config_file)
 
+    # Check the configuration
+    check_config(props)
+
     # Clear file system data
     print("\nClearing file system data...")
     cleanup_filesystem(props)
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons()
+    stop_daemons(props.get_pid_path())
 
     # cleanup db instance
     print("\nCleaning up database instance...")
@@ -385,7 +416,7 @@ def start(args):
     print("\nImporting foreign data wrapper schemas...")
     fdw_import(props, build_dir, config_file)
 
-    print("Springtail system started successfully.")
+    print("\nSpringtail system started successfully.")
 
 
 def status():

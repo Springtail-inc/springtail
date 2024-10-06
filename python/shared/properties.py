@@ -10,7 +10,10 @@ class Properties:
         self.init(config_file)
 
         if load_redis:
-            self.__load_redis(config_file)
+            try:
+                self.__load_redis(config_file)
+            except KeyError as e:
+                raise Exception(f'JSON key error while loading redis, missing key: {e}')
 
     def init(self, config_file=None):
         """Initialize the properties object."""
@@ -29,32 +32,34 @@ class Properties:
                 print('system.json.settings does not have redis settings', file=sys.stderr)
                 sys.exit(1)
 
-            self.redis_host = system_json['redis']['host']
-            self.redis_port = system_json['redis']['port']
-            self.redis_user = system_json['redis']['user']
-            self.redis_password = system_json['redis']['password'] if system_json['redis']['password'] else None
-            self.redis_data_db = system_json['redis']['db']
-            self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
-            self.db_instance_id = str(system_json['org']['db_instance_id'])
-            self.fdw_id = system_json['org']['fdw_id']
+            try:
+                self.redis_host = system_json['redis']['host']
+                self.redis_port = system_json['redis']['port']
+                self.redis_user = system_json['redis']['user']
+                self.redis_password = system_json['redis']['password'] if system_json['redis']['password'] else None
+                self.redis_data_db = system_json['redis']['db']
+                self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+                self.db_instance_id = str(system_json['org']['db_instance_id'])
+                self.fdw_id = system_json['org']['fdw_id']
 
-            # set the environment variables
-            env_vars = {
-                'ORGANIZATION_ID': system_json['org']['organization_id'],
-                'ACCOUNT_ID': system_json['org']['account_id'],
-                'FDW_ID': system_json['org']['fdw_id'],
-                'DATABASE_INSTANCE_ID': str(self.db_instance_id),
-                'REDIS_HOSTNAME': self.redis_host,
-                'REDIS_PORT': str(self.redis_port),
-                'REDIS_USER': self.redis_user,
-                'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
-                'REDIS_USER_DATABASE_ID': str(system_json['redis']['db']),
-                'MOUNT_POINT': system_json['fs']['mount_point'],
-            }
+                # set the environment variables
+                env_vars = {
+                    'ORGANIZATION_ID': system_json['org']['organization_id'],
+                    'ACCOUNT_ID': system_json['org']['account_id'],
+                    'FDW_ID': system_json['org']['fdw_id'],
+                    'DATABASE_INSTANCE_ID': str(self.db_instance_id),
+                    'REDIS_HOSTNAME': self.redis_host,
+                    'REDIS_PORT': str(self.redis_port),
+                    'REDIS_USER': self.redis_user,
+                    'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
+                    'REDIS_USER_DATABASE_ID': str(system_json['redis']['db']),
+                    'MOUNT_POINT': system_json['fs']['mount_point'],
+                }
 
-            for (key, value) in env_vars.items():
-                os.environ[key] = value
-
+                for (key, value) in env_vars.items():
+                    os.environ[key] = value
+            except KeyError as e:
+                raise Exception(f'JSON key error, missing key: {e}')
         else:
             # otherwise, read in redis settings from environment
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
@@ -211,18 +216,26 @@ class Properties:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
-        :param timeout: the maximum time to wait in seconds
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
         """
         key = 'instance_state:' + self.db_instance_id
+        start = time.time()
         while True:
             if self.redis.hget(key, str(id)) == state:
                 return
             time.sleep(1)
-            timeout -= 1
-            if timeout <= 0:
+            if time.time() - start > timeout:
                 break
-        if timeout <= 0:
+
+        if timeout != 0:
             raise TimeoutError('Timed out waiting for state')
 
+    def get_pid_path(self):
+        """Return the path to the pid file."""
+        system_config = self.get_system_config()
+        if 'pid_path' not in system_config['logging']:
+            raise Exception('pid_path not found in system settings')
+        pid_path = system_config['logging']['pid_path']
+        return pid_path
 
 

@@ -1,4 +1,5 @@
 import os
+import platform
 import time
 
 from common import run_command, kill_processes, running_pids
@@ -13,10 +14,9 @@ DAEMONS = [
 
 POSTGRES = 'postgresql@16'
 
-def stop_daemons():
+def stop_daemons(pid_path):
     """Stop the daemons."""
     # Stop the daemons
-    pid_path = '/var/springtail'
     # for each .pid file in the pid_path run kill -9 on the pid in that file
     for file in os.listdir(pid_path):
         file = os.path.join(pid_path, file)
@@ -63,10 +63,17 @@ def check_postgres_running():
     return len(pids) > 0
 
 
-def start_brew_postgres():
-    """Start the postgres process using brew."""
+def start_postgres():
+    """Start the postgres process using brew on mac."""
     print("Postgres is not running, starting it...")
-    run_command('brew', ['services', 'start', POSTGRES])
+
+    # start the postgres process, detect platform
+    system = platform.system()
+    if system == 'Darwin':
+        run_command('brew', ['services', 'start', POSTGRES])
+    elif system == 'Linux':
+        run_command('sudo', ['service', 'postgresql', 'start'])
+
     iters = 0
     pids = []
     while (len(pids) == 0 and iters < 10):
@@ -75,20 +82,28 @@ def start_brew_postgres():
         iters = iters + 1
 
     if iters == 10 and len(pids) == 0:
-        raise Exception("Postgres failed to start")
+        raise Exception("Postgres failed to start, timedout")
 
 
-def stop_brew_postgres():
+def stop_postgres():
     """Stop the postgres process using brew."""
     print("Stopping the postgres process...")
-    run_command('brew', ['services', 'stop', POSTGRES])
+
+    # stop the postgres process, detect platform
+    system = platform.system()
+    if system == 'Darwin':
+        run_command('brew', ['services', 'stop', POSTGRES])
+    elif system == 'Linux':
+        run_command('sudo', ['service', 'postgresql', 'stop'])
+
     pids = running_pids(['postgres'])
     if len(pids) > 0:
         print("Failed to stop the postgres cleanly, killing the process...")
         kill_processes(['postgres'])
+
     pids = running_pids(['postgres'])
     if len(pids) > 0:
-        raise Exception("Failed to stop the postgres process")
+        raise Exception("Failed to stop the postgres process, timedout")
 
 
 def start_daemons(build_dir, restart=True):
