@@ -32,9 +32,9 @@ int main(int argc, char *argv[]) {
     }
     boost::program_options::notify(vm);
 
-    std::optional<std::filesystem::path> pidfile;
+    std::optional<std::string> pidfile;
     if (vm.count("daemonize")) {
-        pidfile = "/var/springtail/sys_tbl_mgr.pid";
+        pidfile = "sys_tbl_mgr.pid";
     }
     springtail_init("sys_tbl_mgr", pidfile);
 

@@ -42,6 +42,8 @@ namespace springtail {
         static inline constexpr char ORG_CONFIG[] = "org";
         /** FS configuration section */
         static inline constexpr char FS_CONFIG[] = "fs";
+        /** PID path in logging config */
+        static inline constexpr char PID_PATH[] = "pid_path";
 
         /**
          * @brief Get JSON object from a key
@@ -110,8 +112,8 @@ namespace springtail {
         /** Helper to get fdw config */
         static nlohmann::json get_fdw_config(const std::string &fdw_id);
 
-
-
+        /** Helper to get pid path */
+        static std::string get_pid_path();
 
     private:
         /** static _instance singleton */

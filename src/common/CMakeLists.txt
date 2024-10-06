@@ -66,6 +66,11 @@ target_include_directories(test_synchronizer PRIVATE ${CMAKE_SOURCE_DIR}/include
 target_link_libraries(test_synchronizer PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_synchronizer)
 
+add_executable(test_exception test/test_exception.cc)
+target_include_directories(test_exception PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_exception GTest::gtest_main)
+add_dsymutil_command(test_exception)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
@@ -74,3 +79,4 @@ gtest_discover_tests(test_counter)
 gtest_discover_tests(test_redis)
 gtest_discover_tests(test_dns)
 gtest_discover_tests(test_synchronizer)
+gtest_discover_tests(test_exception)

@@ -87,9 +87,9 @@ int main(int argc, char* argv[])
         SPDLOG_INFO("SSL Disabled");
     }
 
-    std::optional<std::filesystem::path> pidfile;
+    std::optional<std::string> pidfile;
     if (vm.count("daemonize")) {
-        pidfile = "/var/springtail/xid_mgr.pid";
+        pidfile = "proxy.pid";
     }
     springtail_init("proxy", pidfile);
 
