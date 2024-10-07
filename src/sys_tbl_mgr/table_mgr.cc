@@ -1,10 +1,9 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <storage/table_mgr.hh>
-#include <storage/system_tables.hh>
-
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
 

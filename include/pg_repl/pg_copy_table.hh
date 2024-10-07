@@ -11,6 +11,7 @@
 #include <pg_repl/libpq_connection.hh>
 
 #include <storage/field.hh>
+#include <storage/xid.hh>
 
 namespace springtail
 {

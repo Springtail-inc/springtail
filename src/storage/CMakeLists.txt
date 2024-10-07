@@ -1,5 +1,5 @@
 # source files
-set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc table_mgr.cc schema_mgr.cc table.cc system_tables.cc cache.cc)
+set(STORAGE_SOURCES compressors.cc extent.cc schema.cc field.cc io.cc io_mgr.cc io_file.cc io_request.cc btree.cc mutable_btree.cc cache.cc)
 
 find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
@@ -32,7 +32,7 @@ add_dsymutil_command(read_branch)
 
 add_executable(dump_system_tables test/dump_system_tables.cc)
 target_include_directories(dump_system_tables PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(dump_system_tables PUBLIC springtail_storage springtail_sys_tbl_mgr)
+target_link_libraries(dump_system_tables PUBLIC springtail_sys_tbl_mgr)
 add_dsymutil_command(dump_system_tables)
 
 add_executable(dump_headers test/dump_headers.cc)

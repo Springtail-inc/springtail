@@ -1,7 +1,7 @@
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
-#include <storage/table_mgr.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 
 namespace springtail::gc {

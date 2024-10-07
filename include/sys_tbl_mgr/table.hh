@@ -3,7 +3,8 @@
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
-#include <storage/schema_mgr.hh>
+
+#include <sys_tbl_mgr/schema_mgr.hh>
 
 namespace springtail {
 

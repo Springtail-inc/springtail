@@ -9,8 +9,8 @@
 
 #include <common/object_pool.hh>
 #include <pg_repl/pg_repl_msg.hh>
-#include <storage/table.hh>
 #include <storage/xid.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 

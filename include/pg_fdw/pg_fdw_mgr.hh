@@ -11,12 +11,13 @@
 #include <common/redis_ddl.hh>
 #include <common/concurrent_queue.hh>
 
-#include <storage/table.hh>
-#include <storage/table_mgr.hh>
 #include <storage/field.hh>
-#include <storage/system_tables.hh>
 #include <storage/schema.hh>
-#include <storage/schema_mgr.hh>
+
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 

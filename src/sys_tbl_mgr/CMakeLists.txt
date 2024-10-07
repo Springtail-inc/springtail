@@ -5,6 +5,10 @@ set(SYS_TBL_MGR_SOURCES
     client.cc
     server.cc
     service.cc
+    table_mgr.cc
+    schema_mgr.cc
+    table.cc
+    system_tables.cc
 )
 
 # add the library target

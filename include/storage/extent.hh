@@ -14,7 +14,6 @@
 #include <storage/compressors.hh>
 #include <storage/io.hh>
 #include <storage/schema.hh>
-#include <storage/schema_mgr.hh>
 
 namespace springtail {
     // pre-declare classes to avoid circular dependencies

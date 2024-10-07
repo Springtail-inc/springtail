@@ -12,11 +12,12 @@
 #include <common/constants.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
-#include <storage/table.hh>
-#include <storage/table_mgr.hh>
 #include <storage/field.hh>
-#include <storage/system_tables.hh>
 #include <storage/schema.hh>
+
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 using namespace springtail;
 using namespace springtail::pg_fdw;

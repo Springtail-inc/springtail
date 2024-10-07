@@ -2,7 +2,7 @@
 
 #include <boost/thread.hpp>
 
-#include <storage/table.hh>
+#include <sys_tbl_mgr/table.hh>
 
 namespace springtail {
 

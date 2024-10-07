@@ -5,9 +5,9 @@
 #include <common/threaded_test.hh>
 
 #include <storage/csv_field.hh>
-#include <storage/table.hh>
 
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <test/services.hh>
 

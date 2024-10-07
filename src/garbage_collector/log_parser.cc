@@ -5,9 +5,8 @@
 
 #include <pg_log_mgr/pg_log_mgr.hh>
 
-#include <storage/table_mgr.hh>
-
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::gc {
 

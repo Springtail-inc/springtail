@@ -6,8 +6,8 @@
 #include <common/properties.hh>
 #include <common/threaded_test.hh>
 
-#include <storage/system_tables.hh>
-#include <storage/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <test/services.hh>
 
