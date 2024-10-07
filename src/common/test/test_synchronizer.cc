@@ -44,6 +44,19 @@ TEST_F(StateSynchronizerTest, WaitForState) {
     t.join();
 }
 
+/** Tests wait for state method, state set in thread */
+TEST_F(StateSynchronizerTest, WaitForStateMultiple) {
+    std::thread t([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        sync.set(TestState::RUNNING);
+    });
+
+    sync.wait_for_state({TestState::RUNNING});
+    EXPECT_EQ(sync.get(), TestState::RUNNING);
+
+    t.join();
+}
+
 /** Tests wait and set method, state set in thread */
 TEST_F(StateSynchronizerTest, WaitAndSet) {
     std::thread t([&]() {

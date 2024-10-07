@@ -1,0 +1,241 @@
+import json
+import redis
+import sys
+import os
+import time
+
+class Properties:
+    def __init__(self, config_file=None, load_redis=False):
+        """Initialize the properties object."""
+        self.init(config_file)
+
+        if load_redis:
+            try:
+                self.__load_redis(config_file)
+            except KeyError as e:
+                raise Exception(f'JSON key error while loading redis, missing key: {e}')
+
+    def init(self, config_file=None):
+        """Initialize the properties object."""
+        self.cache = {}
+
+        if config_file is None and 'SPRINGTAIL_PROPERTIES_FILE' in os.environ:
+            self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
+
+        if config_file:
+            os.environ['SPRINGTAIL_PROPERTIES_FILE'] = config_file
+
+            with open(config_file) as file:
+                system_json = json.load(file)
+
+            if system_json['redis'] is None:
+                print('system.json.settings does not have redis settings', file=sys.stderr)
+                sys.exit(1)
+
+            try:
+                self.redis_host = system_json['redis']['host']
+                self.redis_port = system_json['redis']['port']
+                self.redis_user = system_json['redis']['user']
+                self.redis_password = system_json['redis']['password'] if system_json['redis']['password'] else None
+                self.redis_data_db = system_json['redis']['db']
+                self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+                self.db_instance_id = str(system_json['org']['db_instance_id'])
+                self.fdw_id = system_json['org']['fdw_id']
+
+                # set the environment variables
+                env_vars = {
+                    'ORGANIZATION_ID': system_json['org']['organization_id'],
+                    'ACCOUNT_ID': system_json['org']['account_id'],
+                    'FDW_ID': system_json['org']['fdw_id'],
+                    'DATABASE_INSTANCE_ID': str(self.db_instance_id),
+                    'REDIS_HOSTNAME': self.redis_host,
+                    'REDIS_PORT': str(self.redis_port),
+                    'REDIS_USER': self.redis_user,
+                    'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
+                    'REDIS_USER_DATABASE_ID': str(system_json['redis']['db']),
+                    'MOUNT_POINT': system_json['fs']['mount_point'],
+                }
+
+                for (key, value) in env_vars.items():
+                    os.environ[key] = value
+            except KeyError as e:
+                raise Exception(f'JSON key error, missing key: {e}')
+        else:
+            # otherwise, read in redis settings from environment
+            self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
+            self.redis_port = os.environ.get('REDIS_PORT', 6379)
+            self.redis_user = os.environ.get('REDIS_USER', 'default')
+            self.redis_password = os.environ.get('REDIS_PASSWORD', None)
+            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 0)
+            self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+            self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
+            self.fdw_id = os.environ.get('FDW_ID', None)
+
+        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+                                       username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+
+    def get_db_configs(self):
+        """Return a json array of database instance id:name pairs.
+           return: [{"id":, "name":, "replication_slot":, "publication_name": }, ...]
+        """
+        key = 'instance_config:' + str(self.db_instance_id)
+        if 'db_configs' in self.cache:
+            return self.cache['db_configs']
+
+        ids = json.loads(self.redis.hget(key, 'database_ids'))
+        dbs = []
+        for id in ids:
+            db_key = 'db_config:' + str(self.db_instance_id)
+            db = json.loads(self.redis.hget(db_key, str(id)))
+
+            dbs.append({"id": id,
+                        "name": db['name'],
+                        "replication_slot": db['replication_slot'],
+                        "publication_name": db['publication_name'],
+                        "include": db['include']})
+
+        self.cache[key] = dbs
+
+        return dbs
+
+    def get_db_instance_config(self):
+        """Return the primary db instance configuration as an object.
+        return: {"host":, "port":, "replication_user":, "password":}
+        """
+        key = 'instance_config:' + str(self.db_instance_id)
+        if 'db_instance_config' in self.cache:
+            return self.cache['db_instance_config']
+
+        config = json.loads(self.redis.hget(key, 'primary_db'))
+        self.cache[key] = config
+
+        return config
+
+    def get_fdw_config(self):
+        """Return a config object for foreign data wrapper configuration."""
+        key = 'fdw:' + str(self.db_instance_id)
+        if 'fdw_config' in self.cache:
+            return self.cache['fdw_config']
+
+        config = json.loads(self.redis.hget(key, self.fdw_id))
+        self.cache[key] = config
+
+        return config
+
+    def get_system_config(self):
+        """Return the system configuration as an object."""
+        key = 'instance_config:' + str(self.db_instance_id)
+        if 'system_config' in self.cache:
+            return self.cache['system_config']
+
+        config = json.loads(self.redis.hget(key, 'system_settings'))
+        self.cache[key] = config
+
+        return config
+
+    def get_mount_path(self):
+        """Return the mount point for the file system."""
+        return os.environ.get('MOUNT_POINT')
+
+    def get_fdw_id(self):
+        """Return the foreign data wrapper id."""
+        return self.fdw_id
+
+    def get_db_instance_id(self):
+        """Return the database instance id."""
+        return self.db_instance_id
+
+    def __load_redis(self, config_file=None):
+        """Load redis based on a system.json file.
+        :param config_file: the system.json file to load, if None
+        then use SPRINGTAIL_PROPERTIES_FILE
+        """
+        if config_file is None and 'SPRINGTAIL_PROPERTIES_FILE' in os.environ:
+            config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
+
+        if config_file is None:
+            print('No config file provided')
+            sys.exit(1)
+
+        # re-initialize the properties
+        self.init(config_file)
+
+        # connect to the Redis config server
+        self.redis_data = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+
+        # load the system settings into Redis
+        with open(config_file) as f:
+            system_json = json.load(f)
+
+        # clear the Redis data and config databases
+        self.redis_data.flushdb()
+        self.redis.flushdb()
+
+        db_instance_id = system_json['org']['db_instance_id']
+        db_instance_key = 'instance_config:' + str(db_instance_id)
+        self.redis.hset(db_instance_key, 'id', db_instance_id)
+
+        db_instance_json = system_json['db_instances'][str(db_instance_id)]
+        self.redis.hset(db_instance_key, 'primary_db', json.dumps(db_instance_json['primary_db']))
+
+        db_ids = json.dumps(db_instance_json['database_ids'])
+        self.redis.hset(db_instance_key, 'database_ids', db_ids)
+
+        # extract system config
+        sys_config_json = {}
+        sys_config_json['logging'] = system_json['logging']
+        sys_config_json['iopool'] = system_json['iopool']
+        sys_config_json['write_cache'] = system_json['write_cache']
+        sys_config_json['xid_mgr'] = system_json['xid_mgr']
+        sys_config_json['storage'] = system_json['storage']
+        sys_config_json['redis'] = system_json['redis']
+        sys_config_json['log_mgr'] = system_json['log_mgr']
+        sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
+
+        self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
+
+        # setup db_config
+        for db_id in db_instance_json['database_ids']:
+            db_json = system_json['databases'][str(db_id)]
+            # set db_config
+            db_key = 'db_config:' + str(db_instance_id)
+            self.redis.hset(db_key, str(db_id), json.dumps(db_json))
+
+            #set state; default to initialize
+            db_state_key = 'instance_state:' + str(db_instance_id)
+            self.redis.hset(db_state_key, str(db_id), 'initialize')
+
+        # create hset for fdws
+        fdw_key = 'fdw:' + str(db_instance_id)
+        for fdw_id in system_json['fdws']:
+            fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
+            self.redis.hset(fdw_key, fdw_id, fdw_json_str)
+
+    def wait_for_state(self, state, id, timeout=3600):
+        """Wait for the database state to reach the desired state.
+        :param state: the state to wait for
+        :param id: the database id to check
+        :param timeout: the maximum time to wait in seconds (0 wait forever)
+        """
+        key = 'instance_state:' + self.db_instance_id
+        start = time.time()
+        while True:
+            if self.redis.hget(key, str(id)) == state:
+                return
+            time.sleep(1)
+            if time.time() - start > timeout:
+                break
+
+        if timeout != 0:
+            raise TimeoutError('Timed out waiting for state')
+
+    def get_pid_path(self):
+        """Return the path to the pid file."""
+        system_config = self.get_system_config()
+        if 'pid_path' not in system_config['logging']:
+            raise Exception('pid_path not found in system settings')
+        pid_path = system_config['logging']['pid_path']
+        return pid_path
+
+

@@ -10,8 +10,15 @@ namespace springtail {
 
     namespace {
         void
-        daemonize(const std::filesystem::path &pid_filename)
+        daemonize(const std::string &pid_file)
         {
+            std::string pid_path = Properties::get_pid_path();
+
+            std::filesystem::path pid_filename(pid_path);
+            pid_filename /= pid_file;
+
+            std::cout << "Daemonizing process, writing pid to: " << pid_filename << std::endl;
+
             int pid = fork();
             if (pid < 0) {
                 throw Error(fmt::format("Failed to fork: {}", errno));
@@ -48,19 +55,19 @@ namespace springtail {
     }
 
     void springtail_init(const std::optional<std::string> &log_filename,
-                         const std::optional<std::filesystem::path> &daemon_pid,
+                         const std::optional<std::string> &daemon_pid,
                          uint32_t logging_mask)
     {
-        // if requested, daemonize the process
-        if (daemon_pid) {
-            daemonize(*daemon_pid);
-        }
-
         // initialize the backtrace signal handling
         init_exception();
 
         // init system properties
         Properties::init();
+
+        // if requested, daemonize the process
+        if (daemon_pid) {
+            daemonize(*daemon_pid);
+        }
 
         // initialize the logging infrastructure
         init_logging(logging_mask, log_filename, daemon_pid.has_value());

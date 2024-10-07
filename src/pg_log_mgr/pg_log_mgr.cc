@@ -169,6 +169,11 @@ namespace springtail::pg_log_mgr {
         StateEnum internal_state = _internal_state.get();
 
         if (new_state == redis::REDIS_STATE_RUNNING) {
+            if (internal_state == STATE_RUNNING) {
+                // already in running state
+                return;
+            }
+
             // if the new state is running, then we should have been in the replay done state
             if (internal_state == STATE_REPLAYING) {
                 // if in replaying, wait for replay done before switching to running
@@ -277,10 +282,21 @@ namespace springtail::pg_log_mgr {
         } else {
             res = PgCopyTable::copy_db(_db_id, _get_next_xid());
         }
-        _process_copy_results(res);
 
-        // replay xact logs (queued during stall)
-        _replay_xact_logs();
+        if (res.size() > 0) {
+            // process copy results
+            _process_copy_results(res);
+            // replay xact logs (queued during stall)
+            _replay_xact_logs();
+        } else {
+            // no tables copied
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
+            // rollover xact logger
+            _create_xact_logger();
+            // ste to running this unblocks the xact handler
+            _internal_state.set(STATE_RUNNING);
+            Properties::set_db_state(_db_id, redis::REDIS_STATE_RUNNING);
+        }
     }
 
 
@@ -558,7 +574,7 @@ namespace springtail::pg_log_mgr {
         StateEnum state = _internal_state.get();
         if (state == STATE_REPLAYING) {
             // replaying state, block further messages
-            _internal_state.wait_for_state(STATE_REPLAY_DONE);
+            _internal_state.wait_for_state({STATE_REPLAY_DONE, STATE_RUNNING});
             // fall through to running state
         }
 

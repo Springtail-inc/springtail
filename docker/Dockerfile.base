@@ -1,46 +1,25 @@
-FROM ubuntu:jammy
+FROM ubuntu:noble
 
 RUN apt-get update && apt-get install -y \
     lsb-release wget software-properties-common gnupg \
     build-essential autoconf libelf-dev \
     bison pkg-config flex libdw-dev \
-    libdwarf-dev binutils-dev linux-libc-dev \
-    git curl zip unzip tar ninja-build \
-    sudo vim ca-certificates gpg emacs-nox \
+    libdwarf-dev binutils-dev linux-libc-dev cmake \
+    git curl zip unzip tar ninja-build python3 postgresql \
+    sudo vim ca-certificates gpg emacs-nox gcc-14 g++-14 \
     && apt-get clean autoclean \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/{apt,cache,log,dpkg}
 
-RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
-    && apt-get update \
-    && apt-get install -y gcc-13 g++-13 \
-    && apt-get clean autoclean \
-    && apt-get autoremove --yes
-
-RUN update-alternatives --install /usr/bin/c++ c++ $(which g++-13) 50 \
-    && update-alternatives --install /usr/bin/cc cc $(which gcc-13) 50
-
 RUN apt-get install -y libbsd-dev
-
-RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
-RUN echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | tee /etc/apt/sources.list.d/kitware.list > /dev/null
-RUN apt-get update
-RUN apt-get install -y kitware-archive-keyring cmake
-
-RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-RUN wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc 2>/dev/null | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
-RUN apt-get update
 
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 
+# install postgresql
 RUN apt install -y postgresql-16 postgresql-contrib-16
-
-# RUN pg_createcluster 16 main
 
 ARG conf_file=/etc/postgresql/16/main/postgresql.conf
 ARG hba_file=/etc/postgresql/16/main/pg_hba.conf
-ARG ext_dir=/usr/share/postgresql/16/extension/
-ARG lib_dir=/usr/lib/postgresql/16/lib/
 
 # Allow connections from anywhere.
 RUN sed -i -e"s/^#listen_addresses =.*$/listen_addresses = '*'/" $conf_file
@@ -53,15 +32,26 @@ RUN sed -i -e"s/^#log_filename = 'postgresql-\%Y-\%m-\%d_\%H\%M\%S.log'.*$/log_f
 RUN sed -i -e"s/^#log_file_mode = 0600.*$/log_file_mode = 0644/" $conf_file
 RUN sed -i -e"s/^#log_truncate_on_rotation = off.*$/log_truncate_on_rotation = on/" $conf_file
 
-COPY ./ /springtail
+# install ssh
+RUN apt update && apt install -y openssh-server
+RUN sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 
-WORKDIR /springtail
+# create dev user
+RUN useradd -m -s /bin/bash dev
+RUN echo "dev:dev" | chpasswd && adduser dev sudo
+
+RUN touch /home/dev/.bashrc
+RUN echo "export ZIC=true" >> /home/dev/.bashrc
+RUN echo "export VCPKG_FORCE_SYSTEM_BINARIES=1" >> /home/dev/.bashrc
+RUN chown dev /home/dev/.bashrc
+
+# add psql user
+RUN service postgresql start
+#RUN sudo -u postgres psql -h localhost -d postgres -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN;"
 
 ENV ZIC=true
 ENV VCPKG_FORCE_SYSTEM_BINARIES=1
 
-RUN ./vcpkg.sh
-
-RUN ./clean.sh
-RUN ./debug.sh -j 2
-#RUN ./clean.sh
+RUN service ssh start
+EXPOSE 22
+CMD ["/usr/sbin/sshd","-D"]

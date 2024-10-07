@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <string>
+#include <set>
 
 namespace springtail::common {
 
@@ -27,17 +28,23 @@ namespace springtail::common {
         }
 
         /** Wait for a specific state */
-        void wait_for_state(StateEnum desired_state)
+        void wait_for_state(std::set<StateEnum> desired_states)
         {
             std::unique_lock<std::shared_mutex> lock(_mutex);
-            if (_current_state == desired_state) {
+            if (desired_states.contains(_current_state)) {
                 return;
             }
 
             // wait for desired state
-            _cv.wait(lock, [this, desired_state]() {
-                return _current_state == desired_state;
+            _cv.wait(lock, [this, desired_states]() {
+                return desired_states.contains(_current_state);
             });
+        }
+
+        /** Wait for a specific state */
+        void wait_for_state(StateEnum desired_state)
+        {
+            wait_for_state(std::set<StateEnum>{desired_state});
         }
 
         /** Wait for sepecific state and then atomically switch to a new state */

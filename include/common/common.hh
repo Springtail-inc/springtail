@@ -24,7 +24,7 @@ namespace springtail {
      * @param logging_mask logging mask override
      */
     void springtail_init(const std::optional<std::string> &log_filename = std::nullopt,
-                         const std::optional<std::filesystem::path> &daemon_pid = std::nullopt,
+                         const std::optional<std::string> &daemon_pid = std::nullopt,
                          uint32_t logging_mask = LOG_ALL);
 
     /**
