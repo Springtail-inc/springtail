@@ -511,6 +511,11 @@ namespace springtail {
     {
         uint64_t old_eid = page->key().second;
 
+        // if there was no previous page, nothing to invalidate
+        if (old_eid == constant::UNKNOWN_EXTENT) {
+            return;
+        }
+
         // get the original page to use for index updates
         auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid);
 
