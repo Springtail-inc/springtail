@@ -56,7 +56,7 @@ namespace springtail {
 
     void springtail_init(const std::optional<std::string> &log_filename,
                          const std::optional<std::string> &daemon_pid,
-                         uint32_t logging_mask)
+                         const std::optional<uint32_t> &logging_mask)
     {
         // initialize the backtrace signal handling
         init_exception();
