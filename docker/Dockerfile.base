@@ -23,12 +23,14 @@ RUN sed -i -e"s/^#listen_addresses =.*$/listen_addresses = '*'/" $conf_file
 RUN echo "host    all    all    0.0.0.0/0    md5" >> $hba_file
 
 # Configure logs
+RUN sed -i -e"s/^#log_destination = .*$/log_destination = 'stderr'/" $conf_file
 RUN sed -i -e"s/^#logging_collector = off.*$/logging_collector = on/" $conf_file
-RUN sed -i -e"s/^#log_directory = 'pg_log'.*$/log_directory = '\/var\/log\/postgresql'/" $conf_file
+RUN sed -i -e"s/^#log_directory = .*$/log_directory = '\/var\/log\/postgresql'/" $conf_file
 RUN sed -i -e"s/^#log_filename = 'postgresql-\%Y-\%m-\%d_\%H\%M\%S.log'.*$/log_filename = 'postgresql_\%a.log'/" $conf_file
 RUN sed -i -e"s/^#log_file_mode = 0600.*$/log_file_mode = 0644/" $conf_file
 RUN sed -i -e"s/^#log_truncate_on_rotation = off.*$/log_truncate_on_rotation = on/" $conf_file
 RUN sed -i -e"s/^#wal_level = replica.*$/wal_level = logical/" $conf_file
+RUN sed -i -e"s/^#log_min_messages = .*$/log_min_messages = debug1/" $conf_file
 RUN echo "springtail_fdw.config_file_path = '/tmp/springtail/system.json'" >> $conf_file"
 
 # setup ssh

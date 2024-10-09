@@ -49,7 +49,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        springtail_init();
+        springtail_init("pg_fdw", std::nullopt, LOG_ALL);
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
 

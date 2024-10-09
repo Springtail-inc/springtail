@@ -96,11 +96,22 @@ def cleanup_db_instance(props):
     if not check_postgres_running():
         start_postgres()
 
+    # see if the replication slot exists and drop it on the target database
+    # if we don't do this and the slot exists, we can't drop the database
+    try:
+        # Connect to the database, may fail if it doesn't exist
+        conn = connect_db_instance(props, db_name)
+        slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+        if slot_exists:
+            execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+    except Exception as e:
+        pass
+
     # Connect to the database ("postgres" database)
     conn = connect_db_instance(props)
 
     # Drop and recreate the database
-    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)};")
+    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
     execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
 
     conn.close()
@@ -157,9 +168,6 @@ def install_fdw(build_dir):
     if is_linux:
         run_command('sudo', ['cp', os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.so'), lib_dir])
     else:
-    shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
-    shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
-
         shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
 
         # create the debug symbols
@@ -381,6 +389,25 @@ def check_config(props):
             raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
 
 
+def check_log_writable(props):
+    # Get the log path and check the parent directory is writable
+    sys_config = props.get_system_config()
+    log_path = os.path.dirname(sys_config['logging']['log_path'])
+    # Check parent directory of log path is writable
+    print(f"Checking log path {log_path} is writable...")
+    if not os.access(log_path, os.W_OK) or not (os.stat(log_path).st_mode & 0o0007 == 0o0007):
+        # set writable by owner, group, and others
+        print(f"Setting log path {log_path} to be writable by owner, group, and others.")
+        os.chmod(log_path, 0o777)
+
+
+def fixup_perms(mount_path):
+    """Fix up permissions for the given mount path."""
+    username = os.environ.get('USER') or os.environ.get('USERNAME')
+    # Fix up permissions for the given mount path
+    run_command('sudo', ['chown', '-R', f'{username}:{username}', mount_path])
+
+
 def start(args):
     """Main function to start the Springtail system."""
     # Get the config file and build directory from the command line arguments
@@ -434,9 +461,12 @@ def start(args):
     print("\nWaiting for running state...")
     wait_for_running(props)
 
+    check_log_writable(props)
+
     # import the fdw schemas
     print("\nImporting foreign data wrapper schemas...")
     fdw_import(props, build_dir, config_file)
+    #fixup_perms(props.get_mount_path())
 
     print("\nSpringtail system started successfully.")
 
