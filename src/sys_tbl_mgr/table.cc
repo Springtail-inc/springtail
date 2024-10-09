@@ -43,8 +43,11 @@ namespace springtail {
         // construct the table's data directory
         _table_dir = _get_table_dir(table_base, db_id, table_id, metadata.snapshot_xid);
 
-        // make sure that the table directory exists
-        std::filesystem::create_directories(_table_dir);
+        // check if the table directory exists; if not, table is considered vacant/empty
+        if (!std::filesystem::exists(_table_dir)) {
+            _primary_index = nullptr;
+            return;
+        }
 
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
@@ -111,6 +114,11 @@ namespace springtail {
     uint64_t
     Table::primary_lookup(TuplePtr tuple)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return constant::UNKNOWN_EXTENT; // indicates that data should be appended
+        }
+
         // always returns an iterator to a leaf entry where the key *could* exist in the table
         auto &&i = _primary_index->lower_bound(tuple, true);
         if (i == _primary_index->end()) {
@@ -138,6 +146,11 @@ namespace springtail {
     Table::Iterator
     Table::lower_bound(TuplePtr search_key)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end();
+        }
+
         // find the extent that could contain the lower_bound() key
         auto &&i = _primary_index->lower_bound(search_key);
         if (i == _primary_index->end()) {
@@ -159,6 +172,11 @@ namespace springtail {
     Table::Iterator
     Table::upper_bound(TuplePtr search_key)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end();
+        }
+
         // find the extent that could contain the upper_bound() key
         auto &&i = _primary_index->upper_bound(search_key);
         if (i == _primary_index->end()) {
@@ -180,6 +198,11 @@ namespace springtail {
     Table::Iterator
     Table::inverse_lower_bound(TuplePtr search_key)
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end();
+        }
+
         // if the priamry index is empty, return end()
         if (_primary_index->empty()) {
             return end();
@@ -209,6 +232,12 @@ namespace springtail {
     Table::Iterator
     Table::begin()
     {
+        // check if the table is vacant
+        if (_primary_index == nullptr) {
+            return end();
+        }
+
+        // check if the table is empty
         auto &&index_i = _primary_index->begin();
         if (index_i == _primary_index->end()) {
             return end();
