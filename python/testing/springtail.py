@@ -445,8 +445,7 @@ def stop():
     config_file = os.path.abspath(config_file)
 
     # Load the system properties from the system.json file
-    # also does a load redis from the system file
-    props = Properties(config_file, True)
+    props = Properties(config_file, False)
 
     # Stop the daemons
     print("\nStopping daemons...")

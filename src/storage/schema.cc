@@ -327,7 +327,7 @@ namespace springtail {
                 break;
 
             case (SchemaUpdateType::NULLABLE_CHANGE):
-                // note: if the column was made non-null with a default value, the we needed to
+                // note: if the column was made non-null with a default value, then we needed to
                 //       perform a full sync to populate the column data, so we should never hit
                 //       this path
                 assert(update.nullable);
