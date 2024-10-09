@@ -43,6 +43,7 @@ namespace springtail::gc {
             auto itr = _completed_xids.find(db_id);
             if (itr == _completed_xids.end()) {
                 completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
+                _completed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
             }
@@ -102,6 +103,7 @@ namespace springtail::gc {
 
                 // perform a commit to the XidMgr
                 _xid_mgr->commit_xid(db_id, completed_xid, true);
+                _completed_xids[db_id] = completed_xid;
 
                 // notify the FDW of the schema changes
                 _redis_ddl.commit_ddl(db_id, completed_xid, ddls);

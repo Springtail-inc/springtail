@@ -284,105 +284,6 @@ namespace springtail {
         return fields;
     }
  
-    std::shared_ptr<Field>
-    VirtualSchema::_make_const(SchemaType type,
-                               const std::string &value)
-    {
-        switch(type) {
-        case(SchemaType::TEXT):
-            return std::make_shared<ConstTypeField<std::string>>(value);
-
-        case(SchemaType::UINT64):
-            return std::make_shared<ConstTypeField<uint64_t>>(std::stoull(value, nullptr, 0));
-
-        case(SchemaType::INT64):
-            return std::make_shared<ConstTypeField<int64_t>>(std::stoll(value, nullptr, 0));
-
-        case(SchemaType::UINT32):
-            return std::make_shared<ConstTypeField<uint32_t>>(std::stoul(value, nullptr, 0));
-
-        case(SchemaType::INT32):
-            return std::make_shared<ConstTypeField<int32_t>>(std::stol(value, nullptr, 0));
-
-        case(SchemaType::UINT16):
-            return std::make_shared<ConstTypeField<uint16_t>>(static_cast<uint16_t>(std::stoul(value, nullptr, 0)));
-
-        case(SchemaType::INT16):
-            return std::make_shared<ConstTypeField<int16_t>>(static_cast<uint16_t>(std::stoi(value, nullptr, 0)));
-
-        case(SchemaType::UINT8):
-            return std::make_shared<ConstTypeField<uint8_t>>(static_cast<uint8_t>(std::stoul(value, nullptr, 0)));
-
-        case(SchemaType::INT8):
-            return std::make_shared<ConstTypeField<int8_t>>(static_cast<int8_t>(std::stoi(value, nullptr, 0)));
-
-        case(SchemaType::BOOLEAN):
-            // note: might need a more robust way to check the default value
-            return std::make_shared<ConstTypeField<bool>>(value == "true");
-
-        case(SchemaType::FLOAT64):
-            return std::make_shared<ConstTypeField<double>>(std::stod(value));
-
-        case(SchemaType::FLOAT32):
-            return std::make_shared<ConstTypeField<float>>(std::stof(value));
-
-        case(SchemaType::BINARY):
-            // note: this will currently cause two copies of the default value
-            return std::make_shared<ConstTypeField<std::vector<char>>>(std::vector<char>(value.begin(), value.end()));
-
-        default:
-            throw SchemaError(fmt::format("Unsupported SchemaType: {}", static_cast<uint8_t>(type)));
-        }
-    }
-
-    std::shared_ptr<Field>
-    VirtualSchema::_make_default_value(std::shared_ptr<Field> field,
-                                       const std::string &fallback)
-    {
-        switch(field->get_type()) {
-        case(SchemaType::TEXT):
-            return std::make_shared<DefaultValueField<std::string>>(field, fallback);
-
-        case(SchemaType::UINT64):
-            return std::make_shared<DefaultValueField<uint64_t>>(field, std::stoull(fallback, nullptr, 0));
-
-        case(SchemaType::INT64):
-            return std::make_shared<DefaultValueField<int64_t>>(field, std::stoll(fallback, nullptr, 0));
-
-        case(SchemaType::UINT32):
-            return std::make_shared<DefaultValueField<uint32_t>>(field, std::stoul(fallback, nullptr, 0));
-
-        case(SchemaType::INT32):
-            return std::make_shared<DefaultValueField<int32_t>>(field, std::stol(fallback, nullptr, 0));
-
-        case(SchemaType::UINT16):
-            return std::make_shared<DefaultValueField<uint16_t>>(field, static_cast<uint16_t>(std::stoul(fallback, nullptr, 0)));
-
-        case(SchemaType::INT16):
-            return std::make_shared<DefaultValueField<int16_t>>(field, static_cast<uint16_t>(std::stoi(fallback, nullptr, 0)));
-        case(SchemaType::UINT8):
-            return std::make_shared<DefaultValueField<uint8_t>>(field, static_cast<uint8_t>(std::stoul(fallback, nullptr, 0)));
-        case(SchemaType::INT8):
-            return std::make_shared<DefaultValueField<int8_t>>(field, static_cast<int8_t>(std::stoi(fallback, nullptr, 0)));
-
-        case(SchemaType::BOOLEAN):
-            // note: might need a more robust way to check the default value
-            return std::make_shared<DefaultValueField<bool>>(field, fallback == "true");
-
-        case(SchemaType::FLOAT64):
-            return std::make_shared<DefaultValueField<double>>(field, std::stod(fallback));
-
-        case(SchemaType::FLOAT32):
-            return std::make_shared<DefaultValueField<float>>(field, std::stof(fallback));
-
-        case(SchemaType::BINARY):
-            return std::make_shared<DefaultValueField<std::vector<char>>>(field, std::vector<char>(fallback.begin(), fallback.end()));
-
-        default:
-            throw SchemaError(fmt::format("Unsupported SchemaType: {}", static_cast<uint8_t>(field->get_type())));
-        }
-    }
-
     VirtualSchema::VirtualSchema(const SchemaMetadata &meta)
     {
         std::map<uint32_t, std::string> name_map;
@@ -401,19 +302,19 @@ namespace springtail {
             // apply the change to the field set based on the kind of update being performed
             switch(update.update_type) {
             case (SchemaUpdateType::NEW_COLUMN):
-                if (update.default_value) {
-                    _field_map[update.name] = _make_const(update.type, *(update.default_value));
-                } else {
-                    _field_map[update.name] = std::make_shared<ConstNullField>(update.type);
-                }
+                // note: if the new column was not nullable then we needed to perform a full sync to
+                //       populate the column data, so we should never hit this path
+                assert(update.nullable);
 
+                _field_map[update.name] = std::make_shared<ConstNullField>(update.type);
                 name_map[update.position] = update.name;
                 break;
+
             case (SchemaUpdateType::REMOVE_COLUMN):
                 _field_map.erase(update.name);
-
                 name_map.erase(update.position);
                 break;
+
             case (SchemaUpdateType::NAME_CHANGE):
                 {
                     auto &&i = _field_map.find(name_map[update.position]);
@@ -424,12 +325,14 @@ namespace springtail {
                     name_map[update.position] = update.name;
                 }
                 break;
+
             case (SchemaUpdateType::NULLABLE_CHANGE):
-                if (!update.nullable) {
-                    auto old_field = _field_map[update.name];
-                    _field_map[update.name] = _make_default_value(old_field, *(update.default_value));
-                }
+                // note: if the column was made non-null with a default value, the we needed to
+                //       perform a full sync to populate the column data, so we should never hit
+                //       this path
+                assert(update.nullable);
                 break;
+
             default:
                 // note: we shouldn't see any other update types in the schema history
                 assert(0);
