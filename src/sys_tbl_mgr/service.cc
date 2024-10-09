@@ -409,7 +409,7 @@ namespace springtail::sys_tbl_mgr {
     Service::get_target_schema(GetSchemaResponse& _return,
                                const GetTargetSchemaRequest &request)
     {
-        SPDLOG_INFO("got get_target_schema()");
+        SPDLOG_INFO("got get_target_schema() -- {}, {}", request.access_xid, request.target_xid);
 
         boost::shared_lock lock(_read_mutex);
 
@@ -696,7 +696,8 @@ namespace springtail::sys_tbl_mgr {
 
         // first read the columns from the schemas table
         XidLsn &&read_xid = _get_read_xid(db_id);
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{}", table_id, access_xid.xid, access_xid.lsn);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Read schema info {}@{}:{} for @{}:{}",
+                            table_id, access_xid.xid, access_xid.lsn, target_xid.xid, target_xid.lsn);
 
         // note: we always try to read data from disk up to the access_xid in case some of the data
         //       past the read_xid has already made it to disk
@@ -723,12 +724,16 @@ namespace springtail::sys_tbl_mgr {
         auto &&history = _read_schema_history(db_id, table_id, access_xid, target_xid);
         info->history.insert(info->history.end(), history.begin(), history.end());
 
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from disk: {}", info->history.size());
+
         // if the target is ahead of the guaranteed on-disk data then don't need to check the in-memory data
         XidLsn xid = std::max(access_xid, read_xid);
         if (target_xid > xid) {
             // read any history from the cache
             auto &&history = _get_schema_cache_history(db_id, table_id, xid, target_xid);
             info->history.insert(info->history.end(), history.begin(), history.end());
+
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from memory: {}", info->history.size());
         }
 
         return info;
@@ -1126,19 +1131,25 @@ namespace springtail::sys_tbl_mgr {
             for (auto &new_entry : new_schema) {
                 auto &&old_i = lookup.find(new_entry.position);
                 if (old_i == lookup.end()) {
-                    update.column = new_entry;
+                    // if we added a column with a default value, then we need to resync the entire
+                    // table to get the new column data
+                    if (new_entry.__isset.default_value) {
+                        ddl["action"] = "resync";
+                        update.update_type = static_cast<int8_t>(SchemaUpdateType::RESYNC);
+                    } else {
+                        // generate an ADD_COLUMN update
+                        update.update_type = static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN);
+                        update.exists = true;
+                        update.column = new_entry;
 
-                    // generate an ADD_COLUMN update
-                    update.update_type = static_cast<int8_t>(SchemaUpdateType::NEW_COLUMN);
-                    update.exists = true;
-
-                    // set the DDL statement
-                    ddl["action"] = "col_add";
-                    ddl["column"]["name"] = update.column.name;
-                    ddl["column"]["type"] = update.column.pg_type;
-                    ddl["column"]["nullable"] = update.column.is_nullable;
-                    if (update.column.__isset.default_value) {
-                        ddl["column"]["default"] = update.column.default_value;
+                        // set the DDL statement
+                        ddl["action"] = "col_add";
+                        ddl["column"]["name"] = update.column.name;
+                        ddl["column"]["type"] = update.column.pg_type;
+                        ddl["column"]["nullable"] = update.column.is_nullable;
+                        if (update.column.__isset.default_value) {
+                            ddl["column"]["default"] = update.column.default_value;
+                        }
                     }
 
                     return update;

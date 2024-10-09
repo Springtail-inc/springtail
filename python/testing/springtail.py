@@ -458,6 +458,22 @@ def status():
         print("Postgres is not running.")
 
 
+def stop():
+    """Function to stop the Springtail system."""
+    # Get the config file and build directory from the command line arguments
+    config_file = args.config_file
+
+    # get absolute path for config_file
+    config_file = os.path.abspath(config_file)
+
+    # Load the system properties from the system.json file
+    props = Properties(config_file, False)
+
+    # Stop the daemons
+    print("\nStopping daemons...")
+    stop_daemons(props.get_pid_path())
+
+
 def parse_arguments():
     # Create the argument parser
     parser = argparse.ArgumentParser(description="Process command-line arguments for config file and build directory.")
@@ -490,7 +506,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.kill:
-            stop_daemons()
+            stop()
             sys.exit(0)
 
         if args.start:
