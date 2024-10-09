@@ -38,7 +38,7 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 
 def get_lib_ext():
     """Get the library extension for the current platform."""
-    if is_linux:
+    if is_linux():
         return 'so'
     return 'dylib'
 
@@ -154,7 +154,7 @@ def install_fdw(build_dir):
     # get parent directory of build_dir
     parent_dir = os.path.dirname(build_dir)
 
-    if is_linux:
+    if is_linux():
         run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw--1.0.sql')), share_dir])
         run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw.control')), share_dir])
     else:
@@ -165,7 +165,7 @@ def install_fdw(build_dir):
     lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.' + get_lib_ext())
     print(f"Copying shared library to the lib directory: {lib_dir}")
 
-    if is_linux:
+    if is_linux():
         run_command('sudo', ['cp', os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.so'), lib_dir])
     else:
         shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)

@@ -113,6 +113,12 @@ namespace springtail {
              * Compares two iterators for equality.
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
+                if (a._btree == nullptr && b._btree == nullptr) {
+                    return true;
+                } else if (a._btree == nullptr || b._btree == nullptr) {
+                    return false;
+                }
+
                 return (a._btree_i == b._btree_i &&
                         (a._btree_i == a._btree->end() || a._page_i == b._page_i));
             }
@@ -123,6 +129,13 @@ namespace springtail {
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
         private:
+            /** Specifically for the end() iterator of a vacant table. */
+            Iterator(const Table *table)
+                : _table(table),
+                  _btree(nullptr),
+                  _page(nullptr)
+            { }
+
             /** Specifically for the end() iterator. */
             Iterator(const Table *table, BTreePtr btree)
                 : _table(table),
@@ -224,6 +237,10 @@ namespace springtail {
          */
         Iterator end()
         {
+            // check for vacant table
+            if (_primary_index == nullptr) {
+                return Iterator(this);
+            }
             return Iterator(this, _primary_index);
         }
 
