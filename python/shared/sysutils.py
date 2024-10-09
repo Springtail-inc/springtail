@@ -42,8 +42,8 @@ def stop_daemons(pid_path):
 def check_daemons_running():
     """Check if the daemons are running."""
     # Check if the daemons are running
-    pids = running_pids(DAEMONS)
-    return len(pids) == len(DAEMONS)
+    (pids, not_running) = running_pids(DAEMONS)
+    return (len(pids) == len(DAEMONS), not_running)
 
 
 def clean_fs(mount_path, log_path):
@@ -63,7 +63,7 @@ def clean_fs(mount_path, log_path):
 def check_postgres_running():
     """Check if the postgres process is running and start it if it is not."""
     # check if postgres is running
-    pids = running_pids(['postgres'])
+    pids = running_pids(['postgres'])[0]
     return len(pids) > 0
 
 
@@ -82,7 +82,7 @@ def start_postgres():
     pids = []
     while (len(pids) == 0 and iters < 10):
         time.sleep(1)
-        pids = running_pids(['postgres'])
+        pids = running_pids(['postgres'])[0]
         iters = iters + 1
 
     if iters == 10 and len(pids) == 0:
@@ -99,13 +99,14 @@ def stop_postgres():
         run_command('brew', ['services', 'stop', POSTGRES])
     elif system == 'Linux':
         run_command('sudo', ['service', 'postgresql', 'stop'])
+    time.sleep(1)
 
-    pids = running_pids(['postgres'])
+    pids = running_pids(['postgres'])[0]
     if len(pids) > 0:
         print("Failed to stop the postgres cleanly, killing the process...")
         kill_processes(['postgres'])
 
-    pids = running_pids(['postgres'])
+    pids = running_pids(['postgres'])[0]
     if len(pids) > 0:
         raise Exception("Failed to stop the postgres process, timedout")
 
@@ -113,7 +114,7 @@ def stop_postgres():
 def start_daemons(build_dir, restart=True):
     """Start the daemons."""
     # Check if the daemons are already running
-    if check_daemons_running():
+    if check_daemons_running()[0]:
         if restart:
             print("Stopping all daemons...")
             stop_daemons()
@@ -157,9 +158,24 @@ def start_daemons(build_dir, restart=True):
     time.sleep(1)
 
     # check if all daemons are running
-    if not check_daemons_running():
+    (all_running, not_running) = check_daemons_running()
+    if not all_running:
+        for name in not_running:
+            print(f"Daemon {name} failed to start")
         raise Exception("Failed to start all daemons")
 
 def running_daemons():
     """Return a list of process IDs for the running daemons."""
-    return running_pids(DAEMONS)
+    return running_pids(DAEMONS)[0]
+
+def grep_line_in_file(file_path, search_line):
+    """Search for a line in a file."""
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                if search_line in line:
+                    return True
+        return False
+    except FileNotFoundError:
+        print(f"The file {file_path} was not found.")
+        return False

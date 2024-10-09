@@ -29,7 +29,9 @@ from sysutils import (
     stop_postgres,
     start_daemons,
     running_daemons,
-    is_linux)
+    check_daemons_running,
+    is_linux,
+    grep_line_in_file)
 
 # Constants
 FDW_SERVER_NAME = 'springtail_fdw_server'
@@ -41,6 +43,7 @@ def get_lib_ext():
     if is_linux():
         return 'so'
     return 'dylib'
+    
 
 
 def cleanup_filesystem(props):
@@ -472,15 +475,15 @@ def start(args):
 
 
 def status():
+    """Function to check the status of the Springtail system."""
     print("Checking status...")
+    (all_running, not_running) = check_daemons_running()
 
-    procs = running_daemons()
-    if len(procs) == 0:
-        print("No daemons running.")
+    if all_running:
+        print("All daemons are running.")
     else:
-        print("Daemons running:")
-        for proc in procs:
-            print(f"  {proc['name']} with PID: {proc['pid']}")
+        for name in not_running:
+            print(f"Daemon {name} is not running.")
 
     if check_postgres_running():
         print("Postgres is running.")

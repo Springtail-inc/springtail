@@ -849,8 +849,8 @@ namespace springtail {
             json["position"].get_to(column.position);
             json["is_generated"].get_to(column.is_generated);
 
-            if (!json["pk_pos"].is_null()) {
-                json["pk_pos"].get_to(column.pk_position);
+            if (!json["pkey_pos"].is_null()) {
+                json["pkey_pos"].get_to(column.pk_position);
             } else {
                 column.pk_position = -1;
             }
