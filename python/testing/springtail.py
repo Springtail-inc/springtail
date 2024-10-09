@@ -28,12 +28,19 @@ from sysutils import (
     start_postgres,
     stop_postgres,
     start_daemons,
-    running_daemons)
+    running_daemons,
+    is_linux)
 
 # Constants
 FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
 FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
+
+def get_lib_ext():
+    """Get the library extension for the current platform."""
+    if is_linux:
+        return 'so'
+    return 'dylib'
 
 
 def cleanup_filesystem(props):
@@ -122,7 +129,7 @@ def install_fdw(build_dir):
     """Install the foreign data wrapper extension."""
     # Get the share and lib directories
     share_dir = run_command('pg_config', ['--sharedir'])
-    lib_dir = run_command('pg_config', ['--libdir'])
+    lib_dir = run_command('pg_config', ['--pkglibdir'])
 
     build_dir = os.path.abspath(build_dir)
     print (f"Build dir: {build_dir}")
@@ -133,17 +140,31 @@ def install_fdw(build_dir):
     # copy the extension files to the share directory
     share_dir = os.path.join(share_dir.strip(), 'extension')
     print(f"Copying extension files to the share directory: {share_dir}")
-    shutil.copy(os.path.join(build_dir, '../src/pg_fdw/springtail_fdw--1.0.sql'), share_dir)
-    shutil.copy(os.path.join(build_dir, '../src/pg_fdw/springtail_fdw.control'), share_dir)
+    # get parent directory of build_dir
+    parent_dir = os.path.dirname(build_dir)
+
+    if is_linux:
+        run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw--1.0.sql')), share_dir])
+        run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw.control')), share_dir])
+    else:
+        shutil.copy(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw--1.0.sql'), share_dir)
+        shutil.copy(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw.control'), share_dir)
 
     # copy the shared library to the lib directory
-    lib_dir = os.path.join(lib_dir.strip(), 'postgresql/springtail_fdw.dylib')
+    lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.' + get_lib_ext())
     print(f"Copying shared library to the lib directory: {lib_dir}")
+
+    if is_linux:
+        run_command('sudo', ['cp', os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.so'), lib_dir])
+    else:
+    shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
     shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
 
-    # create the debug symbols
-    print(f"Creating debug symbols for the shared library: {lib_dir}")
-    run_command('dsymutil', [lib_dir])
+        shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
+
+        # create the debug symbols
+        print(f"Creating debug symbols for the shared library: {lib_dir}")
+        run_command('dsymutil', [lib_dir])
 
     # start postgres
     print("Starting postgres...")
@@ -168,7 +189,8 @@ def start_replication(props, build_dir):
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
     # Trigger scripts
-    trigger_sql = os.path.join(build_dir, '../scripts/triggers.sql')
+    parent_dir = os.path.dirname(build_dir)
+    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
     execute_sql_script(conn, trigger_sql)
 
     # Close the connection
@@ -348,15 +370,15 @@ def check_config(props):
     # Check that the primary DB and FDW are not on the same host and port
     # if fdw_prefix is not set
     if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
-        raise Exception("Primary DB and FDW cannot be on the same host and port.")
+        raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
 
     # Check that the pid path exists; if not try to create it
     pid_path = props.get_pid_path()
     if not os.path.exists(pid_path):
         try:
-            os.makedirs(pid_path, exist_ok=True)
+            run_command('sudo', ['mkdir', '-p', pid_path])
         except Exception as e:
-            raise Exception(f"Failed to create pid path: {pid_path}")
+            raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
 
 
 def start(args):

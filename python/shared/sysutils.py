@@ -14,6 +14,10 @@ DAEMONS = [
 
 POSTGRES = 'postgresql@16'
 
+def is_linux():
+    """Check if the system is Linux."""
+    return platform.system() == 'Linux'
+
 def stop_daemons(pid_path):
     """Stop the daemons."""
     # Stop the daemons

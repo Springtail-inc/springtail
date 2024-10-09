@@ -3,20 +3,17 @@ FROM ubuntu:noble
 RUN apt-get update && apt-get install -y \
     lsb-release wget software-properties-common gnupg \
     build-essential autoconf libelf-dev \
-    bison pkg-config flex libdw-dev \
+    bison pkg-config flex libdw-dev openssh-server \
     libdwarf-dev binutils-dev linux-libc-dev cmake \
-    git curl zip unzip tar ninja-build python3 postgresql \
-    sudo vim ca-certificates gpg emacs-nox gcc-14 g++-14 \
+    git curl zip unzip tar ninja-build python3 libbsd-dev \
+    redis-server postgresql-16 postgresql-contrib-16 \
+    sudo vim ca-certificates gpg emacs-nox gcc-14 g++-14 gdb \
+    python3-pip python3-psycopg2 python3-psutil python3-redis \
     && apt-get clean autoclean \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/{apt,cache,log,dpkg}
 
-RUN apt-get install -y libbsd-dev
-
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
-
-# install postgresql
-RUN apt install -y postgresql-16 postgresql-contrib-16
 
 ARG conf_file=/etc/postgresql/16/main/postgresql.conf
 ARG hba_file=/etc/postgresql/16/main/pg_hba.conf
@@ -31,27 +28,41 @@ RUN sed -i -e"s/^#log_directory = 'pg_log'.*$/log_directory = '\/var\/log\/postg
 RUN sed -i -e"s/^#log_filename = 'postgresql-\%Y-\%m-\%d_\%H\%M\%S.log'.*$/log_filename = 'postgresql_\%a.log'/" $conf_file
 RUN sed -i -e"s/^#log_file_mode = 0600.*$/log_file_mode = 0644/" $conf_file
 RUN sed -i -e"s/^#log_truncate_on_rotation = off.*$/log_truncate_on_rotation = on/" $conf_file
+RUN sed -i -e"s/^#wal_level = replica.*$/wal_level = logical/" $conf_file
+RUN echo "springtail_fdw.config_file_path = '/tmp/springtail/system.json'" >> $conf_file"
 
-# install ssh
-RUN apt update && apt install -y openssh-server
+# setup ssh
 RUN sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 
 # create dev user
 RUN useradd -m -s /bin/bash dev
 RUN echo "dev:dev" | chpasswd && adduser dev sudo
-
 RUN touch /home/dev/.bashrc
 RUN echo "export ZIC=true" >> /home/dev/.bashrc
 RUN echo "export VCPKG_FORCE_SYSTEM_BINARIES=1" >> /home/dev/.bashrc
 RUN chown dev /home/dev/.bashrc
+RUN mkdir -p /home/dev/debug
+RUN mkdir -p /home/dev/external
+RUN chown dev /home/dev/debug
+RUN chown dev /home/dev/external
 
-# add psql user
+RUN echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# run services at startup
+RUN systemctl enable postgresql.service
+RUN systemctl enable redis-server.service
+
 RUN service postgresql start
-#RUN sudo -u postgres psql -h localhost -d postgres -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN;"
+RUN service redis-server start
 
-ENV ZIC=true
-ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+# Copy the entrypoint script to the container
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN service ssh start
-EXPOSE 22
-CMD ["/usr/sbin/sshd","-D"]
+# Make the entrypoint script executable
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Expose PostgreSQL, Redis, and SSH ports
+EXPOSE 5432 6379 22
+
+# Set the entrypoint script as the container's entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
