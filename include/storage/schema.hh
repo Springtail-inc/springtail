@@ -296,22 +296,6 @@ namespace springtail {
         /** Column order of the virtual schema. */
         std::vector<std::string> _column_order;
 
-    private:
-        /**
-         * Helper function to construct a field with a constant value.
-         * @param type The type of the column data.
-         * @param value The constant value to return, stored as a string.
-         */
-        std::shared_ptr<Field> _make_const(SchemaType type, const std::string &value);
-
-        /**
-         * Helper function to construct a field that returns a provided fallback value if the
-         * underlying field is null.  Otherwise returns the value of the underlying field.
-         * @param field The underlying field.
-         * @param fallback The fallback value, stored as a string.
-         */
-        std::shared_ptr<Field> _make_default_value(std::shared_ptr<Field> field, const std::string &fallback);
-
     public:
         /**
          * Constructor to populate the field map for this schema based on the provided base schema and schema updates.

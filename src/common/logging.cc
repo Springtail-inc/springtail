@@ -66,9 +66,8 @@ namespace logging {
         Json::get_to<std::string>(props, "log_level", log_level, "trace");
         Json::get_to<std::string>(props, "log_pattern", pattern, "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
-        // check if log_module is set in properties, if so override
-        // mask passed in
-        if (props.contains("log_modules")) {
+        // if the mask wasn't passed in then check if log_module is set in properties
+        if (!module_mask_opt && props.contains("log_modules")) {
             std::set<std::string> log_modules;
             // extract log_module array from properties
             Json::get_to<std::set<std::string>>(props, "log_modules", log_modules);
