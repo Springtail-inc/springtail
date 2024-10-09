@@ -109,9 +109,6 @@ namespace springtail
         /** query connection; issuing a query on stream conn will stop the copy */
         std::unique_ptr<LibPqConnection> _connection;
 
-        /** streaming socket */
-        int _streaming_socket;
-
         /** buffer allocated for copy data */
         char _copy_buffer[COPY_BUFFER_SIZE];
         int _copy_buffer_length = 0;

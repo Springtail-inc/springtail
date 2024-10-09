@@ -2,6 +2,12 @@
 #include <iostream>
 #include <climits>
 #include <optional>
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <errno.h>
+
 #include <fmt/core.h>
 
 #include <pg_repl/libpq_connection.hh>
@@ -9,6 +15,12 @@
 
 #include <common/logging.hh>
 #include <common/dns_resolver.hh>
+
+extern "C" {
+    // libpq functions; defined internally
+    extern ssize_t pqsecure_read(PGconn *conn, const void *ptr, size_t len);
+    extern ssize_t pqsecure_write(PGconn *conn, const void *ptr, size_t len);
+}
 
 namespace springtail {
 
@@ -513,6 +525,195 @@ namespace springtail {
         return PQsocket(_connection);
     }
 
+    bool LibPqConnection::is_ssl()
+    {
+        if (_connection == nullptr) {
+            throw PgNotConnectedError();
+        }
+        return (PQsslInUse(_connection) == 1);  // 1 = true, 0 = false
+    }
+
+    int LibPqConnection::wait_until_readable(int timeout_sec)
+    {
+        fd_set readfds;
+        struct timeval timeout;
+        struct timeval *tv;
+        int sockfd = socket();
+
+        while(true) {
+            // Initialize the write file descriptor set
+            FD_ZERO(&readfds);
+            FD_SET(sockfd, &readfds);
+
+            // Set the timeout (timeout_sec seconds, 0 microseconds)
+            timeout.tv_sec = timeout_sec;
+            timeout.tv_usec = 0;
+
+            if (timeout_sec == -1) {
+                tv = NULL;
+            } else {
+                tv = &timeout;
+            }
+
+            // Wait until the socket is readable or timeout occurs
+            int result = select(sockfd + 1, &readfds, NULL, NULL, tv);
+
+            if (result > 0 && FD_ISSET(sockfd, &readfds)) {
+                // Socket is readable
+                return 1;
+            }
+
+            if (result == 0) {
+                // Timeout occurred
+                return 0;
+            }
+
+            if (result == -1 && errno != EINTR) {
+                // Error occurred
+                return result;
+            }
+        }
+
+        return 0;
+    }
+
+    int LibPqConnection::wait_until_writable(int timeout_sec)
+    {
+        fd_set writefds;
+        struct timeval timeout;
+        struct timeval *tv;
+        int sockfd = socket();
+
+        while(true) {
+            // Initialize the write file descriptor set
+            FD_ZERO(&writefds);
+            FD_SET(sockfd, &writefds);
+
+            // Set the timeout (timeout_sec seconds, 0 microseconds)
+            timeout.tv_sec = timeout_sec;
+            timeout.tv_usec = 0;
+
+            if (timeout_sec == -1) {
+                tv = NULL;
+            } else {
+                tv = &timeout;
+            }
+
+            // Wait until the socket is writable or timeout occurs
+            int result = select(sockfd + 1, NULL, &writefds, NULL, tv);
+
+            if (result > 0 && FD_ISSET(sockfd, &writefds)) {
+                // Socket is writable
+                return 1;
+            }
+
+            if (result == 0) {
+                // Timeout occurred
+                return 0;
+            }
+
+            if (result == -1 && errno != EINTR) {
+                // Error occurred
+                return result;
+            }
+        }
+
+        return 0;
+    }
+
+    ssize_t LibPqConnection::read(char *buf, size_t count, bool async)
+    {
+        if (_connection == nullptr) {
+            throw PgNotConnectedError();
+        }
+
+        size_t off = 0;
+
+        while (off < count) {
+            // note this uses an internal interface
+            ssize_t r = pqsecure_read(_connection, buf + off, count - off);
+
+            // incr offset
+            if (r > 0) {
+                off += r;
+                continue;
+            }
+
+            if (r == 0) {
+                // typically this would be eof, but this is complicated, see
+                // pqReadData() in https://doxygen.postgresql.org/fe-misc_8c_source.html
+                if (errno == EPIPE || errno == ECONNRESET || errno == ECONNABORTED ||
+                    errno == EHOSTDOWN || errno == EHOSTUNREACH || errno == ENETDOWN ||
+                    errno == ENETRESET || errno == ENETUNREACH || errno == ETIMEDOUT) {
+                    errno = ECONNRESET;
+                    return -1;
+                }
+                if (is_ssl()) {
+                    // if ssl, then eof is not an error
+                    return 0;
+                }
+
+                // poll to see if there is data (timeout of 0)
+                int rc = wait_until_readable(0);
+                if (rc < 0) {
+                    // on error return econnreset
+                    errno = ECONNRESET;
+                    return -1;
+                } else if (rc > 0) {
+                    // data is available, go around again
+                    continue;
+                } else if (async) {
+                    assert (rc == 0);
+                    // rc == 0, no data available, return 0 if async;
+                    // otherwise fall through and wait for data
+                    return 0;
+                }
+            }
+
+            // if async, or error and error is not a would block or again, then return error
+            if (async || r < 0 || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
+                return r;
+            }
+
+            // not async, fail through; block until socket is readable
+            r = wait_until_readable();
+            if (r < 0) {
+                return r;
+            }
+        }
+        return off;
+    }
+
+    ssize_t LibPqConnection::write(const char *buf, size_t count, bool async)
+    {
+        if (_connection == nullptr) {
+            throw PgNotConnectedError();
+        }
+
+        size_t off = 0;
+
+        while (off < count) {
+            // note this uses an internal interface
+            ssize_t r = pqsecure_write(_connection, buf + off, count - off);
+            // if async, or error and error is not a would block or again, then return error
+            if (async || r < 0 || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
+                return r;
+            }
+
+            // incr offset
+            if (r > 0) {
+                off += r;
+                continue;
+            }
+
+            // block until socket is writable
+            r = wait_until_writable();
+            if (r < 0) {
+                return r;
+            }
+        }
+        return off;
+    }
 
     /**
      * @brief Get raw value from result; use with care, freed by clear()
