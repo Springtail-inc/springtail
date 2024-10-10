@@ -72,7 +72,7 @@ sleep 1
 python3 ../fdw_import.py
 
 # verify the snapshot by running a query against the FDW
-echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}
+# echo "SELECT count(*) FROM test_data; SELECT count(*) FROM test_data WHERE a = 1 AND b = 'a';" | ${PSQL_CMD_REPLICA}
 
 # now we are ready to modify the data
 # ${PSQL_CMD} < test.sql

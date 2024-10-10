@@ -13,3 +13,4 @@ src/**/gen-cpp
 cmake-build-*
 compile_commands.json
 system.json.test
+venv

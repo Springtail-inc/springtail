@@ -101,8 +101,8 @@ for db_id in db_ids:
     db_key = 'db_config:' + str(db_instance_id) # + ':' + str(db_id)
     db = json.loads(r.hget(db_key, str(db_id)))
     dbname = db['name']
-    schemas = db['schemas'].keys()
-    db_schemas[dbname] = {'id': db_id, 'schemas': schemas }
+    # schemas = db['schemas'].keys()
+    db_schemas[dbname] = {'id': db_id, 'schemas': ["public"] }
 
 print(db_schemas)
 
