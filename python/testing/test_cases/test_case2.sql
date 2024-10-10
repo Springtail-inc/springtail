@@ -1,15 +1,3 @@
--- -- PHASE 1 -- table creation
--- CREATE TABLE test2 (id SERIAL PRIMARY KEY, value text);
-
--- -- PHASE 2 -- data modification
--- INSERT INTO test2 (value) VALUES ('test_value');
-
--- -- PHASE 3 -- data verification
--- SELECT * FROM test2 ORDER BY id;
-
--- -- PHASE 4 -- data cleanup
--- DROP TABLE test2;
-
 ## setup
 -- Create a table for the test
 CREATE TABLE IF NOT EXISTS test2 (
