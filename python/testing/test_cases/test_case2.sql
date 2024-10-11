@@ -13,6 +13,7 @@ INSERT INTO test2 (value) VALUES ('initial_value');
 UPDATE test2 SET value = 'updated_value' WHERE id = 1;
 
 ## verify
+-- Expected: [(1, 'updated_value')]
 -- Verify the updated data
 SELECT * FROM test2 WHERE id = 1;
 

@@ -13,6 +13,7 @@ INSERT INTO test3 (value) VALUES ('delete_me');
 DELETE FROM test3 WHERE value = 'delete_me';
 
 ## verify
+-- Expected: []
 -- Verify the data has been deleted
 SELECT * FROM test3 WHERE value = 'delete_me';
 

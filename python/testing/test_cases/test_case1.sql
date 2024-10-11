@@ -11,8 +11,8 @@ INSERT INTO test1 (value) VALUES ('test_value_1');
 INSERT INTO test1 (value) VALUES ('test_value_2');
 
 ## verify
--- Verify the inserted data
 -- Expected: [(1, 'test_value_1'), (2, 'test_value_2')]
+-- Verify the inserted data
 SELECT * FROM test1 ORDER BY id;
 
 ## cleanup
