@@ -3,6 +3,7 @@ import sys
 import shutil
 import argparse
 import traceback
+import time
 from psycopg2.extensions import quote_ident
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -28,7 +29,6 @@ from sysutils import (
     start_postgres,
     stop_postgres,
     start_daemons,
-    running_daemons,
     check_daemons_running,
     is_linux,
     grep_line_in_file)
@@ -38,12 +38,28 @@ FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
 FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 
+# List of daemons to start tuple: (name, path, args)
+CORE_DAEMONS = [
+    ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
+    ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
+    ('write_cache_daemon', 'src/write_cache/write_cache_daemon'),
+    ('gc_daemon', 'src/garbage_collector/gc_daemon'),
+    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
+]
+
+FDW_DAEMONS = [
+    ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql')
+]
+
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
+
+ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
+
 def get_lib_ext():
     """Get the library extension for the current platform."""
     if is_linux():
         return 'so'
     return 'dylib'
-    
 
 
 def cleanup_filesystem(props):
@@ -286,7 +302,6 @@ def fdw_import(props, build_dir, config_file):
 
     # setup primary db
     execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-    execute_sql(conn, f"DROP FUNCTION IF EXISTS springtail_fdw_startup;")
     execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
 
     conn.close()
@@ -308,7 +323,6 @@ def fdw_import(props, build_dir, config_file):
 
         # Create the foreign server
         execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-        execute_sql(conn, f"DROP FUNCTION IF EXISTS springtail_fdw_startup;")
         execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
         execute_sql(conn, f"DROP SERVER IF EXISTS {quote_ident(FDW_SERVER_NAME, conn)} CASCADE;")
         execute_sql(conn, "CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id %s, db_id %s, db_name %s, schema_xid %s);".format(quote_ident(FDW_SERVER_NAME, conn), quote_ident(FDW_WRAPPER, conn)), (fdw_id, db_id, db_name, xid))
@@ -325,10 +339,9 @@ def fdw_import(props, build_dir, config_file):
         # Close the connection
         conn.close()
 
-    # Connect to the foreign data wrapper instance and execute the startup function
-    conn = connect_fdw_instance(props)
-    execute_sql(conn, "SELECT springtail_fdw_startup(%s)", fdw_id)
-    conn.close()
+    # startup pg_ddl_daemon
+    print("Starting pg_ddl_daemon...")
+    start_daemons(build_dir, FDW_DAEMONS)
 
 
 def wait_for_running(props):
@@ -387,7 +400,9 @@ def check_config(props):
     pid_path = props.get_pid_path()
     if not os.path.exists(pid_path):
         try:
+            user = os.environ.get('USER') or os.environ.get('USERNAME')
             run_command('sudo', ['mkdir', '-p', pid_path])
+            run_command('sudo', ['chown', '-R', f'{user}:{user}', pid_path])
         except Exception as e:
             raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
 
@@ -437,7 +452,7 @@ def start(args):
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path())
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     # cleanup db instance
     print("\nCleaning up database instance...")
@@ -458,7 +473,7 @@ def start(args):
 
     # start daemons
     print("\nStarting daemons...")
-    start_daemons(build_dir)
+    start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -477,7 +492,7 @@ def start(args):
 def status():
     """Function to check the status of the Springtail system."""
     print("Checking status...")
-    (all_running, not_running) = check_daemons_running()
+    (all_running, not_running) = check_daemons_running(ALL_DAEMONS_NAMES)
 
     if all_running:
         print("All daemons are running.")
@@ -504,7 +519,7 @@ def stop():
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path())
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
 
 def parse_arguments():

@@ -4,23 +4,18 @@ import time
 
 from common import run_command, kill_processes, running_pids
 
-DAEMONS = [
-    'xid_mgr_daemon',
-    'sys_tbl_mgr_daemon',
-    'write_cache_daemon',
-    'gc_daemon',
-    'pg_log_mgr_daemon'
-]
-
 POSTGRES = 'postgresql@16'
 
 def is_linux():
     """Check if the system is Linux."""
     return platform.system() == 'Linux'
 
-def stop_daemons(pid_path):
+def stop_daemons(pid_path, daemons=[]):
     """Stop the daemons."""
     # Stop the daemons
+    if not os.path.exists(pid_path):
+        raise Exception(f"PID path not found: {pid_path}")
+
     # for each .pid file in the pid_path run kill -9 on the pid in that file
     for file in os.listdir(pid_path):
         file = os.path.join(pid_path, file)
@@ -36,14 +31,14 @@ def stop_daemons(pid_path):
                 run_command('rm', [file])
 
     # kill any lingering daemons
-    kill_processes(DAEMONS)
+    kill_processes(daemons)
 
 
-def check_daemons_running():
+def check_daemons_running(daemons):
     """Check if the daemons are running."""
     # Check if the daemons are running
-    (pids, not_running) = running_pids(DAEMONS)
-    return (len(pids) == len(DAEMONS), not_running)
+    (pids, not_running) = running_pids(daemons)
+    return (len(pids) == len(daemons), not_running)
 
 
 def clean_fs(mount_path, log_path):
@@ -110,11 +105,11 @@ def stop_postgres():
     if len(pids) > 0:
         raise Exception("Failed to stop the postgres process, timedout")
 
-
-def start_daemons(build_dir, restart=True):
+def start_daemons(build_dir, daemons, restart=True):
     """Start the daemons."""
     # Check if the daemons are already running
-    if check_daemons_running()[0]:
+    daemon_names = [daemon[0] for daemon in daemons]
+    if check_daemons_running(daemon_names)[0]:
         if restart:
             print("Stopping all daemons...")
             stop_daemons()
@@ -122,51 +117,34 @@ def start_daemons(build_dir, restart=True):
             print("All daemons are already running.")
             return
 
-    # Start the springtail xid manager daemon
-    print("Starting the Springtail xid manager daemon...")
-    xid_bin = os.path.join(build_dir, 'src/xid_mgr/xid_mgr_daemon')
-    run_command(xid_bin, ['-x', '10', '--daemon'])
+    # start the daemons
+    # daemon is a tuple of (name, path, args)
+    for daemon in daemons:
+        cmd_dir = os.path.join(build_dir, daemon[1])
 
-    time.sleep(1)
+        if not os.path.exists(cmd_dir):
+            raise Exception(f"Daemon {daemon[0]} not found: {cmd_dir}")
 
-    # Start the sys table mgr daemon
-    print("Starting the Springtail system table manager daemon...")
-    sys_tbl_mgr_bin = os.path.join(build_dir, 'src/sys_tbl_mgr/sys_tbl_mgr_daemon')
-    run_command(sys_tbl_mgr_bin, ['--daemon'])
+        print(f"Starting daemon: {daemon[0]}")
 
-    time.sleep(1)
+        args = ['--daemon']
+        if len(daemon) > 2:
+            args += daemon[2].split(',')
 
-    # Start the springtail write cache daemon
-    print("Starting the Springtail write cache daemon...")
-    write_cache_bin = os.path.join(build_dir, 'src/write_cache/write_cache_daemon')
-    run_command(write_cache_bin, ['--daemon'])
+        run_command(cmd_dir, args)
 
-    time.sleep(1)
-
-    # Start the garbage collector daemon
-    print("Starting the Springtail garbage collector daemon...")
-    gc_bin = os.path.join(build_dir, 'src/garbage_collector/gc_daemon')
-    run_command(gc_bin, ['--daemon'])
-
-    time.sleep(1)
-
-    # Start the springtail log mgr daemon
-    print("Starting the Springtail log mgr daemon...")
-    log_mgr_bin = os.path.join(build_dir, 'src/pg_log_mgr/pg_log_mgr_daemon')
-    run_command(log_mgr_bin, ['--daemon'])
-
-    time.sleep(1)
+        time.sleep(1)
 
     # check if all daemons are running
-    (all_running, not_running) = check_daemons_running()
+    (all_running, not_running) = check_daemons_running(daemon_names)
     if not all_running:
         for name in not_running:
             print(f"Daemon {name} failed to start")
         raise Exception("Failed to start all daemons")
 
-def running_daemons():
+def running_daemons(daemons):
     """Return a list of process IDs for the running daemons."""
-    return running_pids(DAEMONS)[0]
+    return running_pids(daemons)[0]
 
 def grep_line_in_file(file_path, search_line):
     """Search for a line in a file."""
