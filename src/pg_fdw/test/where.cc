@@ -3,10 +3,12 @@
 #include <fmt/format.h>
 
 #include <common/common.hh>
+
 #include <storage/field.hh>
-#include <storage/table.hh>
-#include <storage/table_mgr.hh>
 #include <storage/extent.hh>
+
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 using namespace springtail;
 

@@ -3,7 +3,8 @@
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
-#include <storage/table.hh>
+
+#include <sys_tbl_mgr/table.hh>
 
 #include <pg_fdw/pg_fdw_mgr.hh>
 

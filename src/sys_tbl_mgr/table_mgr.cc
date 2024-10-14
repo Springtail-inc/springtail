@@ -1,10 +1,9 @@
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <storage/table_mgr.hh>
-#include <storage/system_tables.hh>
-
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
 
@@ -41,9 +40,6 @@ namespace springtail {
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<std::filesystem::path>(json, "table_dir", _table_base);
         _table_base = Properties::make_absolute_path(_table_base);
-
-        // make sure that the base directory for tables exists
-        std::filesystem::create_directories(_table_base);
     }
 
     TablePtr

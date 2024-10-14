@@ -32,44 +32,75 @@ target_link_libraries(springtail_pg_fdw
     PRIVATE springtail_storage
     PRIVATE springtail_xid_mgr
     PRIVATE springtail_sys_tbl_mgr
-    PRIVATE PostgreSQL::PostgreSQL
 )
-#add_dsymutil_command(springtail_pg_fdw)
 
-add_executable(dump_table test/dump_table.cc test/mock_pg.c pg_fdw_mgr.cc)
-target_include_directories(dump_table
+add_executable(pg_ddl_daemon pg_ddl_daemon.cc pg_ddl_mgr.cc)
+target_include_directories(pg_ddl_daemon
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
-target_link_libraries(dump_table
+target_link_libraries(pg_ddl_daemon
     PRIVATE springtail_common
-    PRIVATE springtail_storage
-    PRIVATE springtail_sys_tbl_mgr
-    PRIVATE springtail_xid_mgr
     PRIVATE Boost::program_options
     PRIVATE PostgreSQL::PostgreSQL
+)
+add_dsymutil_command(pg_ddl_daemon)
+
+# Extract transitive dependencies of libraryC
+get_target_property(POSTGRES_DEP_LIBS PostgreSQL::PostgreSQL INTERFACE_LINK_LIBRARIES)
+
+add_executable(dump_table test/dump_table.cc test/mock_pg.c pg_fdw_mgr.cc)
+target_include_directories(dump_table
+     PUBLIC ${PROJECT_SOURCE_DIR}/include
+     PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
+if (${LINUX})
+set(START_GROUP "-Wl,--start-group")
+set(END_GROUP "-Wl,--end-group")
+else()
+set(START_GROUP "")
+set(END_GROUP "")
+endif()
+
+target_link_libraries(dump_table
+     PRIVATE springtail_common
+     PRIVATE springtail_storage
+     PRIVATE springtail_sys_tbl_mgr
+     PRIVATE springtail_xid_mgr
+     PRIVATE Boost::program_options
+     PRIVATE ${START_GROUP}
+         ${POSTGRES_DEP_LIBS}
+     ${END_GROUP}
 )
 add_dsymutil_command(dump_table)
 
 add_executable(where test/where.cc)
 target_include_directories(where
     PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(where
     PRIVATE springtail_common
     PRIVATE springtail_storage
     PRIVATE springtail_sys_tbl_mgr
+    PRIVATE ${START_GROUP}
+        ${POSTGRES_DEP_LIBS}
+    ${END_GROUP}
 )
 add_dsymutil_command(where)
 
 add_executable(test_where test/where_test.cc test/mock_pg.c pg_fdw_mgr.cc)
 target_include_directories(test_where
     PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
 )
 target_link_libraries(test_where
     PRIVATE springtail_common
     PRIVATE springtail_test
-    PRIVATE PostgreSQL::PostgreSQL
+    PRIVATE ${START_GROUP}
+        ${POSTGRES_DEP_LIBS}
+    ${END_GROUP}
     PRIVATE GTest::gtest_main
 )
 add_dsymutil_command(test_where)

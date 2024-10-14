@@ -1,4 +1,5 @@
-#include <storage/system_tables.hh>
+#include <common/constants.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 // note: these are hard-coded from the postgres type OIDs to avoid having to include all of the
 // postgres headers here

@@ -1,10 +1,12 @@
 #include <common/constants.hh>
+
 #include <storage/exception.hh>
 #include <storage/schema.hh>
-#include <storage/schema_mgr.hh>
-#include <storage/system_tables.hh>
-#include <storage/table_mgr.hh>
+
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail {
     /* static member initialization must happen outside of class */

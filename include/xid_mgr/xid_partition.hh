@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <thread>
 #include <atomic>
+#include <condition_variable>
 
 namespace springtail::xid_mgr {
     class Partition {

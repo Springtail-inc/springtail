@@ -103,7 +103,6 @@ namespace springtail
 
         _stream_connection = std::make_unique<LibPqConnection>();
         _stream_connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
-        _streaming_socket = _stream_connection->socket();
 
         // get protocol version
         _server_version = _stream_connection->server_version();
@@ -216,16 +215,7 @@ namespace springtail
     bool
     PgReplConnection::_check_data_stream(int timeout_secs)
     {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(_streaming_socket, &fds);
-
-        struct timeval t;
-        t.tv_usec = 0;
-        t.tv_sec = timeout_secs;
-
-        // r < 0 error; r == 0 timeout; r > 0 readable socket
-        int r = select(_streaming_socket + 1, &fds, nullptr, nullptr, &t);
+        int r = _connection->wait_until_readable(timeout_secs);
         if (r < 0) {
             throw PgIOError();
         }
@@ -271,20 +261,19 @@ namespace springtail
         // add 4 to length, since length includes length field
         sendint32(length + 4, &msg_header[1]);
 
-        int flags = MSG_NOSIGNAL | MSG_MORE ; // no SIGPIPE if connection is closed
-
         // send the header and then the operation
-        int r = send(_streaming_socket, msg_header, 5, flags);
+        int r = _connection->write(msg_header, COPY_MSG_HDR_SIZE);
         if (r != 5) {
-            SPDLOG_ERROR("Failed to write copy data header: bytes={}\n", r);
+            SPDLOG_ERROR("Failed to write copy data header: bytes={}", r);
+            SPDLOG_ERROR("errno: {}", errno);
             throw PgIOError();
         }
 
-        r = send(_streaming_socket, buffer, length, MSG_NOSIGNAL);
+        r = _connection->write(buffer, length);
         if (r < length) {
-            // XXX if r > 0 this technically isn't an error and we should
-            // really continue retrying the send
-            SPDLOG_ERROR("Failed to write copy data body: bytes={}\n", r);
+            // error
+            SPDLOG_ERROR("Failed to write copy data body: bytes={}", r);
+            SPDLOG_ERROR("errno: {}", errno);
             throw PgIOError();
         }
     }
@@ -296,9 +285,7 @@ namespace springtail
                                       bool async=true)
     {
         while (!_shutdown) {
-            int r = recv(_streaming_socket,
-                         buffer, length, (async ? MSG_DONTWAIT : 0));
-
+            int r = _connection->read(buffer, length, async);
             if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
                 r = wait_for_data();
                 if (r >= 0) {
@@ -309,13 +296,13 @@ namespace springtail
             }
 
             if (r < 0) {
+                if (errno == ECONNRESET) {
+                    SPDLOG_ERROR("Error recv got ECONNRESET\n");
+                    throw PgNotConnectedError();
+                }
+
                 SPDLOG_ERROR("Error recv return < 0; errno={}\n", errno);
                 throw PgIOError();
-            }
-
-            if (r == 0) {
-                SPDLOG_ERROR("Error recv got EOF\n");
-                throw PgNotConnectedError();
             }
 
             if (_shutdown) {

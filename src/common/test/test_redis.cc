@@ -128,15 +128,16 @@ namespace {
         ASSERT_EQ(queue.pop("a")->value(), 102);
 
         // abort "b" (putting it back into the queue) and get another item
+        // note: should be the same item that just aborted
         queue.abort("b");
-        ASSERT_EQ(queue.pop("b")->value(), 103);
+        ASSERT_EQ(queue.pop("b")->value(), 101);
 
         // abort "a"
         queue.abort("a");
 
         // validate the remainder of the queue
-        ASSERT_EQ(queue.pop_and_commit()->value(), 101);
         ASSERT_EQ(queue.pop_and_commit()->value(), 102);
+        ASSERT_EQ(queue.pop_and_commit()->value(), 103);
 
         // test poping empty queue with a worker
         ASSERT_EQ(queue.pop("a", 1), nullptr);

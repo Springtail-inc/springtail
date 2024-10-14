@@ -54,8 +54,15 @@ namespace springtail {
         // add the DDLs to the queue for each FDW
         for (const std::string &fdw_id : fdw_ids) {
             std::string key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
-            _redis->rpush(key, value);
+
+            RedisQueue<std::string> queue(key);
+            queue.push(value);
         }
+
+        // effectively a two-phase commit here by clearing the QUEUE_DDL_XID for this XID on commit
+        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
+                                          Properties::get_db_instance_id(), db_id, xid);
+        _redis->del(ddl_key);
     }
 
     nlohmann::json
@@ -65,13 +72,23 @@ namespace springtail {
 
         // retrieve the next set of DDLs to apply for the given FDW; this blocks
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
-        auto &&res = _redis->blpop(key, std::chrono::seconds(2));
-        if (!res) {
+        RedisQueue<std::string> queue(key);
+
+        auto value = queue.pop("active", 2);
+        if (value == nullptr) {
             return ddls;
         }
 
-        ddls = nlohmann::json::parse(res->second);
+        ddls = nlohmann::json::parse(*value);
         return ddls;
+    }
+
+    void
+    RedisDDL::abort_fdw(const std::string &fdw_id)
+    {
+        std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
+        RedisQueue<std::string> queue(key);
+        queue.abort("active");
     }
 
     void
@@ -81,6 +98,11 @@ namespace springtail {
         // update the hash entry for the FDW with the latest schema XID
         std::string key = fmt::format(redis::HASH_DDL_FDW, Properties::get_db_instance_id());
         _redis->hset(key, fdw_id, std::to_string(schema_xid));
+
+        // commit the DDLs that we just applied now that the schema XID is stored in Redis
+        std::string queue_key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
+        RedisQueue<std::string> queue(queue_key);
+        queue.commit("active");
     }
 
     uint64_t

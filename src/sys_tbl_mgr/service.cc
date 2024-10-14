@@ -5,8 +5,8 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
-#include <storage/table_mgr.hh>
-#include <storage/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail::sys_tbl_mgr {
     /* static member initialization must happen outside of class */

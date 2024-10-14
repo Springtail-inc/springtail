@@ -251,10 +251,10 @@ namespace springtail {
         void abort(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
-            // XXX this actually places it in the wrong place... we need to use lmove() to effectively rpoprpush()
-            _redis->rpoplpush(worker_key, _key);
             // note: lmove() not available yet in redis++
             // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");
+            auto &&res = _redis->command<sw::redis::OptionalString>("LMOVE", worker_key, _key,
+                                                                    "RIGHT", "RIGHT");
         }
 
         /**

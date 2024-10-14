@@ -2,8 +2,8 @@
 #include <common/constants.hh>
 
 #include <storage/field.hh>
-#include <storage/system_tables.hh>
-#include <storage/table_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 using namespace springtail;
 

@@ -7,6 +7,7 @@
 #include <nodes/nodes.h>
 #include <nodes/value.h>
 #include <nodes/primnodes.h>
+#include <storage/pmsignal.h>
 
 static inline Node *
 newNode_mock(size_t size, NodeTag tag)
@@ -22,6 +23,11 @@ newNode_mock(size_t size, NodeTag tag)
 }
 
 #define makeNode_mock(_type_)        ((_type_ *) newNode_mock(sizeof(_type_),T_##_type_))
+
+// from pmsignal.h (pmsignal.cc)
+#ifndef postmaster_possibly_dead
+volatile sig_atomic_t postmaster_possibly_dead = false;
+#endif
 
 // These files are not being linked in, from libpq so we define them here
 Integer *makeInteger(int i) {
@@ -193,3 +199,4 @@ void die(int postgres_signal_arg) {}
 void proc_exit(int code) {}
 
 bool PostmasterIsAliveInternal(void) { return true; }
+

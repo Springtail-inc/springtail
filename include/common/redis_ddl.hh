@@ -53,6 +53,12 @@ namespace springtail {
         nlohmann::json get_next_ddls(const std::string &fdw_id);
 
         /**
+         * Used by the FDW to abort applying a set of DDL statements and place them back on the
+         * processing queue.
+         */
+        void abort_fdw(const std::string &fdw_id);
+
+        /**
          * Used by the FDW to record the latest schema XID that it has applied.
          * @param fdw_id The ID of the FDW we are updating.
          * @param schema_xid The XID from the last get_next_ddls() call that was applied.

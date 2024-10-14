@@ -11,12 +11,13 @@
 #include <common/redis_ddl.hh>
 #include <common/concurrent_queue.hh>
 
-#include <storage/table.hh>
-#include <storage/table_mgr.hh>
 #include <storage/field.hh>
-#include <storage/system_tables.hh>
 #include <storage/schema.hh>
-#include <storage/schema_mgr.hh>
+
+#include <sys_tbl_mgr/schema_mgr.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -110,6 +111,8 @@ namespace springtail::pg_fdw {
         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
         static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
 
+        static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";         ///< Log file prefix
+
         /** Get singleton instance */
         static PgFdwMgr* get_instance() {
             assert (_instance != nullptr);
@@ -202,12 +205,6 @@ namespace springtail::pg_fdw {
          */
         void fdw_commit_rollback(uint64_t pg_xid, bool commit);
 
-        /**
-         * @brief Execute a function from SQL that calls into FDW at startup time
-         * @param command command to execute
-         */
-        static void fdw_worker_main(const std::string &fdw_id, const char *config_file);
-
     private:
         /** Delete constructor */
         PgFdwMgr() {};
@@ -238,13 +235,6 @@ namespace springtail::pg_fdw {
                                               const std::string &table,
                                               uint64_t tid,
                                               std::vector<std::tuple<std::string, std::string, bool>> &columns);
-
-        /** Helper to convert a set of PG type OIDs to type names via an external SQL query. */
-        static std::map<uint32_t, std::string> _query_type_names(PGconn *conn, std::set<uint32_t> pg_types);
-
-        /** Helper to generate a DDL statement from the JSON provided from the ingest pipeline. */
-        static std::string _gen_sql_from_json(PGconn *conn,
-                                              const std::string &server_name, nlohmann::json ddl);
 
         /** Helper to generate a system table create foreign table sql */
         static std::string _gen_fdw_system_table(const std::string &server,
@@ -284,18 +274,6 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
-
-        /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
-        static bool _update_schemas(RedisDDL &redis, const nlohmann::json &ddls,
-                                    const std::string &servername,
-                                    const std::string &fdw_id,
-                                    const nlohmann::json &fdw_config);
-
-        /** Helper to execute ddl statements for this db */
-        static void _execute_ddl(PGconn *conn,
-                                 uint64_t schema_xid,
-                                 const std::vector<std::string> &sql,
-                                 const nlohmann::json &fdw_config);
 
     };
 } // namespace springtail::pg_fdw

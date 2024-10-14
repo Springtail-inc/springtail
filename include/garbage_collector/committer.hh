@@ -16,7 +16,7 @@
 
 #include <garbage_collector/xid_ready.hh>
 
-#include <storage/table.hh>
+#include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 

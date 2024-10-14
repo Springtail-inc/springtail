@@ -60,6 +60,8 @@ namespace springtail::test {
                 WriteCacheServer::startup();
             }));
         }
+        // give everyting a chance to startup
+        sleep(1);
     }
 
     void

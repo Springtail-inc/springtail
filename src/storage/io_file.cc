@@ -177,8 +177,8 @@ namespace springtail {
             fmode = O_RDWR | O_CREAT;
         }
 
-        // set ownership (user r/w; group r; other none)
-        mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP;
+        // set ownership (user r/w; group r; other read)
+        mode_t owner = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
         _fd = ::open(path.c_str(), fmode, owner);
         if (_fd == -1) {
