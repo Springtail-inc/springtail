@@ -204,6 +204,7 @@ namespace springtail {
         nlohmann::json db_ids;
         // see if we are using the properties file override
         if (_instance != nullptr && _instance->_properties_file_override) {
+            std::cout << "Json: " << _instance->_json.dump(4) << std::endl;
             db_ids = _instance->_json["db_instances"][std::to_string(db_instance_id)]["database_ids"];
         } else {
             // otherwise, we are using redis

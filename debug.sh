@@ -7,9 +7,20 @@ fi
 # install dependent packages with vcpkg
 ./vcpkg.sh
 
+if [ -e '/.dockerenv' ]; then
+    DOCKER=1
+else
+    DOCKER=0
+fi
+
 # setup the debug build
 if [ ! -d debug ]; then
-    mkdir -p debug
+    if [ $DOCKER -eq 1 ]; then
+        echo "Building inside a container; symlinking debug dir"
+        ln -s /home/dev/debug debug
+    else
+        mkdir -p debug
+    fi
 fi
 cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'
 

@@ -15,12 +15,6 @@ extern "C" {
         return PgFdwMgr::get_instance();
     }
 
-    void
-    fdw_worker_main(const char *fdw_id, const char *config_file_path)
-    {
-        PgFdwMgr::fdw_worker_main(fdw_id, config_file_path);
-    }
-
     /** Init call */
     void
     fdw_init(const char *config_file_path)

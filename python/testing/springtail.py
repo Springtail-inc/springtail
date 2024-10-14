@@ -3,6 +3,7 @@ import sys
 import shutil
 import argparse
 import traceback
+import time
 from psycopg2.extensions import quote_ident
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -28,12 +29,37 @@ from sysutils import (
     start_postgres,
     stop_postgres,
     start_daemons,
-    running_daemons)
+    check_daemons_running,
+    is_linux,
+    grep_line_in_file)
 
 # Constants
 FDW_SERVER_NAME = 'springtail_fdw_server'
 FDW_WRAPPER = 'springtail_fdw'
 FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
+
+# List of daemons to start tuple: (name, path, args)
+CORE_DAEMONS = [
+    ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
+    ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
+    ('write_cache_daemon', 'src/write_cache/write_cache_daemon'),
+    ('gc_daemon', 'src/garbage_collector/gc_daemon'),
+    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
+]
+
+FDW_DAEMONS = [
+    ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql')
+]
+
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
+
+ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
+
+def get_lib_ext():
+    """Get the library extension for the current platform."""
+    if is_linux():
+        return 'so'
+    return 'dylib'
 
 
 def cleanup_filesystem(props):
@@ -89,11 +115,22 @@ def cleanup_db_instance(props):
     if not check_postgres_running():
         start_postgres()
 
+    # see if the replication slot exists and drop it on the target database
+    # if we don't do this and the slot exists, we can't drop the database
+    try:
+        # Connect to the database, may fail if it doesn't exist
+        conn = connect_db_instance(props, db_name)
+        slot_exists = execute_sql_select(conn, "SELECT 1 FROM pg_replication_slots WHERE slot_name = %s;", slot_name)
+        if slot_exists:
+            execute_sql(conn, "SELECT pg_drop_replication_slot(%s);", slot_name)
+    except Exception as e:
+        pass
+
     # Connect to the database ("postgres" database)
     conn = connect_db_instance(props)
 
     # Drop and recreate the database
-    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)};")
+    execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)} WITH (FORCE);")
     execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
 
     conn.close()
@@ -122,7 +159,7 @@ def install_fdw(build_dir):
     """Install the foreign data wrapper extension."""
     # Get the share and lib directories
     share_dir = run_command('pg_config', ['--sharedir'])
-    lib_dir = run_command('pg_config', ['--libdir'])
+    lib_dir = run_command('pg_config', ['--pkglibdir'])
 
     build_dir = os.path.abspath(build_dir)
     print (f"Build dir: {build_dir}")
@@ -133,17 +170,28 @@ def install_fdw(build_dir):
     # copy the extension files to the share directory
     share_dir = os.path.join(share_dir.strip(), 'extension')
     print(f"Copying extension files to the share directory: {share_dir}")
-    shutil.copy(os.path.join(build_dir, '../src/pg_fdw/springtail_fdw--1.0.sql'), share_dir)
-    shutil.copy(os.path.join(build_dir, '../src/pg_fdw/springtail_fdw.control'), share_dir)
+    # get parent directory of build_dir
+    parent_dir = os.path.dirname(build_dir)
+
+    if is_linux():
+        run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw--1.0.sql')), share_dir])
+        run_command('sudo', ['cp', str(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw.control')), share_dir])
+    else:
+        shutil.copy(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw--1.0.sql'), share_dir)
+        shutil.copy(os.path.join(parent_dir, 'src/pg_fdw/springtail_fdw.control'), share_dir)
 
     # copy the shared library to the lib directory
-    lib_dir = os.path.join(lib_dir.strip(), 'postgresql/springtail_fdw.dylib')
+    lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.' + get_lib_ext())
     print(f"Copying shared library to the lib directory: {lib_dir}")
-    shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
 
-    # create the debug symbols
-    print(f"Creating debug symbols for the shared library: {lib_dir}")
-    run_command('dsymutil', [lib_dir])
+    if is_linux():
+        run_command('sudo', ['cp', os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.so'), lib_dir])
+    else:
+        shutil.copy(os.path.join(build_dir, 'src/pg_fdw/libspringtail_pg_fdw.dylib'), lib_dir)
+
+        # create the debug symbols
+        print(f"Creating debug symbols for the shared library: {lib_dir}")
+        run_command('dsymutil', [lib_dir])
 
     # start postgres
     print("Starting postgres...")
@@ -168,7 +216,8 @@ def start_replication(props, build_dir):
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
     # Trigger scripts
-    trigger_sql = os.path.join(build_dir, '../scripts/triggers.sql')
+    parent_dir = os.path.dirname(build_dir)
+    trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
     execute_sql_script(conn, trigger_sql)
 
     # Close the connection
@@ -253,7 +302,6 @@ def fdw_import(props, build_dir, config_file):
 
     # setup primary db
     execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-    execute_sql(conn, f"DROP FUNCTION IF EXISTS springtail_fdw_startup;")
     execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
 
     conn.close()
@@ -275,7 +323,6 @@ def fdw_import(props, build_dir, config_file):
 
         # Create the foreign server
         execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-        execute_sql(conn, f"DROP FUNCTION IF EXISTS springtail_fdw_startup;")
         execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
         execute_sql(conn, f"DROP SERVER IF EXISTS {quote_ident(FDW_SERVER_NAME, conn)} CASCADE;")
         execute_sql(conn, "CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id %s, db_id %s, db_name %s, schema_xid %s);".format(quote_ident(FDW_SERVER_NAME, conn), quote_ident(FDW_WRAPPER, conn)), (fdw_id, db_id, db_name, xid))
@@ -292,10 +339,9 @@ def fdw_import(props, build_dir, config_file):
         # Close the connection
         conn.close()
 
-    # Connect to the foreign data wrapper instance and execute the startup function
-    conn = connect_fdw_instance(props)
-    execute_sql(conn, "SELECT springtail_fdw_startup(%s)", fdw_id)
-    conn.close()
+    # startup pg_ddl_daemon
+    print("Starting pg_ddl_daemon...")
+    start_daemons(build_dir, FDW_DAEMONS)
 
 
 def wait_for_running(props):
@@ -348,15 +394,36 @@ def check_config(props):
     # Check that the primary DB and FDW are not on the same host and port
     # if fdw_prefix is not set
     if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
-        raise Exception("Primary DB and FDW cannot be on the same host and port.")
+        raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
 
     # Check that the pid path exists; if not try to create it
     pid_path = props.get_pid_path()
     if not os.path.exists(pid_path):
         try:
-            os.makedirs(pid_path, exist_ok=True)
+            user = os.environ.get('USER') or os.environ.get('USERNAME')
+            run_command('sudo', ['mkdir', '-p', pid_path])
+            run_command('sudo', ['chown', '-R', f'{user}:{user}', pid_path])
         except Exception as e:
-            raise Exception(f"Failed to create pid path: {pid_path}")
+            raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
+
+
+def check_log_writable(props):
+    # Get the log path and check the parent directory is writable
+    sys_config = props.get_system_config()
+    log_path = os.path.dirname(sys_config['logging']['log_path'])
+    # Check parent directory of log path is writable
+    print(f"Checking log path {log_path} is writable...")
+    if not os.access(log_path, os.W_OK) or not (os.stat(log_path).st_mode & 0o0007 == 0o0007):
+        # set writable by owner, group, and others
+        print(f"Setting log path {log_path} to be writable by owner, group, and others.")
+        os.chmod(log_path, 0o777)
+
+
+def fixup_perms(mount_path):
+    """Fix up permissions for the given mount path."""
+    username = os.environ.get('USER') or os.environ.get('USERNAME')
+    # Fix up permissions for the given mount path
+    run_command('sudo', ['chown', '-R', f'{username}:{username}', mount_path])
 
 
 def start(args):
@@ -385,7 +452,7 @@ def start(args):
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path())
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     # cleanup db instance
     print("\nCleaning up database instance...")
@@ -406,29 +473,32 @@ def start(args):
 
     # start daemons
     print("\nStarting daemons...")
-    start_daemons(build_dir)
+    start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
     wait_for_running(props)
 
+    check_log_writable(props)
+
     # import the fdw schemas
     print("\nImporting foreign data wrapper schemas...")
     fdw_import(props, build_dir, config_file)
+    #fixup_perms(props.get_mount_path())
 
     print("\nSpringtail system started successfully.")
 
 
 def status():
+    """Function to check the status of the Springtail system."""
     print("Checking status...")
+    (all_running, not_running) = check_daemons_running(ALL_DAEMONS_NAMES)
 
-    procs = running_daemons()
-    if len(procs) == 0:
-        print("No daemons running.")
+    if all_running:
+        print("All daemons are running.")
     else:
-        print("Daemons running:")
-        for proc in procs:
-            print(f"  {proc['name']} with PID: {proc['pid']}")
+        for name in not_running:
+            print(f"Daemon {name} is not running.")
 
     if check_postgres_running():
         print("Postgres is running.")
@@ -449,7 +519,7 @@ def stop():
 
     # Stop the daemons
     print("\nStopping daemons...")
-    stop_daemons(props.get_pid_path())
+    stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
 
 def parse_arguments():

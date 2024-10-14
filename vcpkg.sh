@@ -48,9 +48,20 @@ function find_compiler() {
     return 1
 }
 
+if [ -e '/.dockerenv' ]; then
+    DOCKER=1
+else
+    DOCKER=0
+fi
+
 DIR=external/vcpkg
 if [ ! -d ${DIR} ]
 then
+    if [ $DOCKER -eq 1 ]; then
+        echo "Building inside a container; symlinking external dir"
+        ln -s external /home/dev/external
+    fi
+
     program_names="gcc  gcc-14"
     if ! find_compiler "$program_names"; then
         echo "No suitable gcc compiler found."

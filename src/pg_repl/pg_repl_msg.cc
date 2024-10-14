@@ -300,6 +300,7 @@ namespace pg_msg {
                     ss << "  - default=" << column.default_value.value_or("NULL") << std::endl;
                     ss << "  - is_nullable=" << column.is_nullable << std::endl;
                     ss << "  - is_pkey=" << column.is_pkey << std::endl;
+                    ss << "  - pk_position=" << column.pk_position << std::endl;
                     ss << "  - position=" << column.position << std::endl;
                 }
 

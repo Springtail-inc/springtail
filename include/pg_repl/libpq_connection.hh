@@ -215,6 +215,45 @@ namespace springtail {
         int flush();
 
         /**
+         * @brief is the connection using SSL
+         */
+        bool is_ssl();
+
+        /**
+         * @brief Wait for connection to be writeable
+         * @param timeout_secs timeout in seconds; -1 for no timeout
+         * @return int -1 on error, 0 on timeout, 1 on success
+         */
+        int wait_until_writable(int timeout_secs=-1);
+
+        /**
+         * @brief Wait for connection to be readable
+         * @param timeout_secs timeout in seconds; -1 for no timeout
+         * @return int -1 on error, 0 on timeout, 1 on success
+         */
+        int wait_until_readable(int timeout_secs=-1);
+
+        /**
+         * @brief Read from connection
+         * @param buf buffer to read into
+         * @param count number of bytes to read
+         * @param async flag indicating async operation
+         *              if not async will read all data or return an error
+         * @return number of bytes read; -1 on error, errno set; 0 indicates no bytes ready
+         */
+        ssize_t read(char *buf, size_t count, bool async = false);
+
+        /**
+         * @brief Write to connection
+         * @param buf buffer to write
+         * @param count number of bytes to write
+         * @param async flag indicating async operation;
+         *              if not async will write all data or return an error
+         * @return number of bytes written; -1 on error, errno set
+         */
+        ssize_t write(const char *buf, size_t count, bool async = false);
+
+        /**
          * @brief Get length of field value in bytes
          *
          * @param row row index

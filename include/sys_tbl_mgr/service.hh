@@ -4,7 +4,7 @@
 #include <thrift/transport/TSocket.h>
 
 #include <common/logging.hh>
-#include <storage/table.hh>
+#include <sys_tbl_mgr/table.hh>
 #include <thrift/sys_tbl_mgr/Service.h>
 
 namespace springtail::sys_tbl_mgr {

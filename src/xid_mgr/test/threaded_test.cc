@@ -44,6 +44,8 @@ namespace {
             _server_thread = std::thread([&server](){
                 server->startup();
             });
+
+            sleep(1);
         }
 
         void TearDown() override {

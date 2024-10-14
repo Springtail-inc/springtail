@@ -9,10 +9,10 @@
 
 #include <pg_repl/pg_copy_table.hh>
 
-#include <storage/table.hh>
-#include <storage/table_mgr.hh>
-
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+
 #include <xid_mgr/xid_mgr_client.hh>
 
 #include <test/services.hh>

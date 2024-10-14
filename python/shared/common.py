@@ -70,11 +70,18 @@ def execute_sql_select(conn, sql, args=None):
 def running_pids(names):
     """Return a list of process IDs for the given process names."""
     pids = []
+    not_running = []
+    running_names = {}
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] in names:
             pids.append({'name':proc.info['name'], 'pid':proc.info['pid']})
+            running_names[proc.info['name']] = True
 
-    return pids
+    for name in names:
+        if name not in running_names:
+            not_running.append(name)
+
+    return (pids, not_running)
 
 
 def kill_processes(names):

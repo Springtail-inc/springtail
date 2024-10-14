@@ -18,13 +18,13 @@
 #include <pg_repl/libpq_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
 
-#include <storage/system_tables.hh>
 #include <storage/schema.hh>
-#include <storage/table.hh>
 #include <storage/field.hh>
-#include <storage/table_mgr.hh>
 
 #include <sys_tbl_mgr/client.hh>
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
