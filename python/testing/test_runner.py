@@ -76,32 +76,42 @@ def run_test_case(test_file, primary_db_config, replica_db_config, results):
                     sql_statements = sections[section].strip().split(';')
                     for sql in sql_statements:
                         if sql.strip():
+                            logging.info(f"Executing on primary: {sql.strip()}")
                             execute_sql(primary_cur, sql)
             
             if 'verify' in sections:
                 logging.info(f"Running VERIFY for {test_file}")
-                # Add a delay before verification to allow replication to catch up
-                time.sleep(5)  # Adjust this delay as needed
+                # Increase the delay before verification to allow replication to catch up
+                time.sleep(10)  # Adjust this delay as needed
                 sql_statements = sections['verify'].strip().split(';')
                 for sql in sql_statements:
                     if sql.strip():
+                        # Extract expected results from comments
+                        expected_result = None
+                        for line in sql.split('\n'):
+                            if line.strip().startswith('-- Expected:'):
+                                expected_result = line.strip()[11:].strip()
+                                break
+                        
                         logging.info(f"Executing verification SQL: {sql.strip()}")
+                        if expected_result:
+                            logging.info(f"Expected: {expected_result}")
+                        
+                        logging.info("Executing on primary:")
                         primary_cur.execute(sql)
                         primary_result = primary_cur.fetchall()
+                        logging.info(f"Primary DB result: {primary_result}")
+                        
+                        logging.info("Executing on replica:")
                         replica_cur.execute(sql)
                         replica_result = replica_cur.fetchall()
+                        logging.info(f"Replica DB result: {replica_result}")
+                        
                         if primary_result != replica_result:
                             raise AssertionError(f"Verification failed for {test_file}: "
                                                  f"Primary DB: {primary_result}, "
                                                  f"Replica DB: {replica_result}")
                         logging.info("Verification passed")
-
-            if 'cleanup' in sections:
-                logging.info(f"Running CLEANUP for {test_file}")
-                sql_statements = sections['cleanup'].strip().split(';')
-                for sql in sql_statements:
-                    if sql.strip():
-                        execute_sql(primary_cur, sql)
 
             results.passed += 1
             status = "PASSED"
@@ -124,8 +134,6 @@ def run_test_case(test_file, primary_db_config, replica_db_config, results):
             error_msg = f"Unexpected error in test case {test_file}: {str(e)}"
             results.errors.append(error_msg)
             logging.error(error_msg)
-        finally:
-            log_test_execution(primary_db_config, test_file, status)
 
         duration = time.time() - start_time
         results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
@@ -226,5 +234,17 @@ if __name__ == "__main__":
     # Replica database configuration
     replica_db_config = base_db_config.copy()
     replica_db_config['dbname'] = 'replica_springtail'
+
+    results = TestResult()
+    test_file = os.path.join(test_folder, 'test_case2.sql')
+    run_test_case(test_file, main_db_config, replica_db_config, results)
+
+    print(f"\nTest Summary:")
+    print(f"Passed: {results.passed}")
+    print(f"Failed: {results.failed}")
+    if results.errors:
+        print("\nErrors:")
+        for error in results.errors:
+            print(error)
 
     run_all_tests(test_folder, main_db_config, replica_db_config)
