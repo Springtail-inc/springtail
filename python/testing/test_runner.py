@@ -2,10 +2,8 @@ import psycopg2
 import logging
 import os
 import yaml
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from jinja2 import Template
-import re
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -25,7 +23,10 @@ class TestCase:
 
 def setup(db_config):
     logging.info("Running global setup")
-    with psycopg2.connect(**db_config) as conn:
+    # Connect to the postgres database on the primary
+    postgres_config = db_config.copy()
+    postgres_config['dbname'] = 'postgres'
+    with psycopg2.connect(**postgres_config) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("""
@@ -37,12 +38,16 @@ def setup(db_config):
             )
             """)
 
-def teardown(db_config):
-    logging.info("Running global teardown")
-    with psycopg2.connect(**db_config) as conn:
+def log_test_execution(db_config, test_name, status):
+    postgres_config = db_config.copy()
+    postgres_config['dbname'] = 'postgres'
+    with psycopg2.connect(**postgres_config) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE test_execution_log")
+            cur.execute("""
+            INSERT INTO test_execution_log (test_name, status)
+            VALUES (%s, %s)
+            """, (test_name, status))
 
 def execute_sql(cursor, sql):
     logging.debug(f"Executing SQL: {sql}")
@@ -72,31 +77,24 @@ def run_test_case(test_file, primary_db_config, replica_db_config, results):
                     for sql in sql_statements:
                         if sql.strip():
                             execute_sql(primary_cur, sql)
-                            execute_sql(replica_cur, sql)
             
-            # Separate handling for the 'verify' section
             if 'verify' in sections:
                 logging.info(f"Running VERIFY for {test_file}")
-                verify_statements = re.findall(r'SELECT.+?;', sections['verify'], re.DOTALL | re.IGNORECASE)
-                for sql in verify_statements:
-                    # Execute the query on the primary database
-                    logging.info(f"Running SELECT on primary DB: {sql.strip()}")
-                    primary_cur.execute(sql)
-                    primary_result = primary_cur.fetchall()
-                    
-                    # Execute the same query on the replica database
-                    logging.info(f"Running SELECT on replica DB: {sql.strip()}")
-                    replica_cur.execute(sql)
-                    replica_result = replica_cur.fetchall()
-                    
-                    # Compare the results between primary and replica
-                    if primary_result != replica_result:
-                        error_msg = (f"Verification failed for {test_file}: "
-                                     f"Primary DB: {primary_result}, "
-                                     f"Replica DB: {replica_result}")
-                        raise AssertionError(error_msg)
-
-                    logging.info(f"Verification passed: {sql.strip()}")
+                # Add a delay before verification to allow replication to catch up
+                time.sleep(5)  # Adjust this delay as needed
+                sql_statements = sections['verify'].strip().split(';')
+                for sql in sql_statements:
+                    if sql.strip():
+                        logging.info(f"Executing verification SQL: {sql.strip()}")
+                        primary_cur.execute(sql)
+                        primary_result = primary_cur.fetchall()
+                        replica_cur.execute(sql)
+                        replica_result = replica_cur.fetchall()
+                        if primary_result != replica_result:
+                            raise AssertionError(f"Verification failed for {test_file}: "
+                                                 f"Primary DB: {primary_result}, "
+                                                 f"Replica DB: {replica_result}")
+                        logging.info("Verification passed")
 
             if 'cleanup' in sections:
                 logging.info(f"Running CLEANUP for {test_file}")
@@ -104,7 +102,6 @@ def run_test_case(test_file, primary_db_config, replica_db_config, results):
                 for sql in sql_statements:
                     if sql.strip():
                         execute_sql(primary_cur, sql)
-                        execute_sql(replica_cur, sql)
 
             results.passed += 1
             status = "PASSED"
@@ -128,32 +125,21 @@ def run_test_case(test_file, primary_db_config, replica_db_config, results):
             results.errors.append(error_msg)
             logging.error(error_msg)
         finally:
-            primary_cur.close()
-            replica_cur.close()
+            log_test_execution(primary_db_config, test_file, status)
 
         duration = time.time() - start_time
         results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
 
-
-def run_all_tests(test_folder, primary_db_config, replica_db_config, max_workers):
+def run_all_tests(test_folder, primary_db_config, replica_db_config):
     logging.info(f"Running all test cases from folder: {test_folder}")
     results = TestResult()
     
     setup(primary_db_config)
-    setup(replica_db_config)
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_test = {executor.submit(run_test_case, os.path.join(test_folder, file), primary_db_config, replica_db_config, results): file 
-                          for file in sorted(os.listdir(test_folder)) if file.endswith('.sql')}
-        for future in as_completed(future_to_test):
-            test = future_to_test[future]
-            try:
-                future.result()
-            except Exception as exc:
-                print(f'{test} generated an exception: {exc}')
+    for file in sorted(os.listdir(test_folder)):
+        if file.endswith('.sql'):
+            run_test_case(os.path.join(test_folder, file), primary_db_config, replica_db_config, results)
 
-    teardown(primary_db_config)
-    teardown(replica_db_config)
     generate_report(results)
 
     # Print summary statistics
@@ -224,11 +210,9 @@ if __name__ == "__main__":
         config = yaml.safe_load(f)
     
     test_folder = config['test_folder']
-    max_workers = config['max_workers']
 
     # Base configuration for both databases
     base_db_config = {
-        'dbname': 'springtail',
         'user': 'springtail',
         'password': 'springtail',
         'host': 'localhost',
@@ -243,4 +227,4 @@ if __name__ == "__main__":
     replica_db_config = base_db_config.copy()
     replica_db_config['dbname'] = 'replica_springtail'
 
-    run_all_tests(test_folder, main_db_config, replica_db_config, max_workers)
+    run_all_tests(test_folder, main_db_config, replica_db_config)
