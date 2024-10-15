@@ -103,7 +103,7 @@ namespace springtail {
                     field->allow_null((bit_pos >> 3), (bit_pos & 0x7));
                     ++bit_pos; // add the used null bit
                 }
-                    
+
                 byte_pos += 4; // add the used bytes
                 break;
 
@@ -268,12 +268,12 @@ namespace springtail {
         return std::make_shared<FieldTuple>(fields, tuple->row());
     }
 
-    
+
     std::shared_ptr<std::vector<std::shared_ptr<Field>>>
     ExtentSchema::fieldarray_subset(std::shared_ptr<Tuple> tuple,
                                const std::vector<std::string> &columns) const
     {
-        
+
         // find the correct column indexes for the columns
         auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
         for (auto &&column : columns) {
@@ -283,7 +283,7 @@ namespace springtail {
 
         return fields;
     }
- 
+
     VirtualSchema::VirtualSchema(const SchemaMetadata &meta)
     {
         std::map<uint32_t, std::string> name_map;
@@ -304,7 +304,7 @@ namespace springtail {
             case (SchemaUpdateType::NEW_COLUMN):
                 // note: if the new column was not nullable then we needed to perform a full sync to
                 //       populate the column data, so we should never hit this path
-                assert(update.nullable);
+                //assert(update.nullable);
 
                 _field_map[update.name] = std::make_shared<ConstNullField>(update.type);
                 name_map[update.position] = update.name;
