@@ -18,8 +18,8 @@ class Linear:
         linear.set_team('Springtail')
 
         asset_url = linear.upload_file('/tmp/gc.log.gz')
-        issue = linear.create_linear_issue_with_label('Test error report description', 'Test Error with Asset', label_id, asset_url)
-        issue = linear.create_bug_report_with_file('Test Error with Asset', 'Test error report description', '/tmp/gc.log.gz')
+        issue = linear.create_issue_with_label('Test error report description', 'Test Error with Asset', 'Bug', asset_url)
+        issue = linear.create_issue_with_file('Test Error with Asset', 'Test error report description', '/tmp/gc.log.gz', 'Bug')
 
         print(f"Created issue: {issue['url']}")
      """
@@ -268,17 +268,4 @@ class Linear:
 
         return json_response
 
-# Example Usage:
-#
-# linear = Linear()
-#
-# team_id = linear.get_team_id('Springtail')
-# label_id = linear.get_label_id('Test Error Report', 'Springtail')
-#
-# linear.set_team('Springtail')
-#
-# asset_url = linear.upload_file('/tmp/gc.log.gz')
-#
-# issue = linear.create_issue_with_label('Test error report description\nTest more', 'Test Error with Asset', 'Test Eror Report', asset_url)
-# print(f"Created issue: {issue['url']}")
 
