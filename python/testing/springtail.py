@@ -602,6 +602,27 @@ def dump_logs(args):
     gen_dump_tarball(props, args.build_dir)
 
 
+def generate_report(props, build_dir, title, description):
+    """Generate a bug report programmatically."""
+    log_path = props.get_log_path()
+    error_logs = check_backtrace(log_path)
+
+    if error_logs:
+        description += "\n\nErrors found in log files:\n"
+        for log in error_logs:
+            description += f"\n{log}\n"
+            bt = extract_backtrace(log)
+            description += f"\nBacktrace:\n{''.join(bt)}\n"
+
+    # Generate a tarball of the log files
+    tarball = gen_dump_tarball(props, build_dir)
+    linear = Linear()
+    linear.set_team('Springtail')
+    issue = linear.create_issue_with_file(title, description, tarball)
+
+    return issue['url']
+
+
 def create_report(args):
     """Create a new bug report."""
     build_dir = args.build_dir
