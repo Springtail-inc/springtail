@@ -73,33 +73,32 @@ def cleanup_filesystem(props):
 
 
 def connect_db_instance(props, db_name='postgres'):
-    """Connect to the database instance and return connection."""
+    """Return the database instance configuration."""
     # Get the database instance configuration
     db_instance_config = props.get_db_instance_config()
-    db_host = db_instance_config['host']
-    db_port = db_instance_config['port']
-    db_user = db_instance_config['replication_user']
-    db_password = db_instance_config['password']
-
-    # Connect to the database
-    conn = connect_db(db_name, db_user, db_password, db_host, db_port)
-
-    return conn
-
+    
+    # If db_instance_config is empty, use default values
+    return {
+        'dbname': db_name,
+        'user': db_instance_config.get('replication_user', 'postgres'),
+        'password': db_instance_config.get('password', ''),
+        'host': db_instance_config.get('host', 'localhost'),
+        'port': db_instance_config.get('port', 5432)
+    }
 
 def connect_fdw_instance(props, db_name='postgres'):
-    """Connect to the foreign data wrapper instance and return connection."""
+    """Return the foreign data wrapper instance configuration."""
     # Get the fdw configuration
     fdw_config = props.get_fdw_config()
-    fdw_host = fdw_config['host']
-    fdw_port = fdw_config['port']
-    fdw_user = fdw_config['fdw_user']
-    fdw_password = fdw_config['password']
-
-    # Connect to the database
-    conn = connect_db(db_name, fdw_user, fdw_password, fdw_host, fdw_port)
-
-    return conn
+    
+    # If fdw_config is empty, use default values
+    return {
+        'dbname': db_name,
+        'user': fdw_config.get('fdw_user', 'postgres'),
+        'password': fdw_config.get('password', ''),
+        'host': fdw_config.get('host', 'localhost'),
+        'port': fdw_config.get('port', 5432)
+    }
 
 
 def cleanup_db_instance(props):

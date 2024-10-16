@@ -4,7 +4,9 @@ import os
 import yaml
 import time
 from jinja2 import Template
+from springtail import connect_db_instance, connect_fdw_instance, Properties
 
+# Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TestResult:
@@ -22,11 +24,9 @@ class TestCase:
         self.error = error
 
 def setup(db_config):
-    logging.info("Running global setup")
-    # Connect to the postgres database on the primary
-    postgres_config = db_config.copy()
-    postgres_config['dbname'] = 'postgres'
-    with psycopg2.connect(**postgres_config) as conn:
+    """Initialize the database for logging test executions."""
+    logging.info("Running global setup.")
+    with psycopg2.connect(**db_config) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("""
@@ -35,161 +35,130 @@ def setup(db_config):
                 test_name TEXT,
                 execution_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT
-            )
+            );
             """)
 
 def log_test_execution(db_config, test_name, status):
-    postgres_config = db_config.copy()
-    postgres_config['dbname'] = 'postgres'
-    with psycopg2.connect(**postgres_config) as conn:
+    """Log the status of each test case execution."""
+    logging.info(f"Logging execution of test case: {test_name} with status: {status}")
+    with psycopg2.connect(**db_config) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("""
             INSERT INTO test_execution_log (test_name, status)
-            VALUES (%s, %s)
+            VALUES (%s, %s);
             """, (test_name, status))
 
-def execute_sql(cursor, sql):
-    logging.debug(f"Executing SQL: {sql}")
+def execute_sql(cursor, sql, section):
+    """Execute SQL statements with logging."""
+    logging.debug(f"[{section}] Executing SQL: {sql.strip()}")
     cursor.execute(sql)
-    logging.debug("SQL executed successfully")
+    logging.debug(f"[{section}] SQL executed successfully.")
 
-def run_test_case(test_file, primary_db_config, replica_db_config, results):
+def log_data_state(cursor, sql, db_name):
+    """Log the data state after executing SQL queries."""
+    logging.info(f"Fetching data from {db_name} with query: {sql.strip()}")
+    cursor.execute(sql)
+    data = cursor.fetchall()
+    logging.info(f"Data in {db_name}: {data}")
+    return data
+
+def run_test_case(test_file, main_db_config, replica_db_config, results):
+    """Run a test case and verify replication."""
+    logging.info(f"Running test case: {test_file}")
     start_time = time.time()
+
     with open(test_file, 'r') as f:
         content = f.read()
 
-    sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1] for section in sections if section.strip()}
+    sections = {section.split()[0].lower(): section.split('\n', 1)[1]
+                for section in content.split('##') if section.strip()}
 
-    with psycopg2.connect(**primary_db_config) as primary_conn, \
+    with psycopg2.connect(**main_db_config) as main_conn, \
          psycopg2.connect(**replica_db_config) as replica_conn:
-        primary_conn.autocommit = True
+        main_conn.autocommit = True
         replica_conn.autocommit = True
-        primary_cur = primary_conn.cursor()
+        main_cur = main_conn.cursor()
         replica_cur = replica_conn.cursor()
 
         try:
-            for section in ['setup', 'test']:
+            for section in ['setup', 'test', 'verify']:
                 if section in sections:
-                    logging.info(f"Running {section.upper()} for {test_file}")
+                    logging.info(f"Running {section.upper()} section for {test_file}.")
                     sql_statements = sections[section].strip().split(';')
                     for sql in sql_statements:
                         if sql.strip():
-                            logging.info(f"Executing on primary: {sql.strip()}")
-                            execute_sql(primary_cur, sql)
-            
-            if 'verify' in sections:
-                logging.info(f"Running VERIFY for {test_file}")
-                # Increase the delay before verification to allow replication to catch up
-                time.sleep(10)  # Adjust this delay as needed
-                sql_statements = sections['verify'].strip().split(';')
-                for sql in sql_statements:
+                            if section in ['setup', 'test']:
+                                execute_sql(main_cur, sql, section)
+                                log_data_state(main_cur, "SELECT * FROM test_execution_log", "Primary DB")
+                            elif section == 'verify':
+                                time.sleep(1)  # Delay for replication
+                                logging.info(f"Verifying with query: {sql.strip()}")
+                                main_result = log_data_state(main_cur, sql, "Primary DB")
+                                replica_result = log_data_state(replica_cur, sql, "Replica DB")
+                                if main_result != replica_result:
+                                    raise AssertionError(
+                                        f"Verification failed: Main: {main_result}, Replica: {replica_result}"
+                                    )
+                                logging.info("Verification passed.")
+
+            if 'cleanup' in sections:
+                logging.info(f"Running CLEANUP section for {test_file}.")
+                for sql in sections['cleanup'].strip().split(';'):
                     if sql.strip():
-                        # Extract expected results from comments
-                        expected_result = None
-                        for line in sql.split('\n'):
-                            if line.strip().startswith('-- Expected:'):
-                                expected_result = line.strip()[11:].strip()
-                                break
-                        
-                        logging.info(f"Executing verification SQL: {sql.strip()}")
-                        if expected_result:
-                            logging.info(f"Expected: {expected_result}")
-                        
-                        logging.info("Executing on primary:")
-                        primary_cur.execute(sql)
-                        primary_result = primary_cur.fetchall()
-                        logging.info(f"Primary DB result: {primary_result}")
-                        
-                        logging.info("Executing on replica:")
-                        replica_cur.execute(sql)
-                        replica_result = replica_cur.fetchall()
-                        logging.info(f"Replica DB result: {replica_result}")
-                        
-                        if primary_result != replica_result:
-                            raise AssertionError(f"Verification failed for {test_file}: "
-                                                 f"Primary DB: {primary_result}, "
-                                                 f"Replica DB: {replica_result}")
-                        logging.info("Verification passed")
+                        execute_sql(main_cur, sql, "cleanup")
 
             results.passed += 1
             status = "PASSED"
-            logging.info(f"Test case {test_file} PASSED")
-        except psycopg2.Error as e:
-            results.failed += 1
+            logging.info(f"Test case {test_file} PASSED.")
+        except (psycopg2.Error, AssertionError, Exception) as e:
             status = "FAILED"
-            error_msg = f"SQL Error in test case {test_file}: {str(e)}"
+            results.failed += 1
+            error_msg = f"Error in {test_file}: {str(e)}"
             results.errors.append(error_msg)
             logging.error(error_msg)
-        except AssertionError as e:
-            results.failed += 1
-            status = "FAILED"
-            error_msg = str(e)
-            results.errors.append(error_msg)
-            logging.error(error_msg)
-        except Exception as e:
-            results.failed += 1
-            status = "FAILED"
-            error_msg = f"Unexpected error in test case {test_file}: {str(e)}"
-            results.errors.append(error_msg)
-            logging.error(error_msg)
+        finally:
+            log_test_execution(main_db_config, test_file, status)
+            duration = time.time() - start_time
+            results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
 
-        duration = time.time() - start_time
-        results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
-
-def run_all_tests(test_folder, primary_db_config, replica_db_config):
-    logging.info(f"Running all test cases from folder: {test_folder}")
+def run_all_tests(test_folder, main_db_config, replica_db_config):
+    """Run all test cases from the given folder."""
+    logging.info(f"Running all test cases from folder: {test_folder}.")
     results = TestResult()
-    
-    setup(primary_db_config)
-    
+    setup(main_db_config)
+
     for file in sorted(os.listdir(test_folder)):
         if file.endswith('.sql'):
-            run_test_case(os.path.join(test_folder, file), primary_db_config, replica_db_config, results)
+            run_test_case(os.path.join(test_folder, file), main_db_config, replica_db_config, results)
 
     generate_report(results)
-
-    # Print summary statistics
     logging.info("\n--- Test Summary ---")
     logging.info(f"Total tests run: {results.passed + results.failed}")
     logging.info(f"Tests passed: {results.passed}")
     logging.info(f"Tests failed: {results.failed}")
+
     if results.errors:
-        logging.info("\nErrors:")
+        logging.error("\nErrors encountered:")
         for error in results.errors:
             logging.error(error)
 
 def generate_report(results):
+    """Generate a test report in HTML format."""
     template = Template('''
     <html>
-    <head>
-        <title>Test Report</title>
-        <style>
-            body { font-family: Arial, sans-serif; }
-            table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid #ddd; padding: 8px; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .passed { color: green; }
-            .failed { color: red; }
-        </style>
-    </head>
+    <head><title>Test Report</title></head>
     <body>
         <h1>Test Report</h1>
         <p>Total tests: {{ total_tests }}</p>
         <p>Passed: {{ passed_tests }}</p>
         <p>Failed: {{ failed_tests }}</p>
-        <table>
-            <tr>
-                <th>Test Case</th>
-                <th>Status</th>
-                <th>Duration (s)</th>
-                <th>Error</th>
-            </tr>
+        <table border="1">
+            <tr><th>Test Case</th><th>Status</th><th>Duration (s)</th><th>Error</th></tr>
             {% for test_case in test_cases %}
             <tr>
                 <td>{{ test_case.name }}</td>
-                <td class="{{ test_case.status.lower() }}">{{ test_case.status }}</td>
+                <td>{{ test_case.status }}</td>
                 <td>{{ "%.2f"|format(test_case.duration) }}</td>
                 <td>{{ test_case.error or '' }}</td>
             </tr>
@@ -199,7 +168,7 @@ def generate_report(results):
     </html>
     ''')
 
-    report = template.render(
+    report_content = template.render(
         total_tests=len(results.test_cases),
         passed_tests=results.passed,
         failed_tests=results.failed,
@@ -207,44 +176,19 @@ def generate_report(results):
     )
 
     os.makedirs('reports', exist_ok=True)
-    report_file = os.path.join('reports', 'test_report.html')
+    report_file = 'reports/test_report.html'
     with open(report_file, 'w') as f:
-        f.write(report)
+        f.write(report_content)
 
     logging.info(f"Test report generated: {report_file}")
 
 if __name__ == "__main__":
     with open('config.yaml', 'r') as f:
         config = yaml.safe_load(f)
-    
+
     test_folder = config['test_folder']
-
-    # Base configuration for both databases
-    base_db_config = {
-        'user': 'springtail',
-        'password': 'springtail',
-        'host': 'localhost',
-        'port': 5432
-    }
-
-    # Main database configuration
-    main_db_config = base_db_config.copy()
-    main_db_config['dbname'] = 'springtail'
-
-    # Replica database configuration
-    replica_db_config = base_db_config.copy()
-    replica_db_config['dbname'] = 'replica_springtail'
-
-    results = TestResult()
-    test_file = os.path.join(test_folder, 'test_case2.sql')
-    run_test_case(test_file, main_db_config, replica_db_config, results)
-
-    print(f"\nTest Summary:")
-    print(f"Passed: {results.passed}")
-    print(f"Failed: {results.failed}")
-    if results.errors:
-        print("\nErrors:")
-        for error in results.errors:
-            print(error)
+    props = Properties(load_config=False)
+    main_db_config = connect_db_instance(props)
+    replica_db_config = connect_fdw_instance(props)
 
     run_all_tests(test_folder, main_db_config, replica_db_config)
