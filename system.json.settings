@@ -81,7 +81,7 @@
             "primary_db": {
                 "host": "localhost",
                 "port": 5432,
-                "replication_user": "postgres",
+                "replication_user": "springtail",
                 "password": "springtail"
             },
             "database_ids": ["1"]
@@ -101,8 +101,9 @@
         "1": {
             "host": "localhost",
             "port": 5432,
-            "fdw_user": "postgres",
-            "password": "springtail"
+            "fdw_user": "springtail",
+            "password": "springtail",
+            "db_prefix": "replica_"
         }
     }
 }

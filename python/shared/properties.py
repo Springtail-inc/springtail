@@ -239,3 +239,10 @@ class Properties:
         return pid_path
 
 
+    def get_log_path(self):
+        """Return the path to the log file."""
+        system_config = self.get_system_config()
+        if 'log_path' not in system_config['logging']:
+            raise Exception('log_path not found in system settings')
+        log_path = os.path.dirname(system_config['logging']['log_path'])
+        return log_path
