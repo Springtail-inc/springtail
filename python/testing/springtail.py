@@ -602,6 +602,56 @@ def dump_logs(args):
     gen_dump_tarball(props, args.build_dir)
 
 
+def create_report(args):
+    """Create a new bug report."""
+    build_dir = args.build_dir
+    config_file = args.config_file
+    props = Properties(os.path.abspath(config_file), False)
+
+    linear = Linear()
+    linear.set_team('Springtail')
+
+    # Prompt for the bug title
+    title = input("Enter the title of the bug: ")
+
+    # Prompt for the bug description
+    description = input("Enter a detailed description of the bug: ")
+
+    # Prompt for the label
+    label = input("Enter label: 'Bug', or 'Test Error Report'.  Hit enter for default 'Bug': ")
+    if label == '':
+        label = 'Bug'
+
+    while label not in ['Bug', 'Test Error Report']:
+        print("Invalid label, please enter 'Bug' or 'Test Error Report'.")
+        label = input("Enter label: 'Bug', or 'Test Error Report'.  Hit enter for default 'Bug': ")
+        if label == '':
+            label = 'Bug'
+
+    # Prompt for whether to upload log files
+    upload_logs = input("Do you want to extract and upload log files? (y/n): ").strip().lower()
+
+    # Validate input for upload logs
+    while upload_logs not in ['y', 'n', 'yes', 'no']:
+        upload_logs = input("Do you want to extract and upload log files? (y/n): ").strip().lower()
+
+    tarball = None
+    if upload_logs in ['y', 'yes']:
+        # Generate a tarball of the log files
+        print("Generating tarball of log files...")
+        tarball = gen_dump_tarball(props, build_dir)
+
+    # Create the bug report
+    print("Creating bug report...")
+    issue = None
+    if tarball is not None:
+        issue = linear.create_issue_with_file(title, description, tarball, label)
+    else:
+        issue = linear.create_issue_with_label(description, title, label)
+
+    print(f"Bug report created: {issue['url']}")
+
+
 def parse_arguments():
     """Parse the command line arguments."""
     # Create the argument parser
@@ -617,6 +667,7 @@ def parse_arguments():
     parser.add_argument('--debug', action=argparse.BooleanOptionalAction, help="Print debug information on error")
     parser.add_argument('--check', action=argparse.BooleanOptionalAction, help="Check for backtrace on error")
     parser.add_argument('--dump', action=argparse.BooleanOptionalAction, help="Dump the log files into a tarball")
+    parser.add_argument('--report', action=argparse.BooleanOptionalAction, help="Create a new bug report")
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -628,8 +679,8 @@ if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
 
-    if not args.start and not args.status and not args.kill and not args.dump:
-        print("No action specified. Use --start, --status, --dump, or --kill.")
+    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report:
+        print("No action specified. Use --start, --status, --dump, --check, --report or --kill.")
         sys.exit(1)
 
     try:
@@ -650,6 +701,10 @@ if __name__ == "__main__":
 
         if args.dump:
             dump_logs(args)
+            sys.exit(0)
+
+        if args.report:
+            create_report(args)
             sys.exit(0)
 
     except Exception as e:

@@ -5,6 +5,10 @@ import os
 class Linear:
     """Linear API class.
 
+    Create a file .linear_env in your home directory with the following content:
+    {"api_key": "your_api_key", "team_id": "your_team_id"}
+    team_id is optional, it will default to 'Springtail'
+
     Example Usage:
         linear = Linear()
 
@@ -27,6 +31,8 @@ class Linear:
         self.DEFAULT_TEAM = 'Springtail'
         self.LABEL_ERROR_REPORT = 'Test Error Report'
 
+        self.team_name = self.DEFAULT_TEAM
+
         if os.path.exists(path):
             # read file as json
             with open(path, 'r') as f:
@@ -39,6 +45,8 @@ class Linear:
             self.team_id = os.environ.get('LINEAR_TEAM_ID')
 
         if not self.api_key:
+            print("Set the LINEAR_API_KEY environment variable or create a .linear_env file in your home directory")
+            print("with the following, {\"api_key\": \"your_api_key\", \"team_id\": \"your_team_id\"}\n")
             raise Exception("Linear API key and team ID not found in environment variables or .linear_env file")
 
         self.url = "https://api.linear.app/graphql"
@@ -69,11 +77,15 @@ class Linear:
         for label in labels:
             self.labels[label['name']] = label['id']
 
-        return labels
+        return self.labels
 
 
-    def create_linear_issue_with_label(self, description, title, label_id, asset_url=None):
+    def create_issue_with_label(self, description, title, label_name, asset_url=None):
         """Create a Linear issue with the given tag and label."""
+
+        team_id = self.get_team_id(self.team_name)
+        label_id = self.get_label_id(label_name, self.team_name)
+
         query = """
         mutation ($input: IssueCreateInput!) {
         issueCreate(input: $input) {
@@ -88,7 +100,7 @@ class Linear:
 
         variables = {
             "input": {
-                "teamId": self.team_id,  # Replace with your team ID
+                "teamId": team_id,  # Replace with your team ID
                 "title": title,
                 "description": description,
                 "labelIds": [label_id]  # Use the provided label/tag ID
@@ -98,15 +110,27 @@ class Linear:
         if asset_url:
             variables['input']['description'] = description + f"\nAttached logs: [Click to download]({asset_url})"
 
-        print("Variables: ", variables['input'])
-
         r = self.issue_query(query, variables)
-        print(f"Create issue response: {r}")
 
         if r['issueCreate']['success']:
             return r['issueCreate']['issue']
 
         raise Exception(f"Error creating issue: {r}")
+
+
+    def create_issue_with_file(self, title, description, file_path, label_name=None):
+        """Create a bug report with the given title, description, and file."""
+        asset_url = None
+        try:
+            asset_url = self.upload_file(file_path)
+        except:
+            print(f"Error uploading file: {file_path}, creating issue without file.")
+            pass
+
+        if label_name is None:
+            label_name = self.LABEL_ERROR_REPORT
+
+        return self.create_issue_with_label(description, title, label_name, asset_url)
 
 
     def upload_file(self, file_path):
@@ -199,6 +223,9 @@ class Linear:
 
     def get_label_id(self, label_name, team_name=None):
         """Get the label ID for the given label name."""
+        if team_name is None:
+            team_name = self.team_name
+
         if not self.labels:
             self.get_labels(team_name)
 
@@ -211,18 +238,7 @@ class Linear:
     def set_team(self, team_name):
         """Set the team ID."""
         self.team_id = self.get_team_id(team_name)
-
-
-    def create_bug_report_with_file(self, title, description, file_path):
-        """Create a bug report with the given title, description, and file."""
-        asset_url = None
-        try:
-            asset_url = self.upload_file(file_path)
-        except:
-            pass
-
-        label_id = self.get_label_id(self.LABEL_ERROR_REPORT, self.DEFAULT_TEAM)
-        return self.create_linear_issue_with_label(description, title, label_id, asset_url)
+        self.team_name = team_name
 
 
     def issue_query(self, query, variables={}):
@@ -248,11 +264,6 @@ class Linear:
 
         if 'data' in json_response:
             json_response = json_response['data']
-
-            # get the headers into the resonse
-            #print(f"Response headers: {response.headers}")
-            #json_response['headers'] = response.headers
-
             return json_response
 
         return json_response
@@ -268,6 +279,6 @@ class Linear:
 #
 # asset_url = linear.upload_file('/tmp/gc.log.gz')
 #
-# issue = linear.create_linear_issue_with_label('Test error report description\nTest more', 'Test Error with Asset', label_id, asset_url)
+# issue = linear.create_issue_with_label('Test error report description\nTest more', 'Test Error with Asset', 'Test Eror Report', asset_url)
 # print(f"Created issue: {issue['url']}")
 
