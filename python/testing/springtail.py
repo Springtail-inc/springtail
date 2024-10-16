@@ -1,8 +1,10 @@
 import os
 import sys
 import shutil
+import glob
 import argparse
 import traceback
+import tempfile
 import time
 from psycopg2.extensions import quote_ident
 
@@ -20,7 +22,10 @@ from common import (
     execute_sql,
     execute_sql_select,
     execute_sql_script,
-    run_command)
+    run_command,
+    set_dir_writable,
+    is_linux,
+)
 
 from sysutils import (
     stop_daemons,
@@ -30,8 +35,11 @@ from sysutils import (
     stop_postgres,
     start_daemons,
     check_daemons_running,
-    is_linux,
-    grep_line_in_file)
+    check_backtrace,
+    extract_backtrace
+)
+
+from linear import Linear
 
 # Constants
 FDW_SERVER_NAME = 'springtail_fdw_server'
@@ -408,22 +416,66 @@ def check_config(props):
 
 
 def check_log_writable(props):
+    """Check the log path is writable."""
     # Get the log path and check the parent directory is writable
-    sys_config = props.get_system_config()
-    log_path = os.path.dirname(sys_config['logging']['log_path'])
-    # Check parent directory of log path is writable
+    log_path = props.get_log_path()
+
     print(f"Checking log path {log_path} is writable...")
-    if not os.access(log_path, os.W_OK) or not (os.stat(log_path).st_mode & 0o0007 == 0o0007):
-        # set writable by owner, group, and others
-        print(f"Setting log path {log_path} to be writable by owner, group, and others.")
-        os.chmod(log_path, 0o777)
+    set_dir_writable(log_path)
 
 
-def fixup_perms(mount_path):
+def fixup_log_perms(props):
     """Fix up permissions for the given mount path."""
-    username = os.environ.get('USER') or os.environ.get('USERNAME')
     # Fix up permissions for the given mount path
-    run_command('sudo', ['chown', '-R', f'{username}:{username}', mount_path])
+    if is_linux():
+        log_path = props.get_log_path()
+        for log in glob.glob(os.path.join(log_path, '*.log')):
+            run_command('sudo', ['chmod', 'a+r', log])
+
+
+def gen_dump_tarball(props, build_dir):
+    """Generate a tarball of the log files."""
+    # get paths
+    mount_path = props.get_mount_path()
+    log_path = props.get_log_path()
+
+    fixup_log_perms(props)
+
+    # create a temp directory
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # generate a tarball of the log files
+        # create a logs directory in the temp directory
+        tmp_logs_dir = os.path.join(tmp_dir, 'logs')
+        os.mkdir(tmp_logs_dir)
+
+        # create tarball filename including timestamp
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        tarfile = 'dump-' + timestr + '.tar.gz'
+        tarball = os.path.join(tmp_dir, tarfile)
+
+        # copy the log files to the temp directory
+        logs = os.path.join(log_path, '*.log')
+        for log in glob.glob(logs):
+            shutil.copy(log, tmp_logs_dir)
+
+        shutil.copy(os.path.join(mount_path, 'system.json'), tmp_logs_dir)
+        run_command(os.path.join(build_dir, 'src/storage/dump_system_tables'), ['1'], os.path.join(tmp_logs_dir, 'system_table.dump'));
+
+        # create the tarball
+        run_command('tar', ['-czf', tarball, '-C', tmp_dir, 'logs'])
+
+        # copy the tarball to the mount path
+        # create a dumps dir if not exists
+        dumps_dir = os.path.join(mount_path, 'dumps')
+        if not os.path.exists(dumps_dir):
+            os.mkdir(dumps_dir)
+
+        # copy the tarball to the dumps dir
+        shutil.copy(tarball, dumps_dir)
+
+        print(f"Log files dumped to tarball: {os.path.join(dumps_dir, tarfile)}")
+
+        return os.path.join(dumps_dir, tarfile)
 
 
 def start(args):
@@ -469,6 +521,7 @@ def start(args):
 
     # start replication on db instance
     print("\nStarting replication on database instance...")
+    check_log_writable(props)
     start_replication(props, build_dir)
 
     # start daemons
@@ -479,12 +532,10 @@ def start(args):
     print("\nWaiting for running state...")
     wait_for_running(props)
 
-    check_log_writable(props)
-
     # import the fdw schemas
     print("\nImporting foreign data wrapper schemas...")
     fdw_import(props, build_dir, config_file)
-    #fixup_perms(props.get_mount_path())
+    fixup_log_perms(props)
 
     print("\nSpringtail system started successfully.")
 
@@ -522,7 +573,108 @@ def stop():
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
 
+def check_logs(args):
+    """Check the logs for errors."""
+    # Load the system properties from the system.json file
+    config_file = args.config_file
+    props = Properties(os.path.abspath(config_file), False)
+    log_path = props.get_log_path()
+
+    # Check the logs for errors
+    error_logs = check_backtrace(log_path)
+    print(f"Found the following logs with errors: {error_logs}")
+
+    # Extract the backtrace from the error logs
+    for log in error_logs:
+        print(f"Extracting backtrace from log: {log}")
+        bt = extract_backtrace(log)
+        print(f"\nBacktrace: {"".join(bt)}")
+
+    return error_logs
+
+
+def dump_logs(args):
+    """Dump the log files into a tarball."""
+    # Load the system properties from the system.json file
+    config_file = args.config_file
+    props = Properties(os.path.abspath(config_file), False)
+
+    gen_dump_tarball(props, args.build_dir)
+
+
+def generate_report(props, build_dir, title, description):
+    """Generate a bug report programmatically."""
+    log_path = props.get_log_path()
+    error_logs = check_backtrace(log_path)
+
+    if error_logs:
+        description += "\n\nErrors found in log files:\n"
+        for log in error_logs:
+            description += f"\n{log}\n"
+            bt = extract_backtrace(log)
+            description += f"\nBacktrace:\n{''.join(bt)}\n"
+
+    # Generate a tarball of the log files
+    tarball = gen_dump_tarball(props, build_dir)
+    linear = Linear()
+    linear.set_team('Springtail')
+    issue = linear.create_issue_with_file(title, description, tarball)
+
+    return issue['url']
+
+
+def create_report(args):
+    """Create a new bug report."""
+    build_dir = args.build_dir
+    config_file = args.config_file
+    props = Properties(os.path.abspath(config_file), False)
+
+    linear = Linear()
+    linear.set_team('Springtail')
+
+    # Prompt for the bug title
+    title = input("Enter the title of the bug: ")
+
+    # Prompt for the bug description
+    description = input("Enter a detailed description of the bug: ")
+
+    # Prompt for the label
+    label = input("Enter label: 'Bug', or 'Test Error Report'.  Hit enter for default 'Bug': ")
+    if label == '':
+        label = 'Bug'
+
+    while label not in ['Bug', 'Test Error Report']:
+        print("Invalid label, please enter 'Bug' or 'Test Error Report'.")
+        label = input("Enter label: 'Bug', or 'Test Error Report'.  Hit enter for default 'Bug': ")
+        if label == '':
+            label = 'Bug'
+
+    # Prompt for whether to upload log files
+    upload_logs = input("Do you want to extract and upload log files? (y/n): ").strip().lower()
+
+    # Validate input for upload logs
+    while upload_logs not in ['y', 'n', 'yes', 'no']:
+        upload_logs = input("Do you want to extract and upload log files? (y/n): ").strip().lower()
+
+    tarball = None
+    if upload_logs in ['y', 'yes']:
+        # Generate a tarball of the log files
+        print("Generating tarball of log files...")
+        tarball = gen_dump_tarball(props, build_dir)
+
+    # Create the bug report
+    print("Creating bug report...")
+    issue = None
+    if tarball is not None:
+        issue = linear.create_issue_with_file(title, description, tarball, label)
+    else:
+        issue = linear.create_issue_with_label(description, title, label)
+
+    print(f"Bug report created: {issue['url']}")
+
+
 def parse_arguments():
+    """Parse the command line arguments."""
     # Create the argument parser
     parser = argparse.ArgumentParser(description="Process command-line arguments for config file and build directory.")
 
@@ -534,6 +686,9 @@ def parse_arguments():
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
     parser.add_argument('--debug', action=argparse.BooleanOptionalAction, help="Print debug information on error")
+    parser.add_argument('--check', action=argparse.BooleanOptionalAction, help="Check for backtrace on error")
+    parser.add_argument('--dump', action=argparse.BooleanOptionalAction, help="Dump the log files into a tarball")
+    parser.add_argument('--report', action=argparse.BooleanOptionalAction, help="Create a new bug report")
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -541,11 +696,12 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
+    """Main function to run the Springtail system."""
     # Parse command line arguments
     args = parse_arguments()
 
-    if not args.start and not args.status and not args.kill:
-        print("No action specified. Use --start, --status, or --kill.")
+    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report:
+        print("No action specified. Use --start, --status, --dump, --check, --report or --kill.")
         sys.exit(1)
 
     try:
@@ -559,6 +715,18 @@ if __name__ == "__main__":
 
         if args.start:
             start(args)
+
+        if args.check:
+            check_logs(args)
+            sys.exit(0)
+
+        if args.dump:
+            dump_logs(args)
+            sys.exit(0)
+
+        if args.report:
+            create_report(args)
+            sys.exit(0)
 
     except Exception as e:
         print(f"Caught error: {e}")

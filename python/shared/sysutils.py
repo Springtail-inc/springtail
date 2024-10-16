@@ -1,14 +1,16 @@
 import os
-import platform
 import time
 
-from common import run_command, kill_processes, running_pids
+from common import (
+    run_command,
+    kill_processes,
+    running_pids,
+    grep_file,
+    search_and_capture,
+    is_linux
+)
 
 POSTGRES = 'postgresql@16'
-
-def is_linux():
-    """Check if the system is Linux."""
-    return platform.system() == 'Linux'
 
 def stop_daemons(pid_path, daemons=[]):
     """Stop the daemons."""
@@ -67,11 +69,10 @@ def start_postgres():
     print("Postgres is not running, starting it...")
 
     # start the postgres process, detect platform
-    system = platform.system()
-    if system == 'Darwin':
-        run_command('brew', ['services', 'start', POSTGRES])
-    elif system == 'Linux':
+    if is_linux():
         run_command('sudo', ['service', 'postgresql', 'start'])
+    else:
+        run_command('brew', ['services', 'start', POSTGRES])
 
     iters = 0
     pids = []
@@ -146,14 +147,26 @@ def running_daemons(daemons):
     """Return a list of process IDs for the running daemons."""
     return running_pids(daemons)[0]
 
-def grep_line_in_file(file_path, search_line):
-    """Search for a line in a file."""
-    try:
-        with open(file_path, 'r') as file:
-            for line in file:
-                if search_line in line:
-                    return True
-        return False
-    except FileNotFoundError:
-        print(f"The file {file_path} was not found.")
-        return False
+def check_backtrace(log_path):
+    """Check if any daemon log files contain a backtrace."""
+    failed_files = []
+
+    # iterate over files in mount_path
+    for f in os.listdir(log_path):
+        f = os.path.join(log_path, f)
+        if os.path.isfile(f) and f.endswith('.log'):
+            # check if the file contains a backtrace
+            if grep_file(f, ['backtrace_handler', 'Stack trace']):
+                failed_files.append(f)
+
+    return failed_files
+
+def extract_backtrace(file: str):
+    """Extract the backtrace from the given file."""
+    lines = search_and_capture(file, ['backtrace_handler', 'Stack trace'])
+    for i in range(len(lines)-1, 0, -1):
+        if lines[i][0] != '#':
+            lines.pop()
+        else:
+            break
+    return lines

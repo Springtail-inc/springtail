@@ -2,7 +2,8 @@ import os
 import psutil
 import subprocess
 import psycopg2
-
+import platform
+import re
 
 def connect_db(dbname, username, password, host, port, autocommit=True):
     """Connect to the given database with the given username, password, host, and port."""
@@ -92,18 +93,92 @@ def kill_processes(names):
             proc.kill()
 
 
-def run_command(command, args):
+def run_command(command, args, outfile=None):
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
+
     # Run the external command
-    result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False)
+    result = None
+    if outfile:
+        with open(outfile, 'w') as f:
+            result = subprocess.run(command_with_args, stdout=f, stderr=subprocess.PIPE, text=True, shell=False)
+    else:
+        result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False)
 
     # Check if the command was successful
     if result.returncode != 0:
         raise Exception(f"Command failed with error: {result.stderr}")
+
+    if outfile:
+        return None
 
     # Split the output into lines and get the last line
     output_lines = result.stdout.strip().split('\n')
     last_line = output_lines[-1] if output_lines else None
 
     return last_line
+
+
+def grep_file(file_path: str, search_strings: list):
+    """Search for a line in a file.
+    Arguments:
+    file_path -- the path to the file to search
+    search_lines -- a list of strings to search for
+    Returns:
+    List of files that contain the search string.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                for search_line in search_strings:
+                    if search_line in line:
+                        return True
+        return False
+    except FileNotFoundError:
+        print(f"The file {file_path} was not found.")
+        return False
+
+
+def remove_ansi_escapes(text):
+    """Remove ANSI escape sequences from a string."""
+    # Regular expression pattern to match ANSI escape sequences
+    ansi_escape_pattern = r'\x1B\[\d{1,2}m'
+    return re.sub(ansi_escape_pattern, '', text)
+
+
+def search_and_capture(filename: str, search_strings: list):
+    """Search for a string in a file and capture all lines after the string is found."""
+    found_string = False
+    captured_output = []
+
+    # Open the file and read line by line
+    with open(filename, 'r') as file:
+        for line in file:
+            if found_string:
+                # If the search string is found, start capturing the output
+                captured_output.append(remove_ansi_escapes(line))
+            else:
+                for search_line in search_strings:
+                    if search_line in line:
+                        found_string = True
+                        captured_output.append(remove_ansi_escapes(line))
+
+    # Join the captured lines into a multiline string
+    return captured_output
+
+
+def set_dir_writable(dir):
+    """Check the log path is writable."""
+    if not os.path.exists(dir):
+        # make directory writable by owner, group, and others
+        os.makedirs(dir, mode=0o777)
+        return
+
+    if not os.access(dir, os.W_OK) or not (os.stat(dir).st_mode & 0o0007 == 0o0007):
+        # set writable by owner, group, and others
+        os.chmod(dir, 0o777)
+
+
+def is_linux():
+    """Check if the system is Linux."""
+    return platform.system() == 'Linux'
