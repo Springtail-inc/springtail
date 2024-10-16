@@ -14,3 +14,5 @@ cmake-build-*
 compile_commands.json
 system.json.test
 venv
+.DS_Store
+__pycache__/
