@@ -1,2 +1,2 @@
 test_folder: 'test_cases'
-max_workers: 4
+max_workers: 1
