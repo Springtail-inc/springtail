@@ -90,11 +90,11 @@ def stop_postgres():
     print("Stopping the postgres process...")
 
     # stop the postgres process, detect platform
-    system = platform.system()
-    if system == 'Darwin':
-        run_command('brew', ['services', 'stop', POSTGRES])
-    elif system == 'Linux':
+    if is_linux():
         run_command('sudo', ['service', 'postgresql', 'stop'])
+    else:
+        run_command('brew', ['services', 'stop', POSTGRES])
+
     time.sleep(1)
 
     pids = running_pids(['postgres'])[0]
