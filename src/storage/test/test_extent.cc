@@ -91,10 +91,10 @@ namespace {
             _populate(extent->append(),
                       "different", 4372895, true, 12, false);
 
-			if (add_empty_variable) {
-				_populate(extent->append(),
-						  "", 4372896, true, 15, false);
-			}
+            if (add_empty_variable) {
+                _populate(extent->append(),
+                        "", 4372896, true, 15, false);
+            }
 
             return extent;
         }
