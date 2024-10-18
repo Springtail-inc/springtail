@@ -1,0 +1,18 @@
+-- Test Case 4: Rename Column
+-- Create a table for testing column renaming.
+CREATE TABLE IF NOT EXISTS ddl_test_rename_column (
+    id SERIAL PRIMARY KEY,
+    value TEXT
+);
+
+-- Rename the column from 'value' to 'renamed_value'.
+ALTER TABLE ddl_test_rename_column RENAME COLUMN value TO renamed_value;
+
+-- Insert data into the table using the renamed column.
+INSERT INTO ddl_test_rename_column (renamed_value) VALUES ('test_value');
+
+-- Query the table to verify the column rename.
+SELECT * FROM ddl_test_rename_column;
+
+-- Drop the table to clean up.
+DROP TABLE IF EXISTS ddl_test_rename_column;

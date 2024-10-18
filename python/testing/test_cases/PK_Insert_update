@@ -1,0 +1,15 @@
+-- Test Case 4: Inserting and Updating Duplicates in a Table Without Primary Key
+CREATE TABLE IF NOT EXISTS test_no_pkey (
+    id SERIAL,
+    value TEXT
+);
+
+INSERT INTO test_no_pkey (value) VALUES ('duplicate');
+INSERT INTO test_no_pkey (value) VALUES ('duplicate');
+
+UPDATE test_no_pkey SET value = 'updated' WHERE id = 1;
+
+SELECT * FROM test_no_pkey;
+
+-- Cleanup
+DROP TABLE IF EXISTS test_no_pkey;
