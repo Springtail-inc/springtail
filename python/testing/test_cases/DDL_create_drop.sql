@@ -1,13 +1,18 @@
--- Test Case 1: Create and Drop Table
-
--- Create a simple table with a primary key and text column.
-CREATE TABLE IF NOT EXISTS ddl_test_create (
+## setup
+-- Create a test table.
+CREATE TABLE IF NOT EXISTS ddl_create_drop (
     id SERIAL PRIMARY KEY,
     value TEXT
 );
 
--- Query the table to ensure it's created correctly.
-SELECT * FROM ddl_test_create;
+## test
+-- Drop the table to verify DDL operations.
+DROP TABLE ddl_create_drop;
 
--- Drop the table to clean up.
-DROP TABLE IF EXISTS ddl_test_create;
+## verify
+-- Ensure the table no longer exists.
+SELECT * FROM information_schema.tables 
+WHERE table_name = 'ddl_create_drop';
+
+## cleanup
+-- No cleanup needed since the table was dropped.

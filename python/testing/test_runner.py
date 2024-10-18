@@ -85,21 +85,12 @@ def execute_sql(cursor, sql):
     logging.debug("SQL executed successfully")
 
 def run_test_case(test_file, main_conn, replica_conn, results):
-    """
-    Execute a test case and verify its results across primary and replica databases.
-
-    Args:
-        test_file (str): Path to the SQL test case file.
-        main_conn (psycopg2.connection): Connection to the primary database.
-        replica_conn (psycopg2.connection): Connection to the replica database.
-        results (TestResult): Object to store the test results.
-    """
     start_time = time.time()
     with open(test_file, 'r') as f:
         content = f.read()
 
     sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1] for section in sections if section.strip()}
+    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip() for section in sections if section.strip()}
 
     main_conn.autocommit = True
     replica_conn.autocommit = True
@@ -110,46 +101,61 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         for section in ['setup', 'test', 'verify']:
             if section in sections:
                 logging.info(f"Running {section.upper()} for {test_file}")
-                sql_statements = sections[section].strip().split(';')
+                sql_statements = sections[section].split(';')
+
                 for sql in sql_statements:
                     if sql.strip():
                         if section in ['setup', 'test']:
                             execute_sql(main_cur, sql)
                         elif section == 'verify':
-                            time.sleep(1)  # Allow time for replication to catch up
-                            logging.info(f"Verifying: {sql.strip()}")
-                            main_cur.execute(sql)
-                            main_result = main_cur.fetchall()
-                            replica_cur.execute(sql)
-                            replica_result = replica_cur.fetchall()
-                            if main_result != replica_result:
-                                raise AssertionError(
-                                    f"Verification failed for {test_file}: "
-                                    f"Main DB: {main_result}, Replica DB: {replica_result}"
-                                )
-                            logging.info("Verification passed")
+                            if sql.strip().lower().startswith('select'):
+                                time.sleep(1)  # Allow time for replication
+                                logging.info(f"Verifying: {sql.strip()}")
 
+                                main_cur.execute(sql)
+                                main_result = main_cur.fetchall()
+                                replica_cur.execute(sql)
+                                replica_result = replica_cur.fetchall()
+
+                                if main_result != replica_result:
+                                    raise AssertionError(
+                                        f"Verification failed for {test_file}: "
+                                        f"Main DB: {main_result}, Replica DB: {replica_result}"
+                                    )
+                                logging.info("Verification passed")
+                            else:
+                                logging.info(f"Executing non-SELECT verification: {sql.strip()}")
+                                execute_sql(main_cur, sql)
+
+        # Handle cleanup gracefully
         if 'cleanup' in sections:
-            logging.info(f"Running CLEANUP for {test_file}")
-            sql_statements = sections['cleanup'].strip().split(';')
-            for sql in sql_statements:
-                if sql.strip():
-                    execute_sql(main_cur, sql)
+            cleanup_content = sections['cleanup'].strip()
+            if not cleanup_content or all(line.startswith('--') for line in cleanup_content.split('\n')):
+                logging.info(f"Skipping empty or comment-only cleanup in {test_file}")
+            else:
+                logging.info(f"Running CLEANUP for {test_file}")
+                cleanup_statements = cleanup_content.split(';')
+                for sql in cleanup_statements:
+                    if sql.strip():
+                        execute_sql(main_cur, sql)
 
         results.passed += 1
         status = "PASSED"
         logging.info(f"Test case {test_file} PASSED")
+
     except (psycopg2.Error, AssertionError, Exception) as e:
         results.failed += 1
         status = "FAILED"
         error_msg = str(e)
         results.errors.append(error_msg)
         logging.error(f"Test case {test_file} FAILED: {error_msg}")
+
     finally:
         log_test_execution(main_conn, test_file, status)
 
     duration = time.time() - start_time
     results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
+
 
 def run_all_tests(test_folder, main_conn, replica_conn):
     """
