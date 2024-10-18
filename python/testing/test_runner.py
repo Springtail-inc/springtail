@@ -11,9 +11,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 
 class TestResult:
     """Class to store the results of test cases."""
-
     def __init__(self):
-        """Initialize the test result counters."""
         self.passed = 0
         self.failed = 0
         self.errors = []
@@ -21,29 +19,14 @@ class TestResult:
 
 class TestCase:
     """Class to represent a single test case result."""
-
     def __init__(self, name, status, duration, error=None):
-        """
-        Initialize the test case with its name, status, duration, and error (if any).
-        
-        Args:
-            name (str): Name of the test case.
-            status (str): Status of the test case (e.g., PASSED, FAILED).
-            duration (float): Duration of the test case execution.
-            error (str, optional): Error message if the test failed.
-        """
         self.name = name
         self.status = status
         self.duration = duration
         self.error = error
 
 def setup(conn):
-    """
-    Set up the database by creating a log table for test executions.
-
-    Args:
-        conn (psycopg2.connection): Connection to the main database.
-    """
+    """Run global setup by creating the test execution log table."""
     logging.info("Running global setup")
     conn.autocommit = True
     with conn.cursor() as cur:
@@ -57,14 +40,7 @@ def setup(conn):
         """)
 
 def log_test_execution(conn, test_name, status):
-    """
-    Log the execution status of a test case to the database.
-
-    Args:
-        conn (psycopg2.connection): Connection to the main database.
-        test_name (str): Name of the test case.
-        status (str): Status of the test case (e.g., PASSED, FAILED).
-    """
+    """Log the execution status of a test case."""
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute("""
@@ -73,24 +49,20 @@ def log_test_execution(conn, test_name, status):
         """, (test_name, status))
 
 def execute_sql(cursor, sql):
-    """
-    Execute an SQL statement and log its progress.
-
-    Args:
-        cursor (psycopg2.cursor): Cursor to execute the SQL statement.
-        sql (str): SQL query to execute.
-    """
+    """Execute an SQL statement and log its progress."""
     logging.debug(f"Executing SQL: {sql}")
     cursor.execute(sql)
     logging.debug("SQL executed successfully")
 
 def run_test_case(test_file, main_conn, replica_conn, results):
+    """Run a single test case and track the results."""
     start_time = time.time()
     with open(test_file, 'r') as f:
         content = f.read()
 
     sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip() for section in sections if section.strip()}
+    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip()
+                for section in sections if section.strip()}
 
     main_conn.autocommit = True
     replica_conn.autocommit = True
@@ -98,36 +70,35 @@ def run_test_case(test_file, main_conn, replica_conn, results):
     replica_cur = replica_conn.cursor()
 
     try:
+        # Process setup, test, and verify sections
         for section in ['setup', 'test', 'verify']:
             if section in sections:
                 logging.info(f"Running {section.upper()} for {test_file}")
                 sql_statements = sections[section].split(';')
 
                 for sql in sql_statements:
-                    if sql.strip():
-                        if section in ['setup', 'test']:
-                            execute_sql(main_cur, sql)
-                        elif section == 'verify':
-                            if sql.strip().lower().startswith('select'):
-                                time.sleep(1)  # Allow time for replication
-                                logging.info(f"Verifying: {sql.strip()}")
+                    if sql.strip():  # Skip empty queries
+                        logging.debug(f"Executing SQL: {sql}")
+                        main_cur.execute(sql)
 
-                                main_cur.execute(sql)
-                                main_result = main_cur.fetchall()
-                                replica_cur.execute(sql)
-                                replica_result = replica_cur.fetchall()
+                        # Handle verification logic separately
+                        if section == 'verify' and sql.strip().lower().startswith('select'):
+                            time.sleep(1)  # Allow time for replication
+                            logging.info(f"Verifying: {sql.strip()}")
 
-                                if main_result != replica_result:
-                                    raise AssertionError(
-                                        f"Verification failed for {test_file}: "
-                                        f"Main DB: {main_result}, Replica DB: {replica_result}"
-                                    )
-                                logging.info("Verification passed")
-                            else:
-                                logging.info(f"Executing non-SELECT verification: {sql.strip()}")
-                                execute_sql(main_cur, sql)
+                            main_cur.execute(sql)
+                            main_result = main_cur.fetchall()
+                            replica_cur.execute(sql)
+                            replica_result = replica_cur.fetchall()
 
-        # Handle cleanup gracefully
+                            if main_result != replica_result:
+                                raise AssertionError(
+                                    f"Verification failed for {test_file}: "
+                                    f"Main DB: {main_result}, Replica DB: {replica_result}"
+                                )
+                            logging.info("Verification passed")
+
+        # Handle cleanup section
         if 'cleanup' in sections:
             cleanup_content = sections['cleanup'].strip()
             if not cleanup_content or all(line.startswith('--') for line in cleanup_content.split('\n')):
@@ -139,11 +110,13 @@ def run_test_case(test_file, main_conn, replica_conn, results):
                     if sql.strip():
                         execute_sql(main_cur, sql)
 
+        # Mark the test case as passed
         results.passed += 1
         status = "PASSED"
         logging.info(f"Test case {test_file} PASSED")
 
     except (psycopg2.Error, AssertionError, Exception) as e:
+        # Handle any errors or assertion failures
         results.failed += 1
         status = "FAILED"
         error_msg = str(e)
@@ -151,21 +124,14 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         logging.error(f"Test case {test_file} FAILED: {error_msg}")
 
     finally:
+        # Log the test execution status
         log_test_execution(main_conn, test_file, status)
 
     duration = time.time() - start_time
     results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
 
-
 def run_all_tests(test_folder, main_conn, replica_conn):
-    """
-    Run all test cases in the specified folder.
-
-    Args:
-        test_folder (str): Path to the folder containing SQL test cases.
-        main_conn (psycopg2.connection): Connection to the primary database.
-        replica_conn (psycopg2.connection): Connection to the replica database.
-    """
+    """Run all test cases in the specified folder."""
     logging.info(f"Running all test cases from folder: {test_folder}")
     results = TestResult()
 
@@ -187,12 +153,7 @@ def run_all_tests(test_folder, main_conn, replica_conn):
             logging.error(error)
 
 def generate_report(results):
-    """
-    Generate an HTML report for the test results.
-
-    Args:
-        results (TestResult): Object containing the test results.
-    """
+    """Generate an HTML report for the test results."""
     template = Template('''
     <html>
     <head>
