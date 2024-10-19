@@ -391,12 +391,6 @@ namespace springtail {
         StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
-         * Release modified pages back to the cache.
-         */
-        void release_pages(const std::vector<StorageCache::PagePtr> &pages);
-
-
-        /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
          * system tables.
          */

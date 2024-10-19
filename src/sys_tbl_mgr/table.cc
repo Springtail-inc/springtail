@@ -481,20 +481,6 @@ namespace springtail {
                                                  _access_xid, _target_xid);
     }
 
-    void
-    MutableTable::release_pages(const std::vector<StorageCache::PagePtr> &pages)
-    {
-    //    auto cache = StorageCache::get_instance();
-
-        // need to release the dirty pages back to the cache with the appropriate callback
-        /*
-        for (auto &page : pages) {
-            cache->put(page, std::bind(&MutableTable::_flush_handler,
-                                       this, std::placeholders::_1));
-        }
-        */
-    }
-
     bool
     MutableTable::_flush_handler(StorageCache::PagePtr page)
     {
