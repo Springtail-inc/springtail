@@ -838,6 +838,7 @@ namespace springtail {
             }
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
+                assert(_p != other._p);
 				clear();
                 _p = other._p;
                 _c = other._c;
@@ -851,11 +852,17 @@ namespace springtail {
             }
 
             PagePtr operator->() const {
+                assert(_p);
                 return _p;
             }
 
             PagePtr ptr() const {
+                assert(_p);
                 return _p;
+            }
+
+            bool empty() const {
+                return !_p;
             }
 
         private:

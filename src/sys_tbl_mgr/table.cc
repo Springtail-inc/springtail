@@ -600,7 +600,7 @@ namespace springtail {
     {
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
-        if (_empty_page.ptr()) {
+        if (!_empty_page.empty()) {
             _flush_and_populate_indexes(_empty_page.ptr());
 
             //StorageCache::get_instance()->put(_empty_page);
@@ -664,7 +664,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // get the page from the cache if we don't have one
-        if (!_empty_page.ptr()) {
+        if (_empty_page.empty()) {
             _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
         }
 
@@ -677,7 +677,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // get the page from the cache if we don't have one
-        if (!_empty_page.ptr()) {
+        if (_empty_page.empty()) {
             _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
         }
 
@@ -759,7 +759,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // get the page from the cache if we don't have one
-        if (!_empty_page.ptr()) {
+        if (_empty_page.empty()) {
             _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
         }
 
@@ -813,7 +813,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // get the page from the cache if we don't have one
-        if (!_empty_page.ptr()) {
+        if (_empty_page.empty()) {
             _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
         }
 
@@ -907,7 +907,7 @@ namespace springtail {
                                 uint64_t xid)
     {
         // get the page from the cache if we don't have one
-        if (!_empty_page.ptr()) {
+        if (_empty_page.empty()) {
             _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
         }
 

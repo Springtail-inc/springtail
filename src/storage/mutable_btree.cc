@@ -363,7 +363,7 @@ namespace springtail {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
         // note: page should be empty when this is called
-        assert(_cache_page.ptr() == nullptr || _cache_page->empty());
+        assert(_cache_page.empty() || _cache_page.ptr()->empty());
 
         // set the type based on the extent header
         this->type = cache_page->header().type;
