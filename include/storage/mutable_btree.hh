@@ -157,6 +157,7 @@ namespace springtail {
         class Page {
         public:
             using Iterator = StorageCache::Page::Iterator;
+            using StoragePagePtr = StorageCache::SafePagePtr;
 
         private:
             /**
@@ -170,7 +171,7 @@ namespace springtail {
         public:
             /** For constructing an empty root. */
             Page(std::shared_ptr<MutableBTree> btree,
-                 StorageCache::PagePtr cache_page,
+                 StoragePagePtr cache_page,
                  ExtentSchemaPtr schema)
                 : extent_id(constant::UNKNOWN_EXTENT),
                   type(false, true),
@@ -178,7 +179,7 @@ namespace springtail {
                   _btree(btree),
                   _dirty(false),
                   _schema(schema),
-                  _cache_page(cache_page),
+                  _cache_page(std::move(cache_page)),
                   _parent(nullptr)
             {
                 _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
@@ -195,7 +196,7 @@ namespace springtail {
             Page(std::shared_ptr<MutableBTree> btree,
                  uint64_t extent_id,
                  ValueTuplePtr v,
-                 StorageCache::PagePtr cache_page,
+                 StoragePagePtr cache_page,
                  ExtentSchemaPtr schema)
                 : extent_id(extent_id),
                   prev_key(v),
@@ -203,7 +204,7 @@ namespace springtail {
                   _btree(btree),
                   _dirty(false),
                   _schema(schema),
-                  _cache_page(cache_page)
+                  _cache_page(std::move(cache_page))
             {
                 type = cache_page->header().type;
                 _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
@@ -299,7 +300,7 @@ namespace springtail {
              * @param extent The contents of the page.
              * @param key_fields The fields that represent the key within this page.
              */
-            void set_cache_page(StorageCache::PagePtr cache_page, ExtentSchemaPtr schema);
+            void set_cache_page(StoragePagePtr cache_page, ExtentSchemaPtr schema);
 
             PageCache::LookupID
             get_lookup_id()
@@ -419,7 +420,7 @@ namespace springtail {
             MutableFieldArrayPtr _key_fields; ///< The fields representing the key in the btree.
 
             ExtentSchemaPtr _schema; ///< The schema of the page.
-            StorageCache::PagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
+            StoragePagePtr _cache_page; ///< The backing page in the cache for the contents of this BTree page.
 
             // the following are protected by a separate mutex, must be holding the primary mutex at least shared.
             mutable boost::shared_mutex _children_mutex; ///< A mutex to protect the map of children.  Can be acquired unique while sharing the primary mutex.

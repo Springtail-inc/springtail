@@ -813,7 +813,65 @@ namespace springtail {
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
         };
+
         using PagePtr = std::shared_ptr<Page>;
+
+        class SafePagePtr {
+        public:
+            using FlashCb = std::function<bool(std::shared_ptr<Page>)>;
+
+            SafePagePtr() :
+                _c{nullptr}, _p{}, _cb{}
+            {}
+
+            SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlashCb cb) :
+                _c{c}, _p{p}, _cb{cb}
+            {}
+
+            SafePagePtr(SafePagePtr &other) = delete;
+            SafePagePtr& operator=(const SafePagePtr &other) = delete;
+
+            SafePagePtr(SafePagePtr &&other) {
+                if (_p) {
+                    _c->put(_p, _cb);
+                }
+                _p = other._p;
+                _c = other._c;
+                _cb = other._cb;
+                other._p = nullptr;
+            }
+
+            SafePagePtr& operator=(SafePagePtr &&other) noexcept {
+                if (_p) {
+                    _c->put(_p, _cb);
+                }
+                _p = other._p;
+                _c = other._c;
+                _cb = other._cb;
+                other._p = nullptr;
+                return *this;
+            }
+
+            ~SafePagePtr() {
+                if (_p) {
+                    _c->put(_p, _cb);
+                }
+            }
+
+            PagePtr operator->() const {
+                return _p;
+            }
+
+            PagePtr ptr() const {
+                return _p;
+            }
+
+        private:
+            PageCache* _c;
+            PagePtr _p;
+            FlashCb _cb;
+        };
+
 
 
     private:
@@ -946,19 +1004,20 @@ namespace springtail {
          *                 the same in-flight dirty page to other callers.
          * @return The retrieved Page object.
          */
-        PagePtr get(const std::filesystem::path &file,
+        SafePagePtr get(const std::filesystem::path &file,
                     uint64_t extent_id,
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
-                    bool do_rollforward = false);
+                    bool do_rollforward = false,
+                    SafePagePtr::FlashCb flash_cb={} );
 
         /**
          * Release a Page object back to the cache.
          *
          * @param page The page to release.
          */
-        void put(PagePtr page,
-                 std::function<bool(std::shared_ptr<Page>)> flush_callback = nullptr);
+//        void put(PagePtr page,
+ //                std::function<bool(std::shared_ptr<Page>)> flush_callback = nullptr);
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages

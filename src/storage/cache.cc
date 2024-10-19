@@ -43,12 +43,13 @@ namespace springtail {
         _page_cache = std::make_shared<PageCache>(size);
     }
 
-    StorageCache::PagePtr
+    StorageCache::SafePagePtr
     StorageCache::get(const std::filesystem::path &file,
                       uint64_t extent_id,
                       uint64_t access_xid,
                       uint64_t target_xid,
-                      bool do_rollforward)
+                      bool do_rollforward,
+                      SafePagePtr::FlashCb cb )
     {
         // note: target_xid must be at or beyond the access_xid
         assert(target_xid >= access_xid);
@@ -58,12 +59,12 @@ namespace springtail {
 
         // if the extent ID is UNKNOWN, then we will get an empty page for the file
         if (extent_id == constant::UNKNOWN_EXTENT) {
-            return _page_cache->get_empty(file, target_xid);
+            return {_page_cache.get(), _page_cache->get_empty(file, target_xid), cb};
         }
 
         // if target is the same as access, get the page and return it
         if (target_xid == access_xid) {
-            return _page_cache->get(file, extent_id, access_xid, target_xid);
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), cb};
         }
 
         // if the target is ahead of the access, but there is roll-forward request, then it means
@@ -72,7 +73,7 @@ namespace springtail {
             // note: we know that the provided extent_id is valid at the access_xid, so we get the
             //       page at the target_xid using that original extent_id so that the caller can
             //       modify it from that point forward
-            return _page_cache->get(file, extent_id, access_xid, target_xid);
+            return {_page_cache.get(), _page_cache->get(file, extent_id, access_xid, target_xid), cb};
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
@@ -105,12 +106,14 @@ namespace springtail {
 #endif
     }
 
+    /*
     void
     StorageCache::put(PagePtr page,
                       std::function<bool(std::shared_ptr<Page>)> flush_callback)
     {
         _page_cache->put(page, flush_callback);
     }
+    */
 
     void
     StorageCache::flush(const std::filesystem::path &file)

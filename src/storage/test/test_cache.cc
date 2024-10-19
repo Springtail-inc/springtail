@@ -69,16 +69,16 @@ namespace {
         auto &&offsets = page->flush(header);
 
         // put() the mutated Page
-        cache->put(page);
-        page = nullptr;
+//        cache->put(page);
+ //       page = nullptr;
 
         // verify the contents
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, xid);
+           page = cache->get(file, offset, xid);
 
-            for (auto row : (*page)) {
+            for (auto row : *page.ptr()) {
                 if (prev != "") {
                     ASSERT_GT(_fields->at(1)->get_text(row), prev);
                 }
@@ -87,7 +87,7 @@ namespace {
                 ++count;
             }
 
-            cache->put(page);
+            //cache->put(page);
         }
         ASSERT_EQ(count, 5000);
     }
@@ -115,8 +115,8 @@ namespace {
         auto &&offsets = page->flush(header);
 
         // put() the mutated Page
-        cache->put(page);
-        page = nullptr;
+        //cache->put(page);
+        //page = nullptr;
 
         // verify the contents
         int count = 0;
@@ -124,7 +124,7 @@ namespace {
         for (auto offset : offsets) {
             page = cache->get(file, offset, xid);
 
-            for (auto row : (*page)) {
+            for (auto row : *page.ptr()) {
                 if (prev != "") {
                     ASSERT_GE(_fields->at(1)->get_text(row), prev);
                 }
@@ -132,8 +132,6 @@ namespace {
                 prev = _fields->at(1)->get_text(row);
                 ++count;
             }
-
-            cache->put(page);
         }
         ASSERT_EQ(count, 50000);
     }

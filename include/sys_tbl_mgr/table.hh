@@ -63,7 +63,8 @@ namespace springtail {
                 }
 
                 // retrieve the data extent
-                _page = _table->_read_page_via_primary(_btree_i);
+                auto sp = _table->_read_page_via_primary(_btree_i);
+                _page = sp.ptr();
                 _page_i = _page->begin();
 
                 return *this;
@@ -85,7 +86,8 @@ namespace springtail {
                     --_btree_i;
 
                     // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
+                    auto sp = _table->_read_page_via_primary(_btree_i);
+                    _page = sp.ptr();
                     _page_i = _page->end();
                 }
 
@@ -95,7 +97,8 @@ namespace springtail {
                     --_btree_i;
 
                     // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
+                    auto sp = _table->_read_page_via_primary(_btree_i);
+                    _page = sp.ptr();
                     _page_i = _page->end();
                 }
 
@@ -133,7 +136,7 @@ namespace springtail {
             Iterator(const Table *table)
                 : _table(table),
                   _btree(nullptr),
-                  _page(nullptr)
+                  _page{}
             { }
 
             /** Specifically for the end() iterator. */
@@ -141,7 +144,7 @@ namespace springtail {
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree->end()),
-                  _page(nullptr)
+                  _page{}
             { }
 
             /** For constructing an Iterator from the Table functions. */
@@ -261,7 +264,7 @@ namespace springtail {
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats
@@ -277,14 +280,14 @@ namespace springtail {
          * @param pos The primary index btree iterator.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr _read_page_via_primary(BTree::Iterator &pos) const;
+        StorageCache::SafePagePtr _read_page_via_primary(BTree::Iterator &pos) const;
 
         /**
          * Reads an extent from the tree and returns it.
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr _read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr _read_page(uint64_t extent_id) const;
 
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -385,7 +388,7 @@ namespace springtail {
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
          * Release modified pages back to the cache.
@@ -557,7 +560,7 @@ namespace springtail {
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
-        StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
+        StorageCache::SafePagePtr _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
