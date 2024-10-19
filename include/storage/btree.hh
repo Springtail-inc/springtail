@@ -32,22 +32,16 @@ namespace springtail {
 
             Node(PagePtr p)
                 : page(std::move(p)),
-                  row_i(p->begin()),
                   parent(nullptr)
-            { }
+            { 
+                  row_i = page->begin();
+			}
 
             Node(PagePtr page, StorageCache::Page::Iterator i, std::shared_ptr<Node> p)
                 : page(std::move(page)),
                   row_i(std::move(i)),
                   parent(p)
             { }
-
-            /*
-            ~Node()
-            {
-                StorageCache::get_instance()->put(page);
-            }
-            */
 
             bool operator==(const Node& rhs) const { return (page.ptr() == rhs.page.ptr() && row_i == rhs.row_i); }
         };

@@ -820,42 +820,34 @@ namespace springtail {
         public:
             using FlashCb = std::function<bool(std::shared_ptr<Page>)>;
 
-            SafePagePtr() :
-                _c{nullptr}, _p{}, _cb{}
+            SafePagePtr(SafePagePtr &other) = delete;
+            SafePagePtr& operator=(const SafePagePtr &other) = delete;
+
+            SafePagePtr()
             {}
 
             SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlashCb cb) :
                 _c{c}, _p{p}, _cb{cb}
             {}
 
-            SafePagePtr(SafePagePtr &other) = delete;
-            SafePagePtr& operator=(const SafePagePtr &other) = delete;
-
             SafePagePtr(SafePagePtr &&other) {
-                if (_p) {
-                    _c->put(_p, _cb);
-                }
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
-                other._p = nullptr;
+                other._p.reset();
             }
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
-                if (_p) {
-                    _c->put(_p, _cb);
-                }
+				clear();
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
-                other._p = nullptr;
+                other._p.reset();
                 return *this;
             }
 
             ~SafePagePtr() {
-                if (_p) {
-                    _c->put(_p, _cb);
-                }
+				clear();
             }
 
             PagePtr operator->() const {
@@ -870,6 +862,14 @@ namespace springtail {
             PageCache* _c;
             PagePtr _p;
             FlashCb _cb;
+
+			void clear() noexcept {
+				if (!_p) {
+					return;
+				}
+				assert(_c);
+				_c->put(_p, _cb);
+			}
         };
 
 

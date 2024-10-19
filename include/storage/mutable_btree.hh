@@ -206,7 +206,7 @@ namespace springtail {
                   _schema(schema),
                   _cache_page(std::move(cache_page))
             {
-                type = cache_page->header().type;
+                type = _cache_page->header().type;
                 _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
             }
 
