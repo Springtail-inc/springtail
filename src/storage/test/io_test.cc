@@ -212,7 +212,7 @@ TEST(IOTest, IOTests)
 
     sync_append(fh_append, fh_read, 15, 3);
 
-	// test empty vectors
+    // test empty vectors
     sync_append(fh_append, fh_read, 0, 3);
 
     // open second file for write (overwrite)
