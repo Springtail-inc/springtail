@@ -865,21 +865,19 @@ namespace springtail {
                 return !_p;
             }
 
-        private:
-            PageCache* _c;
-            PagePtr _p;
-            FlashCb _cb;
-
 			void clear() noexcept {
 				if (!_p) {
 					return;
 				}
 				assert(_c);
 				_c->put(_p, _cb);
+                _p.reset();
 			}
+        private:
+            PageCache* _c;
+            PagePtr _p;
+            FlashCb _cb;
         };
-
-
 
     private:
         /**
