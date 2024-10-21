@@ -78,9 +78,9 @@ def execute_sql(cursor, sql):
 
     Args:
         cursor (psycopg2.cursor): Cursor to execute the SQL statement.
-        sql (str): SQL query to execute.
+        sql (str): SQL query to execute, which may span multiple lines.
     """
-    logging.debug(f"Executing SQL: {sql}")
+    logging.debug(f"Executing SQL:\n{sql}")
     cursor.execute(sql)
     logging.debug("SQL executed successfully")
 
@@ -99,7 +99,7 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         content = f.read()
 
     sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1] for section in sections if section.strip()}
+    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip() for section in sections if section.strip()}
 
     main_conn.autocommit = True
     replica_conn.autocommit = True
@@ -110,31 +110,27 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         for section in ['setup', 'test', 'verify']:
             if section in sections:
                 logging.info(f"Running {section.upper()} for {test_file}")
-                sql_statements = sections[section].strip().split(';')
-                for sql in sql_statements:
-                    if sql.strip():
-                        if section in ['setup', 'test']:
-                            execute_sql(main_cur, sql)
-                        elif section == 'verify':
-                            time.sleep(1)  # Allow time for replication to catch up
-                            logging.info(f"Verifying: {sql.strip()}")
-                            main_cur.execute(sql)
-                            main_result = main_cur.fetchall()
-                            replica_cur.execute(sql)
-                            replica_result = replica_cur.fetchall()
-                            if main_result != replica_result:
-                                raise AssertionError(
-                                    f"Verification failed for {test_file}: "
-                                    f"Main DB: {main_result}, Replica DB: {replica_result}"
-                                )
-                            logging.info("Verification passed")
+                sql_statements = sections[section]
+                
+                if section in ['setup', 'test']:
+                    execute_sql(main_cur, sql_statements)
+                elif section == 'verify':
+                    time.sleep(1)  # Allow time for replication to catch up
+                    logging.info(f"Verifying:\n{sql_statements.strip()}")
+                    execute_sql(main_cur, sql_statements)
+                    main_result = main_cur.fetchall()
+                    execute_sql(replica_cur, sql_statements)
+                    replica_result = replica_cur.fetchall()
+                    if main_result != replica_result:
+                        raise AssertionError(
+                            f"Verification failed for {test_file}:\n"
+                            f"Main DB: {main_result}\nReplica DB: {replica_result}"
+                        )
+                    logging.info("Verification passed")
 
         if 'cleanup' in sections:
             logging.info(f"Running CLEANUP for {test_file}")
-            sql_statements = sections['cleanup'].strip().split(';')
-            for sql in sql_statements:
-                if sql.strip():
-                    execute_sql(main_cur, sql)
+            execute_sql(main_cur, sections['cleanup'])
 
         results.passed += 1
         status = "PASSED"

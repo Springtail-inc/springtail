@@ -4,7 +4,11 @@ CREATE TABLE IF NOT EXISTS ddl_test_not_null (
     id SERIAL PRIMARY KEY,
     value TEXT NOT NULL
 );
+
 ## test
+-- Insert data with non-NULL value to ensure the initial constraint.
+INSERT INTO ddl_test_not_null (value) VALUES ('valid_value');
+
 -- Drop the NOT NULL constraint from the 'value' column.
 ALTER TABLE ddl_test_not_null ALTER COLUMN value DROP NOT NULL;
 
