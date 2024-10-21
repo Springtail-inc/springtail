@@ -150,7 +150,7 @@ namespace springtail {
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     StorageCache::PagePtr page,
+                     StorageCache::PagePtr::element_type* page,
                      const StorageCache::Page::Iterator &page_i)
                 : _table(table),
                   _btree(btree),
@@ -165,7 +165,7 @@ namespace springtail {
             BTreePtr _btree; ///< A pointer to the BTree of the primary index.
             BTree::Iterator _btree_i; ///< An iterator into the BTree.
 
-            StorageCache::PagePtr _page; ///< A pointer to the data page currently being processed.
+            StorageCache::PagePtr::element_type* _page; ///< A pointer to the data page currently being processed.
             StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
         };
 
@@ -443,7 +443,7 @@ namespace springtail {
         /**
          * Flush the page and add it's rows into the primary and secondary indexes.
          */
-        void _flush_and_populate_indexes(StorageCache::PagePtr page);
+        void _flush_and_populate_indexes(StorageCache::PagePtr::element_type* page);
 
 
         /**
@@ -554,7 +554,7 @@ namespace springtail {
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
-        StorageCache::SafePagePtr _empty_page; ///< Used to handle the empty table corner-case.
+        std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.

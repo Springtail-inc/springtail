@@ -816,6 +816,10 @@ namespace springtail {
 
         using PagePtr = std::shared_ptr<Page>;
 
+            /**
+             * RAII container for a PagePtr to ensure it is put back into the read cache after
+             * use.
+             */
         class SafePagePtr {
         public:
             using FlashCb = std::function<bool(std::shared_ptr<Page>)>;
@@ -839,7 +843,7 @@ namespace springtail {
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
                 assert(_p != other._p);
-				clear();
+				put();
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
@@ -848,24 +852,28 @@ namespace springtail {
             }
 
             ~SafePagePtr() {
-				clear();
+				put();
             }
 
-            PagePtr operator->() const {
-                assert(_p);
-                return _p;
+            PagePtr::element_type* operator->() const {
+                return ptr();
             }
 
-            PagePtr ptr() const {
+            PagePtr::element_type* ptr() const {
                 assert(_p);
-                return _p;
+                return _p.get();
             }
 
             bool empty() const {
                 return !_p;
             }
 
-			void clear() noexcept {
+        private:
+            PageCache* _c;
+            PagePtr _p;
+            FlashCb _cb;
+
+			void put() noexcept {
 				if (!_p) {
 					return;
 				}
@@ -873,10 +881,6 @@ namespace springtail {
 				_c->put(_p, _cb);
                 _p.reset();
 			}
-        private:
-            PageCache* _c;
-            PagePtr _p;
-            FlashCb _cb;
         };
 
     private:
