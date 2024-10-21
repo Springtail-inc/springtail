@@ -1030,7 +1030,7 @@ namespace springtail {
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
                     bool do_rollforward = false,
-                    SafePagePtr::FlushCb flash_cb={} );
+                    SafePagePtr::FlushCb flush_cb={} );
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages
