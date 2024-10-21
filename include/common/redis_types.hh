@@ -137,4 +137,20 @@ namespace springtail::redis {
      * args: <db_instance_id>, <db_id>
      */
     static constexpr char QUEUE_SYNC_TABLE_OPS[] = "queue:sync_table_ops:{}:{}";
+
+    //// For coordinator
+
+    /**
+     * Hash set for tracking liveness of a daemon
+     * args: <db_instance_id>
+     * key: <daemon_type>:<thread_id>, value: <timestamp>
+     */
+    static constexpr char HASH_LIVENESS[] = "hash:liveness:{}";
+
+    /**
+     * Queue for notifying the coordinator of a dead daemon
+     * args: <db_instance_id>
+     * value: <daemon_type>:<thread_id>
+     */
+    static constexpr char QUEUE_LIVENESS_NOTIFY[] = "queue:liveness_notify:{}";
 }
