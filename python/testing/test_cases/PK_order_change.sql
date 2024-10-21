@@ -1,20 +1,26 @@
 ## setup
--- Create a table with a composite primary key.
-CREATE TABLE IF NOT EXISTS test_pkey_3 (
-    id1 INT,
-    id2 INT,
-    id3 INT,
+CREATE TABLE IF NOT EXISTS test_pkey_order (
+    A INT,
+    B INT,
+    C INT,
     value TEXT,
-    PRIMARY KEY (id1, id2, id3)
+    PRIMARY KEY (A, B, C)
 );
 
 ## test
-INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (1, 2, 3, 'test_value_1');
-INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (4, 5, 6, 'test_value_2');
+
+ALTER TABLE test_pkey_order DROP CONSTRAINT test_pkey_order_pkey;
+ALTER TABLE test_pkey_order ADD PRIMARY KEY (B, C, A);
+
+INSERT INTO test_pkey_order (A, B, C, value) VALUES (1, 2, 3, 'test_value');
 
 ## verify
-SELECT * FROM test_pkey_3;
+-- Verify the new primary key order (B, C, A)
+SELECT column_name
+FROM information_schema.key_column_usage
+WHERE table_name = 'test_pkey_order'
+ORDER BY ordinal_position;
 
 ## cleanup
 -- Cleanup
-DROP TABLE IF EXISTS test_pkey_3;
+DROP TABLE IF EXISTS test_pkey_order;

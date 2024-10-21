@@ -1,4 +1,3 @@
--- Test Case 5: Drop NOT NULL Constraint
 ## setup
 -- Create a table with a NOT NULL constraint on a column.
 CREATE TABLE IF NOT EXISTS ddl_test_not_null (
