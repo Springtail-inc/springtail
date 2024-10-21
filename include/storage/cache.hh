@@ -263,7 +263,7 @@ namespace springtail {
              * rows.  The provided extent is invalidated and references to the two new DIRTY extents
              * are returned.
              */
-            std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
+            std::pair<ExtentRef, std::weak_ptr<CacheExtent>> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
 
             /**
              * Returns an empty DIRTY extent tied to the provided file.
