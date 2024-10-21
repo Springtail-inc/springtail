@@ -38,28 +38,28 @@ namespace springtail {
          * @param type daemon type
          * @param thread_id thread id
          */
-        void register_thread(DaemonType type, uint64_t thread_id=0);
+        void register_thread(DaemonType type, const std::string &thread_id="0");
 
         /**
          * @brief Unregister a thread with the coordinator
          * @param type daemon type
          * @param thread_id thread id
          */
-        void unregister_thread(DaemonType type, uint64_t thread_id=0);
+        void unregister_thread(DaemonType type, const std::string &thread_id="0");
 
         /**
          * @brief Set the thread liveness object
          * @param type daemon type
          * @param thread_id thread id
          */
-        void set_liveness(DaemonType type, uint64_t thread_id=0);
+        void set_liveness(DaemonType type, const std::string &thread_id="0");
 
         /**
          * @brief Kill a daemon; mark it as dead, notify the coordinator
          * @param type daemon type
          * @param thread_id thread id
          */
-        void kill_daemon(DaemonType type, uint64_t thread_id=0);
+        void kill_daemon(DaemonType type, const std::string &thread_id="0");
 
     private:
         /** Private constructor */
@@ -89,6 +89,6 @@ namespace springtail {
          * @param thread_id thread id
          * @param alive true if alive, false if dead
          */
-        void _set_liveness(DaemonType type, uint64_t thread_id, bool alive);
+        void _set_liveness(DaemonType type, const std::string &thread_id, bool alive);
     };
 }

@@ -22,13 +22,13 @@ namespace springtail {
     }
 
     void
-    Coordinator::register_thread(DaemonType type, uint64_t thread_id)
+    Coordinator::register_thread(DaemonType type, const std::string &thread_id)
     {
         _set_liveness(type, thread_id, true);
     }
 
     void
-    Coordinator::unregister_thread(DaemonType type, uint64_t thread_id)
+    Coordinator::unregister_thread(DaemonType type, const std::string &thread_id)
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id, (uint8_t)type, thread_id);
@@ -37,19 +37,19 @@ namespace springtail {
     }
 
     void
-    Coordinator::set_liveness(DaemonType type, uint64_t thread_id)
+    Coordinator::set_liveness(DaemonType type, const std::string &thread_id)
     {
         _set_liveness(type, thread_id, true);
     }
 
     void
-    Coordinator::kill_daemon(DaemonType type, uint64_t thread_id)
+    Coordinator::kill_daemon(DaemonType type, const std::string &thread_id)
     {
         _set_liveness(type, thread_id, false);
     }
 
     void
-    Coordinator::_set_liveness(DaemonType type, uint64_t thread_id, bool alive)
+    Coordinator::_set_liveness(DaemonType type, const std::string &thread_id, bool alive)
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id, (uint8_t)type, thread_id);

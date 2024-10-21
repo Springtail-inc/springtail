@@ -59,7 +59,7 @@ protected:
      * @param thread_id thread id
      * @param alive true if the daemon is alive
      */
-    void check_redis(Coordinator::DaemonType type, uint64_t thread_id, bool alive)
+    void check_redis(Coordinator::DaemonType type, const std::string &thread_id, bool alive)
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _instance_id);
@@ -96,7 +96,7 @@ TEST_F(CoordinatorTest, SingletonInstanceTest) {
 }
 
 TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
-    uint64_t thread_id = 1;
+    std::string thread_id = "1";
 
     coordinator->register_thread(Coordinator::LOG_MGR, thread_id);
     check_redis(Coordinator::LOG_MGR, thread_id, true);
@@ -106,7 +106,7 @@ TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
 }
 
 TEST_F(CoordinatorTest, SetLivenessTest) {
-    uint64_t thread_id = 1;
+    std::string thread_id = "1";
 
     coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
     coordinator->set_liveness(Coordinator::WRITE_CACHE, thread_id);
@@ -115,7 +115,7 @@ TEST_F(CoordinatorTest, SetLivenessTest) {
 }
 
 TEST_F(CoordinatorTest, KillDaemonTest) {
-    uint64_t thread_id = 1;
+    std::string thread_id = "1";
 
     coordinator->register_thread(Coordinator::XID_MGR, thread_id);
     coordinator->kill_daemon(Coordinator::XID_MGR, thread_id);
@@ -124,8 +124,8 @@ TEST_F(CoordinatorTest, KillDaemonTest) {
 }
 
 TEST_F(CoordinatorTest, MultipleThreadsTest) {
-    uint64_t thread_id1 = 1;
-    uint64_t thread_id2 = 2;
+    std::string thread_id1 = "1";
+    std::string thread_id2 = "2";
 
     coordinator->register_thread(Coordinator::DDL_MGR, thread_id1);
     coordinator->register_thread(Coordinator::GC_MGR, thread_id2);
