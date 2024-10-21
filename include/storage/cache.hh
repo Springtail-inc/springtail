@@ -873,14 +873,14 @@ namespace springtail {
             PagePtr _p;
             FlashCb _cb;
 
-			void put() noexcept {
-				if (!_p) {
-					return;
-				}
-				assert(_c);
-				_c->put(_p, _cb);
+            void put() noexcept {
+                if (!_p) {
+                    return;
+                }
+                assert(_c);
+                _c->put(_p, _cb);
                 _p.reset();
-			}
+            }
         };
 
     private:
@@ -1019,14 +1019,6 @@ namespace springtail {
                     uint64_t target_xid = constant::LATEST_XID,
                     bool do_rollforward = false,
                     SafePagePtr::FlashCb flash_cb={} );
-
-        /**
-         * Release a Page object back to the cache.
-         *
-         * @param page The page to release.
-         */
-//        void put(PagePtr page,
- //                std::function<bool(std::shared_ptr<Page>)> flush_callback = nullptr);
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages
