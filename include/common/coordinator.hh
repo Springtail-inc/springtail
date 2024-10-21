@@ -48,11 +48,11 @@ namespace springtail {
         void unregister_thread(DaemonType type, const std::string &thread_id="0");
 
         /**
-         * @brief Set the thread liveness object
+         * @brief Mark a daemon as alive; refresh it's timestamp
          * @param type daemon type
          * @param thread_id thread id
          */
-        void set_liveness(DaemonType type, const std::string &thread_id="0");
+        void mark_alive(DaemonType type, const std::string &thread_id="0");
 
         /**
          * @brief Kill a daemon; mark it as dead, notify the coordinator

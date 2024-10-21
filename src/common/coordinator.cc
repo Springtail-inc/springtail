@@ -37,7 +37,7 @@ namespace springtail {
     }
 
     void
-    Coordinator::set_liveness(DaemonType type, const std::string &thread_id)
+    Coordinator::mark_alive(DaemonType type, const std::string &thread_id)
     {
         _set_liveness(type, thread_id, true);
     }
