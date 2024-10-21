@@ -831,7 +831,7 @@ namespace springtail {
             {}
 
             SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlashCb cb) :
-                _c{c}, _p{p}, _cb{cb}
+                _c{c}, _p{std::move(p)}, _cb{std::move(cb)}
             {}
 
             SafePagePtr(SafePagePtr &&other) {
@@ -843,7 +843,7 @@ namespace springtail {
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
                 assert(_p != other._p);
-				put();
+                put();
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
