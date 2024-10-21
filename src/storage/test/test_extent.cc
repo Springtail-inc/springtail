@@ -78,7 +78,7 @@ namespace {
         }
 
         ExtentPtr
-        _create_and_populate()
+        _create_and_populate(bool add_empty_variable=false)
         {
             // create an extent
             ExtentPtr extent = std::make_shared<Extent>(ExtentType{false}, 0, _schema->row_size());
@@ -90,6 +90,11 @@ namespace {
                       "duplicate", 15, false, 0, true);
             _populate(extent->append(),
                       "different", 4372895, true, 12, false);
+
+            if (add_empty_variable) {
+                _populate(extent->append(),
+                        "", 4372896, true, 15, false);
+            }
 
             return extent;
         }
@@ -105,7 +110,7 @@ namespace {
 
     TEST_F(Extent_Test, SerializeDeserialize) {
         // create a populated extent
-        ExtentPtr extent = _create_and_populate();
+        ExtentPtr extent = _create_and_populate(true);
 
         FieldPtr variable_f = _schema->get_field("variable");
         FieldPtr fixed_f = _schema->get_field("fixed");
@@ -123,12 +128,12 @@ namespace {
         EXPECT_FALSE(new_extent->empty());
         EXPECT_EQ(_schema->row_size(), new_extent->row_size());
         EXPECT_TRUE(new_extent->byte_count() > 0);
-        EXPECT_EQ(new_extent->row_count(), 3);
+        EXPECT_EQ(new_extent->row_count(), extent->row_count());
     }
 
     TEST_F(Extent_Test, WriteAndRead) {
         // create a populated extent
-        ExtentPtr extent = _create_and_populate();
+        ExtentPtr extent = _create_and_populate(true);
 
         FieldPtr variable_f = _schema->get_field("variable");
         FieldPtr fixed_f = _schema->get_field("fixed");
@@ -139,7 +144,7 @@ namespace {
         EXPECT_FALSE(extent->empty());
         EXPECT_EQ(_schema->row_size(), extent->row_size());
         EXPECT_TRUE(extent->byte_count() > 0);
-        EXPECT_EQ(extent->row_count(), 3);
+        EXPECT_EQ(extent->row_count(), 4);
 
         // check that the iterator works as expected
         auto i = extent->begin();
@@ -151,28 +156,40 @@ namespace {
         EXPECT_EQ(nullable_f->get_int32(*i), 15);
 
         ++i; // test increment
-        i += 2; // test addition
+        i += 3; // test addition
         EXPECT_EQ(i, extent->end()); // make sure we made it to the end()
 
         // check that the data of the second entry matches
-        auto second_row = extent->at(1);
-        EXPECT_EQ(variable_f->get_text(*second_row).compare("duplicate"), 0);
-        EXPECT_EQ(fixed_f->get_uint64(*second_row), 15);
-        EXPECT_FALSE(bit_f->get_bool(*second_row));
-        EXPECT_TRUE(nullable_f->is_null(*second_row));
+        {
+            auto row = extent->at(1);
+            EXPECT_EQ(variable_f->get_text(*row).compare("duplicate"), 0);
+            EXPECT_EQ(fixed_f->get_uint64(*row), 15);
+            EXPECT_FALSE(bit_f->get_bool(*row));
+            EXPECT_TRUE(nullable_f->is_null(*row));
+        }
+
+        // check that the data of the third entry matches
+        {
+            auto row = extent->at(2);
+            EXPECT_EQ(variable_f->get_text(*row).compare("different"), 0);
+            EXPECT_EQ(fixed_f->get_uint64(*row), 4372895);
+            EXPECT_TRUE(bit_f->get_bool(*row));
+            EXPECT_FALSE(nullable_f->is_null(*row));
+            EXPECT_EQ(nullable_f->get_int32(*row), 12);
+        }
 
         // check the data of the last entry matches
         Extent::Row back_row = extent->back();
-        EXPECT_EQ(variable_f->get_text(back_row).compare("different"), 0);
-        EXPECT_EQ(fixed_f->get_uint64(back_row), 4372895);
+        EXPECT_EQ(variable_f->get_text(back_row).compare(""), 0);
+        EXPECT_EQ(fixed_f->get_uint64(back_row), 4372896);
         EXPECT_TRUE(bit_f->get_bool(back_row));
         EXPECT_FALSE(nullable_f->is_null(back_row));
-        EXPECT_EQ(nullable_f->get_int32(back_row), 12);
+        EXPECT_EQ(nullable_f->get_int32(back_row), 15);
     }
 
     TEST_F(Extent_Test, WriteAndReadViaDisk) {
         // create a populated extent
-        ExtentPtr extent = _create_and_populate();
+        ExtentPtr extent = _create_and_populate(true);
 
         // construct a file handle
         auto handle = IOMgr::get_instance()->open("/tmp/test_extent_file",
