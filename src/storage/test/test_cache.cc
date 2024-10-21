@@ -68,10 +68,6 @@ namespace {
         ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
         auto &&offsets = page->flush(header);
 
-        // put() the mutated Page
-//        cache->put(page);
- //       page = nullptr;
-
         // verify the contents
         int count = 0;
         std::string prev = "";
