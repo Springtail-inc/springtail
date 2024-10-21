@@ -816,10 +816,10 @@ namespace springtail {
 
         using PagePtr = std::shared_ptr<Page>;
 
-            /**
-             * RAII container for a PagePtr to ensure it is put back into the read cache after
-             * use.
-             */
+        /**
+         * RAII container for a PagePtr to ensure it is put back into the read cache after
+         * use.
+         */
         class SafePagePtr {
         public:
             using FlashCb = std::function<bool(std::shared_ptr<Page>)>;
