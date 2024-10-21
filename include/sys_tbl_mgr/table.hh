@@ -63,31 +63,24 @@ namespace springtail {
                 }
 
                 // retrieve the data extent
-                auto sp = _table->_read_page_via_primary(_btree_i);
-                _page = sp.ptr();
+                _page = _table->_read_page_via_primary(_btree_i);
                 _page_i = _page->begin();
 
                 return *this;
             }
 
             /**
-             * Returns a new iterator at the next row.
-             */
-            Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-            /**
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
                 // check if this is end()
-                if (_page == nullptr) {
+                if (_page.empty()) {
                     // move to the final page referenced by the primary index
                     assert(_btree_i == _btree->end());
                     --_btree_i;
 
                     // read the page and reference the end() of that page
-                    auto sp = _table->_read_page_via_primary(_btree_i);
-                    _page = sp.ptr();
+                    _page = _table->_read_page_via_primary(_btree_i);
                     _page_i = _page->end();
                 }
 
@@ -97,8 +90,7 @@ namespace springtail {
                     --_btree_i;
 
                     // read the page and reference the end() of that page
-                    auto sp = _table->_read_page_via_primary(_btree_i);
-                    _page = sp.ptr();
+                    _page = _table->_read_page_via_primary(_btree_i);
                     _page_i = _page->end();
                 }
 
@@ -106,11 +98,6 @@ namespace springtail {
                 --_page_i;
                 return *this;
             }
-
-            /**
-             * Returns a new iterator at the previous row.
-             */
-            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
             /**
              * Compares two iterators for equality.
@@ -150,12 +137,12 @@ namespace springtail {
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     StorageCache::PagePtr::element_type* page,
+                     StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree_i),
-                  _page(page),
+                  _page(std::move(page)),
                   _page_i(page_i)
             { }
 
@@ -165,7 +152,7 @@ namespace springtail {
             BTreePtr _btree; ///< A pointer to the BTree of the primary index.
             BTree::Iterator _btree_i; ///< An iterator into the BTree.
 
-            StorageCache::PagePtr::element_type* _page; ///< A pointer to the data page currently being processed.
+            StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
             StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
         };
 

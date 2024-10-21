@@ -49,7 +49,7 @@ namespace springtail {
                       uint64_t access_xid,
                       uint64_t target_xid,
                       bool do_rollforward,
-                      SafePagePtr::FlashCb cb )
+                      SafePagePtr::FlushCb cb )
     {
         // note: target_xid must be at or beyond the access_xid
         assert(target_xid >= access_xid);

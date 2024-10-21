@@ -822,16 +822,12 @@ namespace springtail {
          */
         class SafePagePtr {
         public:
-            using FlashCb = std::function<bool(std::shared_ptr<Page>)>;
+            using FlushCb = std::function<bool(std::shared_ptr<Page>)>;
 
             SafePagePtr(SafePagePtr &other) = delete;
             SafePagePtr& operator=(const SafePagePtr &other) = delete;
 
             SafePagePtr()
-            {}
-
-            SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlashCb cb) :
-                _c{c}, _p{std::move(p)}, _cb{std::move(cb)}
             {}
 
             SafePagePtr(SafePagePtr &&other) {
@@ -859,6 +855,15 @@ namespace springtail {
                 return ptr();
             }
 
+            PagePtr::element_type& operator*() const {
+                assert(_p);
+                return *_p;
+            }
+
+            bool operator==(const SafePagePtr& rhs) const {
+                return _p == rhs._p;
+            }
+
             PagePtr::element_type* ptr() const {
                 assert(_p);
                 return _p.get();
@@ -868,10 +873,17 @@ namespace springtail {
                 return !_p;
             }
 
+        protected:
+            friend StorageCache;
+
+            SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlushCb cb) :
+                _c{c}, _p{std::move(p)}, _cb{std::move(cb)}
+            {}
+
         private:
             PageCache* _c;
             PagePtr _p;
-            FlashCb _cb;
+            FlushCb _cb;
 
             void put() noexcept {
                 if (!_p) {
@@ -1018,7 +1030,7 @@ namespace springtail {
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
                     bool do_rollforward = false,
-                    SafePagePtr::FlashCb flash_cb={} );
+                    SafePagePtr::FlushCb flash_cb={} );
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages

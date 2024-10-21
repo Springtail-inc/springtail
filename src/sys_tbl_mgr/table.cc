@@ -167,7 +167,7 @@ namespace springtail {
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, page.ptr(), j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -193,7 +193,7 @@ namespace springtail {
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, page.ptr(), j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -227,7 +227,7 @@ namespace springtail {
             return end();
         }
 
-        return Iterator(this, _primary_index, i, page.ptr(), j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -245,7 +245,8 @@ namespace springtail {
         }
 
         auto page = _read_page_via_primary(index_i);
-        return Iterator(this, _primary_index, index_i, page.ptr(), page->begin());
+        auto begin = page->begin();
+        return Iterator(this, _primary_index, index_i, std::move(page), begin);
     }
 
     StorageCache::SafePagePtr
@@ -524,7 +525,7 @@ namespace springtail {
 
         // go through each row and pass the relevant key to each of the secondary indexes for removal
         uint32_t row_id = 0;
-        for (auto &&row : *orig_page.ptr()) {
+        for (auto &&row : *orig_page) {
             value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
             for (int i = 0; i < _secondary_indexes.size(); ++i) {
@@ -573,7 +574,7 @@ namespace springtail {
             // go through each row and pass the relevant key to each of the secondary indexes for insertion
             value_fields->resize(2);
             uint32_t row_id = 0;
-            for (auto &row : *new_page.ptr()) {
+            for (auto &row : *new_page) {
                 (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
                 for (int i = 0; i < _secondary_indexes.size(); ++i) {
