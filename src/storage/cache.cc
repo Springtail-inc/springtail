@@ -106,15 +106,6 @@ namespace springtail {
 #endif
     }
 
-    /*
-    void
-    StorageCache::put(PagePtr page,
-                      std::function<bool(std::shared_ptr<Page>)> flush_callback)
-    {
-        _page_cache->put(page, flush_callback);
-    }
-    */
-
     void
     StorageCache::flush(const std::filesystem::path &file)
     {
