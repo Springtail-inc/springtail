@@ -13,6 +13,7 @@ set(COMMON_LIB_SOURCES
   redis_ddl.cc
   tracking_allocator.cc
   dns_resolver.cc
+  coordinator.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
@@ -71,6 +72,11 @@ target_include_directories(test_exception PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_exception GTest::gtest_main)
 add_dsymutil_command(test_exception)
 
+add_executable(test_coordinator test/test_coordinator.cc)
+target_include_directories(test_coordinator PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_coordinator PRIVATE springtail_common GTest::gtest_main)
+add_dsymutil_command(test_coordinator)
+
 gtest_discover_tests(test_thread)
 gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
@@ -80,3 +86,4 @@ gtest_discover_tests(test_redis)
 gtest_discover_tests(test_dns)
 gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)
+gtest_discover_tests(test_coordinator)

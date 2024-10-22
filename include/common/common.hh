@@ -35,6 +35,19 @@ namespace springtail {
     void springtail_init(const std::string &log_filename,
                          uint32_t logging_mask);
 
+
+    /**
+     * @brief Get integral value from enum
+     * @tparam E enum type
+     * @param e enum value
+     * @return std::underlying_type<E>::type
+     */
+    template<typename E>
+    constexpr auto enum_to_integral(E e) -> typename std::underlying_type<E>::type
+    {
+        return static_cast<typename std::underlying_type<E>::type>(e);
+    }
+
     namespace common {
         /**
          * @brief Get the time in milliseconds
