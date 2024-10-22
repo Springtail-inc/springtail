@@ -9,6 +9,7 @@ CREATE TABLE ddl_test_add_column_default (
 
 ## test
 -- Add a new column with a default value.
+INSERT INTO ddl_test_add_column_default DEFAULT VALUES;
 ALTER TABLE ddl_test_add_column_default 
 ADD COLUMN status TEXT DEFAULT 'active';
 
