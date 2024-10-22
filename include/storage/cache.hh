@@ -813,8 +813,87 @@ namespace springtail {
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
         };
+
         using PagePtr = std::shared_ptr<Page>;
 
+        /**
+         * RAII container for a PagePtr to ensure it is put back into the read cache after
+         * use.
+         */
+        class SafePagePtr {
+        public:
+            using FlushCb = std::function<bool(std::shared_ptr<Page>)>;
+
+            SafePagePtr(SafePagePtr &other) = delete;
+            SafePagePtr& operator=(const SafePagePtr &other) = delete;
+
+            SafePagePtr()
+            {}
+
+            SafePagePtr(SafePagePtr &&other) {
+                _p = other._p;
+                _c = other._c;
+                _cb = other._cb;
+                other._p.reset();
+            }
+
+            SafePagePtr& operator=(SafePagePtr &&other) noexcept {
+                assert(_p != other._p);
+                put();
+                _p = other._p;
+                _c = other._c;
+                _cb = other._cb;
+                other._p.reset();
+                return *this;
+            }
+
+            ~SafePagePtr() {
+				put();
+            }
+
+            PagePtr::element_type* operator->() const {
+                return ptr();
+            }
+
+            PagePtr::element_type& operator*() const {
+                assert(_p);
+                return *_p;
+            }
+
+            bool operator==(const SafePagePtr& rhs) const {
+                return _p == rhs._p;
+            }
+
+            PagePtr::element_type* ptr() const {
+                assert(_p);
+                return _p.get();
+            }
+
+            bool empty() const {
+                return !_p;
+            }
+
+        protected:
+            friend StorageCache;
+
+            SafePagePtr(PageCache* c, std::shared_ptr<Page> p, FlushCb cb) :
+                _c{c}, _p{std::move(p)}, _cb{std::move(cb)}
+            {}
+
+        private:
+            PageCache* _c;
+            PagePtr _p;
+            FlushCb _cb;
+
+            void put() noexcept {
+                if (!_p) {
+                    return;
+                }
+                assert(_c);
+                _c->put(_p, _cb);
+                _p.reset();
+            }
+        };
 
     private:
         /**
@@ -946,19 +1025,12 @@ namespace springtail {
          *                 the same in-flight dirty page to other callers.
          * @return The retrieved Page object.
          */
-        PagePtr get(const std::filesystem::path &file,
+        SafePagePtr get(const std::filesystem::path &file,
                     uint64_t extent_id,
                     uint64_t access_xid,
                     uint64_t target_xid = constant::LATEST_XID,
-                    bool do_rollforward = false);
-
-        /**
-         * Release a Page object back to the cache.
-         *
-         * @param page The page to release.
-         */
-        void put(PagePtr page,
-                 std::function<bool(std::shared_ptr<Page>)> flush_callback = nullptr);
+                    bool do_rollforward = false,
+                    SafePagePtr::FlushCb flush_cb={} );
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages

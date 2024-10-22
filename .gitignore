@@ -14,3 +14,4 @@ cmake-build-*
 compile_commands.json
 system.json.test
 **/.DS_Store
+.cache

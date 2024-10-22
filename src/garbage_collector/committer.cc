@@ -329,27 +329,27 @@ namespace springtail::gc {
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
     }
 
-    StorageCache::PagePtr
-    Committer::_find_page(std::vector<StorageCache::PagePtr> pages,
+    Committer::SafePageIter Committer::_find_page(std::vector<StorageCache::SafePagePtr>& pages,
                           TuplePtr key,
                           ExtentSchemaPtr schema)
     {
+        assert(!pages.empty());
         // if only one page, return it
         if (pages.size() == 1) {
-            return pages[0];
+            return pages.begin(); 
         }
 
         // otherwise, use the key to find the appropriate page
         auto page_i = std::lower_bound(pages.begin(), pages.end(), *key,
-                                       [&schema](const StorageCache::PagePtr &page, const Tuple &key) {
+                                       [&schema](const StorageCache::SafePagePtr &page, const Tuple &key) {
                                            return FieldTuple(schema->get_sort_fields(), *(page->last())).less_than(key);
                                        });
 
         // return the correct page
         if (page_i == pages.end()) {
-            return pages.back();
+            return --pages.end();
         }
-        return *page_i;
+        return page_i;
     }
 
     bool
@@ -431,7 +431,7 @@ namespace springtail::gc {
         auto target_schema = schema_mgr->get_extent_schema(table->db(), table->id(), target_xid);
 
         // retrieve the pages that may be impacted
-        std::vector<StorageCache::PagePtr> pages;
+        std::vector<StorageCache::SafePagePtr> pages;
         for (auto extent_id : extent_ids) {
             auto page = table->read_page(extent_id);
             auto header = page->header();
@@ -444,7 +444,7 @@ namespace springtail::gc {
                 page->convert(source_schema, target_schema);
             }
 
-            pages.push_back(page);
+            pages.push_back(std::move(page));
         }
 
         if (pages.empty()) {
@@ -525,8 +525,8 @@ namespace springtail::gc {
                     SPDLOG_DEBUG("Insert row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
 
                     // insert into the appropriate page
-                    auto page = _find_page(pages, key, target_schema);
-                    page->insert(value, target_schema);
+                    auto page_it = _find_page(pages, key, target_schema);
+                    (*page_it)->insert(value, target_schema);
 
                     break;
                 }
@@ -541,8 +541,8 @@ namespace springtail::gc {
                     SPDLOG_DEBUG("Update row {} for {}:{}@{}", value->to_string(), table->id(), extent_id, xid);
 
                     // update in the appropriate page
-                    auto page = _find_page(pages, key, target_schema);
-                    page->update(value, target_schema);
+                    auto page_it = _find_page(pages, key, target_schema);
+                    (*page_it)->update(value, target_schema);
 
                     break;
                 }
@@ -557,8 +557,8 @@ namespace springtail::gc {
                     SPDLOG_DEBUG("Remove row {} for {}:{}@{}", key->to_string(), table->id(), extent_id, xid);
 
                     // remove from the appropriate page
-                    auto page = _find_page(pages, key, target_schema);
-                    page->remove(key, target_schema);
+                    auto page_it = _find_page(pages, key, target_schema);
+                    (*page_it)->remove(key, target_schema);
 
                     break;
                 }
@@ -566,10 +566,6 @@ namespace springtail::gc {
                 }
             }
         }
-
-        // now that we've applied all of the mutations, we need to release these pages back to the
-        // cache via the table so that the appropriate callbacks are made when the pages are flushed
-        table->release_pages(pages);
     }
 
     void

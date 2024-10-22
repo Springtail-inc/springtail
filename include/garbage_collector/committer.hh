@@ -107,7 +107,8 @@ namespace springtail::gc {
          * Helper function to find the enclosing page for a key given an ordered set of contiguous
          * pages.
          */
-        StorageCache::PagePtr _find_page(std::vector<StorageCache::PagePtr> pages,
+        using SafePageIter = std::vector<StorageCache::SafePagePtr>::iterator;
+        SafePageIter _find_page(std::vector<StorageCache::SafePagePtr>& pages,
                                          TuplePtr key, ExtentSchemaPtr schema);
 
         /**

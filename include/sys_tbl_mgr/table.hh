@@ -70,16 +70,11 @@ namespace springtail {
             }
 
             /**
-             * Returns a new iterator at the next row.
-             */
-            Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-            /**
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
                 // check if this is end()
-                if (_page == nullptr) {
+                if (_page.empty()) {
                     // move to the final page referenced by the primary index
                     assert(_btree_i == _btree->end());
                     --_btree_i;
@@ -105,11 +100,6 @@ namespace springtail {
             }
 
             /**
-             * Returns a new iterator at the previous row.
-             */
-            Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
-
-            /**
              * Compares two iterators for equality.
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
@@ -133,7 +123,7 @@ namespace springtail {
             Iterator(const Table *table)
                 : _table(table),
                   _btree(nullptr),
-                  _page(nullptr)
+                  _page{}
             { }
 
             /** Specifically for the end() iterator. */
@@ -141,18 +131,18 @@ namespace springtail {
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree->end()),
-                  _page(nullptr)
+                  _page{}
             { }
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
-                     StorageCache::PagePtr page,
+                     StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
                 : _table(table),
                   _btree(btree),
                   _btree_i(btree_i),
-                  _page(page),
+                  _page(std::move(page)),
                   _page_i(page_i)
             { }
 
@@ -162,7 +152,7 @@ namespace springtail {
             BTreePtr _btree; ///< A pointer to the BTree of the primary index.
             BTree::Iterator _btree_i; ///< An iterator into the BTree.
 
-            StorageCache::PagePtr _page; ///< A pointer to the data page currently being processed.
+            StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
             StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
         };
 
@@ -261,7 +251,7 @@ namespace springtail {
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
          * @brief Get table stats
@@ -277,14 +267,14 @@ namespace springtail {
          * @param pos The primary index btree iterator.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr _read_page_via_primary(BTree::Iterator &pos) const;
+        StorageCache::SafePagePtr _read_page_via_primary(BTree::Iterator &pos) const;
 
         /**
          * Reads an extent from the tree and returns it.
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr _read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr _read_page(uint64_t extent_id) const;
 
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
@@ -385,13 +375,7 @@ namespace springtail {
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::PagePtr read_page(uint64_t extent_id) const;
-
-        /**
-         * Release modified pages back to the cache.
-         */
-        void release_pages(const std::vector<StorageCache::PagePtr> &pages);
-
+        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
 
         /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the
@@ -446,7 +430,7 @@ namespace springtail {
         /**
          * Flush the page and add it's rows into the primary and secondary indexes.
          */
-        void _flush_and_populate_indexes(StorageCache::PagePtr page);
+        void _flush_and_populate_indexes(StorageCache::PagePtr::element_type* page);
 
 
         /**
@@ -557,7 +541,7 @@ namespace springtail {
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
 
-        StorageCache::PagePtr _empty_page; ///< Used to handle the empty table corner-case.
+        std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
