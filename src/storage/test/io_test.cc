@@ -212,6 +212,9 @@ TEST(IOTest, IOTests)
 
     sync_append(fh_append, fh_read, 15, 3);
 
+    // test empty vectors
+    sync_append(fh_append, fh_read, 0, 3);
+
     // open second file for write (overwrite)
     std::shared_ptr<springtail::IOHandle> fh_write = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::WRITE, false);
     fh_read = IOMgr->open(FILE2, springtail::IOMgr::IO_MODE::READ, false);
