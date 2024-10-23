@@ -18,6 +18,7 @@ class TestResult:
         self.failed = 0
         self.errors = []
         self.test_cases = []
+        self.error_logs = []  # New field to store error logs
 
 class TestCase:
     """Class to represent a single test case result."""
@@ -36,6 +37,54 @@ class TestCase:
         self.status = status
         self.duration = duration
         self.error = error
+
+def check_backtrace(log_path):
+    """
+    Check log files for backtraces indicating errors.
+    
+    Args:
+        log_path (str): Path to directory containing log files
+        
+    Returns:
+        list: List of log files containing backtraces
+    """
+    error_logs = []
+    for file in os.listdir(log_path):
+        if file.endswith('.log'):
+            log_file = os.path.join(log_path, file)
+            try:
+                with open(log_file, 'r') as f:
+                    content = f.read()
+                    if 'Backtrace:' in content:
+                        error_logs.append(log_file)
+            except Exception as e:
+                logging.error(f"Error reading log file {log_file}: {str(e)}")
+    return error_logs
+
+def extract_backtrace(log_file):
+    """
+    Extract backtrace from a log file.
+    
+    Args:
+        log_file (str): Path to log file
+        
+    Returns:
+        list: Lines containing the backtrace
+    """
+    backtrace = []
+    in_backtrace = False
+    try:
+        with open(log_file, 'r') as f:
+            for line in f:
+                if 'Backtrace:' in line:
+                    in_backtrace = True
+                elif in_backtrace and line.strip() and not line.startswith('---'):
+                    backtrace.append(line)
+                elif in_backtrace and (line.startswith('---') or not line.strip()):
+                    in_backtrace = False
+    except Exception as e:
+        logging.error(f"Error extracting backtrace from {log_file}: {str(e)}")
+    return backtrace
 
 def setup(conn):
     """
@@ -137,6 +186,7 @@ def run_test_case(test_file, main_conn, replica_conn, results):
     main_cur = main_conn.cursor()
     replica_cur = replica_conn.cursor()
 
+    error_msg = None
     try:
         for section in ['setup', 'test', 'verify']:
             if section in sections:
@@ -182,44 +232,31 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         log_test_execution(main_conn, test_file, status)
 
     duration = time.time() - start_time
-    results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
+    results.test_cases.append(TestCase(test_file, status, duration, error_msg))
 
-def run_all_tests(test_folder, main_conn, replica_conn):
+def check_logs(props, results):
     """
-    Run all test cases in the specified folder.
-
+    Check logs for errors and update test results.
+    
     Args:
-        test_folder (str): Path to the folder containing SQL test cases.
-        main_conn (psycopg2.connection): Connection to the primary database.
-        replica_conn (psycopg2.connection): Connection to the replica database.
+        props (Properties): System properties object
+        results (TestResult): Test results object to update
     """
-    logging.info(f"Running all test cases from folder: {test_folder}")
-    results = TestResult()
-
-    setup(main_conn)
-
-    for file in sorted(os.listdir(test_folder)):
-        if file.endswith('.sql'):
-            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results)
-
-    generate_report(results)
-
-    logging.info("\n--- Test Summary ---")
-    logging.info(f"Total tests run: {results.passed + results.failed}")
-    logging.info(f"Tests passed: {results.passed}")
-    logging.info(f"Tests failed: {results.failed}")
-    if results.errors:
-        logging.info("\nErrors:")
-        for error in results.errors:
-            logging.error(error)
+    log_path = props.get_log_path()
+    error_logs = check_backtrace(log_path)
+    
+    if error_logs:
+        logging.error(f"Found errors in logs: {error_logs}")
+        results.error_logs = error_logs
+        
+        for log in error_logs:
+            backtrace = extract_backtrace(log)
+            if backtrace:
+                error_msg = f"Error in {os.path.basename(log)}:\n{''.join(backtrace)}"
+                results.errors.append(error_msg)
 
 def generate_report(results):
-    """
-    Generate an HTML report for the test results.
-
-    Args:
-        results (TestResult): Object containing the test results.
-    """
+    """Generate an HTML report for the test results."""
     template = Template('''
     <html>
     <head>
@@ -231,6 +268,7 @@ def generate_report(results):
             tr:nth-child(even) { background-color: #f2f2f2; }
             .passed { color: green; }
             .failed { color: red; }
+            .error-logs { margin-top: 20px; }
         </style>
     </head>
     <body>
@@ -238,6 +276,8 @@ def generate_report(results):
         <p>Total tests: {{ total_tests }}</p>
         <p>Passed: {{ passed_tests }}</p>
         <p>Failed: {{ failed_tests }}</p>
+        
+        <h2>Test Cases</h2>
         <table>
             <tr>
                 <th>Test Case</th>
@@ -254,6 +294,17 @@ def generate_report(results):
             </tr>
             {% endfor %}
         </table>
+        
+        {% if error_logs %}
+        <div class="error-logs">
+            <h2>Log File Errors</h2>
+            <pre>
+            {% for error in errors %}
+{{ error }}
+            {% endfor %}
+            </pre>
+        </div>
+        {% endif %}
     </body>
     </html>
     ''')
@@ -262,7 +313,9 @@ def generate_report(results):
         total_tests=len(results.test_cases),
         passed_tests=results.passed,
         failed_tests=results.failed,
-        test_cases=results.test_cases
+        test_cases=results.test_cases,
+        error_logs=results.error_logs,
+        errors=results.errors
     )
 
     os.makedirs('reports', exist_ok=True)
@@ -272,10 +325,45 @@ def generate_report(results):
 
     logging.info(f"Test report generated: {report_file}")
 
+def run_all_tests(test_folder, main_conn, replica_conn, props):
+    """
+    Run all test cases in the specified folder.
+
+    Args:
+        test_folder (str): Path to the folder containing SQL test cases.
+        main_conn (psycopg2.connection): Connection to the primary database.
+        replica_conn (psycopg2.connection): Connection to the replica database.
+        props (Properties): System properties object.
+    """
+    logging.info(f"Running all test cases from folder: {test_folder}")
+    results = TestResult()
+
+    setup(main_conn)
+
+    for file in sorted(os.listdir(test_folder)):
+        if file.endswith('.sql'):
+            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results)
+
+    # Check logs for errors after all tests have completed
+    check_logs(props, results)
+    
+    generate_report(results)
+
+    logging.info("\n--- Test Summary ---")
+    logging.info(f"Total tests run: {results.passed + results.failed}")
+    logging.info(f"Tests passed: {results.passed}")
+    logging.info(f"Tests failed: {results.failed}")
+    
+    if results.errors:
+        logging.info("\nErrors:")
+        for error in results.errors:
+            logging.error(error)
+
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the configuration file')
+    parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -294,7 +382,7 @@ if __name__ == "__main__":
     main_conn = connect_db_instance(props)
     replica_conn = connect_fdw_instance(props)
 
-    run_all_tests(test_folder, main_conn, replica_conn)
+    run_all_tests(test_folder, main_conn, replica_conn, props)
 
     main_conn.close()
     replica_conn.close()
