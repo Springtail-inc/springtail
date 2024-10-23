@@ -29,6 +29,8 @@ namespace springtail {
          */
         static void shutdown();
 
+        class Page;
+
     private:
         static StorageCache *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
@@ -68,6 +70,7 @@ namespace springtail {
          */
         class CacheExtent : public Extent {
             friend DataCache;
+            friend Page;
 
         public:
             enum State {
@@ -77,27 +80,26 @@ namespace springtail {
                 FLUSHING = 3,
                 INVALID = 4
             };
-            State _state; ///< The current state of this extent.
 
         public:
             CacheExtent(const std::vector<std::shared_ptr<std::vector<char>>> &data,
                         const std::filesystem::path &file,
                         uint64_t extent_id)
                 : Extent(data),
-                  _state(State::CLEAN),
                   _file(file),
                   _extent_id(extent_id),
                   _use_count(1),
+                  _state(State::CLEAN),
                   _cache_id(0)
             { }
 
             CacheExtent(const ExtentHeader &header,
                         const std::filesystem::path &file)
                 : Extent(header),
-                  _state(State::DIRTY),
                   _file(file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
+                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -106,10 +108,10 @@ namespace springtail {
              */
             CacheExtent(const CacheExtent &extent)
                 : Extent(extent),
-                  _state(State::DIRTY),
                   _file(extent._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
+                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -118,10 +120,10 @@ namespace springtail {
              */
             CacheExtent(Extent &&other, const CacheExtent &original)
                 : Extent(std::move(other)),
-                  _state(State::DIRTY),
                   _file(original._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
+                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -148,6 +150,7 @@ namespace springtail {
             uint16_t _use_count; ///< The number of users of this extent.
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
+            State _state; ///< The current state of this extent.
             std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
