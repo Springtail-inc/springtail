@@ -1,0 +1,20 @@
+## setup
+-- Create a table with a composite primary key.
+CREATE TABLE IF NOT EXISTS test_pkey_3 (
+    id1 INT,
+    id2 INT,
+    id3 INT,
+    value TEXT,
+    PRIMARY KEY (id1, id2, id3)
+);
+
+## test
+INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (1, 2, 3, 'test_value_1');
+INSERT INTO test_pkey_3 (id1, id2, id3, value) VALUES (4, 5, 6, 'test_value_2');
+
+## verify
+SELECT * FROM test_pkey_3;
+
+## cleanup
+-- Cleanup
+DROP TABLE IF EXISTS test_pkey_3;

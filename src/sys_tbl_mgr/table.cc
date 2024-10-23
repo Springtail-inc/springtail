@@ -1,3 +1,4 @@
+#include <memory>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -166,7 +167,7 @@ namespace springtail {
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, page, j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -192,7 +193,7 @@ namespace springtail {
         // note: the primary index indicates that there is a value >= the search_key in this page
         assert(j != page->end());
 
-        return Iterator(this, _primary_index, i, page, j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -226,7 +227,7 @@ namespace springtail {
             return end();
         }
 
-        return Iterator(this, _primary_index, i, page, j);
+        return Iterator(this, _primary_index, i, std::move(page), j);
     }
 
     Table::Iterator
@@ -244,23 +245,24 @@ namespace springtail {
         }
 
         auto page = _read_page_via_primary(index_i);
-        return Iterator(this, _primary_index, index_i, page, page->begin());
+        auto begin = page->begin();
+        return Iterator(this, _primary_index, index_i, std::move(page), begin);
     }
 
-    StorageCache::PagePtr
+    StorageCache::SafePagePtr
     Table::read_page(uint64_t extent_id) const
     {
         return _read_page(extent_id);
     }
 
-    StorageCache::PagePtr
+    StorageCache::SafePagePtr
     Table::_read_page_via_primary(BTree::Iterator &pos) const
     {
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
         return _read_page(extent_id);
     }
 
-    StorageCache::PagePtr
+    StorageCache::SafePagePtr
     Table::_read_page(uint64_t extent_id) const
     {
         return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
@@ -474,23 +476,11 @@ namespace springtail {
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
     }
 
-    StorageCache::PagePtr
+    StorageCache::SafePagePtr
     MutableTable::read_page(uint64_t extent_id) const
     {
         return StorageCache::get_instance()->get(_data_file, extent_id,
                                                  _access_xid, _target_xid);
-    }
-
-    void
-    MutableTable::release_pages(const std::vector<StorageCache::PagePtr> &pages)
-    {
-        auto cache = StorageCache::get_instance();
-
-        // need to release the dirty pages back to the cache with the appropriate callback
-        for (auto &page : pages) {
-            cache->put(page, std::bind(&MutableTable::_flush_handler,
-                                       this, std::placeholders::_1));
-        }
     }
 
     bool
@@ -500,7 +490,7 @@ namespace springtail {
         _invalidate_indexes(page);
 
         // then flush the generated page and populate the index entries based on the new pages
-        _flush_and_populate_indexes(page);
+        _flush_and_populate_indexes(page.get());
 
         // return success
         return true;
@@ -548,12 +538,10 @@ namespace springtail {
 
             ++row_id;
         }
-
-        StorageCache::get_instance()->put(orig_page);
     }
 
     void
-    MutableTable::_flush_and_populate_indexes(StorageCache::PagePtr page)
+    MutableTable::_flush_and_populate_indexes(StorageCache::PagePtr::element_type* page)
     {
         uint64_t old_eid = page->key().second;
         auto pkey_fields = _schema->get_fields(_primary_key);
@@ -601,7 +589,6 @@ namespace springtail {
 
                 ++row_id;
             }
-            StorageCache::get_instance()->put(new_page);
 
             SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
         }
@@ -613,10 +600,9 @@ namespace springtail {
         // in the case of having an (initially) empty table, there are no invalidations... we can
         // flush the single Page and update the indexes
         if (_empty_page) {
-            _flush_and_populate_indexes(_empty_page);
-
-            StorageCache::get_instance()->put(_empty_page);
-            _empty_page = nullptr;
+            _flush_and_populate_indexes(_empty_page->ptr());
+            // this will release the page to the cache
+            _empty_page.reset();
         }
 
         // flush the dirty data pages of the table to disk
@@ -661,14 +647,12 @@ namespace springtail {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, 
+                false, 
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // add the row to the page
         page->insert(value, _schema);
-
-        // release the page back to the write cache
-        StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                          this, std::placeholders::_1));
     }
 
     void
@@ -677,11 +661,12 @@ namespace springtail {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
         // add the row to the page
-        _empty_page->insert(value, _schema);
+        (*_empty_page)->insert(value, _schema);
     }
 
     void
@@ -690,11 +675,12 @@ namespace springtail {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
         // add the row to the page
-        _empty_page->append(value, _schema);
+        (*_empty_page)->append(value, _schema);
     }
 
     void
@@ -714,15 +700,13 @@ namespace springtail {
         uint64_t extent_id = _primary_extent_id_f->get_uint64(*pos);
 
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
+
 
         // append the value to the extent
         page->append(value, _schema);
-
-        // release the extent back to the write cache
-        // note: the primary index is just a btree of extent IDs in the no-primary-key scenario
-        StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                          this, std::placeholders::_1));
     }
 
     void
@@ -756,14 +740,11 @@ namespace springtail {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // add the row to the page
         bool did_insert = page->upsert(value, _schema);
-
-        // release the page back to the write cache
-        StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                          this, std::placeholders::_1));
 
         return did_insert;
     }
@@ -774,11 +755,12 @@ namespace springtail {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>( 
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
         // add the row to the page
-        return _empty_page->upsert(value, _schema);
+        return (*_empty_page)->upsert(value, _schema);
     }
 
     bool
@@ -811,15 +793,12 @@ namespace springtail {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // remove the row from the page
         // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
         page->remove(value, _schema);
-
-        // release the page back to the write cache
-        StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                          this, std::placeholders::_1));
     }
 
     void
@@ -828,11 +807,12 @@ namespace springtail {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+            _empty_page = std::make_unique< StorageCache::SafePagePtr>(
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
         // add the row to the page
-        _empty_page->remove(value, _schema);
+       (*_empty_page)->remove(value, _schema);
     }
 
     void
@@ -879,7 +859,8 @@ namespace springtail {
             // scan each extent, looking for a match
             uint64_t extent_id = _primary_extent_id_f->get_uint64(*i);
 
-            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+            auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
             auto &&j = page->begin();
             while (!found && j != page->end()) {
@@ -890,9 +871,6 @@ namespace springtail {
                     ++j;
                 }
             }
-
-            StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                              this, std::placeholders::_1));
 
             if (!found) {
                 ++i;
@@ -906,15 +884,14 @@ namespace springtail {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid);
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid,
+                false,
+                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
+
 
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
         page->update(value, _schema);
-
-        // release the page back to the write cache
-        StorageCache::get_instance()->put(page, std::bind(&MutableTable::_flush_handler,
-                                                          this, std::placeholders::_1));
     }
 
     void
@@ -923,11 +900,12 @@ namespace springtail {
     {
         // get the page from the cache if we don't have one
         if (!_empty_page) {
-            _empty_page = StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid);
+            _empty_page = std::make_unique<StorageCache::SafePagePtr>(
+                    StorageCache::get_instance()->get(_data_file, constant::UNKNOWN_EXTENT, _access_xid, _target_xid));
         }
 
         // add the row to the page
-        _empty_page->update(value, _schema);
+        (*_empty_page)->update(value, _schema);
     }
 
     void

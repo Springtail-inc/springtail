@@ -28,7 +28,7 @@ namespace springtail {
         auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
 
         // create an empty root
-        _root = std::make_shared<Page>(shared_from_this(), cache_page, _leaf_schema);
+        _root = std::make_shared<Page>(shared_from_this(), std::move(cache_page), _leaf_schema);
 
         // add the root to the cache
         // note: we do not release the root, leaving it's use-count in the local cache permanently at 1
@@ -319,7 +319,7 @@ namespace springtail {
         // XXX how to handle the XIDs?
         auto cache_page = StorageCache::get_instance()->get(_btree->_file, extent_id, _btree->_xid);
         auto page = std::make_shared<Page>(_btree, extent_id);
-        page->set_cache_page(cache_page, _schema);
+        page->set_cache_page(std::move(cache_page), _schema);
 
         return std::vector<PagePtr>({page});
     }
@@ -328,7 +328,7 @@ namespace springtail {
     MutableBTree::Page::flush(uint64_t xid)
     {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
-        std::vector<PagePtr> new_pages;
+        std::vector<std::shared_ptr<MutableBTree::Page>> new_pages;
 
         // if the root was split, then remove the root flag from the type
         ExtentType type = (_cache_page->extent_count() > 1)
@@ -346,7 +346,7 @@ namespace springtail {
             auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
 
-            auto page = std::make_shared<Page>(_btree, id, value_key, cache_page, _schema);
+            auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
             SPDLOG_INFO("Creating MutableBTree Page: {} {}", id, page->extent_id);
 
@@ -357,16 +357,13 @@ namespace springtail {
     }
 
     void
-    MutableBTree::Page::set_cache_page(StorageCache::PagePtr cache_page,
+    MutableBTree::Page::set_cache_page(StoragePagePtr cache_page,
                                        ExtentSchemaPtr schema)
     {
         // note: we must be holding the disk_mutex, so no need to lock the access mutex
 
         // note: page should be empty when this is called
-        assert(_cache_page == nullptr || _cache_page->empty());
-
-        // replace the backing page
-        _cache_page = cache_page;
+        assert(_cache_page.empty() || _cache_page.ptr()->empty());
 
         // set the type based on the extent header
         this->type = cache_page->header().type;
@@ -381,6 +378,10 @@ namespace springtail {
             auto key = std::make_shared<MutableTuple>(_key_fields, *(cache_page->last()));
             this->prev_key = std::make_shared<ValueTuple>(key);
         }
+
+        // replace the backing page
+        _cache_page = std::move(cache_page);
+
     }
 
     MutableBTree::PagePtr
@@ -599,7 +600,7 @@ namespace springtail {
             : _leaf_schema;
 
         // tie the backing page into the btree page
-        page->set_cache_page(cache_page, schema);
+        page->set_cache_page(std::move(cache_page), schema);
     }
 
     MutableBTree::NodePtr
@@ -864,7 +865,7 @@ namespace springtail {
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
 
             new_root = std::make_shared<Page>(shared_from_this(), extent_id,
-                                              value_key, cache_page, _branch_schema);
+                                              value_key, std::move(cache_page), _branch_schema);
 
             // note: we don't need to add these new pages as children because they are clean
             //       pages that haven't been traversed for modification
