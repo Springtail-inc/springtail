@@ -124,7 +124,7 @@ def split_sql_statements(sql_content):
         
     return statements
 
-def run_test_case(test_file, main_conn, replica_conn, results):
+def run_test_case(test_file, main_conn, replica_conn, results, props):
     """
     Execute a test case and verify its results across primary and replica databases.
     """
@@ -140,7 +140,7 @@ def run_test_case(test_file, main_conn, replica_conn, results):
     replica_conn.autocommit = True
     main_cur = main_conn.cursor()
     replica_cur = replica_conn.cursor()
-
+    error_msg = None
     try:
         for section in ['setup', 'test', 'verify']:
             if section in sections:
@@ -186,7 +186,13 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         log_test_execution(main_conn, test_file, status)
 
     duration = time.time() - start_time
-    results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
+    results.test_cases.append(TestCase(test_file, status, duration, error_msg))
+
+    # Check logs for errors after this test
+    check_logs(props, results)
+    if results.error_logs:
+        logging.error(f"Found errors in logs after running {test_file}")
+        raise Exception(f"Test aborted due to errors found in logs after running {test_file}")
 
 def run_all_tests(test_folder, main_conn, replica_conn, props):
     """
@@ -205,10 +211,7 @@ def run_all_tests(test_folder, main_conn, replica_conn, props):
 
     for file in sorted(os.listdir(test_folder)):
         if file.endswith('.sql'):
-            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results)
-
-    # Check logs for errors
-    check_logs(props, results)
+            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results, props)
     
     generate_report(results)
 
