@@ -59,7 +59,7 @@ if [ ! -d ${DIR} ]
 then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking external dir"
-        ln -s external /home/dev/external
+        ln -s /home/dev/external external
     fi
 
     program_names="gcc  gcc-14"

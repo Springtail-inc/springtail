@@ -115,6 +115,9 @@ namespace springtail {
         /** Helper to get pid path */
         static std::string get_pid_path();
 
+        /** Helper to send notification on liveness pubsub */
+        static void publish_liveness_notification(const std::string &msg);
+
     private:
         /** static _instance singleton */
         static Properties *_instance;

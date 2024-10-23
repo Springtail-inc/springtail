@@ -145,6 +145,16 @@ class Properties:
         """Return the database instance id."""
         return self.db_instance_id
 
+    def get_liveness_hash(self):
+        """Return the liveness hash key."""
+        # see common/redis_types.hh HASH_LIVENESS
+        return 'hash:liveness:' + self.db_instance_id
+
+    def get_liveness_notification_pubsub(self):
+        """Return the liveness notification pubsub channel."""
+        # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
+        return 'pubsub:liveness_notify:' + self.db_instance_id
+
     def __load_redis(self, config_file=None):
         """Load redis based on a system.json file.
         :param config_file: the system.json file to load, if None
@@ -246,3 +256,9 @@ class Properties:
             raise Exception('log_path not found in system settings')
         log_path = os.path.dirname(system_config['logging']['log_path'])
         return log_path
+
+    def get_data_redis(self):
+        """Return the data redis object."""
+        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                                 username=self.redis_user, password=self.redis_password,
+                                 encoding="utf-8", decode_responses=True)

@@ -142,15 +142,17 @@ namespace springtail::redis {
 
     /**
      * Hash set for tracking liveness of a daemon
+     * Used by coordinator.py
      * args: <db_instance_id>
      * key: <daemon_type>:<thread_id>, value: <timestamp>
      */
     static constexpr char HASH_LIVENESS[] = "hash:liveness:{}";
 
     /**
-     * Queue for notifying the coordinator of a dead daemon
+     * Pub/sub for notifying the coordinator of a dead daemon
+     * Used by coordinator.py
      * args: <db_instance_id>
      * value: <daemon_type>:<thread_id>
      */
-    static constexpr char QUEUE_LIVENESS_NOTIFY[] = "queue:liveness_notify:{}";
+    static constexpr char PUBSUB_LIVENESS_NOTIFY[] = "pubsub:liveness_notify:{}";
 }
