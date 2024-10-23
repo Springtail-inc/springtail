@@ -68,17 +68,13 @@ namespace {
         ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
         auto &&offsets = page->flush(header);
 
-        // put() the mutated Page
-        cache->put(page);
-        page = nullptr;
-
         // verify the contents
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
             page = cache->get(file, offset, xid);
 
-            for (auto row : (*page)) {
+            for (auto row : *page.ptr()) {
                 if (prev != "") {
                     ASSERT_GT(_fields->at(1)->get_text(row), prev);
                 }
@@ -86,8 +82,6 @@ namespace {
                 prev = _fields->at(1)->get_text(row);
                 ++count;
             }
-
-            cache->put(page);
         }
         ASSERT_EQ(count, 5000);
     }
@@ -97,34 +91,34 @@ namespace {
         std::filesystem::path file(_base_dir / "Insert50K");
         uint64_t xid = 1;
 
+        std::vector<uint64_t> offsets;
+
         // get() an empty Page
-        auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
+        {
+            auto page = cache->get(file, constant::UNKNOWN_EXTENT, xid);
 
-        // populate data into the Page
-        for (int i = 0; i < 10; i++) {
-            csv::CSVReader reader("test_btree_simple.csv");
-            for (auto &&r : reader) {
-                auto extra = std::make_shared<FieldArray>();
-                extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
+            // populate data into the Page
+            for (int i = 0; i < 10; i++) {
+                csv::CSVReader reader("test_btree_simple.csv");
+                for (auto &&r : reader) {
+                    auto extra = std::make_shared<FieldArray>();
+                    extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
-                page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+                    page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+                }
             }
+
+            ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
+            offsets = page->flush(header);
         }
-
-        ExtentHeader header(ExtentType(), xid++, _schema->row_size(), 0);
-        auto &&offsets = page->flush(header);
-
-        // put() the mutated Page
-        cache->put(page);
-        page = nullptr;
 
         // verify the contents
         int count = 0;
         std::string prev = "";
         for (auto offset : offsets) {
-            page = cache->get(file, offset, xid);
+            auto page = cache->get(file, offset, xid);
 
-            for (auto row : (*page)) {
+            for (auto row : *page.ptr()) {
                 if (prev != "") {
                     ASSERT_GE(_fields->at(1)->get_text(row), prev);
                 }
@@ -132,8 +126,6 @@ namespace {
                 prev = _fields->at(1)->get_text(row);
                 ++count;
             }
-
-            cache->put(page);
         }
         ASSERT_EQ(count, 50000);
     }

@@ -40,12 +40,11 @@ namespace springtail {
 
         // check if the root is empty
         if (root->empty()) {
-            StorageCache::get_instance()->put(root);
             return end();
         }
 
         // create a node for the root
-        auto node = std::make_shared<Node>(root);
+        auto node = std::make_shared<Node>(std::move(root));
 
         // iterate down to the leaf
         while (node->page->header().type.is_branch()) {
@@ -56,7 +55,8 @@ namespace springtail {
             auto child = StorageCache::get_instance()->get(_file, child_id, _xid);
 
             // create a node for the child an move to it
-            node = std::make_shared<Node>(child, child->begin(), node);
+            auto begin = child->begin();
+            node = std::make_shared<Node>(std::move(child), begin, node);
         }
 
         return Iterator(this, node);
@@ -76,7 +76,6 @@ namespace springtail {
 
         // check if the root is empty
         if (current->empty()) {
-            StorageCache::get_instance()->put(current);
             return end();
         }
 
@@ -100,8 +99,8 @@ namespace springtail {
             auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
 
             // recurse to the child
-            node = std::make_shared<Node>(current, child_i, node);
-            current = child;
+            node = std::make_shared<Node>(std::move(current), child_i, node);
+            current = std::move(child);
         }
 
         // now find the entry in the leaf node
@@ -114,7 +113,7 @@ namespace springtail {
             }
         }
 
-        node = std::make_shared<Node>(current, leaf_i, node);
+        node = std::make_shared<Node>(std::move(current), leaf_i, node);
         return Iterator(this, node);
     }
 
@@ -132,7 +131,6 @@ namespace springtail {
 
         // check if the root is empty
         if (current->empty()) {
-            StorageCache::get_instance()->put(current);
             return end();
         }
 
@@ -156,8 +154,8 @@ namespace springtail {
             auto child = StorageCache::get_instance()->get(_file, extent_id, _xid);
 
             // recurse to the child
-            node = std::make_shared<Node>(current, child_i, node);
-            current = child;
+            node = std::make_shared<Node>(std::move(current), child_i, node);
+            current = std::move(child);
         }
 
         // now find the entry in the leaf node
@@ -170,7 +168,7 @@ namespace springtail {
             }
         }
 
-        node = std::make_shared<Node>(current, leaf_i, node);
+        node = std::make_shared<Node>(std::move(current), leaf_i, node);
         return Iterator(this, node);
     }
 

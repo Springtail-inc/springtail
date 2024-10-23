@@ -72,34 +72,65 @@ def log_test_execution(conn, test_name, status):
         VALUES (%s, %s)
         """, (test_name, status))
 
-def execute_sql(cursor, sql):
+def execute_sql(cursor, sql, fetch_results=False):
     """
     Execute an SQL statement and log its progress.
 
     Args:
         cursor (psycopg2.cursor): Cursor to execute the SQL statement.
         sql (str): SQL query to execute.
+        fetch_results (bool): Whether to fetch and return results.
+
+    Returns:
+        list: Query results if fetch_results is True, None otherwise.
     """
-    logging.debug(f"Executing SQL: {sql}")
+    logging.debug(f"Executing SQL statement:\n{sql}")
     cursor.execute(sql)
+    if fetch_results:
+        return cursor.fetchall()
     logging.debug("SQL executed successfully")
+    return None
+
+def split_sql_statements(sql_content):
+    """
+    Split SQL content into individual statements.
+    
+    Args:
+        sql_content (str): SQL content containing one or more statements.
+        
+    Returns:
+        list: List of individual SQL statements.
+    """
+    statements = []
+    current_statement = []
+    
+    for line in sql_content.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('--'):
+            continue
+            
+        current_statement.append(line)
+        
+        if line.endswith(';'):
+            statements.append(' '.join(current_statement))
+            current_statement = []
+            
+    if current_statement:  # Handle last statement if it doesn't end with semicolon
+        statements.append(' '.join(current_statement))
+        
+    return statements
 
 def run_test_case(test_file, main_conn, replica_conn, results):
     """
     Execute a test case and verify its results across primary and replica databases.
-
-    Args:
-        test_file (str): Path to the SQL test case file.
-        main_conn (psycopg2.connection): Connection to the primary database.
-        replica_conn (psycopg2.connection): Connection to the replica database.
-        results (TestResult): Object to store the test results.
     """
     start_time = time.time()
     with open(test_file, 'r') as f:
         content = f.read()
 
     sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1] for section in sections if section.strip()}
+    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip() 
+               for section in sections if section.strip()}
 
     main_conn.autocommit = True
     replica_conn.autocommit = True
@@ -110,29 +141,31 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         for section in ['setup', 'test', 'verify']:
             if section in sections:
                 logging.info(f"Running {section.upper()} for {test_file}")
-                sql_statements = sections[section].strip().split(';')
+                sql_statements = split_sql_statements(sections[section])
+                
                 for sql in sql_statements:
-                    if sql.strip():
-                        if section in ['setup', 'test']:
-                            execute_sql(main_cur, sql)
-                        elif section == 'verify':
-                            time.sleep(1)  # Allow time for replication to catch up
-                            logging.info(f"Verifying: {sql.strip()}")
-                            main_cur.execute(sql)
-                            main_result = main_cur.fetchall()
-                            replica_cur.execute(sql)
-                            replica_result = replica_cur.fetchall()
-                            if main_result != replica_result:
-                                raise AssertionError(
-                                    f"Verification failed for {test_file}: "
-                                    f"Main DB: {main_result}, Replica DB: {replica_result}"
-                                )
-                            logging.info("Verification passed")
+                    if section in ['setup', 'test']:
+                        execute_sql(main_cur, sql)
+                    elif section == 'verify':
+                        time.sleep(1)  # Allow time for replication to catch up
+                        logging.info(f"Verifying: {sql}")
+                        
+                        main_result = execute_sql(main_cur, sql, fetch_results=True)
+                        replica_result = execute_sql(replica_cur, sql, fetch_results=True)
+                        
+                        if main_result != replica_result:
+                            raise AssertionError(
+                                f"Verification failed for {test_file}:\n"
+                                f"Statement: {sql}\n"
+                                f"Main DB: {main_result}\n"
+                                f"Replica DB: {replica_result}"
+                            )
+                        logging.info(f"Verification passed for: {sql}")
 
-        if 'cleanup' in sections:
+        if 'cleanup' in sections and sections['cleanup'].strip():
             logging.info(f"Running CLEANUP for {test_file}")
-            sql_statements = sections['cleanup'].strip().split(';')
-            for sql in sql_statements:
+            cleanup_statements = split_sql_statements(sections['cleanup'])
+            for sql in cleanup_statements:
                 if sql.strip():
                     execute_sql(main_cur, sql)
 
