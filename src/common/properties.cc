@@ -68,6 +68,8 @@ namespace springtail {
             redis_config["host"].is_null() ||
             redis_config.contains("port") == false ||
             redis_config["port"].is_null() ||
+            redis_config.contains("config_db") == false ||
+            redis_config["config_db"].is_null() ||
             redis_config.contains("db") == false ||
             redis_config["db"].is_null()) {
             throw Error("Error missing redis config in environment\nTry setting SPRINGTAIL_PROPERTIES_FILE to settings.json");            throw Error("Error missing redis config in environment");
@@ -79,6 +81,7 @@ namespace springtail {
         std::string user = redis_config["user"];
         std::string password; // password is optional
         Json::get_to<std::string>(redis_config, "password", password);
+        int config_db = redis_config["config_db"];
 
         // create connection options for config db
         sw::redis::ConnectionOptions connect_options;
@@ -86,7 +89,7 @@ namespace springtail {
         connect_options.port = port;
         connect_options.user = user;
         connect_options.password = password;
-        connect_options.db = 0; // config DB hard-coded to 0
+        connect_options.db = config_db;
 
         // create redis client just for accessing config db
         _redis_config_client = std::make_shared<RedisClient>(connect_options);
@@ -297,6 +300,20 @@ namespace springtail {
 
         // publish the state
         redis_client->publish(std::format(redis::PUBSUB_DB_STATE_CHANGES, db_instance_id, db_id), state);
+    }
+
+    void
+    Properties::publish_liveness_notification(const std::string &msg)
+    {
+        // get the db_instance_id (initially set from env or system.json)
+        uint64_t db_instance_id = get_db_instance_id();
+
+        // need to use redis
+        RedisClientPtr redis_client = _get_redis_client();
+
+        // publish the state
+        SPDLOG_DEBUG("Publishing liveness notification: channel: {} msg: {}", std::format(redis::PUBSUB_LIVENESS_NOTIFY, db_instance_id), msg);
+        redis_client->publish(std::format(redis::PUBSUB_LIVENESS_NOTIFY, db_instance_id), msg);
     }
 
     std::string

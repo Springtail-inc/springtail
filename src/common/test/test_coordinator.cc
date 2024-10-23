@@ -9,13 +9,18 @@
 #include <common/coordinator.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
+#include <common/properties.hh>
+#include <common/logging.hh>
 
 using namespace springtail;
 
 class CoordinatorTest : public ::testing::Test {
 protected:
-    void SetUp() override {
+    void SetUp() override
+    {
         springtail_init();
+
+        _instance_id = Properties::get_db_instance_id();
 
         // See if redis is enabled
         try {
@@ -23,22 +28,36 @@ protected:
 
             // cleanup in case of previous killed run
             TearDown();
+
+            // setup the pubsub for liveness notifications
+            _subscriber = RedisMgr::get_instance()->get_subscriber(5);
+            std::string channel = fmt::format(redis::PUBSUB_LIVENESS_NOTIFY, _instance_id);
+            SPDLOG_DEBUG("Subscribing to {}", channel);
+            _subscriber->on_message([&](const std::string &channel, const std::string &msg) {
+                SPDLOG_DEBUG("Received message: {}", msg);
+                this->_msg = msg;
+            });
+            _subscriber->subscribe(channel);
+            _subscriber->consume(); // consume the unsubscribe message
+
+            _subscriber->subscribe(channel);
+            _subscriber->consume(); // consume the subscribe message
+
         } catch (const std::exception &e) {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
-        coordinator = Coordinator::get_instance();
-        _instance_id = Properties::get_db_instance_id();
+        _coordinator = Coordinator::get_instance();
         _now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     }
 
-    void TearDown() override {
+    void TearDown() override
+    {
         // cleanout the liveness hash, and the notify queue
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _instance_id);
         redis->del(key);
-        std::string notify_key = fmt::format(redis::QUEUE_LIVENESS_NOTIFY, _instance_id);
-        redis->del(notify_key);
+        _subscriber = nullptr;
     }
 
     /**
@@ -70,23 +89,32 @@ protected:
         ASSERT_TRUE(value.has_value());
         if (alive) {
             // if alive, value should be later than now (as set in the StartUp)
-            EXPECT_GE(std::stoull(*value), _now);
+            ASSERT_GE(std::stoull(*value), _now);
         } else {
             // if dead, should be 0
-            EXPECT_EQ(value, "0");
+            ASSERT_EQ(value, "0");
 
-            // Check the queue for the dead daemon
-            std::vector<std::string> values;
-            std::string notify_key = fmt::format(redis::QUEUE_LIVENESS_NOTIFY, _instance_id);
-            redis->lrange(notify_key, 0, -1, std::back_inserter(values));
-            EXPECT_EQ(values.size(), 1);
-            EXPECT_EQ(values[0], hkey);
+            // setup the pubsub for liveness notifications
+            _subscriber->on_message([&](const std::string &channel, const std::string &msg) {
+                SPDLOG_DEBUG("Received message: {}", msg);
+                this->_msg = msg;
+            });
+
+            // Check the pubsub for the notification message
+            try {
+                _subscriber->consume();
+                ASSERT_EQ(_msg, hkey);
+            } catch (const sw::redis::TimeoutError &e) {
+                FAIL() << "Timeout waiting for notification message";
+            }
         }
     }
 
-    Coordinator* coordinator;
+    Coordinator* _coordinator;
+    RedisMgr::SubscriberPtr _subscriber;
     uint64_t _instance_id;
     uint64_t _now;
+    std::string _msg; ///< message from the pubsub
 };
 
 TEST_F(CoordinatorTest, SingletonInstanceTest) {
@@ -98,18 +126,18 @@ TEST_F(CoordinatorTest, SingletonInstanceTest) {
 TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
     std::string thread_id = "1";
 
-    coordinator->register_thread(Coordinator::LOG_MGR, thread_id);
+    _coordinator->register_thread(Coordinator::LOG_MGR, thread_id);
     check_redis(Coordinator::LOG_MGR, thread_id, true);
 
-    coordinator->unregister_thread(Coordinator::LOG_MGR, thread_id);
+    _coordinator->unregister_thread(Coordinator::LOG_MGR, thread_id);
     check_redis_empty();
 }
 
 TEST_F(CoordinatorTest, SetLivenessTest) {
     std::string thread_id = "1";
 
-    coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
-    coordinator->set_liveness(Coordinator::WRITE_CACHE, thread_id);
+    _coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
+    _coordinator->mark_alive(Coordinator::WRITE_CACHE, thread_id);
 
     check_redis(Coordinator::WRITE_CACHE, thread_id, true);
 }
@@ -117,8 +145,8 @@ TEST_F(CoordinatorTest, SetLivenessTest) {
 TEST_F(CoordinatorTest, KillDaemonTest) {
     std::string thread_id = "1";
 
-    coordinator->register_thread(Coordinator::XID_MGR, thread_id);
-    coordinator->kill_daemon(Coordinator::XID_MGR, thread_id);
+    _coordinator->register_thread(Coordinator::XID_MGR, thread_id);
+    _coordinator->kill_daemon(Coordinator::XID_MGR, thread_id);
 
     check_redis(Coordinator::XID_MGR, thread_id, false);
 }
@@ -127,19 +155,19 @@ TEST_F(CoordinatorTest, MultipleThreadsTest) {
     std::string thread_id1 = "1";
     std::string thread_id2 = "2";
 
-    coordinator->register_thread(Coordinator::DDL_MGR, thread_id1);
-    coordinator->register_thread(Coordinator::GC_MGR, thread_id2);
+    _coordinator->register_thread(Coordinator::DDL_MGR, thread_id1);
+    _coordinator->register_thread(Coordinator::GC_MGR, thread_id2);
 
-    coordinator->set_liveness(Coordinator::DDL_MGR, thread_id1);
-    coordinator->set_liveness(Coordinator::GC_MGR, thread_id2);
+    _coordinator->mark_alive(Coordinator::DDL_MGR, thread_id1);
+    _coordinator->mark_alive(Coordinator::GC_MGR, thread_id2);
 
     check_redis(Coordinator::DDL_MGR, thread_id1, true);
     check_redis(Coordinator::GC_MGR, thread_id2, true);
 
-    coordinator->kill_daemon(Coordinator::DDL_MGR, thread_id1);
+    _coordinator->kill_daemon(Coordinator::DDL_MGR, thread_id1);
     check_redis(Coordinator::DDL_MGR, thread_id1, false);
 
-    coordinator->unregister_thread(Coordinator::GC_MGR, thread_id2);
-    coordinator->unregister_thread(Coordinator::DDL_MGR, thread_id1);
+    _coordinator->unregister_thread(Coordinator::GC_MGR, thread_id2);
+    _coordinator->unregister_thread(Coordinator::DDL_MGR, thread_id1);
     check_redis_empty();
 }

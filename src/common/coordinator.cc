@@ -62,8 +62,7 @@ namespace springtail {
 
         if (!alive) {
             // notify the coordinator
-            std::string notify_key = fmt::format(redis::QUEUE_LIVENESS_NOTIFY, _db_instance_id);
-            redis->rpush(notify_key, hkey);
+            Properties::publish_liveness_notification(hkey);
         }
     }
 }
