@@ -77,26 +77,27 @@ namespace springtail {
                 FLUSHING = 3,
                 INVALID = 4
             };
+            State _state; ///< The current state of this extent.
 
         public:
             CacheExtent(const std::vector<std::shared_ptr<std::vector<char>>> &data,
                         const std::filesystem::path &file,
                         uint64_t extent_id)
                 : Extent(data),
+                  _state(State::CLEAN),
                   _file(file),
                   _extent_id(extent_id),
                   _use_count(1),
-                  _state(State::CLEAN),
                   _cache_id(0)
             { }
 
             CacheExtent(const ExtentHeader &header,
                         const std::filesystem::path &file)
                 : Extent(header),
+                  _state(State::DIRTY),
                   _file(file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
-                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -105,10 +106,10 @@ namespace springtail {
              */
             CacheExtent(const CacheExtent &extent)
                 : Extent(extent),
+                  _state(State::DIRTY),
                   _file(extent._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
-                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -117,10 +118,10 @@ namespace springtail {
              */
             CacheExtent(Extent &&other, const CacheExtent &original)
                 : Extent(std::move(other)),
+                  _state(State::DIRTY),
                   _file(original._file),
                   _extent_id(constant::UNKNOWN_EXTENT),
                   _use_count(1),
-                  _state(State::DIRTY),
                   _cache_id(0)
             { }
 
@@ -147,7 +148,6 @@ namespace springtail {
             uint16_t _use_count; ///< The number of users of this extent.
             std::list<std::shared_ptr<CacheExtent>>::iterator _pos; ///< The position of this entry on it's global LRU list.  Invalid if use count is non-zero.
 
-            State _state; ///< The current state of this extent.
             std::shared_ptr<boost::condition_variable> _flush_cv; ///< A condition variable used to notify waiters when the extent is no longer FLUSHING.
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
@@ -155,10 +155,51 @@ namespace springtail {
         using CacheExtentPtr = std::shared_ptr<CacheExtent>;
 
         /**
-         * Reference to an extent in the DataCache.  First holds the ID of the extent.  If second is
-         * true, then the ID is a cache ID, false then an extent ID.
+         * Reference to an extent in the DataCache.
          */
-        using ExtentRef = std::pair<uint64_t, bool>;
+        class ExtentRef {
+        public:
+            // first is a cache ID
+            // second is a weak ptr to the cached extent
+            using CacheRef = std::weak_ptr<CacheExtent>;
+
+            uint64_t id() const {
+                return _id;
+            }
+
+            void set_id(uint64_t id) {
+                _id = id;
+            }
+
+            bool is_dirty() const {
+                return _dirty.has_value();
+            }
+
+            CacheExtentPtr lock_dirty() const {
+                assert(_dirty);
+                auto ext = _dirty->lock();
+                return ext;
+            }
+
+            void set_dirty(CacheRef ref) {
+                _dirty = std::move(ref);
+            }
+
+            void reset_dirty() {
+                _dirty.reset();
+            }
+
+        protected:
+            friend class StorageCache; 
+
+            ExtentRef(uint64_t id, CacheRef dirty) :
+                _id{id}, _dirty{std::move(dirty)} 
+            {}
+
+        private:
+            uint64_t _id;  //ID of the extent
+            std::optional<CacheRef> _dirty;
+        };
 
         /**
          * A list of CacheExtent objects used for tracking the LRU entry.
@@ -263,7 +304,7 @@ namespace springtail {
              * rows.  The provided extent is invalidated and references to the two new DIRTY extents
              * are returned.
              */
-            std::pair<ExtentRef, std::weak_ptr<CacheExtent>> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
+            std::pair<ExtentRef, ExtentRef> split(CacheExtentPtr extent, ExtentSchemaPtr schema);
 
             /**
              * Returns an empty DIRTY extent tied to the provided file.
@@ -422,33 +463,11 @@ namespace springtail {
                 { }
 
                 SafeExtent(const std::filesystem::path &file,
-                           const ExtentRef &ref)
-                    : _extent(nullptr)
-                {
-                    if (ref.second) {
-                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first);
-                    } else {
-                        _extent = StorageCache::get_instance()->_data_cache->get(file, ref.first);
-                    }
-                }
+                           const ExtentRef &ref);
 
                 SafeExtent(const std::filesystem::path &file,
                            ExtentRef &ref,
-                           bool mark_dirty = false)
-                    : _extent(nullptr)
-                {
-                    if (ref.second) {
-                        _extent = StorageCache::get_instance()->_data_cache->get(ref.first, mark_dirty);
-                    } else if (!mark_dirty) {
-                        _extent = StorageCache::get_instance()->_data_cache->get(file, ref.first);
-                    } else {
-                        _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.first);
-
-                        // update the reference in the Page to reflect the extent's cache ID
-                        ref.first = _extent->cache_id();
-                        ref.second = true;
-                    }
-                }
+                           bool mark_dirty = false);
 
                 // copy causes the use count to be incremented
                 SafeExtent(const SafeExtent &other) {

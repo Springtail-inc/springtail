@@ -271,10 +271,12 @@ namespace springtail {
 
             // clear the associated dirty extents from the cache
             for (auto &ref : page->_extents) {
-                if (ref.second) {
-                    auto extent = data_cache->get(ref.first);
+                if (ref.is_dirty()) {
+                    auto extent = ref.lock_dirty();
+                    assert(extent);
                     data_cache->drop_dirty(extent);
                     data_cache->put(extent);
+                    ref.reset_dirty();
                 }
             }
 
@@ -440,7 +442,7 @@ namespace springtail {
           _end_xid(end_xid)
     {
         for (auto offset : offsets) {
-            _extents.push_back({ offset, false });
+            _extents.push_back({ offset, {} });
         }
     }
 
@@ -470,7 +472,8 @@ namespace springtail {
         // create an empty extent
         auto extent = cache->_data_cache->get_empty(_file, header);
 
-        _extents.push_back({ extent->cache_id(), true });
+        _extents.push_back({ extent->key().second, extent });
+
         cache->_data_cache->put(extent);
 
         // now perform the usual flush()
@@ -630,7 +633,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.push_back({ extent->key().second, extent });
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -694,7 +697,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.push_back({ extent->key().second, extent });
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -734,7 +737,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.push_back({ extent->key().second, extent });
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -919,7 +922,7 @@ namespace springtail {
                 MutableTuple(target_fields, new_row).assign(source_tuple);
             }
 
-            new_extents.push_back({ new_extent->cache_id(), true });
+            new_extents.push_back({ new_extent->key().second, new_extent });
 
             // release the new extent back to the cache
             cache->_data_cache->put(new_extent);
@@ -959,7 +962,7 @@ namespace springtail {
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
             // check if the reference is a cache ID
-            if (ref.second) {
+            if (ref.is_dirty()) {
                 // retrieve the extent; should always have a cache ID given the if-condition
                 SafeExtent e(_file, ref);
 
@@ -974,13 +977,12 @@ namespace springtail {
                 cache->_data_cache->reinsert(*e);
 
                 // save the extent ID of the now-unmodified extent
-                ref.first = (*e)->key().second;
-                ref.second = false;
-
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.first);
+                ref.set_id( (*e)->key().second );
+                ref.reset_dirty();
+                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
-            offsets.push_back(ref.first);
+            offsets.push_back(ref.id());
         }
 
         return offsets;
@@ -1222,8 +1224,8 @@ namespace springtail {
         _dirty_cache.insert({ second->_cache_id, second });
         _release(second);
 
-        return std::pair<ExtentRef, ExtentRef>({ first->_cache_id, true },
-                                               { second->_cache_id, true });
+        return std::pair<ExtentRef, ExtentRef>({ first->key().second, first },
+                                               { second->key().second, second });
     }
 
     StorageCache::CacheExtentPtr
@@ -1432,4 +1434,48 @@ namespace springtail {
             _cache_id_map[extent->_cache_id] = extent->key();
         }
     }
+
+
+    StorageCache::Page::SafeExtent::SafeExtent(const std::filesystem::path &file,
+            const ExtentRef &ref)
+        : _extent(nullptr)
+    {
+        if (ref.is_dirty()) {
+            _extent = ref.lock_dirty();
+            if (_extent) {
+                assert(_extent->_state != CacheExtent::State::INVALID);
+                StorageCache::get_instance()->_data_cache->use(_extent);
+            }
+        }
+        // not in cache
+        if (!_extent) {
+            _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
+        }
+        assert(_extent);
+    }
+
+    StorageCache::Page::SafeExtent::SafeExtent(const std::filesystem::path &file,
+            ExtentRef &ref,
+            bool mark_dirty)
+        : _extent(nullptr)
+    {
+        if (ref.is_dirty()) {
+            _extent = ref.lock_dirty();
+            if (_extent) {
+                assert(_extent->_state != CacheExtent::State::INVALID);
+                StorageCache::get_instance()->_data_cache->use(_extent);
+            }
+        } 
+        // not in cache
+        if (!_extent) {
+            if (!mark_dirty) {
+                _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
+            } else {
+                _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
+                ref.set_dirty(_extent);
+            }
+        }
+        assert(_extent);
+    }
+
 }
