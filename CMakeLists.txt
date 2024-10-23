@@ -21,7 +21,6 @@ endif()
 ## Cmake modules in ./cmake (for finding libraries)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
-include(InstallProject)
 
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
@@ -102,13 +101,6 @@ endforeach(MODULE ${MODULES})
 
 ## configure CTestCustom.cmake for top level
 configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINARY_DIR}/CTestCustom.cmake @ONLY)
-
-## add install target
-# Add this target to your build so it runs when you invoke 'make install'
-add_custom_target(install_project ALL
-    COMMAND cmake -P ${PROJECT_SOURCE_DIR}/cmake/InstallProject.cmake
-    COMMENT "Running custom install steps"
-)
 
 ## Messages keep at end of file
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
