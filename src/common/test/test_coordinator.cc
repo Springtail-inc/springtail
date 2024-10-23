@@ -32,9 +32,7 @@ protected:
             // setup the pubsub for liveness notifications
             _subscriber = RedisMgr::get_instance()->get_subscriber(5);
             std::string channel = fmt::format(redis::PUBSUB_LIVENESS_NOTIFY, _instance_id);
-            SPDLOG_DEBUG("Subscribing to {}", channel);
             _subscriber->on_message([&](const std::string &channel, const std::string &msg) {
-                SPDLOG_DEBUG("Received message: {}", msg);
                 this->_msg = msg;
             });
             _subscriber->subscribe(channel);
@@ -93,12 +91,6 @@ protected:
         } else {
             // if dead, should be 0
             ASSERT_EQ(value, "0");
-
-            // setup the pubsub for liveness notifications
-            _subscriber->on_message([&](const std::string &channel, const std::string &msg) {
-                SPDLOG_DEBUG("Received message: {}", msg);
-                this->_msg = msg;
-            });
 
             // Check the pubsub for the notification message
             try {

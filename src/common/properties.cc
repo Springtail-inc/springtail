@@ -311,8 +311,7 @@ namespace springtail {
         // need to use redis
         RedisClientPtr redis_client = _get_redis_client();
 
-        // publish the state
-        SPDLOG_DEBUG("Publishing liveness notification: channel: {} msg: {}", std::format(redis::PUBSUB_LIVENESS_NOTIFY, db_instance_id), msg);
+        // publish the msg
         redis_client->publish(std::format(redis::PUBSUB_LIVENESS_NOTIFY, db_instance_id), msg);
     }
 
