@@ -271,12 +271,12 @@ namespace springtail {
 
             // clear the associated dirty extents from the cache
             for (auto &ref : page->_extents) {
-                if (ref.is_dirty()) {
-                    auto extent = ref.lock_dirty();
+                if (ref.is_cached()) {
+                    auto extent = ref.lock_cached();
                     assert(extent);
                     data_cache->drop_dirty(extent);
                     data_cache->put(extent);
-                    ref.reset_dirty();
+                    ref.reset_cached();
                 }
             }
 
@@ -962,7 +962,7 @@ namespace springtail {
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
             // check if the reference is a cache ID
-            if (ref.is_dirty()) {
+            if (ref.is_cached()) {
                 // retrieve the extent; should always have a cache ID given the if-condition
                 SafeExtent e(_file, ref);
 
@@ -978,7 +978,7 @@ namespace springtail {
 
                 // save the extent ID of the now-unmodified extent
                 ref.set_id( (*e)->key().second );
-                ref.reset_dirty();
+                ref.reset_cached();
                 SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
@@ -1440,15 +1440,12 @@ namespace springtail {
             const ExtentRef &ref)
         : _extent(nullptr)
     {
-        if (ref.is_dirty()) {
-            _extent = ref.lock_dirty();
-            if (_extent) {
-                assert(_extent->_state != CacheExtent::State::INVALID);
-                StorageCache::get_instance()->_data_cache->use(_extent);
-            }
-        }
-        // not in cache
-        if (!_extent) {
+        _extent = ref.lock_cached();
+        if (_extent) {
+            assert(_extent->_state != CacheExtent::State::INVALID);
+            StorageCache::get_instance()->_data_cache->use(_extent);
+        } else {
+            // not in cache
             _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
         }
         assert(_extent);
@@ -1459,20 +1456,17 @@ namespace springtail {
             bool mark_dirty)
         : _extent(nullptr)
     {
-        if (ref.is_dirty()) {
-            _extent = ref.lock_dirty();
-            if (_extent) {
-                assert(_extent->_state != CacheExtent::State::INVALID);
-                StorageCache::get_instance()->_data_cache->use(_extent);
-            }
-        } 
-        // not in cache
-        if (!_extent) {
+        _extent = ref.lock_cached();
+        if (_extent) {
+            assert(_extent->_state != CacheExtent::State::INVALID);
+            StorageCache::get_instance()->_data_cache->use(_extent);
+        } else {
+            // not in cache
             if (!mark_dirty) {
                 _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
             } else {
                 _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
-                ref.set_dirty(_extent);
+                ref.set_cached(_extent);
             }
         }
         assert(_extent);

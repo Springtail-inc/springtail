@@ -159,9 +159,7 @@ namespace springtail {
          */
         class ExtentRef {
         public:
-            // first is a cache ID
-            // second is a weak ptr to the cached extent
-            using CacheRef = std::weak_ptr<CacheExtent>;
+            using SharedExtent = std::weak_ptr<CacheExtent>;
 
             uint64_t id() const {
                 return _id;
@@ -171,34 +169,35 @@ namespace springtail {
                 _id = id;
             }
 
-            bool is_dirty() const {
-                return _dirty.has_value();
+            bool is_cached() const {
+                return _cached.has_value();
             }
 
-            CacheExtentPtr lock_dirty() const {
-                assert(_dirty);
-                auto ext = _dirty->lock();
-                return ext;
+            CacheExtentPtr lock_cached() const {
+                if (!_cached) {
+                    return {};
+                }
+                return _cached->lock();
             }
 
-            void set_dirty(CacheRef ref) {
-                _dirty = std::move(ref);
+            void set_cached(SharedExtent ext) {
+                _cached = std::move(ext);
             }
 
-            void reset_dirty() {
-                _dirty.reset();
+            void reset_cached() {
+                _cached.reset();
             }
 
         protected:
             friend class StorageCache; 
 
-            ExtentRef(uint64_t id, CacheRef dirty) :
-                _id{id}, _dirty{std::move(dirty)} 
+            ExtentRef(uint64_t id, SharedExtent cached) :
+                _id{id}, _cached{std::move(cached)} 
             {}
 
         private:
             uint64_t _id;  //ID of the extent
-            std::optional<CacheRef> _dirty;
+            std::optional<SharedExtent> _cached;
         };
 
         /**
