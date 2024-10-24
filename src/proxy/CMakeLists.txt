@@ -69,15 +69,15 @@ target_link_libraries(parsing
 )
 
 # test server daemon executable
-add_executable(daemon daemon.cc)
-target_include_directories(daemon
+add_executable(proxy daemon.cc)
+target_include_directories(proxy
     PRIVATE ${CMAKE_SOURCE_DIR}/include
 )
-target_link_libraries(daemon
+target_link_libraries(proxy
     PUBLIC springtail_proxy
     PRIVATE Boost::program_options
 )
-add_dsymutil_command(daemon)
+add_dsymutil_command(proxy)
 
 # test client executable -- boost::asio test, not used
 #add_executable(client test/client.cc)

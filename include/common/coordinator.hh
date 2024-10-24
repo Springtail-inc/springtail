@@ -16,12 +16,13 @@ namespace springtail {
         /** Daemon type */
         enum DaemonType : uint8_t {
             LOG_MGR=1,
-            WRITE_CACHE,
-            XID_MGR,
-            DDL_MGR,
-            GC_MGR,
-            SYS_TBL_MGR,
-            FDW
+            WRITE_CACHE=2,
+            XID_MGR=3,
+            DDL_MGR=4,
+            GC_MGR=5,
+            SYS_TBL_MGR=6,
+            PROXY=7,
+            FDW=8
         };
 
         /**

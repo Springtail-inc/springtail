@@ -4,8 +4,9 @@ import subprocess
 import psycopg2
 import platform
 import re
+from typing import Dict, List, Optional
 
-def connect_db(dbname, username, password, host, port, autocommit=True):
+def connect_db(dbname : str, username : str, password :str, host : str, port : int, autocommit : bool=True) -> psycopg2.extensions.connection:
     """Connect to the given database with the given username, password, host, and port."""
     print(f"Connecting to database: {dbname} with username: {username} and host: {host}")
     try:
@@ -19,7 +20,7 @@ def connect_db(dbname, username, password, host, port, autocommit=True):
     return conn
 
 
-def execute_sql(conn, sql, args=None):
+def execute_sql(conn, sql : str, args=None) -> None:
     """Execute the given sql statement with the given arguments on the given connection."""
     print(f"Executing sql: {sql} with args: {args}")
     try:
@@ -34,7 +35,7 @@ def execute_sql(conn, sql, args=None):
     return
 
 
-def execute_sql_script(conn, script_file):
+def execute_sql_script(conn, script_file : str) -> None:
     """Execute the given sql script file on the given connection."""
     print(f"Executing sql script: {script_file}")
     if not os.path.exists(script_file):
@@ -52,7 +53,7 @@ def execute_sql_script(conn, script_file):
 
 
 # execute a sql select statement and return the result
-def execute_sql_select(conn, sql, args=None):
+def execute_sql_select(conn, sql : str, args=None) -> List:
     """Execute the given sql select statement with the given arguments on the given connection and return the result."""
     print(f"Executing sql select: {sql} with args: {args}")
     try:
@@ -68,7 +69,7 @@ def execute_sql_select(conn, sql, args=None):
     return result
 
 
-def running_pids(names):
+def running_pids(names : List[str]) -> tuple:
     """Return a list of process IDs for the given process names."""
     pids = []
     not_running = []
@@ -85,7 +86,7 @@ def running_pids(names):
     return (pids, not_running)
 
 
-def kill_processes(names):
+def kill_processes(names : List[str]):
     """Kill the processes with the given names."""
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] in names:
@@ -93,7 +94,7 @@ def kill_processes(names):
             proc.kill()
 
 
-def run_command(command, args, outfile=None):
+def run_command(command, args : List[str], outfile : str = None) -> Optional[str]:
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
 
@@ -119,13 +120,13 @@ def run_command(command, args, outfile=None):
     return last_line
 
 
-def grep_file(file_path: str, search_strings: list):
+def grep_file(file_path: str, search_strings: List[str]) -> bool:
     """Search for a line in a file.
     Arguments:
     file_path -- the path to the file to search
     search_lines -- a list of strings to search for
     Returns:
-    List of files that contain the search string.
+    True if any of the search strings are found in the file, False otherwise
     """
     try:
         with open(file_path, 'r') as file:
@@ -146,7 +147,7 @@ def remove_ansi_escapes(text):
     return re.sub(ansi_escape_pattern, '', text)
 
 
-def search_and_capture(filename: str, search_strings: list):
+def search_and_capture(filename: str, search_strings: List[str]) -> List[str]:
     """Search for a string in a file and capture all lines after the string is found."""
     found_string = False
     captured_output = []
@@ -163,11 +164,11 @@ def search_and_capture(filename: str, search_strings: list):
                         found_string = True
                         captured_output.append(remove_ansi_escapes(line))
 
-    # Join the captured lines into a multiline string
+    # return the captured output as a list of lines
     return captured_output
 
 
-def set_dir_writable(dir):
+def set_dir_writable(dir) -> None:
     """Check the log path is writable."""
     if not os.path.exists(dir):
         # make directory writable by owner, group, and others
@@ -179,6 +180,9 @@ def set_dir_writable(dir):
         os.chmod(dir, 0o777)
 
 
-def is_linux():
-    """Check if the system is Linux."""
+def is_linux() -> bool:
+    """
+    Check if the system is Linux.
+    Returns: True if the system is Linux, False otherwise.
+    """
     return platform.system() == 'Linux'
