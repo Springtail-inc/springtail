@@ -77,6 +77,12 @@ def cleanup_filesystem(props):
     sys_config = props.get_system_config()
     log_path = sys_config['logging']['log_path']
 
+    # Create log path if it doesn't exist
+    os.makedirs(name=log_path, exist_ok=True, mode=0o777)
+
+    # Create the mount path if it doesn't exist
+    os.makedirs(name=mount_path, exist_ok=True, mode=0o755)
+
     clean_fs(mount_path, log_path)
 
 

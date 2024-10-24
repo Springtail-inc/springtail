@@ -26,6 +26,7 @@ namespace springtail::environment {
         {"REDIS_USER", STR, "redis", "user"},
         {"REDIS_PASSWORD", STR, "redis", "password"},
         {"REDIS_USER_DATABASE_ID", UINT32, "redis", "db"},
+        {"REDIS_CONFIG_DATABASE_ID", UINT32, "redis", "config_db"},
         {"REDIS_PORT", UINT32, "redis", "port"},
         {"ORGANIZATION_ID", STR, "org", "organization_id"},
         {"ACCOUNT_ID", STR, "org", "account_id"},

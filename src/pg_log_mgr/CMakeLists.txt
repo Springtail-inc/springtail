@@ -81,6 +81,16 @@ target_link_libraries(dump_repl_log
 )
 add_dsymutil_command(dump_repl_log)
 
+# install pg_log_mgr_daemon to install directory
+install(TARGETS pg_log_mgr_daemon RUNTIME DESTINATION bin/system)
+
+# install utils
+install(TARGETS
+    dump_xact_log
+    dump_repl_log
+    RUNTIME DESTINATION bin/utils
+)
+
 gtest_discover_tests(test_log_reader
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
