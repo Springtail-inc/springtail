@@ -29,8 +29,6 @@ namespace springtail {
          */
         static void shutdown();
 
-        class Page;
-
     private:
         static StorageCache *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
@@ -70,7 +68,6 @@ namespace springtail {
          */
         class CacheExtent : public Extent {
             friend DataCache;
-            friend Page;
 
         public:
             enum State {
@@ -141,6 +138,10 @@ namespace springtail {
                 return _cache_id;
             }
 
+            State state() const {
+                return _state;
+            }
+
         private:
             std::filesystem::path _file; ///< The file containing this extent.
             uint64_t _extent_id; ///< The extent_id of this extent.
@@ -170,10 +171,6 @@ namespace springtail {
 
             void set_id(uint64_t id) {
                 _id = id;
-            }
-
-            bool is_cached() const {
-                return _cached.has_value();
             }
 
             CacheExtentPtr lock_cached() const {
@@ -465,11 +462,8 @@ namespace springtail {
                 { }
 
                 SafeExtent(const std::filesystem::path &file,
-                           const ExtentRef &ref);
-
-                SafeExtent(const std::filesystem::path &file,
-                           ExtentRef &ref,
-                           bool mark_dirty = false);
+                           const ExtentRef &ref,
+                           bool mark_dirty);
 
                 // copy causes the use count to be incremented
                 SafeExtent(const SafeExtent &other) {
@@ -508,6 +502,10 @@ namespace springtail {
                     if (_extent) {
                         StorageCache::get_instance()->_data_cache->put(_extent);
                     }
+                }
+
+                ExtentRef get_ref() const {
+                    return {_extent->key().second, _extent};
                 }
 
                 CacheExtentPtr operator*() const {
@@ -571,7 +569,7 @@ namespace springtail {
                     }
 
                     // retrieve the extent
-                    _extent = SafeExtent(_page->_file, *_extent_i);
+                    _extent = SafeExtent(_page->_file, *_extent_i, false);
 
                     // start at the first row
                     _row = (*_extent)->begin();
@@ -598,7 +596,9 @@ namespace springtail {
                     --_extent_i;
 
                     // retrieve the extent
-                    _extent = SafeExtent(_page->_file, *_extent_i);
+                    _extent = SafeExtent(_page->_file, *_extent_i, false);
+                    // refresh the extent reference
+                    *_extent_i = _extent.get_ref();
 
                     // start at the last row
                     _row = (*_extent)->last();
@@ -633,7 +633,9 @@ namespace springtail {
                     }
 
                     // get the extent, potentially from the read cache
-                    _extent = SafeExtent(_page->_file, *_extent_i);
+                    _extent = SafeExtent(_page->_file, *_extent_i, false);
+                    // refresh the extent reference
+                    *_extent_i = _extent.get_ref();
 
                     // get the first row in the extent
                     _row = (*_extent)->begin();
@@ -669,7 +671,8 @@ namespace springtail {
              */
             Iterator last() {
                 boost::shared_lock lock(_mutex);
-                SafeExtent extent(_file, _extents.back());
+                assert(!_extents.empty());
+                SafeExtent extent(_file, _extents.back(), false);
                 auto row_i = (*extent)->last();
                 return Iterator(this, --_extents.end(), std::move(extent), row_i);
             }
@@ -711,7 +714,8 @@ namespace springtail {
              * Page is based on.
              */
             ExtentHeader header() const {
-                SafeExtent extent(_file, _extents.front());
+                assert(!_extents.empty());
+                SafeExtent extent(_file, _extents.front(), false);
                 return (*extent)->header();
             }
 
@@ -731,7 +735,7 @@ namespace springtail {
                 }
 
                 // if one extent, and the extent is empty, then empty
-                SafeExtent extent(_file, _extents.front());
+                SafeExtent extent(_file, _extents.front(), false);
                 return (*extent)->empty();
             }
 

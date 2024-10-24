@@ -265,13 +265,12 @@ namespace springtail {
 
             // clear the associated dirty extents from the cache
             for (auto &ref : page->_extents) {
-                if (ref.is_cached()) {
-                    auto extent = ref.lock_cached();
-                    assert(extent);
-                    data_cache->drop_dirty(extent);
-                    data_cache->put(extent);
-                    ref.reset_cached();
-                }
+                auto extent = ref.lock_cached();
+                assert(extent); //must be in the dirty cache
+                assert(extent->state() == CacheExtent::State::DIRTY);
+                data_cache->drop_dirty(extent);
+                data_cache->put(extent);
+                ref = {extent->key().second, extent};
             }
 
             // remove the page from the flush list
@@ -499,14 +498,15 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             SafeExtent extent(_file, ref, false);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
         }
 
-        SafeExtent extent(_file, *extent_i);
+        SafeExtent extent(_file, *extent_i, false);
+        *extent_i = extent.get_ref();
 
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::lower_bound(**extent, *tuple,
@@ -533,7 +533,7 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
-                                     SafeExtent extent(_file, ref);
+                                     SafeExtent extent(_file, ref, false);
                                      auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
                                      return key.less_than(tuple);
                                  });
@@ -542,7 +542,8 @@ namespace springtail {
             return end();
         }
 
-        SafeExtent extent(_file, *extent_i);
+        SafeExtent extent(_file, *extent_i, false);
+        *extent_i = extent.get_ref();
 
         // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
@@ -597,7 +598,8 @@ namespace springtail {
     {
         // iterate through the extents to find the requested index in the page
         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
-            SafeExtent extent(_file, *extent_i);
+            SafeExtent extent(_file, *extent_i, false);
+            *extent_i = extent.get_ref();
 
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
@@ -644,7 +646,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             SafeExtent extent(_file, ref, false);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
 
@@ -654,6 +656,7 @@ namespace springtail {
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
+        *extent_i = extent.get_ref();
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -748,7 +751,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             SafeExtent extent(_file, ref, false);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
@@ -757,6 +760,7 @@ namespace springtail {
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
+        *extent_i = extent.get_ref();
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -799,7 +803,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             SafeExtent extent(_file, ref, false);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
@@ -807,6 +811,7 @@ namespace springtail {
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
+        *extent_i = extent.get_ref();
 
         // find the update position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -837,7 +842,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             SafeExtent extent(_file, ref, false);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
@@ -845,6 +850,7 @@ namespace springtail {
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *extent_i, true);
+        *extent_i = extent.get_ref();
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -906,7 +912,7 @@ namespace springtail {
             auto new_extent = cache->_data_cache->get_empty(_file, header());
 
             // get the old extent
-            SafeExtent old_extent(_file, ref);
+            SafeExtent old_extent(_file, ref, false);
 
             // copy the data
             for (auto &row : **old_extent) {
@@ -955,10 +961,8 @@ namespace springtail {
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
-            // check if the reference is a cache ID
-            if (ref.is_cached()) {
-                // retrieve the extent; should always have a cache ID given the if-condition
-                SafeExtent e(_file, ref);
+            SafeExtent e(_file, ref, false);
+            if ((*e)->state() == CacheExtent::State::DIRTY) {
 
                 // update the extent header
                 (*e)->header() = header;
@@ -971,8 +975,8 @@ namespace springtail {
                 cache->_data_cache->reinsert(*e);
 
                 // save the extent ID of the now-unmodified extent
-                ref.set_id( (*e)->key().second );
-                ref.reset_cached();
+                ref = { (*e)->key().second, *e };
+
                 SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
@@ -1097,6 +1101,7 @@ namespace springtail {
 
         // get the clean extent from the cache
         auto extent = _get_clean(key);
+        assert(extent);
 
         // check if the caller is the only user
         if (extent->_use_count == 1) {
@@ -1429,38 +1434,25 @@ namespace springtail {
         }
     }
 
-
     StorageCache::Page::SafeExtent::SafeExtent(const std::filesystem::path &file,
-            const ExtentRef &ref)
-        : _extent(nullptr)
-    {
-        _extent = ref.lock_cached();
-        if (_extent) {
-            assert(_extent->_state != CacheExtent::State::INVALID);
-            StorageCache::get_instance()->_data_cache->use(_extent);
-        } else {
-            // not in cache
-            _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
-        }
-        assert(_extent);
-    }
-
-    StorageCache::Page::SafeExtent::SafeExtent(const std::filesystem::path &file,
-            ExtentRef &ref,
+            const ExtentRef &ref,
             bool mark_dirty)
         : _extent(nullptr)
     {
         _extent = ref.lock_cached();
         if (_extent) {
-            assert(_extent->_state != CacheExtent::State::INVALID);
-            StorageCache::get_instance()->_data_cache->use(_extent);
+            assert(_extent->state() != CacheExtent::State::INVALID);
+            if (mark_dirty && _extent->state() != CacheExtent::State::DIRTY) {
+                _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
+            } else {
+                StorageCache::get_instance()->_data_cache->use(_extent);
+            }
         } else {
             // not in cache
             if (!mark_dirty) {
                 _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
             } else {
                 _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
-                ref.set_cached(_extent);
             }
         }
         assert(_extent);
