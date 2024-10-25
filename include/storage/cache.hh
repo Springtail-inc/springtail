@@ -166,38 +166,53 @@ namespace springtail {
             using SharedExtent = std::weak_ptr<CacheExtent>;
 
             uint64_t id() const {
+                if(_cached) {
+                    auto c = _cached->lock();
+                    if (c) {
+                        return c->key().second;
+                    }
+                }
                 return _id;
             }
 
-            void set_id(uint64_t id) {
-                _id = id;
+            bool is_cached() const {
+                return _cached.has_value();
             }
 
             CacheExtentPtr lock_cached() const {
-                if (!_cached) {
+                if (!is_cached()) {
                     return {};
+                }
+                auto e = _cached->lock();
+                if (!e) {
+                    _cached = {};
                 }
                 return _cached->lock();
             }
 
-            void set_cached(SharedExtent ext) {
-                _cached = std::move(ext);
-            }
-
-            void reset_cached() {
-                _cached.reset();
+            CacheExtent::State state() const {
+                return _state;
             }
 
         protected:
             friend class StorageCache; 
 
-            ExtentRef(uint64_t id, SharedExtent cached) :
-                _id{id}, _cached{std::move(cached)} 
+            ExtentRef(uint64_t id, CacheExtentPtr cached) :
+                _id{id} 
+            { 
+                if (cached) {
+                    _cached = cached;
+                    _state = cached->state();
+                }
+            }
+            ExtentRef(uint64_t id) :
+                _id{id} 
             {}
 
         private:
             uint64_t _id;  //ID of the extent
-            std::optional<SharedExtent> _cached;
+            mutable std::optional<SharedExtent> _cached;
+            CacheExtent::State _state;
         };
 
         /**
@@ -251,6 +266,8 @@ namespace springtail {
              * @return A pointer to the extent.
              */
             CacheExtentPtr get(uint64_t cache_id, bool mark_dirty = false);
+
+            CacheExtentPtr use_cached(CacheExtentPtr extent, bool mark_dirty);
 
             /**
              * Increment the use count on a cache extent.
@@ -473,10 +490,13 @@ namespace springtail {
                     _extent = other._extent;
                 }
                 SafeExtent &operator=(const SafeExtent &other) {
-                    if (other._extent != nullptr) {
-                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->put(_extent);
                     }
                     _extent = other._extent;
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
                     return *this;
                 }
 
@@ -490,7 +510,6 @@ namespace springtail {
                     if (_extent) {
                         StorageCache::get_instance()->_data_cache->put(_extent);
                     }
-
                     _extent = other._extent;
                     other._extent = nullptr;
 
@@ -505,6 +524,7 @@ namespace springtail {
                 }
 
                 ExtentRef get_ref() const {
+                    assert(_extent);
                     return {_extent->key().second, _extent};
                 }
 
@@ -577,7 +597,7 @@ namespace springtail {
                     return *this;
                 }
 
-                Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+                //Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 
 
                 /**
@@ -597,8 +617,6 @@ namespace springtail {
 
                     // retrieve the extent
                     _extent = SafeExtent(_page->_file, *_extent_i, false);
-                    // refresh the extent reference
-                    *_extent_i = _extent.get_ref();
 
                     // start at the last row
                     _row = (*_extent)->last();
@@ -606,7 +624,7 @@ namespace springtail {
                     return *this;
                 }
 
-                Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
+                //Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
                 /**
                  * Equality operator -- compares if this iterator is at the same row position as the
@@ -634,8 +652,6 @@ namespace springtail {
 
                     // get the extent, potentially from the read cache
                     _extent = SafeExtent(_page->_file, *_extent_i, false);
-                    // refresh the extent reference
-                    *_extent_i = _extent.get_ref();
 
                     // get the first row in the extent
                     _row = (*_extent)->begin();

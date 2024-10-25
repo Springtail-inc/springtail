@@ -270,7 +270,6 @@ namespace springtail {
                 assert(extent->state() == CacheExtent::State::DIRTY);
                 data_cache->drop_dirty(extent);
                 data_cache->put(extent);
-                ref = {extent->key().second, extent};
             }
 
             // remove the page from the flush list
@@ -435,7 +434,12 @@ namespace springtail {
           _end_xid(end_xid)
     {
         for (auto offset : offsets) {
-            _extents.push_back({ offset, {} });
+           {
+               SafeExtent ex{file, offset, false};
+               _extents.push_back(ex.get_ref());
+           }
+           auto r = _extents[_extents.size()-1];
+           //_extents.push_back(offset);
         }
     }
 
@@ -506,7 +510,6 @@ namespace springtail {
         }
 
         SafeExtent extent(_file, *extent_i, false);
-        *extent_i = extent.get_ref();
 
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::lower_bound(**extent, *tuple,
@@ -543,7 +546,6 @@ namespace springtail {
         }
 
         SafeExtent extent(_file, *extent_i, false);
-        *extent_i = extent.get_ref();
 
         // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
@@ -599,7 +601,6 @@ namespace springtail {
         // iterate through the extents to find the requested index in the page
         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
             SafeExtent extent(_file, *extent_i, false);
-            *extent_i = extent.get_ref();
 
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
@@ -708,6 +709,7 @@ namespace springtail {
         // retrieve the last extent
         auto extent_i = --_extents.end();
         SafeExtent extent(_file, *extent_i, true);
+        *extent_i = extent.get_ref();
 
         // append a row
         auto row = (*extent)->append();
@@ -882,6 +884,7 @@ namespace springtail {
 
         // make sure that we've got a mutable version of the extent
         SafeExtent extent(_file, *pos._extent_i, true);
+        *pos._extent_i = extent.get_ref();
 
         // remove the row
         (*extent)->remove(pos._row);
@@ -974,10 +977,9 @@ namespace springtail {
                 // return the clean extent back to the read cache
                 cache->_data_cache->reinsert(*e);
 
-                // save the extent ID of the now-unmodified extent
-                ref = { (*e)->key().second, *e };
-
                 SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
+
+                ref = e.get_ref();
             }
 
             offsets.push_back(ref.id());
@@ -1087,7 +1089,6 @@ namespace springtail {
     StorageCache::DataCache::put(CacheExtentPtr extent)
     {
         boost::unique_lock lock(_mutex);
-
         // release the extent
         _release(extent);
     }
@@ -1354,6 +1355,8 @@ namespace springtail {
             return;
         }
 
+        assert(extent->_use_count);
+
         // reduce the use count
         --(extent->_use_count);
 
@@ -1439,15 +1442,15 @@ namespace springtail {
             bool mark_dirty)
         : _extent(nullptr)
     {
+        bool was_cached = ref.is_cached();
         _extent = ref.lock_cached();
         if (_extent) {
             assert(_extent->state() != CacheExtent::State::INVALID);
-            if (mark_dirty && _extent->state() != CacheExtent::State::DIRTY) {
-                _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
-            } else {
-                StorageCache::get_instance()->_data_cache->use(_extent);
-            }
+            _extent = StorageCache::get_instance()->_data_cache->use_cached(_extent, mark_dirty);
         } else {
+            if (was_cached) {
+                SPDLOG_INFO("Evicted extent: {}", ref.id());
+            }
             // not in cache
             if (!mark_dirty) {
                 _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
@@ -1458,4 +1461,28 @@ namespace springtail {
         assert(_extent);
     }
 
+    StorageCache::CacheExtentPtr  StorageCache::DataCache::use_cached(CacheExtentPtr extent, bool mark_dirty) {
+        boost::unique_lock lock(_mutex);
+
+        if (extent->_state == CacheExtent::State::FLUSHING) {
+            // wait for the flush to complete and then return the extent
+            // mark ourselves as a user of the extent to prevent eviction post-flush()
+            ++(extent->_use_count);
+
+            auto cv = extent->_flush_cv;
+            cv->wait(lock);
+            --(extent->_use_count);
+        }
+
+        if (mark_dirty && extent->state() != CacheExtent::State::DIRTY) {
+            _make_extent_space();
+            auto new_extent = std::make_shared<CacheExtent>(*extent);
+            _gen_cache_id(new_extent);
+            _dirty_cache.insert({ new_extent->_cache_id, new_extent });
+            return new_extent;
+        }
+
+        ++extent->_use_count;
+        return extent;
+    }
 }
