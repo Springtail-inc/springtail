@@ -1488,7 +1488,7 @@ namespace springtail {
             _make_extent_space();
             auto new_extent = std::make_shared<CacheExtent>(*extent);
             _gen_cache_id(new_extent);
-            _dirty_cache.emplace( new_extent->_cache_id, new_extent );
+            _dirty_cache.try_emplace( new_extent->_cache_id, new_extent );
             return new_extent;
         }
 
