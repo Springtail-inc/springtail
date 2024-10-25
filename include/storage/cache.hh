@@ -606,9 +606,6 @@ namespace springtail {
                     return *this;
                 }
 
-                //Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-
                 /**
                  * Decrement operator -- moves to point at the previous row in the page.
                  */
@@ -632,8 +629,6 @@ namespace springtail {
 
                     return *this;
                 }
-
-                //Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
 
                 /**
                  * Equality operator -- compares if this iterator is at the same row position as the
