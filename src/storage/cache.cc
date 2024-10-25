@@ -1485,6 +1485,7 @@ namespace springtail {
         }
 
         if (mark_dirty && extent->state() != CacheExtent::State::DIRTY) {
+            assert(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
             _make_extent_space();
             auto new_extent = std::make_shared<CacheExtent>(*extent);
             _gen_cache_id(new_extent);
