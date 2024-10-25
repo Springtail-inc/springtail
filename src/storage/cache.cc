@@ -468,7 +468,7 @@ namespace springtail {
         // create an empty extent
         auto extent = cache->_data_cache->get_empty(_file, header);
 
-        _extents.push_back({ extent->key().second, extent });
+        _extents.emplace_back(extent->key().second, extent);
 
         cache->_data_cache->put(extent);
 
@@ -629,7 +629,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->key().second, extent });
+            _extents.emplace_back( extent->key().second, extent );
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -693,7 +693,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->key().second, extent });
+            _extents.emplace_back(extent->key().second, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -734,7 +734,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->key().second, extent });
+            _extents.emplace_back(extent->key().second, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -919,7 +919,7 @@ namespace springtail {
                 MutableTuple(target_fields, new_row).assign(source_tuple);
             }
 
-            new_extents.push_back({ new_extent->key().second, new_extent });
+            new_extents.emplace_back(new_extent->key().second, new_extent);
 
             // release the new extent back to the cache
             cache->_data_cache->put(new_extent);
@@ -1488,7 +1488,7 @@ namespace springtail {
             _make_extent_space();
             auto new_extent = std::make_shared<CacheExtent>(*extent);
             _gen_cache_id(new_extent);
-            _dirty_cache.insert({ new_extent->_cache_id, new_extent });
+            _dirty_cache.emplace( new_extent->_cache_id, new_extent );
             return new_extent;
         }
 

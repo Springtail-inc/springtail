@@ -169,6 +169,18 @@ namespace springtail {
          */
         class ExtentRef {
             public:
+                ExtentRef(uint64_t id, CacheExtentPtr cached) :
+                    _id{id} 
+                { 
+                    if (cached) {
+                        _cached = cached;
+                    }
+                }
+
+                ExtentRef(uint64_t id) :
+                    _id{id} 
+                {}
+
                 uint64_t id() const {
                     if(_cached) {
                         auto c = _cached->lock();
@@ -198,20 +210,6 @@ namespace springtail {
 
                 // This function may modify weak_ptr with a new extent
                 SafeExtent make_dirty_safe_extent(const std::filesystem::path &file);
-
-            protected:
-                friend class StorageCache; 
-
-                ExtentRef(uint64_t id, CacheExtentPtr cached) :
-                    _id{id} 
-                { 
-                    if (cached) {
-                        _cached = cached;
-                    }
-                }
-                ExtentRef(uint64_t id) :
-                    _id{id} 
-                {}
 
             private:
                 uint64_t _id;  //ID of the extent
