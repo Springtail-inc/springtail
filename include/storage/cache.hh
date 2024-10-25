@@ -18,6 +18,7 @@ namespace springtail {
      */
     class StorageCache {
     public:
+
         /**
          * @brief get_instance() of singleton StorageCache; create if it doesn't exist.
          * @return instance of StorageCache
@@ -156,63 +157,143 @@ namespace springtail {
 
             uint64_t _cache_id; ///< A unique ID provided from the DataCache when the CacheExtent is MUTABLE / DIRTY and shouldn't be referenced by extent_id.
         };
+
         using CacheExtentPtr = std::shared_ptr<CacheExtent>;
 
+        class SafeExtent;
+
         /**
-         * Reference to an extent in the DataCache.
+         * Reference to an extent in the DataCache. Typically one would keep a set of ExtentRef elements
+         * to keep track of extents and call make_safe_extent/make_dirty_safe_extent
+         * to access the referenced extent.
          */
         class ExtentRef {
-        public:
-            using SharedExtent = std::weak_ptr<CacheExtent>;
+            public:
+                uint64_t id() const {
+                    if(_cached) {
+                        auto c = _cached->lock();
+                        if (c) {
+                            return c->key().second;
+                        }
+                    }
+                    return _id;
+                }
 
-            uint64_t id() const {
-                if(_cached) {
-                    auto c = _cached->lock();
-                    if (c) {
-                        return c->key().second;
+                bool is_cached() const {
+                    return _cached.has_value();
+                }
+
+                CacheExtentPtr lock_cached() const {
+                    if (!is_cached()) {
+                        return {};
+                    }
+                    auto e = _cached->lock();
+                    if (!e) {
+                        _cached = {};
+                    }
+                    return _cached->lock();
+                }
+
+                SafeExtent make_safe_extent(const std::filesystem::path &file) const;
+
+                // This function may modify weak_ptr with a new extent
+                SafeExtent make_dirty_safe_extent(const std::filesystem::path &file);
+
+            protected:
+                friend class StorageCache; 
+
+                ExtentRef(uint64_t id, CacheExtentPtr cached) :
+                    _id{id} 
+                { 
+                    if (cached) {
+                        _cached = cached;
                     }
                 }
-                return _id;
-            }
+                ExtentRef(uint64_t id) :
+                    _id{id} 
+                {}
 
-            bool is_cached() const {
-                return _cached.has_value();
-            }
+            private:
+                uint64_t _id;  //ID of the extent
+                mutable std::optional<std::weak_ptr<CacheExtent>> _cached;
+        };
 
-            CacheExtentPtr lock_cached() const {
-                if (!is_cached()) {
-                    return {};
+
+        /**
+         * RAII container for a CacheExtent to ensure it is put back into the read cache after
+         * use. In most cases you won't need to create SafeExtent directly
+         * but use ExtentRef::make_safe_extent/make_dirty_safe_extent.
+         * To get ExtentRef from SafeExtent use get_ref().
+         **/
+        class SafeExtent {
+            public:
+                SafeExtent()
+                    : _extent(nullptr)
+                { }
+
+                // copy causes the use count to be incremented
+                SafeExtent(const SafeExtent &other) {
+                    if (other._extent != nullptr) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
+                    _extent = other._extent;
                 }
-                auto e = _cached->lock();
-                if (!e) {
-                    _cached = {};
+                SafeExtent &operator=(const SafeExtent &other) {
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->put(_extent);
+                    }
+                    _extent = other._extent;
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->use(other._extent);
+                    }
+                    return *this;
                 }
-                return _cached->lock();
-            }
 
-            CacheExtent::State state() const {
-                return _state;
-            }
-
-        protected:
-            friend class StorageCache; 
-
-            ExtentRef(uint64_t id, CacheExtentPtr cached) :
-                _id{id} 
-            { 
-                if (cached) {
-                    _cached = cached;
-                    _state = cached->state();
+                // move handling
+                SafeExtent(SafeExtent &&other) {
+                    _extent = other._extent;
+                    other._extent = nullptr;
                 }
-            }
-            ExtentRef(uint64_t id) :
-                _id{id} 
-            {}
 
-        private:
-            uint64_t _id;  //ID of the extent
-            mutable std::optional<SharedExtent> _cached;
-            CacheExtent::State _state;
+                SafeExtent &operator=(SafeExtent &&other) {
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->put(_extent);
+                    }
+                    _extent = other._extent;
+                    other._extent = nullptr;
+
+                    return *this;
+                }
+
+                ~SafeExtent()
+                {
+                    if (_extent) {
+                        StorageCache::get_instance()->_data_cache->put(_extent);
+                    }
+                }
+
+                ExtentRef get_ref() const {
+                    assert(_extent);
+                    return {_extent->key().second, _extent};
+                }
+
+                CacheExtentPtr operator*() const {
+                    return _extent;
+                }
+
+                CacheExtentPtr *operator->() {
+                    return &_extent;
+                }
+
+            protected:
+                friend ExtentRef;
+
+                SafeExtent(const std::filesystem::path &file,
+                        const ExtentRef &ref,
+                        bool mark_dirty);
+
+            private:
+                CacheExtentPtr _extent;
         };
 
         /**
@@ -267,7 +348,7 @@ namespace springtail {
              */
             CacheExtentPtr get(uint64_t cache_id, bool mark_dirty = false);
 
-            CacheExtentPtr use_cached(CacheExtentPtr extent, bool mark_dirty);
+            CacheExtentPtr use_cached(const CacheExtentPtr& extent, bool mark_dirty);
 
             /**
              * Increment the use count on a cache extent.
@@ -468,78 +549,6 @@ namespace springtail {
                 _flush_callback = callback;
             }
 
-            /**
-             * RAII container for a CacheExtent to ensure it is put back into the read cache after
-             * use.
-             */
-            class SafeExtent {
-            public:
-                SafeExtent()
-                    : _extent(nullptr)
-                { }
-
-                SafeExtent(const std::filesystem::path &file,
-                           const ExtentRef &ref,
-                           bool mark_dirty);
-
-                // copy causes the use count to be incremented
-                SafeExtent(const SafeExtent &other) {
-                    if (other._extent != nullptr) {
-                        StorageCache::get_instance()->_data_cache->use(other._extent);
-                    }
-                    _extent = other._extent;
-                }
-                SafeExtent &operator=(const SafeExtent &other) {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
-                    _extent = other._extent;
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->use(other._extent);
-                    }
-                    return *this;
-                }
-
-                // move handling
-                SafeExtent(SafeExtent &&other) {
-                    _extent = other._extent;
-                    other._extent = nullptr;
-                }
-
-                SafeExtent &operator=(SafeExtent &&other) {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
-                    _extent = other._extent;
-                    other._extent = nullptr;
-
-                    return *this;
-                }
-
-                ~SafeExtent()
-                {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
-                }
-
-                ExtentRef get_ref() const {
-                    assert(_extent);
-                    return {_extent->key().second, _extent};
-                }
-
-                CacheExtentPtr operator*() const {
-                    return _extent;
-                }
-
-                CacheExtentPtr *operator->() {
-                    return &_extent;
-                }
-
-            private:
-                CacheExtentPtr _extent;
-            };
-
         public:
             // ACCESS
             // note: access is to a bi-directional iterator that dereferences to rows
@@ -589,7 +598,7 @@ namespace springtail {
                     }
 
                     // retrieve the extent
-                    _extent = SafeExtent(_page->_file, *_extent_i, false);
+                    _extent = _extent_i->make_safe_extent(_page->_file);
 
                     // start at the first row
                     _row = (*_extent)->begin();
@@ -616,7 +625,7 @@ namespace springtail {
                     --_extent_i;
 
                     // retrieve the extent
-                    _extent = SafeExtent(_page->_file, *_extent_i, false);
+                    _extent = _extent_i->make_safe_extent(_page->_file);
 
                     // start at the last row
                     _row = (*_extent)->last();
@@ -651,7 +660,7 @@ namespace springtail {
                     }
 
                     // get the extent, potentially from the read cache
-                    _extent = SafeExtent(_page->_file, *_extent_i, false);
+                    _extent = _extent_i->make_safe_extent(_page->_file);
 
                     // get the first row in the extent
                     _row = (*_extent)->begin();
@@ -688,7 +697,7 @@ namespace springtail {
             Iterator last() {
                 boost::shared_lock lock(_mutex);
                 assert(!_extents.empty());
-                SafeExtent extent(_file, _extents.back(), false);
+                SafeExtent extent{ _extents.back().make_safe_extent(_file) };
                 auto row_i = (*extent)->last();
                 return Iterator(this, --_extents.end(), std::move(extent), row_i);
             }
@@ -731,7 +740,7 @@ namespace springtail {
              */
             ExtentHeader header() const {
                 assert(!_extents.empty());
-                SafeExtent extent(_file, _extents.front(), false);
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
                 return (*extent)->header();
             }
 
@@ -751,7 +760,7 @@ namespace springtail {
                 }
 
                 // if one extent, and the extent is empty, then empty
-                SafeExtent extent(_file, _extents.front(), false);
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
                 return (*extent)->empty();
             }
 
