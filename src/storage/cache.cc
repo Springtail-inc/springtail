@@ -436,7 +436,7 @@ namespace springtail {
         for (auto offset : offsets) {
             ExtentRef r{offset};
             // this will create weak_ptr references to clean cache
-            SafeExtent e{ r.make_safe_extent(file) };
+            auto e = r.make_safe_extent(file);
             // safe a reference to the cached extent
             _extents.push_back(e.get_ref());
         }
@@ -501,14 +501,14 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent{ ref.make_safe_extent(_file) };
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
         }
 
-        SafeExtent extent{ extent_i->make_safe_extent(_file) };
+        auto extent = extent_i->make_safe_extent(_file);
 
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::lower_bound(**extent, *tuple,
@@ -535,7 +535,7 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
-                                     SafeExtent extent{ ref.make_safe_extent(_file) };
+                                     auto extent = ref.make_safe_extent(_file);
                                      auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
                                      return key.less_than(tuple);
                                  });
@@ -544,7 +544,7 @@ namespace springtail {
             return end();
         }
 
-        SafeExtent extent{ extent_i->make_safe_extent(_file) };
+        auto extent = extent_i->make_safe_extent(_file);
 
         // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
@@ -599,7 +599,7 @@ namespace springtail {
     {
         // iterate through the extents to find the requested index in the page
         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
-            SafeExtent extent{ extent_i->make_safe_extent(_file) };
+            auto extent = extent_i->make_safe_extent(_file);
 
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
@@ -646,7 +646,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent{ ref.make_safe_extent(_file) };
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
 
@@ -655,7 +655,7 @@ namespace springtail {
         }
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent{ extent_i->make_dirty_safe_extent(_file) };
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -707,7 +707,7 @@ namespace springtail {
         // retrieve the last extent
         auto extent_i = --_extents.end();
 
-        SafeExtent extent{ extent_i->make_dirty_safe_extent(_file) };
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // append a row
         auto row = (*extent)->append();
@@ -751,7 +751,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent{ ref.make_safe_extent(_file) };
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
@@ -759,7 +759,7 @@ namespace springtail {
         }
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent{ extent_i->make_dirty_safe_extent(_file) };
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -802,14 +802,14 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent{ ref.make_safe_extent(_file) };
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent{ extent_i->make_dirty_safe_extent(_file) };
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the update position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -840,14 +840,14 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent{ ref.make_safe_extent(_file) };
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent{ extent_i->make_dirty_safe_extent(_file) };
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -878,7 +878,7 @@ namespace springtail {
         _is_dirty = true;
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent{ pos._extent_i->make_dirty_safe_extent(_file) };
+        auto extent = pos._extent_i->make_dirty_safe_extent(_file);
 
         // remove the row
         (*extent)->remove(pos._row);
@@ -909,7 +909,7 @@ namespace springtail {
             auto new_extent = cache->_data_cache->get_empty(_file, header());
 
             // get the old extent
-            SafeExtent old_extent{ ref.make_safe_extent(_file) };
+            auto old_extent = ref.make_safe_extent(_file);
 
             // copy the data
             for (auto &row : **old_extent) {
@@ -958,7 +958,7 @@ namespace springtail {
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
-            SafeExtent e{ ref.make_safe_extent(_file) };
+            auto e = ref.make_safe_extent(_file);
             if ((*e)->state() == CacheExtent::State::DIRTY) {
 
                 // update the extent header
