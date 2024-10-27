@@ -40,6 +40,10 @@ namespace springtail {
     Coordinator::unregister_threads(DaemonType type,
                                     const std::vector<std::string> &threads)
     {
+        if (threads.empty()) {
+            return;
+        }
+
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
         std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
         redis->hdel(key, threads.begin(), threads.end());
