@@ -1,3 +1,4 @@
+#include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
 #include <sys_tbl_mgr/client.hh>
@@ -9,14 +10,24 @@ namespace springtail::gc {
     void
     Committer::run()
     {
+        // perform cleanup for any Committer threads in a previous run
+        cleanup();
+
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        // register the thread on startup
+        coordinator->register_thread(daemon_type, _worker_id);
+
         // initiate the worker threads
         for (int i = 0; i < _worker_count; i++) {
-            _worker_threads.push_back(std::thread(&Committer::_run_worker, this));
+            _worker_threads.push_back(std::thread(&Committer::_run_worker, this, i));
         }
 
         // XXX we are currently processing XIDs one at a time, but we should eventually bundle
         //     together XID ranges when possible.  It makes sense to do this when the FDW nodes can
         //     do their own roll-forward.
+        // XXX we could also process the XIDs from different databases within the instance in parallel
 
         // enter a loop polling for data from the write cache
         while (!_shutdown) {
@@ -101,12 +112,15 @@ namespace springtail::gc {
                 // finalize the system metadata
                 client->finalize(db_id, completed_xid);
 
+                // pre-commit the DDLs in case there's a failure
+                _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
+
                 // perform a commit to the XidMgr
                 _xid_mgr->commit_xid(db_id, completed_xid, true);
                 _completed_xids[db_id] = completed_xid;
 
                 // notify the FDW of the schema changes
-                _redis_ddl.commit_ddl(db_id, completed_xid, ddls);
+                _redis_ddl.commit_ddl(db_id, completed_xid);
 
                 // notify everyone that the database is now in the "ready" state
                 Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
@@ -239,6 +253,9 @@ namespace springtail::gc {
             // retrieve any schema changes available in Redis
             auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
 
+            // pre-commit the DDLs to be applied to the FDWs
+            _redis_ddl.precommit_ddl(db_id, xid, ddls);
+
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
@@ -251,7 +268,7 @@ namespace springtail::gc {
 
             // push any DDL changes to the FDWs
             if (!ddls.is_null()) {
-                _redis_ddl.commit_ddl(db_id, xid, ddls);
+                _redis_ddl.commit_ddl(db_id, xid);
             }
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "XID completed: {}@{}", db_id, xid);
@@ -270,6 +287,9 @@ namespace springtail::gc {
         for (auto &thread : _worker_threads) {
             thread.join();
         }
+
+        // unregister the thread on shutdown
+        coordinator->unregister_thread(daemon_type, _worker_id);
     }
 
     void
@@ -280,8 +300,65 @@ namespace springtail::gc {
     }
 
     void
-    Committer::_run_worker()
+    Committer::cleanup()
     {
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        std::vector<std::string> cleanup_threads;
+
+        // retrieve all of the threads for the daemon
+        // note: we do this because there is a single GC daemon for both GC1 and GC2
+        auto &&threads = coordinator->get_threads(daemon_type);
+        for (const auto &thread_id : threads) {
+            // check which class this is for
+            std::vector<std::string> parts;
+            common::split_string("_", thread_id, parts);
+
+            // check the id is valid
+            assert(parts.size() == 3 &&
+                   (parts[0] == "parser" || parts[0] == "commit"));
+
+            // only handle "parser" threads here
+            if (parts[0] != "commit") {
+                continue;
+            }
+            cleanup_threads.push_back(thread_id);
+
+            // perform thread-type-specific cleanup
+            if (parts[1] == "m") {
+                // get the set of pre-committed DDL statements
+                auto &&precommit = _redis_ddl.get_precommit_ddl();
+
+                for (const auto &entry : precommit) {
+                    uint64_t commit_xid = _xid_mgr->get_committed_xid(entry.first, 0);
+
+                    if (entry.second <= commit_xid) {
+                        // for those that are <= the committed XID, commit them
+                        _redis_ddl.commit_ddl(entry.first, entry.second);
+                    } else {
+                        // for those that are > the committed XID, abort them
+                        _redis_ddl.abort_ddl(entry.first, entry.second);
+                    }
+                }
+            }
+        }
+
+        // unregister all parser threads from the previous run
+        coordinator->unregister_threads(daemon_type, cleanup_threads);
+    }
+
+    void
+    Committer::_run_worker(int thread_id)
+    {
+        std::string worker_id = fmt::format("commit_w_{}", thread_id);
+
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        // register the thread on startup
+        coordinator->register_thread(daemon_type, worker_id);
+
         // note: also wait on an empty queue to ensure it is drained before shutdown
         while (!_shutdown || !_worker_queue.empty()) {
             // wait for work on the queue
@@ -311,6 +388,9 @@ namespace springtail::gc {
                 _cv.notify_one();
             }
         }
+
+        // unregister the thread on shutdown
+        coordinator->unregister_thread(daemon_type, worker_id);
     }
 
     void

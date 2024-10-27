@@ -258,7 +258,7 @@ namespace springtail {
         }
 
         /**
-         * @brief Logically performs a commmit() and then a push() of that element onto another queue.
+         * @brief Logically performs a commit() and then a push() of that element onto another queue.
          */
         void commit_and_move(const std::string &worker_id,
                              const std::string &queue)
@@ -297,6 +297,23 @@ namespace springtail {
                 result.push_back(T(value));
             }
             return result;
+        }
+
+        /**
+         * Return the item currently being worked on by the given worker.
+         */
+        std::shared_ptr<T> work_item(const std::string &worker_id)
+        {
+            std::vector<std::string> values;
+
+            std::string worker_key = fmt::format("{}:{}", _key, worker_id);
+            _redis->lrange(worker_key, 0, 1, std::back_inserter(values));
+
+            if (values.empty()) {
+                return nullptr;
+            }
+
+            return std::make_shared<T>(values[0]);
         }
 
         /**
