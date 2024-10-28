@@ -2,7 +2,6 @@
 
 #include <string>
 #include <vector>
-#include <functional>
 #include <filesystem>
 #include <memory>
 #include <future>
