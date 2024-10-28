@@ -10,7 +10,14 @@
 #include <nlohmann/json.hpp>
 
 #include <common/redis_ddl.hh>
+#include <pg_repl/libpq_connection.hh>
 
+
+/* These are defined by Thrift imported from xid_mgr_client.h and
+ * must be undefined before including postgres.h */
+#undef PACKAGE_STRING
+#undef PACKAGE_VERSION
+#undef UINT64CONST
 
 namespace springtail::pg_fdw {
 
@@ -81,10 +88,19 @@ namespace springtail::pg_fdw {
         /** Internal instance shutdown */
         void _internal_shutdown();
 
+        /** Initialize the FDW */
+        void _init_fdw();
+
         /**
          * Main thread entry point; loops checking redis for DDL changes
          */
         void _main_thread_fn();
+
+        /** Helper to connect to fdw db */
+        LibPqConnectionPtr _connect_fdw(const std::string &db_name);
+
+        /** Helper to connect to primary db */
+        LibPqConnectionPtr _connect_primary(int db_id, const std::string &db_name);
 
         /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
         bool _update_schemas(RedisDDL &redis, const nlohmann::json &ddls,
@@ -92,24 +108,26 @@ namespace springtail::pg_fdw {
 
 
         /** Helper to execute ddl statements for this db */
-        void _execute_ddl(PGconn *conn,
+        void _execute_ddl(LibPqConnectionPtr conn,
                           uint64_t schema_xid,
                           const std::vector<std::string> &sql);
 
+        /** Helper to get schemas from db config */
+        std::set<std::string> _get_schemas(int db_id, const std::string &db_name);
 
         /** Helper to generate sql from ddl json */
         static std::string
-        _gen_sql_from_json(PGconn *conn,
+        _gen_sql_from_json(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            nlohmann::json &ddl);
 
         /** Helper to convert a set of PG type OIDs to type names via an external SQL query. */
         static std::map<uint32_t, std::string>
-        _query_type_names(PGconn *conn, std::set<uint32_t> pg_types);
+        _query_type_names(LibPqConnectionPtr conn, std::set<uint32_t> pg_types);
 
         /** Helper to generate sql for FDW foreign table */
         static std::string
-        _gen_fdw_table_sql(PGconn *conn,
+        _gen_fdw_table_sql(LibPqConnectionPtr conn,
                            const std::string &server_name,
                            const std::string &schema,
                            const std::string &table,

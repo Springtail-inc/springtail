@@ -17,3 +17,6 @@ target_link_libraries(gc_daemon
     PRIVATE springtail_gc Boost::program_options
 )
 add_dsymutil_command(gc_daemon)
+
+# install daemon to install directory
+install(TARGETS gc_daemon RUNTIME DESTINATION bin/system)

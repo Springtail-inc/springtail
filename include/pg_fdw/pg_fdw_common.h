@@ -20,6 +20,7 @@ extern "C" {
 
 #define SPRINGTAIL_STARTUP_COST 100 ///< Default startup cost is 100, added to tuple cost
 
+#define SPRINGTAIL_FDW_EXTENSION "springtail_fdw"               ///< Name of FDW extension
 #define SPRINGTAIL_FDW_SERVER_NAME "springtail_fdw_server"      ///< Name of foreign server on import schema
 #define SPRINGTAIL_FDW_CATALOG_SCHEMA "__pg_springtail_catalog" ///< Name of catalog schema
 

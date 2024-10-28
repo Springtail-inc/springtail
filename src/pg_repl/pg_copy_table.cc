@@ -100,12 +100,10 @@ namespace springtail
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
         "WHERE relkind = 'r' "          // regular tables
-        "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
-        "AND nspname != 'information_schema' "
-        "AND nspname = '{}' "
+        "AND nspname in ({}) "
         "ORDER BY pg_class.oid";
 
-    /** Get table name, schema name, oid for a single table */
+    /** Get table name, schema name, oid for a single table given oid */
     static constexpr char TABLE_QUERY[] =
         "SELECT relname::text, nspname::text, pg_class.oid::integer "
         "FROM pg_catalog.pg_class "
@@ -115,6 +113,19 @@ namespace springtail
         "AND nspname NOT LIKE 'pg_%' "  // exclude system schemas
         "AND nspname != 'information_schema' "
         "AND pg_class.oid::integer in ({}) ";
+
+    static constexpr char TABLE_SCHEMA_PAIR_QUERY[] =
+        "SELECT "
+        "    v.schema_name, "
+        "    v.table_name, "
+        "    c.oid as table_oid "
+        "FROM (VALUES "
+        "    {} " // need to substitute with "('{}', '{}'), ('{}', '{}'), ...
+        ") AS v(schema_name, table_name) "
+        "JOIN pg_class c ON c.relname = v.table_name "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "    AND n.nspname = v.schema_name "
+        "WHERE c.relkind = 'r'";
 
     /**
      * @brief Connect to database
@@ -631,6 +642,52 @@ namespace springtail
     }
 
     void
+    PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
+                                 std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids)
+    {
+        // get schemas array from json into vector of strings
+
+        // check for schemas array
+        if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
+            std::vector<std::string> schemas = include_json["schemas"];
+            if (!schemas.empty()) {
+                if (schemas[0] == "*") {
+                    // all tables in db
+                    _get_table_oids(std::string(TABLES_QUERY), table_oids);
+                    return;
+                }
+
+                // construct query by joining schema names
+                std::vector<std::string> schema_names;
+                for (const auto &schema : schemas) {
+                    schema_names.push_back(fmt::format("'{}'", _connection.escape_string(schema)));
+                }
+
+                _get_table_oids(fmt::format(TABLES_SCHEMA_QUERY,
+                                common::join_string(",", schema_names.begin(), schema_names.end())),
+                                table_oids);
+            }
+        }
+
+        // go through the tables array (containing schema, table pairs)
+        if (include_json.contains("tables") && include_json["tables"].is_array()) {
+            std::vector<std::string> pairs;
+            for (const auto &table : include_json["tables"]) {
+                if (table.contains("schema") && table.contains("table")) {
+                    std::string schema = table["schema"].get<std::string>();
+                    std::string table_name = table["table"].get<std::string>();
+                    pairs.push_back(fmt::format("('{}', '{}')", _connection.escape_string(schema), _connection.escape_string(table_name)));
+                }
+            }
+
+            if (!pairs.empty()) {
+                // issue query by joining all the schema, table pairs
+                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids);
+            }
+        }
+    }
+
+    void
     PgCopyTable::_end_copy()
     {
         _connection.end_transaction();
@@ -649,13 +706,13 @@ namespace springtail
                              uint64_t xid,
                              const std::string &schema_name)
     {
-        return _internal_copy(db_id, xid, schema_name, std::nullopt, std::nullopt);
+        return _internal_copy(db_id, xid, schema_name);
     }
 
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_db(uint64_t db_id, uint64_t xid)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt);
+        return _internal_copy(db_id, xid);
     }
 
     std::vector<PgCopyResultPtr>
@@ -664,7 +721,14 @@ namespace springtail
                             const std::string &schema_name,
                             const std::string &table_name)
     {
-        return _internal_copy(db_id, xid, std::nullopt, std::pair{schema_name, table_name}, std::nullopt);
+        return _internal_copy(db_id, xid, std::nullopt, std::pair{schema_name, table_name});
+    }
+
+    std::vector<PgCopyResultPtr>
+    PgCopyTable::copy_table(uint64_t db_id, uint64_t xid,
+                            const nlohmann::json &include_json)
+    {
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json);
     }
 
     void
@@ -723,7 +787,8 @@ namespace springtail
                                 uint64_t target_xid,
                                 std::optional<std::string> schema_name,
                                 std::optional<std::pair<std::string, std::string>> schema_table,
-                                std::optional<std::vector<uint32_t>> table_tids)
+                                std::optional<std::vector<uint32_t>> table_tids,
+                                std::optional<nlohmann::json> include_json)
     {
         CopyQueuePtr copy_queue = std::make_shared<CopyQueue>();
 
@@ -738,7 +803,7 @@ namespace springtail
         if (schema_name.has_value()) {
             // by schema name, need to escape the schema name
             // escape the schema name
-            std::string schema = copy_table._connection.escape_string(schema_name.value());
+            std::string schema = "'" + copy_table._connection.escape_string(schema_name.value()) + "'";
             copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
         } else if (table_tids.has_value()) {
             // by table oids
@@ -749,9 +814,11 @@ namespace springtail
             std::string schema = copy_table._connection.escape_string(schema_table.value().first);
             std::string table = copy_table._connection.escape_string(schema_table.value().second);
             copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
+        } else if (include_json.has_value()) {
+            copy_table._get_table_oids(include_json.value(), table_oids);
         } else {
             // all tables in db
-            copy_table._get_table_oids(TABLES_QUERY, table_oids);
+            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids);
         }
 
         // close this connection

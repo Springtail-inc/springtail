@@ -41,8 +41,8 @@ target_include_directories(pg_ddl_daemon
 )
 target_link_libraries(pg_ddl_daemon
     PRIVATE springtail_common
+    PRIVATE springtail_pg
     PRIVATE Boost::program_options
-    PRIVATE PostgreSQL::PostgreSQL
 )
 add_dsymutil_command(pg_ddl_daemon)
 
@@ -105,3 +105,22 @@ target_link_libraries(test_where
 )
 add_dsymutil_command(test_where)
 gtest_discover_tests(test_where)
+
+# install ddl daemon to install directory
+install(TARGETS
+    pg_ddl_daemon
+    RUNTIME DESTINATION bin/system
+)
+
+# install shared library to lib directory
+install(TARGETS
+    springtail_pg_fdw
+    LIBRARY DESTINATION lib
+)
+
+# install fdw files into share
+install(FILES
+    springtail_fdw--1.0.sql
+    springtail_fdw.control
+    DESTINATION share
+)

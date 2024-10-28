@@ -7,11 +7,23 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 
+#include <pg_repl/exception.hh>
+#include <pg_repl/libpq_connection.hh>
+
+#include <xid_mgr/xid_mgr_client.hh>
+
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
 #include <pg_fdw/pg_fdw_common.h>
 
 namespace springtail::pg_fdw {
+
+    /** Get a list of all non-system schema names */
+    static constexpr char SCHEMA_SELECT[] =
+        "SELECT schema_name "
+        "FROM information_schema.schemata "
+        "WHERE schema_name NOT LIKE 'pg_%' "
+        " AND schema_name <> 'information_schema'";
 
     // static vars for singleton
     PgDDLMgr* PgDDLMgr::_instance {nullptr};
@@ -50,6 +62,9 @@ namespace springtail::pg_fdw {
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
+        // initialize the fdw, setup fdw server, import foreign schemas, etc
+        _init_fdw();
+
         // start the main thread
         _main_thread = std::thread(&PgDDLMgr::_main_thread_fn, this);
     }
@@ -84,6 +99,138 @@ namespace springtail::pg_fdw {
         if (_instance != nullptr) {
             delete _instance;
             _instance = nullptr;
+        }
+    }
+
+    std::set<std::string>
+    PgDDLMgr::_get_schemas(int db_id, const std::string &db_name)
+    {
+        // get the db config and parse out the included schemas
+        auto db_config = Properties::get_db_config(db_id);
+
+        bool all_schemas = false;
+        std::set<std::string> schemas;
+
+        // scan through includes
+        auto includes = db_config["include"];
+        if (includes.contains("schemas")) {
+            for (const auto &schema : includes["schemas"]) {
+                std::string schema_name = schema.get<std::string>();
+                if (schema_name == "*") {
+                    all_schemas = true;
+                    break;
+                }
+                schemas.insert(schema_name);
+            }
+        }
+
+        // go through tables
+        if (!all_schemas && includes.contains("tables")) {
+            for (const auto &table : includes["tables"]) {
+                std::string schema_name = table["schema"].get<std::string>();
+                schemas.insert(schema_name);
+            }
+        }
+
+        if (!all_schemas) {
+            return schemas;
+        }
+
+        // otherwise all schemas, need to query the primary
+        // use libpq to connect to the database
+        LibPqConnectionPtr conn = _connect_primary(db_id, db_name);
+        conn->exec(SCHEMA_SELECT);
+
+        // iterate through the results and get the schema names
+        for (int i = 0; i < conn->ntuples(); i++) {
+            schemas.insert(conn->get_string(i, 0));
+        }
+        conn->clear();
+        conn->disconnect();
+
+        return schemas;
+    }
+
+
+    void
+    PgDDLMgr::_init_fdw()
+    {
+        // get map of dbs id:name from redis
+        auto dbs = Properties::get_databases();
+
+        LibPqConnectionPtr conn = _connect_fdw("postgres");
+
+        // go through each db and drop/create the database on the fdw
+        for (const auto &[db_id, db_name] : dbs) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "DB ID: {}, DB Name: {}", db_id, db_name);
+
+            // drop and create database on fdw
+            std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+            std::string drop_db = fmt::format("DROP DATABASE IF EXISTS {}", prefixed_name);
+            std::string create_db = fmt::format("CREATE DATABASE {}", prefixed_name);
+
+            conn->exec(drop_db);
+            conn->clear();
+
+            conn->exec(create_db);
+            conn->clear();
+        }
+
+        // close the connection
+        conn->disconnect();
+
+        // go through each db and create the foreign server, connect to each db
+        for (const auto &[db_id, db_name] : dbs) {
+
+            // get schemas, parse include, fetch from primary db if necessary
+            auto schemas = _get_schemas(db_id, db_name);
+
+            uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
+            // connect to the database on the fdw
+            conn = _connect_fdw(_db_prefix + db_name);
+
+            std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+
+            // drop and create the fdw extension
+            conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
+            conn->clear();
+
+            conn->exec(fmt::format("CREATE EXTENSION {} WITH SCHEMA PUBLIC", SPRINGTAIL_FDW_EXTENSION));
+            conn->clear();
+
+            // drop and create the foreign server
+            conn->exec(fmt::format("DROP SERVER IF EXISTS {}", SPRINGTAIL_FDW_SERVER_NAME));
+            conn->clear();
+
+            conn->exec(fmt::format("CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id '{}', db_id '{}', db_name '{}', schema_xid '{}')",
+                                   SPRINGTAIL_FDW_SERVER_NAME, SPRINGTAIL_FDW_EXTENSION, _fdw_id, db_id, prefixed_name, xid));
+            conn->clear();
+
+            for (const auto &schema: schemas) {
+                // create schema if not exists
+                std::string escaped_schema = conn->escape_identifier(schema);
+                conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
+                conn->clear();
+
+                // import foreign schema
+                conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
+                                       escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
+                                       escaped_schema));
+                conn->clear();
+            }
+
+            // import catalog schema
+            std::string escaped_schema = conn->escape_identifier(SPRINGTAIL_FDW_CATALOG_SCHEMA);
+            conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
+            conn->clear();
+            conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
+                                   escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
+                                   escaped_schema));
+            conn->clear();
+
+            // close the connection
+            conn->disconnect();
         }
     }
 
@@ -131,6 +278,37 @@ namespace springtail::pg_fdw {
         }
     }
 
+    LibPqConnectionPtr
+    PgDDLMgr::_connect_primary(int db_id, const std::string &db_name)
+    {
+        // get db config and parse it
+        auto db_config = Properties::get_primary_db_config();
+
+        std::string host, user, password;
+        int port;
+
+        Json::get_to<std::string>(db_config, "host", host);
+        Json::get_to<int>(db_config, "port", port);
+        Json::get_to<std::string>(db_config, "replication_user", user);
+        Json::get_to<std::string>(db_config, "password", password);
+
+        // use libpq to connect to the database
+        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+        conn->connect(host, db_name, user, password, port);
+
+        return conn;
+    }
+
+    LibPqConnectionPtr
+    PgDDLMgr::_connect_fdw(const std::string &db_name)
+    {
+        // use libpq to connect to the database
+        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+        conn->connect(_hostname, db_name, _username, _password, _port, false);
+
+        return conn;
+    }
+
     bool
     PgDDLMgr::_update_schemas(RedisDDL &redis,
                               const nlohmann::json &ddls,
@@ -142,26 +320,11 @@ namespace springtail::pg_fdw {
 
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
-        if (!_db_prefix.empty()) {
-            // if the FDW is using a prefix, prepend it
-            db_name = _db_prefix + db_name;
-        }
-
-        // use libpq to connect to the database
-        PGconn *conn = PQconnectdb(fmt::format("host={} dbname={} user={} password={} port={}",
-                                               _hostname, db_name, _username, _password, _port).c_str());
-
-        if (PQstatus(conn) != CONNECTION_OK) {
-            SPDLOG_ERROR("Connection to database failed: {}", PQerrorMessage(conn));
-            PQfinish(conn);
-            return false;
-        }
+        LibPqConnectionPtr conn = _connect_fdw(_db_prefix + db_name);
 
         try {
             // generate a DDL statement for each JSON in the transaction
             std::vector<std::string> txn;
-            txn.push_back("BEGIN");
-
             for (auto ddl : ddls.at("ddls")) {
                 txn.push_back(_gen_sql_from_json(conn, server_name, ddl));
             }
@@ -171,17 +334,14 @@ namespace springtail::pg_fdw {
                                       server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                       schema_xid));
 
-            txn.push_back("COMMIT");
-
             // execute the set of statements
             _execute_ddl(conn, schema_xid, txn);
 
             // close the connection
-            PQfinish(conn);
+            conn->disconnect();
 
         } catch (Error &e) {
-            PQexec(conn, "ROLLBACK");
-            PQfinish(conn);
+            conn->disconnect();
             assert(0); // assert in debug
             e.log_backtrace();
             return false;
@@ -191,7 +351,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_execute_ddl(PGconn *conn,
+    PgDDLMgr::_execute_ddl(LibPqConnectionPtr conn,
                            uint64_t schema_xid,
                            const std::vector<std::string> &txn)
     {
@@ -205,20 +365,15 @@ namespace springtail::pg_fdw {
         ") AS options WHERE option LIKE 'schema_xid%';";
 
         // get the schema XID from the server options
-        PGresult *res = PQexec(conn, xid_sql.c_str());
-        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
-            SPDLOG_ERROR("SELECT command failed: {} {}", xid_sql, PQerrorMessage(conn));
-            PQclear(res);
-            throw FdwError();
-        }
+        conn->exec(xid_sql);
 
         // extract the schema XID from the result
         uint64_t current_schema_xid = 0;
-        std::string option = PQgetvalue(res, 0, 0);
+        std::string option = conn->get_string(0, 0);
         std::string xid_str = option.substr(option.find('=') + 1);
         current_schema_xid = std::stoull(xid_str);
 
-        PQclear(res);
+        conn->clear();
 
         if (current_schema_xid >= schema_xid) {
             SPDLOG_WARN("Schema XID has already been applied: current={}, new={}",
@@ -226,21 +381,21 @@ namespace springtail::pg_fdw {
             return;
         }
 
+        // start a transaction
+        conn->start_transaction();
+
         // exectute each DDL statement
         for (const auto &sql : txn) {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Executing DDL: {}", sql);
-            res = PQexec(conn, sql.c_str());
-            if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-                SPDLOG_ERROR("DDL command failed: {} error: {}", sql, PQerrorMessage(conn));
-                PQclear(res);
-                throw FdwError();
-            }
-            PQclear(res);
+            conn->exec(sql);
+            conn->clear();
         }
+
+        conn->end_transaction();
     }
 
     std::string
-    PgDDLMgr::_gen_sql_from_json(PGconn *conn,
+    PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
                                  nlohmann::json &ddl)
     {
@@ -274,13 +429,13 @@ namespace springtail::pg_fdw {
 
         if (action == "rename") {
             return fmt::format("ALTER FOREIGN TABLE {} RENAME TO {};",
-                               ddl.at("table").get<std::string>(),
-                               ddl.at("old_table").get<std::string>());
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(ddl.at("old_table").get<std::string>()));
         }
 
         if (action == "drop") {
             return fmt::format("DROP FOREIGN TABLE {};",
-                               ddl.at("table").get<std::string>());
+                               conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
 
         if (action == "col_add") {
@@ -300,30 +455,30 @@ namespace springtail::pg_fdw {
             uint32_t type_oid = col.at("type").get<uint32_t>();
             auto &&type_map = _query_type_names(conn, { type_oid });
             return fmt::format("ALTER FOREIGN TABLE {} ADD COLUMN {} {} {};",
-                               ddl.at("table").get<std::string>(),
-                               col.at("name").get<std::string>(),
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(col.at("name").get<std::string>()),
                                type_map.at(type_oid),
                                constraints);
         }
 
         if (action == "col_drop") {
             return fmt::format("ALTER FOREIGN TABLE {} DROP COLUMN {};",
-                               ddl.at("table").get<std::string>(),
-                               ddl.at("column").get<std::string>());
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(ddl.at("column").get<std::string>()));
         }
 
         if (action == "col_rename") {
             return fmt::format("ALTER FOREIGN TABLE {} RENAME COLUMN {} TO {};",
-                               ddl.at("table").get<std::string>(),
-                               ddl.at("old_name").get<std::string>(),
-                               ddl.at("new_name").get<std::string>());
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(ddl.at("old_name").get<std::string>()),
+                               conn->escape_identifier(ddl.at("new_name").get<std::string>()));
         }
 
         if (action == "col_nullable") {
             auto &col = ddl.at("column");
             return fmt::format("ALTER FOREIGN TABLE {} ALTER COLUMN {} {} NOT NULL;",
-                               ddl.at("table").get<std::string>(),
-                               col.at("name").get<std::string>(),
+                               conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(col.at("name").get<std::string>()),
                                col.at("nullable").get<bool>() ? "DROP" : "SET");
         }
 
@@ -333,91 +488,55 @@ namespace springtail::pg_fdw {
     }
 
     std::map<uint32_t, std::string>
-    PgDDLMgr::_query_type_names(PGconn *conn,
+    PgDDLMgr::_query_type_names(LibPqConnectionPtr conn,
                                 std::set<uint32_t> pg_types)
     {
         std::map<uint32_t, std::string> type_map;
 
         std::string &&query = fmt::format("SELECT oid, typname FROM pg_type WHERE oid IN ({})",
                                           common::join_string(",", pg_types.begin(), pg_types.end()));
-        PGresult *res = PQexec(conn, query.c_str());
-        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
-            SPDLOG_ERROR("SELECT command failed: {}", PQerrorMessage(conn));
-            PQclear(res);
-            throw FdwError();
-        }
+
+        conn->exec(query);
 
         // extract the type names from the result
-        int rows = PQntuples(res);
+        int rows = conn->ntuples();
         for (int i = 0; i < rows; ++i) {
-            char *value = PQgetvalue(res, i, 0);
-            if (value == nullptr) {
-                SPDLOG_ERROR("Retrieving OID {}: {}", i, PQerrorMessage(conn));
-                PQclear(res);
-                throw FdwError();
-            }
-            uint32_t oid = std::stoi(value, nullptr, 10);
-
-            value = PQgetvalue(res, i, 1);
-            if (value == nullptr) {
-                SPDLOG_ERROR("Retrieving type name {}: {}", i, PQerrorMessage(conn));
-                PQclear(res);
-                throw FdwError();
-            }
-            std::string type_name(value);
+            uint32_t oid = conn->get_int32(i, 0);
+            std::string type_name = conn->get_string(i, 1);
 
             // store the mapping
             type_map[oid] = type_name;
         }
-        PQclear(res);
+        conn->clear();
 
         return type_map;
     }
 
     std::string
-    PgDDLMgr::_gen_fdw_table_sql(PGconn *conn,
+    PgDDLMgr::_gen_fdw_table_sql(LibPqConnectionPtr conn,
                                  const std::string &server_name,
                                  const std::string &schema,
                                  const std::string &table,
                                  uint64_t tid,
                                  std::vector<std::tuple<std::string, std::string, bool>> &columns)
     {
-        char *schema_name = PQescapeIdentifier(conn, schema.c_str(), schema.size());
-        char *table_name = PQescapeIdentifier(conn, table.c_str(), table.size());
-
         // no schema name needed
         std::string create = fmt::format("CREATE FOREIGN TABLE {}.{} (\n",
-                                         schema_name, table_name);
-
-        PQfreemem(schema_name);
-        PQfreemem(table_name);
+                                         conn->escape_identifier(schema),
+                                         conn->escape_identifier(table));
 
         // iterate over the columns, adding each to the create statement
         // name, type, is_nullable, default value
         for (int i = 0; i < columns.size(); i++) {
             const auto &[column_name, type_name, nullable] = columns[i];
-            char *column_name_escaped = PQescapeIdentifier(conn, column_name.c_str(), column_name.size());
-
-            std::string column = fmt::format("  {} ", column_name_escaped);
-
-            PQfreemem(column_name_escaped);
-
-            // set the type name
-            column += type_name;
-
-            // add nullability and default
-            if (!nullable) {
-                column += " NOT NULL";
-            }
-
-            if (i < columns.size() - 1) {
-                column += ",\n";
-            }
+            std::string column = fmt::format("{} {} {} {}", conn->escape_identifier(column_name),
+                                             type_name, nullable ? "" : "NOT NULL",
+                                             (i == columns.size() - 1) ? "" : ",");
 
             create += column;
         }
 
-        create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", server_name.c_str(), tid);
+        create += fmt::format("\n) SERVER {} OPTIONS (tid '{}');", server_name, tid);
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Generated SQL: {}", create);
 
