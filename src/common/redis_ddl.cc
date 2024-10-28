@@ -1,3 +1,4 @@
+#include <common/common.hh>
 #include <common/constants.hh>
 #include <common/logging.hh>
 #include <common/redis_ddl.hh>
@@ -38,32 +39,110 @@ namespace springtail {
     }
 
     void
-    RedisDDL::commit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls)
+    RedisDDL::clear_ddls_xid(uint64_t db_id,
+                             uint64_t xid)
     {
-        nlohmann::json op;
-        op["db_id"] = db_id;
-        op["xid"] = xid;
-        op["ddls"] = ddls;
-
-        std::string value = nlohmann::to_string(op);
-
-        // get the set of FDWs
-        uint64_t db_instance_id = Properties::get_db_instance_id();
-        std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
-
-        // add the DDLs to the queue for each FDW
-        for (const std::string &fdw_id : fdw_ids) {
-            std::string key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
-
-            RedisQueue<std::string> queue(key);
-            queue.push(value);
-        }
-
-        // effectively a two-phase commit here by clearing the QUEUE_DDL_XID for this XID on commit
         std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
                                           Properties::get_db_instance_id(), db_id, xid);
         _redis->del(ddl_key);
     }
+
+    void
+    RedisDDL::precommit_ddl(uint64_t db_id,
+                            uint64_t xid,
+                            nlohmann::json ddls)
+    {
+        // construct the DDL value and place it into the pre-commit hash in a single transaction
+        // with clearing the DDL_XID queue
+
+        nlohmann::json op;
+        op["db_id"] = db_id;
+        op["xid"] = xid;
+        op["ddls"] = ddls;
+        std::string value = nlohmann::to_string(op);
+
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
+                                                Properties::get_db_instance_id());
+        std::string hkey = fmt::format("{}:{}", db_id, xid);
+        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
+                                          Properties::get_db_instance_id(), db_id, xid);
+
+        // perform the pre-commit in a single transaction
+        auto ts = _redis->transaction(false, false);
+        ts.hset(precommit_key, hkey, value).del(ddl_key).exec();
+    }
+
+    void
+    RedisDDL::commit_ddl(uint64_t db_id,
+                         uint64_t xid)
+    {
+        uint64_t db_instance_id = Properties::get_db_instance_id();
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT, db_instance_id);
+
+        // get the pre-committed DDLs and figure out which ones we can commit based on the given XID
+        std::vector<std::string> commit_keys;
+        std::vector<std::string> hkeys;
+
+        _redis->hkeys(precommit_key, std::back_inserter(hkeys));
+        for (const auto &key : hkeys) {
+            std::vector<std::string> split;
+            common::split_string(":", key, split);
+            if (stoull(split[0]) == db_id && stoull(split[1]) <= xid) {
+                commit_keys.push_back(key);
+            }
+        }
+
+        // move from the pre-commit to the DDL queue of each FDW, all in a single transaction
+        for (const auto &key : commit_keys) {
+            auto ts = _redis->transaction(false, false);
+            auto r = ts.redis();
+            auto &&value = r.hget(precommit_key, key);
+
+            // get the set of FDWs
+            std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
+
+            for (const std::string &fdw_id : fdw_ids) {
+                std::string fdw_key = fmt::format(redis::QUEUE_DDL_FDW, db_instance_id, fdw_id);
+                // note: this is equivalent to RedisQueue::push()
+                ts.lpush(fdw_key, *value);
+            }
+            ts.del(key).exec();
+        }
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>>
+    RedisDDL::get_precommit_ddl()
+    {
+        std::vector<std::pair<uint64_t, uint64_t>> keys;
+
+        // retrieve the pre-commit keys
+        std::vector<std::string> hkeys;
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
+                                                Properties::get_db_instance_id());
+        _redis->hkeys(precommit_key, std::back_inserter(hkeys));
+
+        // keys are stored as "db_id:xid", so split and store them
+        for (const auto &key : hkeys) {
+            std::vector<std::string> split_key;
+            common::split_string(":", key, split_key);
+
+            keys.push_back({ stoull(split_key[0]), stoull(split_key[1]) });
+        }
+
+        return keys;
+    }
+
+    void
+    RedisDDL::abort_ddl(uint64_t db_id,
+                        uint64_t xid)
+    {
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
+                                                Properties::get_db_instance_id());
+        std::string hkey = fmt::format("{}:{}", db_id, xid);
+
+        _redis->hdel(precommit_key, hkey);
+    }
+
 
     nlohmann::json
     RedisDDL::get_next_ddls(const std::string &fdw_id)

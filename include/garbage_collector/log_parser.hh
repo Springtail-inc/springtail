@@ -57,35 +57,24 @@ namespace springtail::gc {
               _parser_threads(parser_count)
         { }
 
-        void run()
-        {
-            for (auto &thread : _reader_threads) {
-                thread = std::thread(&Reader::run, &_reader);
-            }
+        /**
+         * Start the LogParser service.  Performs any cleanup from a previously failed run,
+         * registers with the coordinator, and begins the service threads.
+         */
+        void run();
 
-            for (auto &thread : _parser_threads) {
-                thread = std::thread(&Parser::run, &_parser);
-            }
-        }
+        /**
+         * Shuts down the service threads and de-registers them from the coordinator.
+         */
+        void shutdown();
 
-        void shutdown()
-        {
-            // signal the readers to shutdown
-            _reader.shutdown();
+        /** Perform cleanup on a failed thread. */
+        void cleanup();
 
-            // wait for the readers to complete
-            for (auto &thread : _reader_threads) {
-                thread.join();
-            }
-
-            // once the readers have completed, signal the queue to shutdown
-            _parser_queue->shutdown();
-
-            // wait for the parsers to complete
-            for (auto &thread : _parser_threads) {
-                thread.join();
-            }
-        }
+        // constants for the coordinator thread IDs
+        constexpr static const std::string_view THREAD_TYPE = "parser";
+        constexpr static const std::string_view THREAD_READER = "r";
+        constexpr static const std::string_view THREAD_PARSER = "p";
 
     private:
 
@@ -355,7 +344,7 @@ namespace springtail::gc {
             /**
              * Main loop for the Reader worker threads.
              */
-            void run();
+            void run(int thread_id);
 
             /**
              * Signals shutdown to the main loop.
@@ -409,7 +398,7 @@ namespace springtail::gc {
             /** Queue for notify messages from the GC-2 committer back to the GC-1 after a table sync commit. */
             RedisQueue<XidReady> _parser_notify;
 
-            /** Queue to pass messages from the Dispatcher thread to the Reader threads. */
+            /** Queue to pass messages from the PgLogMgr to the Reader threads. */
             RedisQueue<pg_log_mgr::PgXactMsg> _reader_queue;
 
             /** A backlog queue for blocked XIDs. */
@@ -449,7 +438,7 @@ namespace springtail::gc {
              * Main loop for the Parser worker threads.  Will shutdown automatically when the queue
              * is shutdown and drained.
              */
-            void run();
+            void run(int thread_id);
 
         protected:
             /**

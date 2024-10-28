@@ -375,7 +375,7 @@ namespace springtail {
          * @param extent_id The extent ID to read.
          * @return A pointer to the requested page.
          */
-        StorageCache::SafePagePtr read_page(uint64_t extent_id) const;
+        StorageCache::SafePagePtr read_page(uint64_t extent_id);
 
         /**
          * Flush any dirty pages to disk and return the roots of the indexes to be updated in the

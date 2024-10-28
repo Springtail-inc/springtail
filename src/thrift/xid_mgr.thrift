@@ -20,7 +20,7 @@ service ThriftXidMgr {
     // commit upto and including the provided xid
     Status commit_xid(1: i64 db_id, 2: xid_t xid, 3: bool has_schema_changes),
 
-    // commit upto and including the provided xid
+    // record that the given XID contains a schema change, without committing the XID
     Status record_ddl_change(1: i64 db_id, 2: xid_t xid),
 
     // get latest committed xid

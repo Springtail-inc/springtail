@@ -31,9 +31,41 @@ namespace springtail {
     Coordinator::unregister_thread(DaemonType type, const std::string &thread_id)
     {
         RedisClientPtr redis = RedisMgr::get_instance()->get_client();
-        std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id, (uint8_t)type, thread_id);
+        std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
         std::string hkey = fmt::format("{}:{}", enum_to_integral(type), thread_id);
         redis->hdel(key, hkey);
+    }
+
+    void
+    Coordinator::unregister_threads(DaemonType type,
+                                    const std::vector<std::string> &threads)
+    {
+        if (threads.empty()) {
+            return;
+        }
+
+        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+        std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
+        redis->hdel(key, threads.begin(), threads.end());
+    }
+
+    std::vector<std::string>
+    Coordinator::get_threads(DaemonType type)
+    {
+        std::vector<std::string> all_keys, keys;
+
+        RedisClientPtr redis = RedisMgr::get_instance()->get_client();
+        std::string key = fmt::format(redis::HASH_LIVENESS, _db_instance_id);
+        redis->hkeys(key, std::back_inserter(all_keys));
+
+        // retrieve just the keys for the daemon we care about
+        for (auto &&key : all_keys) {
+            if (key.starts_with(fmt::format("{}:", enum_to_integral(type)))) {
+                keys.push_back(std::move(key));
+            }
+        }
+
+        return keys;
     }
 
     void

@@ -93,13 +93,19 @@ namespace springtail::redis {
     //// For RedisDDL
 
     /**
-     * Queue of DDL operations for a given XID
+     * Queue of DDL operations for a given XID coming out of the GC1 LogParser
      * args: <db_instance_id>, <db_id>, <xid>
      */
     static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}:{}";
 
     /**
-     * Queue of DDL changes for the FDW to process.
+     * HASH of pre-commit DDL operations.  Stored with a key of "db_id:xid"
+     * args: <db_instance_id>
+     */
+    static constexpr char HASH_DDL_PRECOMMIT[] = "queue:ddl:pc:{}";
+
+    /**
+     * Queue of DDL changes for the FDW to process coming out of the GC2 Committer
      * args: <db_instance_id>, <fdw_id>
      */
     static constexpr char QUEUE_DDL_FDW[] = "queue:ddl:fdw:{}:{}";

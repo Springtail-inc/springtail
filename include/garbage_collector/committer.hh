@@ -41,7 +41,7 @@ namespace springtail::gc {
         {
             _xid_mgr = XidMgrClient::get_instance();
             _write_cache = WriteCacheClient::get_instance();
-            _worker_id = boost::uuids::to_string(boost::uuids::random_generator()());
+            _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
         /** Initiate the committer loop. */
@@ -49,6 +49,14 @@ namespace springtail::gc {
 
         /** Stop all execution after draining any ongoing work with the current XID. */
         void shutdown();
+
+        /** Perform cleanup on a failed thread. */
+        void cleanup();
+
+        // constants for the coordinator thread IDs
+        constexpr static const std::string_view THREAD_TYPE = "commit";
+        constexpr static const std::string_view THREAD_MAIN = "m";
+        constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
         /**
@@ -84,7 +92,7 @@ namespace springtail::gc {
         /**
          * The worker thread main loop.
          */
-        void _run_worker();
+        void _run_worker(int thread_id);
 
         /**
          * Worker helper function to process a finalize() on a given table.
