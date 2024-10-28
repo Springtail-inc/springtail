@@ -353,9 +353,20 @@ namespace springtail {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
 
+        // get the org config and see if there is a replication_user_password
+        nlohmann::json org = _instance->_json[ORG_CONFIG];
+        std::string replication_user_password;
+        if (org.contains("replication_user_password")) {
+            Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
+        }
+
         // see if we are using the properties file override
         if (_instance != nullptr && _instance->_properties_file_override) {
-            return _instance->_json["db_instances"][std::to_string(db_instance_id)]["primary_db"];
+            nlohmann::json json = _instance->_json["db_instances"][std::to_string(db_instance_id)]["primary_db"];
+            if (!replication_user_password.empty()) {
+                json["replication_user_password"] = replication_user_password;
+            }
+            return json;
         }
 
         // otherwise, we are using redis
@@ -368,8 +379,12 @@ namespace springtail {
             throw RedisNotFoundError("Error missing db_instance_id in redis");
         }
 
-        // convert to json
-        return nlohmann::json::parse(db_instance_str.value());
+        // convert to json and add replication user password
+        nlohmann::json json = nlohmann::json::parse(db_instance_str.value());
+        if (!replication_user_password.empty()) {
+            json["replication_user_password"] = replication_user_password;
+        }
+        return json;
     }
 
     nlohmann::json
@@ -391,6 +406,19 @@ namespace springtail {
 
         // convert to json
         return nlohmann::json::parse(fdw_config_str.value());
+    }
+
+    std::string
+    Properties::_get_ingestion_hostname()
+    {
+        uint64_t db_instance_id = get_db_instance_id();
+
+        RedisClientPtr redis_client = _get_redis_client();
+        std::optional<std::string> hostname = redis_client->hget(std::format(redis::DB_INSTANCE_CONFIG, db_instance_id), "hostname::ingestion");
+        if (!hostname.has_value()) {
+            throw RedisNotFoundError("Error missing hostname::ingestion in redis");
+        }
+        return hostname.value();
     }
 
     std::string
