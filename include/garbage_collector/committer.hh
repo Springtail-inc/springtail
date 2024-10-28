@@ -41,7 +41,7 @@ namespace springtail::gc {
         {
             _xid_mgr = XidMgrClient::get_instance();
             _write_cache = WriteCacheClient::get_instance();
-            _worker_id = "commit_m";
+            _worker_id = fmt::format("{}_{}_0", THREAD_TYPE, THREAD_MAIN);
         }
 
         /** Initiate the committer loop. */
@@ -52,6 +52,11 @@ namespace springtail::gc {
 
         /** Perform cleanup on a failed thread. */
         void cleanup();
+
+        // constants for the coordinator thread IDs
+        constexpr static const std::string_view THREAD_TYPE = "commit";
+        constexpr static const std::string_view THREAD_MAIN = "m";
+        constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
         /**

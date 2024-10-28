@@ -2,6 +2,7 @@
 #include <common/constants.hh>
 #include <common/filesystem.hh>
 
+#include <garbage_collector/committer.hh>
 #include <garbage_collector/log_parser.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
@@ -69,18 +70,18 @@ namespace springtail::gc {
 
             // check the id is valid
             assert(parts.size() == 3 &&
-                   (parts[0] == "parser" || parts[0] == "commit"));
+                   (parts[0] == THREAD_TYPE || parts[0] == Committer::THREAD_TYPE));
 
             // only handle "parser" threads here
-            if (parts[0] != "parser") {
+            if (parts[0] != THREAD_TYPE) {
                 continue;
             }
             cleanup_threads.push_back(thread_id);
 
             // perform thread-type-specific cleanup
-            if (parts[1] == "r") {
+            if (parts[1] == THREAD_READER) {
                 // get the work item from the reader_queue
-                auto entry = reader_queue.work_item(parts[2]);
+                auto entry = reader_queue.work_item(thread_id);
                 if (entry) {
                     if (entry->type == pg_log_mgr::PgXactMsg::Type::XACT_MSG) {
                         auto &msg = std::get<pg_log_mgr::PgXactMsg::XactMsg>(entry->msg);
@@ -90,7 +91,7 @@ namespace springtail::gc {
                     }
 
                     // abort any in-flight XID
-                    reader_queue.abort(parts[2]);
+                    reader_queue.abort(thread_id);
                 }
             }
         }
@@ -474,7 +475,7 @@ namespace springtail::gc {
     void
     LogParser::Reader::run(int thread_id)
     {
-        std::string worker_id = fmt::format("parser_r_{}", thread_id);
+        std::string worker_id = fmt::format("{}_{}_{}", THREAD_TYPE, THREAD_READER, thread_id);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -977,7 +978,7 @@ namespace springtail::gc {
     void
     LogParser::Parser::run(int thread_id)
     {
-        std::string worker_id = fmt::format("parser_p_{}", thread_id);
+        std::string worker_id = fmt::format("{}_{}_{}", THREAD_TYPE, THREAD_PARSER, thread_id);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;

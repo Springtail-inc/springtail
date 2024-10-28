@@ -1,6 +1,7 @@
 #include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
+#include <garbage_collector/log_parser.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -317,16 +318,16 @@ namespace springtail::gc {
 
             // check the id is valid
             assert(parts.size() == 3 &&
-                   (parts[0] == "parser" || parts[0] == "commit"));
+                   (parts[0] == LogParser::THREAD_TYPE || parts[0] == THREAD_TYPE));
 
             // only handle "parser" threads here
-            if (parts[0] != "commit") {
+            if (parts[0] != THREAD_TYPE) {
                 continue;
             }
             cleanup_threads.push_back(thread_id);
 
             // perform thread-type-specific cleanup
-            if (parts[1] == "m") {
+            if (parts[1] == THREAD_MAIN) {
                 // get the set of pre-committed DDL statements
                 auto &&precommit = _redis_ddl.get_precommit_ddl();
 
@@ -351,7 +352,7 @@ namespace springtail::gc {
     void
     Committer::_run_worker(int thread_id)
     {
-        std::string worker_id = fmt::format("commit_w_{}", thread_id);
+        std::string worker_id = fmt::format("{}_{}_{}", THREAD_TYPE, THREAD_WORKER, thread_id);
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;

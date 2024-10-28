@@ -71,6 +71,11 @@ namespace springtail::gc {
         /** Perform cleanup on a failed thread. */
         void cleanup();
 
+        // constants for the coordinator thread IDs
+        constexpr static const std::string_view THREAD_TYPE = "parser";
+        constexpr static const std::string_view THREAD_READER = "r";
+        constexpr static const std::string_view THREAD_PARSER = "p";
+
     private:
 
         /** Holds the state for processing an XID. */
