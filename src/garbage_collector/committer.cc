@@ -409,7 +409,8 @@ namespace springtail::gc {
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
     }
 
-    Committer::SafePageIter Committer::_find_page(std::vector<StorageCache::SafePagePtr>& pages,
+    Committer::SafePageIter
+    Committer::_find_page(std::vector<StorageCache::SafePagePtr>& pages,
                           TuplePtr key,
                           ExtentSchemaPtr schema)
     {
