@@ -2,7 +2,6 @@
 
 #include <string>
 #include <vector>
-#include <functional>
 #include <filesystem>
 #include <memory>
 #include <future>
@@ -40,7 +39,7 @@ namespace springtail {
         ~IOHandle() {};
 
         /** maximum number of vectors per call */
-        static const int MAX_VECTORS=8;
+        static constexpr int MAX_VECTORS=8;
 
         /**
          * @brief Get the open mode 

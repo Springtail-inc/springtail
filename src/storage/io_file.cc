@@ -1,7 +1,5 @@
 #include <string>
 #include <memory>
-#include <functional>
-#include <iostream>
 #include <vector>
 #include <cassert>
 #include <cerrno>
@@ -238,8 +236,10 @@ namespace springtail {
             return XXH64(data[0]->data(), data[0]->size(), 0);
         }
 
+        assert(count <= IOHandle::MAX_VECTORS);
+
         // otherwise generate hash of hashes
-        char hashes[8 * count];
+        char hashes[8 * IOHandle::MAX_VECTORS];
 
         for (int i=0; i < count; i++) {
             uint64_t hash = XXH64(data[i]->data(), data[i]->size(), 0);
@@ -334,7 +334,7 @@ namespace springtail {
         uint32_t size;
         uint32_t csize;
         uint32_t total_size=0;
-        struct iovec iov[count];
+        struct iovec iov[IOHandle::MAX_VECTORS];
 
         // construct the iovec for the read
         for (int i = 0; i < count; i++) {
@@ -420,7 +420,7 @@ namespace springtail {
 
         // do it in two passes to avoid partial writes
         // first, compress data and compute total uncompressed size
-        std::vector<char> compressed_data[count];
+        std::vector<char> compressed_data[IOHandle::MAX_VECTORS];
 
         if (is_compressed) {
             uint32_t compressed_size = 0;
@@ -455,7 +455,7 @@ namespace springtail {
         }
 
         // write out header data
-        char hdr[4 + 8 + 8 * count];
+        char hdr[4 + 8 + 8 * IOHandle::MAX_VECTORS];
 
         // header and number of vectors
         std::copy_n((is_compressed) ? HDR_MAGIC_COMPRESSED : HDR_MAGIC_UNCOMPRESSED, 3, &hdr[0]);
@@ -468,7 +468,7 @@ namespace springtail {
         // fill in header and construct iovec for write
         int hdr_off = 12;
         uint32_t total_size = 4 + 8 + 8 * count;
-        struct iovec iov[count+1];
+        struct iovec iov[IOHandle::MAX_VECTORS+1];
         iov[0].iov_base = hdr;
         iov[0].iov_len = 4 + 8 + 8 * count;
 
