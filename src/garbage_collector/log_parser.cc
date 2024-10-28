@@ -1,6 +1,8 @@
+#include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <common/filesystem.hh>
 
+#include <garbage_collector/committer.hh>
 #include <garbage_collector/log_parser.hh>
 
 #include <pg_log_mgr/pg_log_mgr.hh>
@@ -9,6 +11,99 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail::gc {
+
+    void
+    LogParser::run()
+    {
+        // perform cleanup for any LogParser threads in a previous run
+        cleanup();
+
+        // start the service
+        for (int i = 0; i < _reader_threads.size(); ++i) {
+            _reader_threads[i] = std::thread(&Reader::run, &_reader, i);
+        }
+
+        for (int i = 0; i < _parser_threads.size(); ++i) {
+            _parser_threads[i] = std::thread(&Parser::run, &_parser, i);
+        }
+    }
+
+    void
+    LogParser::shutdown()
+    {
+        // signal the readers to shutdown
+        _reader.shutdown();
+
+        // wait for the readers to complete
+        for (auto &thread : _reader_threads) {
+            thread.join();
+        }
+
+        // once the readers have completed, signal the queue to shutdown
+        _parser_queue->shutdown();
+
+        // wait for the parsers to complete
+        for (auto &thread : _parser_threads) {
+            thread.join();
+        }
+    }
+
+    void
+    LogParser::cleanup()
+    {
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        std::vector<std::string> cleanup_threads;
+        RedisDDL redis_ddl;
+        RedisQueue<pg_log_mgr::PgXactMsg>
+            reader_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
+                                     Properties::get_db_instance_id()));
+
+        // retrieve all of the threads for the daemon
+        // note: we do this because there is a single GC daemon for both GC1 and GC2
+        auto &&threads = coordinator->get_threads(daemon_type);
+        for (const auto &thread_id : threads) {
+            // check which class this is for
+            std::vector<std::string> parts;
+            springtail::common::split_string("_", thread_id, parts);
+
+            // check the id is valid
+            assert(parts.size() == 3 &&
+                   (parts[0] == THREAD_TYPE || parts[0] == Committer::THREAD_TYPE));
+
+            // only handle "parser" threads here
+            if (parts[0] != THREAD_TYPE) {
+                continue;
+            }
+            cleanup_threads.push_back(thread_id);
+
+            // perform thread-type-specific cleanup
+            if (parts[1] == THREAD_READER) {
+                // get the work item from the reader_queue
+                auto entry = reader_queue.work_item(thread_id);
+                if (entry) {
+                    if (entry->type == pg_log_mgr::PgXactMsg::Type::XACT_MSG) {
+                        auto &msg = std::get<pg_log_mgr::PgXactMsg::XactMsg>(entry->msg);
+
+                        // clear the queue of DDLs for the in-flight XID
+                        redis_ddl.clear_ddls_xid(msg.db_id, msg.xid);
+                    }
+
+                    // abort any in-flight XID
+                    reader_queue.abort(thread_id);
+                }
+            }
+        }
+
+        // also clear the notification queue from the GC2 since we don't need to unblock
+        RedisQueue<XidReady> parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY,
+                                                       Properties::get_db_instance_id()));
+        parser_notify.clear();
+
+        // unregister all parser threads from the previous run
+        coordinator->unregister_threads(daemon_type, cleanup_threads);
+    }
 
     bool
     LogParser::Backlog::empty() const
@@ -378,10 +473,15 @@ namespace springtail::gc {
     }
 
     void
-    LogParser::Reader::run()
+    LogParser::Reader::run(int thread_id)
     {
-        // XXX it's potentially expensive to construct a generator each time
-        std::string worker_id = boost::uuids::to_string(boost::uuids::random_generator()());
+        std::string worker_id = fmt::format("{}_{}_{}", THREAD_TYPE, THREAD_READER, thread_id);
+
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        // register the thread on startup
+        coordinator->register_thread(daemon_type, worker_id);
 
         // loop until we are asked to shutdown; on shutdown drain the backlog
         while (!_shutdown || !_backlog.empty()) {
@@ -771,6 +871,9 @@ namespace springtail::gc {
                 }
             }
         }
+
+        // unregister the thread on shutdown
+        coordinator->unregister_thread(daemon_type, worker_id);
     }
 
     void
@@ -873,10 +976,17 @@ namespace springtail::gc {
     };
 
     void
-    LogParser::Parser::run()
+    LogParser::Parser::run(int thread_id)
     {
-        WriteCacheClient * const write_cache = WriteCacheClient::get_instance();
+        std::string worker_id = fmt::format("{}_{}_{}", THREAD_TYPE, THREAD_PARSER, thread_id);
 
+        auto coordinator = Coordinator::get_instance();
+        constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
+
+        // register the thread on startup
+        coordinator->register_thread(daemon_type, worker_id);
+
+        WriteCacheClient * const write_cache = WriteCacheClient::get_instance();
         while (true) {
             // wait for a work item
             auto entry = _parser_queue->pop();
@@ -1071,6 +1181,9 @@ namespace springtail::gc {
             // decrement the outstanding work counter
             entry->counter->decrement();
         }
+
+        // unregister the thread on shutdown
+        coordinator->unregister_thread(daemon_type, worker_id);
     }
 
     std::shared_ptr<MutableTuple>

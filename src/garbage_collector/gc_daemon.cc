@@ -2,6 +2,7 @@
 #include <boost/program_options.hpp>
 
 #include <common/common.hh>
+#include <common/coordinator.hh>
 #include <garbage_collector/log_parser.hh>
 #include <garbage_collector/committer.hh>
 
@@ -45,6 +46,7 @@ main(int argc,
     springtail::springtail_init("gc", pidfile);
 
     // the GC components
+    // note: each performs any crash cleanup for their components prior to startup
     log_parser = std::make_shared<springtail::gc::LogParser>(1, 1);
     committer = std::make_shared<springtail::gc::Committer>(1);
 

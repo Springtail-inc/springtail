@@ -49,6 +49,20 @@ namespace springtail {
         void unregister_thread(DaemonType type, const std::string &thread_id="0");
 
         /**
+         * @brief Unregister a set of threads for a given daemon
+         * @param type daemon type
+         * @param threads a list of thread ids
+         */
+        void unregister_threads(DaemonType type, const std::vector<std::string> &threads);
+
+        /**
+         * @brief Get the list of registered threads for a given daemon
+         * @param type daemon type
+         * @return A list of thread ids
+         */
+        std::vector<std::string> get_threads(DaemonType type);
+
+        /**
          * @brief Mark a daemon as alive; refresh it's timestamp
          * @param type daemon type
          * @param thread_id thread id

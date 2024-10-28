@@ -477,10 +477,13 @@ namespace springtail {
     }
 
     StorageCache::SafePagePtr
-    MutableTable::read_page(uint64_t extent_id) const
+    MutableTable::read_page(uint64_t extent_id)
     {
         return StorageCache::get_instance()->get(_data_file, extent_id,
-                                                 _access_xid, _target_xid);
+                                                 _access_xid, _target_xid, false,
+                                                 [this](StorageCache::PagePtr page) {
+                                                     return _flush_handler(page);
+                                                 });
     }
 
     bool
@@ -647,9 +650,8 @@ namespace springtail {
                                  uint64_t extent_id)
     {
         // get the page from the cache
-        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, 
-                false, 
-                [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
+        auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false, 
+                                                      [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
         // add the row to the page
         page->insert(value, _schema);
