@@ -1,5 +1,6 @@
 import os
 import time
+from typing import Dict, List, Optional
 
 from common import (
     run_command,
@@ -12,7 +13,7 @@ from common import (
 
 POSTGRES = 'postgresql@16'
 
-def stop_daemons(pid_path, daemons=[]):
+def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
     """Stop the daemons."""
     # Stop the daemons
     if not os.path.exists(pid_path):
@@ -36,48 +37,35 @@ def stop_daemons(pid_path, daemons=[]):
     kill_processes(daemons)
 
 
-def check_daemons_running(daemons):
+def check_daemons_running(daemons : List[tuple]) -> tuple:
     """Check if the daemons are running."""
     # Check if the daemons are running
     (pids, not_running) = running_pids(daemons)
     return (len(pids) == len(daemons), not_running)
 
 
-def makedir(path, mode):
-    """Make the directory at the given path."""
-    if not os.path.exists(path):
-        try:
-            user = os.environ.get('USER') or os.environ.get('USERNAME')
-            run_command('sudo', ['mkdir', '-p', path])
-            run_command('sudo', ['chown', '-R', f'{user}:{user}', path])
-            run_command('sudo', ['chmod', mode, path])
-        except Exception as e:
-            print(f"Failed to create directory: {path}")
-            raise e
-
-
-def clean_fs(mount_path, log_path):
+def clean_fs(mount_path : str, log_path : str) -> None:
     """Clear the file system data at the given mount path."""
     # Get the mount path
     print(f"Clearing file system data at mount path: {mount_path}")
 
     # Run the external command to clear the file system data
-    run_command('rm', ['-rf', mount_path])
+    run_command('sudo', ['rm', '-rf', mount_path])
 
     # remove log files
     log_dir = os.path.dirname(log_path)
     print(f"Clearing log files at directory: {log_dir}")
-    run_command('rm', ['-f', log_dir + '/*.log'])
+    run_command('sudo', ['rm', '-f', log_dir + '/*.log'])
 
 
-def check_postgres_running():
+def check_postgres_running() -> bool:
     """Check if the postgres process is running and start it if it is not."""
     # check if postgres is running
     pids = running_pids(['postgres'])[0]
     return len(pids) > 0
 
 
-def start_postgres():
+def start_postgres() -> None:
     """Start the postgres process using brew on mac."""
     print("Postgres is not running, starting it...")
 
@@ -98,7 +86,7 @@ def start_postgres():
         raise Exception("Postgres failed to start, timedout")
 
 
-def stop_postgres():
+def stop_postgres() -> None:
     """Stop the postgres process using brew."""
     print("Stopping the postgres process...")
 
@@ -119,7 +107,8 @@ def stop_postgres():
     if len(pids) > 0:
         raise Exception("Failed to stop the postgres process, timedout")
 
-def start_daemons(build_dir, daemons, restart=True):
+
+def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True) -> None:
     """Start the daemons."""
     # Check if the daemons are already running
     daemon_names = [daemon[0] for daemon in daemons]
@@ -156,11 +145,13 @@ def start_daemons(build_dir, daemons, restart=True):
             print(f"Daemon {name} failed to start")
         raise Exception("Failed to start all daemons")
 
-def running_daemons(daemons):
+
+def running_daemons(daemons : List[tuple]) -> List[Dict]:
     """Return a list of process IDs for the running daemons."""
     return running_pids(daemons)[0]
 
-def check_backtrace(log_path):
+
+def check_backtrace(log_path : str) -> List[str]:
     """Check if any daemon log files contain a backtrace."""
     failed_files = []
 
@@ -174,7 +165,8 @@ def check_backtrace(log_path):
 
     return failed_files
 
-def extract_backtrace(file: str):
+
+def extract_backtrace(file: str) -> List[str]:
     """Extract the backtrace from the given file."""
     lines = search_and_capture(file, ['backtrace_handler', 'Stack trace'])
     for i in range(len(lines)-1, 0, -1):

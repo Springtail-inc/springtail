@@ -25,6 +25,7 @@ from common import (
     run_command,
     set_dir_writable,
     is_linux,
+    makedir
 )
 
 from sysutils import (
@@ -75,27 +76,19 @@ def cleanup_filesystem(props):
     # Get the mount path
     mount_path = props.get_mount_path()
     sys_config = props.get_system_config()
-    log_path = sys_config['logging']['log_path']
+    log_path = os.path.dirname(sys_config['logging']['log_path'])
+    pid_path = props.get_pid_path()
 
     clean_fs(mount_path, log_path)
 
     # Create log path if it doesn't exist
-    if not os.path.exists(log_path):
-        os.makedirs(name=log_path, exist_ok=True, mode=0o777)
+    makedir(log_path, '777')
 
     # Create the mount path if it doesn't exist
-    if not os.path.exists(mount_path):
-        os.makedirs(name=mount_path, exist_ok=True, mode=0o755)
+    makedir(mount_path, '755')
 
     # Check that the pid path exists; if not try to create it
-    pid_path = props.get_pid_path()
-    if not os.path.exists(pid_path):
-        try:
-            user = os.environ.get('USER') or os.environ.get('USERNAME')
-            run_command('sudo', ['mkdir', '-p', pid_path])
-            run_command('sudo', ['chown', '-R', f'{user}:{user}', pid_path])
-        except Exception as e:
-            raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
+    makedir(pid_path, '755')
 
 
 def connect_db_instance(props, db_name='postgres'):
