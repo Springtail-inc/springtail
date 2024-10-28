@@ -265,11 +265,11 @@ namespace springtail {
 
             // clear the associated dirty extents from the cache
             for (auto &ref : page->_extents) {
-                if (ref.second) {
-                    auto extent = data_cache->get(ref.first);
-                    data_cache->drop_dirty(extent);
-                    data_cache->put(extent);
-                }
+                auto extent = ref.lock_cached();
+                assert(extent); //must be in the dirty cache
+                assert(extent->state() == CacheExtent::State::DIRTY);
+                data_cache->drop_dirty(extent);
+                data_cache->put(extent);
             }
 
             // remove the page from the flush list
@@ -434,7 +434,11 @@ namespace springtail {
           _end_xid(end_xid)
     {
         for (auto offset : offsets) {
-            _extents.push_back({ offset, false });
+            ExtentRef r{offset};
+            // this will create weak_ptr references to clean cache
+            auto e = r.make_safe_extent(file);
+            // safe a reference to the cached extent
+            _extents.push_back(e.get_ref());
         }
     }
 
@@ -464,7 +468,8 @@ namespace springtail {
         // create an empty extent
         auto extent = cache->_data_cache->get_empty(_file, header);
 
-        _extents.push_back({ extent->cache_id(), true });
+        _extents.emplace_back(extent->key().second, extent);
+
         cache->_data_cache->put(extent);
 
         // now perform the usual flush()
@@ -496,14 +501,14 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *tuple,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
             return end();
         }
 
-        SafeExtent extent(_file, *extent_i);
+        auto extent = extent_i->make_safe_extent(_file);
 
         // perform a lower-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::lower_bound(**extent, *tuple,
@@ -530,7 +535,7 @@ namespace springtail {
         //       SafeExtent to go out of scope before it is used in the comparison
         auto extent_i = std::upper_bound(_extents.begin(), _extents.end(), *tuple,
                                  [this, &schema](const Tuple &key, const ExtentRef &ref) {
-                                     SafeExtent extent(_file, ref);
+                                     auto extent = ref.make_safe_extent(_file);
                                      auto tuple = FieldTuple(schema->get_sort_fields(), (*extent)->back());
                                      return key.less_than(tuple);
                                  });
@@ -539,7 +544,7 @@ namespace springtail {
             return end();
         }
 
-        SafeExtent extent(_file, *extent_i);
+        auto extent = extent_i->make_safe_extent(_file);
 
         // perform a upper-bound check to find the appropriate row within the extent
         auto row_i = std::ranges::upper_bound(**extent, *tuple,
@@ -594,7 +599,7 @@ namespace springtail {
     {
         // iterate through the extents to find the requested index in the page
         for (auto extent_i = _extents.begin(); extent_i != _extents.end(); ++extent_i) {
-            SafeExtent extent(_file, *extent_i);
+            auto extent = extent_i->make_safe_extent(_file);
 
             uint32_t row_count = (*extent)->row_count();
             if (index < row_count) {
@@ -624,7 +629,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.emplace_back( extent->key().second, extent );
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -641,7 +646,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
 
@@ -650,7 +655,7 @@ namespace springtail {
         }
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent(_file, *extent_i, true);
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -688,7 +693,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.emplace_back(extent->key().second, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -701,7 +706,8 @@ namespace springtail {
 
         // retrieve the last extent
         auto extent_i = --_extents.end();
-        SafeExtent extent(_file, *extent_i, true);
+
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // append a row
         auto row = (*extent)->append();
@@ -728,7 +734,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.push_back({ extent->cache_id(), true });
+            _extents.emplace_back(extent->key().second, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -745,7 +751,7 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         if (extent_i == _extents.end()) {
@@ -753,7 +759,7 @@ namespace springtail {
         }
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent(_file, *extent_i, true);
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -796,14 +802,14 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent(_file, *extent_i, true);
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the update position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -834,14 +840,14 @@ namespace springtail {
         // find the extent to modify via lower_bound
         auto extent_i = std::lower_bound(_extents.begin(), _extents.end(), *key,
                                          [this, &schema](const ExtentRef &ref, const Tuple &key) {
-                                             SafeExtent extent(_file, ref);
+                                             auto extent = ref.make_safe_extent(_file);
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
         assert(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent(_file, *extent_i, true);
+        auto extent = extent_i->make_dirty_safe_extent(_file);
 
         // find the insert position in the extent
         auto row_i = std::ranges::lower_bound(**extent, *key,
@@ -872,7 +878,7 @@ namespace springtail {
         _is_dirty = true;
 
         // make sure that we've got a mutable version of the extent
-        SafeExtent extent(_file, *pos._extent_i, true);
+        auto extent = pos._extent_i->make_dirty_safe_extent(_file);
 
         // remove the row
         (*extent)->remove(pos._row);
@@ -903,7 +909,7 @@ namespace springtail {
             auto new_extent = cache->_data_cache->get_empty(_file, header());
 
             // get the old extent
-            SafeExtent old_extent(_file, ref);
+            auto old_extent = ref.make_safe_extent(_file);
 
             // copy the data
             for (auto &row : **old_extent) {
@@ -913,7 +919,7 @@ namespace springtail {
                 MutableTuple(target_fields, new_row).assign(source_tuple);
             }
 
-            new_extents.push_back({ new_extent->cache_id(), true });
+            new_extents.emplace_back(new_extent->key().second, new_extent);
 
             // release the new extent back to the cache
             cache->_data_cache->put(new_extent);
@@ -952,10 +958,8 @@ namespace springtail {
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
-            // check if the reference is a cache ID
-            if (ref.second) {
-                // retrieve the extent; should always have a cache ID given the if-condition
-                SafeExtent e(_file, ref);
+            auto e = ref.make_safe_extent(_file);
+            if ((*e)->state() == CacheExtent::State::DIRTY) {
 
                 // update the extent header
                 (*e)->header() = header;
@@ -967,14 +971,12 @@ namespace springtail {
                 // return the clean extent back to the read cache
                 cache->_data_cache->reinsert(*e);
 
-                // save the extent ID of the now-unmodified extent
-                ref.first = (*e)->key().second;
-                ref.second = false;
+                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
 
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.first);
+                ref = e.get_ref();
             }
 
-            offsets.push_back(ref.first);
+            offsets.push_back(ref.id());
         }
 
         return offsets;
@@ -1081,7 +1083,6 @@ namespace springtail {
     StorageCache::DataCache::put(CacheExtentPtr extent)
     {
         boost::unique_lock lock(_mutex);
-
         // release the extent
         _release(extent);
     }
@@ -1095,6 +1096,7 @@ namespace springtail {
 
         // get the clean extent from the cache
         auto extent = _get_clean(key);
+        assert(extent);
 
         // check if the caller is the only user
         if (extent->_use_count == 1) {
@@ -1216,8 +1218,8 @@ namespace springtail {
         _dirty_cache.insert({ second->_cache_id, second });
         _release(second);
 
-        return std::pair<ExtentRef, ExtentRef>({ first->_cache_id, true },
-                                               { second->_cache_id, true });
+        return std::pair<ExtentRef, ExtentRef>({ first->key().second, first },
+                                               { second->key().second, second });
     }
 
     StorageCache::CacheExtentPtr
@@ -1347,6 +1349,8 @@ namespace springtail {
             return;
         }
 
+        assert(extent->_use_count);
+
         // reduce the use count
         --(extent->_use_count);
 
@@ -1425,5 +1429,71 @@ namespace springtail {
         if (extent->_extent_id != constant::UNKNOWN_EXTENT) {
             _cache_id_map[extent->_cache_id] = extent->key();
         }
+    }
+
+    StorageCache::SafeExtent
+    StorageCache::ExtentRef::make_safe_extent(const std::filesystem::path &file) const {
+        SafeExtent e{ file, *this, false };
+        auto ref_ext = lock_cached();
+        // make sure that the referenced extent doesn't change 
+        assert(ref_ext? ref_ext == *e: true);
+        return e;
+    }
+
+    StorageCache::SafeExtent
+    StorageCache::ExtentRef::make_dirty_safe_extent(const std::filesystem::path &file) {
+        SafeExtent e{ file, *this, true };
+        assert(*e);
+        _cached = *e;  //update cached extent
+        return e;
+    }
+
+    StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
+            const ExtentRef &ref,
+            bool mark_dirty)
+        : _extent(nullptr)
+    {
+        bool was_cached = ref.is_cached();
+        _extent = ref.lock_cached();
+        if (_extent) {
+            assert(_extent->state() != CacheExtent::State::INVALID);
+            _extent = StorageCache::get_instance()->_data_cache->use_cached(_extent, mark_dirty);
+        } else {
+            if (was_cached) {
+                SPDLOG_INFO("Evicted extent: {}", ref.id());
+            }
+            // not in cache
+            if (!mark_dirty) {
+                _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
+            } else {
+                _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
+            }
+        }
+        assert(_extent);
+    }
+
+    StorageCache::CacheExtentPtr  StorageCache::DataCache::use_cached(const CacheExtentPtr& extent, bool mark_dirty) {
+        boost::unique_lock lock(_mutex);
+
+        if (extent->_state == CacheExtent::State::FLUSHING) {
+            // wait for the flush to complete and then return the extent
+            // mark ourselves as a user of the extent to prevent eviction post-flush()
+            ++(extent->_use_count);
+            auto cv = extent->_flush_cv;
+            cv->wait(lock);
+            --(extent->_use_count);
+        }
+
+        if (mark_dirty && extent->state() != CacheExtent::State::DIRTY) {
+            assert(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
+            _make_extent_space();
+            auto new_extent = std::make_shared<CacheExtent>(*extent);
+            _gen_cache_id(new_extent);
+            _dirty_cache.try_emplace( new_extent->_cache_id, new_extent );
+            return new_extent;
+        }
+
+        ++extent->_use_count;
+        return extent;
     }
 }

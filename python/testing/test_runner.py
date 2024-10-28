@@ -6,6 +6,7 @@ import time
 from jinja2 import Template
 import argparse
 from springtail import connect_db_instance, connect_fdw_instance, Properties
+from sysutils import check_backtrace, extract_backtrace
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -18,6 +19,9 @@ class TestResult:
         self.failed = 0
         self.errors = []
         self.test_cases = []
+        self.error_logs = []  # New field
+
+
 
 class TestCase:
     """Class to represent a single test case result."""
@@ -120,7 +124,7 @@ def split_sql_statements(sql_content):
         
     return statements
 
-def run_test_case(test_file, main_conn, replica_conn, results):
+def run_test_case(test_file, main_conn, replica_conn, results, props):
     """
     Execute a test case and verify its results across primary and replica databases.
     """
@@ -136,7 +140,7 @@ def run_test_case(test_file, main_conn, replica_conn, results):
     replica_conn.autocommit = True
     main_cur = main_conn.cursor()
     replica_cur = replica_conn.cursor()
-
+    error_msg = None
     try:
         for section in ['setup', 'test', 'verify']:
             if section in sections:
@@ -182,9 +186,15 @@ def run_test_case(test_file, main_conn, replica_conn, results):
         log_test_execution(main_conn, test_file, status)
 
     duration = time.time() - start_time
-    results.test_cases.append(TestCase(test_file, status, duration, error_msg if status == "FAILED" else None))
+    results.test_cases.append(TestCase(test_file, status, duration, error_msg))
 
-def run_all_tests(test_folder, main_conn, replica_conn):
+    # Check logs for errors after this test
+    check_logs(props, results)
+    if results.error_logs:
+        logging.error(f"Found errors in logs after running {test_file}")
+        raise Exception(f"Test aborted due to errors found in logs after running {test_file}")
+
+def run_all_tests(test_folder, main_conn, replica_conn, props):
     """
     Run all test cases in the specified folder.
 
@@ -192,6 +202,7 @@ def run_all_tests(test_folder, main_conn, replica_conn):
         test_folder (str): Path to the folder containing SQL test cases.
         main_conn (psycopg2.connection): Connection to the primary database.
         replica_conn (psycopg2.connection): Connection to the replica database.
+        props (Properties): System properties object.
     """
     logging.info(f"Running all test cases from folder: {test_folder}")
     results = TestResult()
@@ -200,8 +211,8 @@ def run_all_tests(test_folder, main_conn, replica_conn):
 
     for file in sorted(os.listdir(test_folder)):
         if file.endswith('.sql'):
-            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results)
-
+            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results, props)
+    
     generate_report(results)
 
     logging.info("\n--- Test Summary ---")
@@ -212,6 +223,21 @@ def run_all_tests(test_folder, main_conn, replica_conn):
         logging.info("\nErrors:")
         for error in results.errors:
             logging.error(error)
+
+def check_logs(props, results):
+    """Check logs for errors and update test results."""
+    log_path = props.get_log_path()
+    error_logs = check_backtrace(log_path)
+    
+    if error_logs:
+        logging.error(f"Found errors in logs: {error_logs}")
+        results.error_logs = error_logs
+        
+        for log in error_logs:
+            backtrace = extract_backtrace(log)
+            if backtrace:
+                error_msg = f"Error in {os.path.basename(log)}:\n{''.join(backtrace)}"
+                results.errors.append(error_msg)
 
 def generate_report(results):
     """
@@ -231,6 +257,7 @@ def generate_report(results):
             tr:nth-child(even) { background-color: #f2f2f2; }
             .passed { color: green; }
             .failed { color: red; }
+            .error-logs { margin-top: 20px; }
         </style>
     </head>
     <body>
@@ -238,6 +265,8 @@ def generate_report(results):
         <p>Total tests: {{ total_tests }}</p>
         <p>Passed: {{ passed_tests }}</p>
         <p>Failed: {{ failed_tests }}</p>
+        
+        <h2>Test Cases</h2>
         <table>
             <tr>
                 <th>Test Case</th>
@@ -254,6 +283,17 @@ def generate_report(results):
             </tr>
             {% endfor %}
         </table>
+        
+        {% if error_logs %}
+        <div class="error-logs">
+            <h2>Log File Errors</h2>
+            <pre>
+            {% for error in errors %}
+{{ error }}
+            {% endfor %}
+            </pre>
+        </div>
+        {% endif %}
     </body>
     </html>
     ''')
@@ -262,7 +302,9 @@ def generate_report(results):
         total_tests=len(results.test_cases),
         passed_tests=results.passed,
         failed_tests=results.failed,
-        test_cases=results.test_cases
+        test_cases=results.test_cases,
+        error_logs=results.error_logs,
+        errors=results.errors
     )
 
     os.makedirs('reports', exist_ok=True)
@@ -276,6 +318,7 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the configuration file')
+    parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -294,7 +337,7 @@ if __name__ == "__main__":
     main_conn = connect_db_instance(props)
     replica_conn = connect_fdw_instance(props)
 
-    run_all_tests(test_folder, main_conn, replica_conn)
+    run_all_tests(test_folder, main_conn, replica_conn, props)
 
     main_conn.close()
     replica_conn.close()
