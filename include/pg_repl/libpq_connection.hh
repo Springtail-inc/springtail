@@ -195,7 +195,7 @@ namespace springtail {
                      const std::string &db_user,
                      const std::string &db_pass,
                      const int db_port,
-                     const bool replication);
+                     const bool replication = false);
 
         /**
          * @brief Disconnect connection, ignore errors
@@ -298,4 +298,5 @@ namespace springtail {
         /** Simple version of escape identifier */
         std::string _escape_identifier(const char *str);
     };
+    using LibPqConnectionPtr = std::shared_ptr<LibPqConnection>;
 };

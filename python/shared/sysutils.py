@@ -43,6 +43,19 @@ def check_daemons_running(daemons):
     return (len(pids) == len(daemons), not_running)
 
 
+def makedir(path, mode):
+    """Make the directory at the given path."""
+    if not os.path.exists(path):
+        try:
+            user = os.environ.get('USER') or os.environ.get('USERNAME')
+            run_command('sudo', ['mkdir', '-p', path])
+            run_command('sudo', ['chown', '-R', f'{user}:{user}', path])
+            run_command('sudo', ['chmod', mode, path])
+        except Exception as e:
+            print(f"Failed to create directory: {path}")
+            raise e
+
+
 def clean_fs(mount_path, log_path):
     """Clear the file system data at the given mount path."""
     # Get the mount path
@@ -50,9 +63,9 @@ def clean_fs(mount_path, log_path):
 
     # Run the external command to clear the file system data
     run_command('rm', ['-rf', mount_path])
-    log_dir = os.path.dirname(log_path)
 
     # remove log files
+    log_dir = os.path.dirname(log_path)
     print(f"Clearing log files at directory: {log_dir}")
     run_command('rm', ['-f', log_dir + '/*.log'])
 

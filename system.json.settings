@@ -1,12 +1,12 @@
 {
     "logging" : {
         "log_level" : "debug",
-        "log_path" : "/tmp/springtail/springtail.log",
+        "log_path" : "/opt/springtail/logs/springtail.log",
         "log_file_size" : 1000000,
         "log_file_count" : 10,
         "log_pattern": "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v",
         "log_modules": ["all"],
-        "pid_path": "/var/springtail"
+        "pid_path": "/opt/springtail/pids"
     },
     "iopool" : {
         "threads" : 10,
@@ -66,7 +66,7 @@
         "transaction_log_path": "xact_logs"
     },
     "fs": {
-        "mount_point": "/tmp/springtail",
+        "mount_point": "/opt/springtail/data",
         "mount_name": null,
         "dns_name": null
     },

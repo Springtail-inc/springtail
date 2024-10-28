@@ -52,7 +52,8 @@ class Properties:
                     'REDIS_PORT': str(self.redis_port),
                     'REDIS_USER': self.redis_user,
                     'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
-                    'REDIS_USER_DATABASE_ID': str(system_json['redis']['db']),
+                    'REDIS_USER_DATABASE_ID': str(self.redis_data_db),
+                    'REDIS_CONFIG_DATABASE_ID': str(self.redis_config_db),
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                 }
 
@@ -66,8 +67,8 @@ class Properties:
             self.redis_port = os.environ.get('REDIS_PORT', 6379)
             self.redis_user = os.environ.get('REDIS_USER', 'default')
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
-            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 0)
-            self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
+            self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 

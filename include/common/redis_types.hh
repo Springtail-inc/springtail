@@ -38,18 +38,18 @@ namespace springtail::redis {
     //// For publish/subscribe (DB 0)
 
     /**
-     * Pubsub channel for all DB instance config changes
+     * Pubsub channel for notifying of FDW changes (up | down)
      * args: <db_instance_id>
-     * message: TBD
+     * message: <fdw_id>:up|down
      */
-    static constexpr char PUBSUB_DB_INSTANCE_UPDATES[] = "pubsub:instance_config_updates:{}";
+    static constexpr char PUBSUB_FDW_CHANGES[] = "pubsub:fdw_changes:{}";
 
     /**
      * Pubsub channel for all DB config changes
      * args: <db_instance_id>, <db_id>
-     * message: TBD
+     * message: TBD (Type 1: include schema/table changes)
      */
-    static constexpr char PUBSUB_DB_UPDATES[] = "pubsub:db_config_updates:{}:{}";
+    static constexpr char PUBSUB_DB_CONFIG_CHANGES[] = "pubsub:db_config_changes:{}:{}";
 
     /**
      * Pubsub channel for all DB state changes
