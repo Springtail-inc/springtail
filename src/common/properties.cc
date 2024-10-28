@@ -364,7 +364,7 @@ namespace springtail {
         if (_instance != nullptr && _instance->_properties_file_override) {
             nlohmann::json json = _instance->_json["db_instances"][std::to_string(db_instance_id)]["primary_db"];
             if (!replication_user_password.empty()) {
-                json["replication_user_password"] = replication_user_password;
+                json["password"] = replication_user_password;
             }
             return json;
         }
@@ -382,7 +382,7 @@ namespace springtail {
         // convert to json and add replication user password
         nlohmann::json json = nlohmann::json::parse(db_instance_str.value());
         if (!replication_user_password.empty()) {
-            json["replication_user_password"] = replication_user_password;
+            json["password"] = replication_user_password;
         }
         return json;
     }
@@ -414,7 +414,7 @@ namespace springtail {
         uint64_t db_instance_id = get_db_instance_id();
 
         RedisClientPtr redis_client = _get_redis_client();
-        std::optional<std::string> hostname = redis_client->hget(std::format(redis::DB_INSTANCE_CONFIG, db_instance_id), "hostname::ingestion");
+        std::optional<std::string> hostname = redis_client->hget(std::format(redis::DB_INSTANCE_CONFIG, db_instance_id), "hostname:ingestion");
         if (!hostname.has_value()) {
             throw RedisNotFoundError("Error missing hostname::ingestion in redis");
         }

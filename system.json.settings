@@ -33,7 +33,7 @@
             "io_threads": 1
         },
         "client": {
-            "connections": 8,
+            "connections": 8
         }
     },
     "xid_mgr": {
@@ -43,7 +43,7 @@
             "base_path": "xid_mgr"
         },
         "client": {
-            "connections": 8,
+            "connections": 8
         }
     },
     "sys_tbl_mgr": {
@@ -52,7 +52,7 @@
             "worker_threads": 8
         },
         "client": {
-            "connections": 8,
+            "connections": 8
         }
     },
     "storage": {

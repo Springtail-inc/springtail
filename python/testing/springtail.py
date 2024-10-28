@@ -231,7 +231,8 @@ def start_replication(props, build_dir):
     # Create the publication
     execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES;")
 
-    # Create the replication slot
+    # Create the replication slot;
+    # NOTE: it the slot name needs to be globally unique
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
     # Trigger scripts
