@@ -33,8 +33,7 @@
             "io_threads": 1
         },
         "client": {
-            "connections": 8,
-            "server" : "localhost"
+            "connections": 8
         }
     },
     "xid_mgr": {
@@ -44,8 +43,7 @@
             "base_path": "xid_mgr"
         },
         "client": {
-            "connections": 8,
-            "server" : "localhost"
+            "connections": 8
         }
     },
     "sys_tbl_mgr": {
@@ -54,8 +52,7 @@
             "worker_threads": 8
         },
         "client": {
-            "connections": 8,
-            "server" : "localhost"
+            "connections": 8
         }
     },
     "storage": {
@@ -74,17 +71,19 @@
         "organization_id": "abc-de-fgh",
         "account_id": "123-45-678",
         "db_instance_id": 1234,
-        "fdw_id": "1"
+        "fdw_id": "1",
+        "replication_user_password": "springtail"
     },
     "db_instances": {
         "1234": {
             "primary_db": {
                 "host": "localhost",
                 "port": 5432,
-                "replication_user": "springtail",
-                "password": "springtail"
+                "replication_user": "springtail"
             },
-            "database_ids": ["1"]
+            "database_ids": ["1"],
+            "hostname:ingestion": "localhost",
+            "hostname:proxy": "localhost"
         }
     },
     "databases": {

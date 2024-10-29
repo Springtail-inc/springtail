@@ -64,19 +64,19 @@ ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
-def get_lib_ext():
+def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
     if is_linux():
         return 'so'
     return 'dylib'
 
 
-def cleanup_filesystem(props):
+def cleanup_filesystem(props : Properties) -> None:
     """Clear the file system data at the given mount path."""
     # Get the mount path
     mount_path = props.get_mount_path()
     sys_config = props.get_system_config()
-    log_path = os.path.dirname(sys_config['logging']['log_path'])
+    log_path = props.get_log_path()
     pid_path = props.get_pid_path()
 
     clean_fs(mount_path, log_path)
@@ -231,7 +231,8 @@ def start_replication(props, build_dir):
     # Create the publication
     execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES;")
 
-    # Create the replication slot
+    # Create the replication slot;
+    # NOTE: it the slot name needs to be globally unique
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
     # Trigger scripts

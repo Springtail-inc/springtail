@@ -34,6 +34,7 @@ namespace springtail::environment {
         {"LUSTRE_DNS_NAME", STR, "fs", "dns_name"},
         {"LUSTRE_MOUNT_NAME", STR, "fs", "mount_name"},
         {"MOUNT_POINT", STR, "fs", "mount_point"},
-        {"FDW_ID", STR, "org", "fdw_id"}
+        {"FDW_ID", STR, "org", "fdw_id"},
+        {"REPLICATION_USER_PASSWORD", STR, "org", "replication_user_password"}
     };
 } // namespace springtail::environment

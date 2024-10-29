@@ -183,7 +183,7 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
 
             // get schemas, parse include, fetch from primary db if necessary
-            auto schemas = _get_schemas(db_id, db_name);
+            auto &&schemas = _get_schemas(db_id, db_name);
 
             uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
