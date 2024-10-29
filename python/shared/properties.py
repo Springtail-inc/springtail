@@ -42,6 +42,7 @@ class Properties:
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
                 self.replication_user_password = system_json['org']['replication_user_password']
+                self.fdw_user_password = system_json['org']['fdw_user_password']
 
                 # set the environment variables
                 env_vars = {
@@ -57,6 +58,7 @@ class Properties:
                     'REDIS_CONFIG_DATABASE_ID': str(self.redis_config_db),
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'REPLICATION_USER_PASSWORD': self.replication_user_password,
+                    'FDW_USER_PASSWORD': self.fdw_user_password
                 }
 
                 for (key, value) in env_vars.items():
@@ -73,6 +75,7 @@ class Properties:
             self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
             self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
+            self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
         self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
@@ -123,6 +126,7 @@ class Properties:
             return self.cache['fdw_config']
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
+        config['password'] = self.fdw_user_password
         self.cache[key] = config
 
         return config

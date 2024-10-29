@@ -68,11 +68,13 @@
         "dns_name": null
     },
     "org": {
+        "NOTE": "this section is for testing only, in production env vars are used",
         "organization_id": "abc-de-fgh",
         "account_id": "123-45-678",
         "db_instance_id": 1234,
         "fdw_id": "1",
-        "replication_user_password": "springtail"
+        "replication_user_password": "springtail",
+        "fdw_user_password": "springtail"
     },
     "db_instances": {
         "1234": {
@@ -101,7 +103,6 @@
             "host": "localhost",
             "port": 5432,
             "fdw_user": "springtail",
-            "password": "springtail",
             "db_prefix": "replica_"
         }
     }

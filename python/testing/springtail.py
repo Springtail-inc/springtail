@@ -6,6 +6,8 @@ import argparse
 import traceback
 import tempfile
 import time
+from typing import Dict, List, Optional
+import psycopg2
 from psycopg2.extensions import quote_ident
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -91,7 +93,7 @@ def cleanup_filesystem(props : Properties) -> None:
     makedir(pid_path, '755')
 
 
-def connect_db_instance(props, db_name='postgres'):
+def connect_db_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
     """Connect to the database instance and return connection."""
     # Get the database instance configuration
     db_instance_config = props.get_db_instance_config()
@@ -106,7 +108,7 @@ def connect_db_instance(props, db_name='postgres'):
     return conn
 
 
-def connect_fdw_instance(props, db_name='postgres'):
+def connect_fdw_instance(props : Properties, db_name : str ='postgres') -> psycopg2.extensions.connection:
     """Connect to the foreign data wrapper instance and return connection."""
     # Get the fdw configuration
     fdw_config = props.get_fdw_config()
@@ -121,7 +123,7 @@ def connect_fdw_instance(props, db_name='postgres'):
     return conn
 
 
-def cleanup_db_instance(props):
+def cleanup_db_instance(props : Properties) -> None:
     """Cleanup the database instance.
        Drop and recreate the db and execute cleanup SQL statements.
     """
@@ -174,7 +176,7 @@ def cleanup_db_instance(props):
     conn.close()
 
 
-def install_fdw(build_dir):
+def install_fdw(build_dir : str) -> None:
     """Install the foreign data wrapper extension."""
     # Get the share and lib directories
     share_dir = run_command('pg_config', ['--sharedir'])
@@ -217,7 +219,7 @@ def install_fdw(build_dir):
     start_postgres()
 
 
-def start_replication(props, build_dir):
+def start_replication(props : Properties, build_dir : str) -> None:
     """Start the replication process."""
     # Get db config
     db_config = props.get_db_configs()[0]
@@ -244,24 +246,7 @@ def start_replication(props, build_dir):
     conn.close()
 
 
-def fetch_schemas(props, db_name):
-    """Fetch the schemas for the given database."""
-    # Connect to the database
-    conn = connect_fdw_instance(props, db_name)
-
-    # Get the schemas
-    schemas = []
-    rows = execute_sql_select(conn, "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg_%' AND schema_name <> 'information_schema';")
-    for row in rows:
-        schemas.append(row[0])
-
-    # Close the connection
-    conn.close()
-
-    return schemas
-
-
-def fdw_import(props, build_dir, config_file):
+def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
     """Import the foreign data wrapper schemas."""
     fdw_config = props.get_fdw_config()
     db_configs = props.get_db_configs()
@@ -296,7 +281,7 @@ def fdw_import(props, build_dir, config_file):
     start_daemons(build_dir, FDW_DAEMONS)
 
 
-def wait_for_running(props):
+def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""
     # Wait for the system to be in a running state
     db_config = props.get_db_configs()[0]
@@ -304,7 +289,7 @@ def wait_for_running(props):
     props.wait_for_state('running', id)
 
 
-def execute_startup_sql(props, sql_file):
+def execute_startup_sql(props : Properties, sql_file : str) -> None:
     """Execute the startup SQL file."""
     # Connect to the primary database
     db_name = props.get_db_configs()[0]['name']
@@ -317,7 +302,7 @@ def execute_startup_sql(props, sql_file):
     conn.close()
 
 
-def print_sys_props(props, config_file):
+def print_sys_props(props : Properties, config_file : str) -> None:
     """Print the system properties."""
     db_config = props.get_db_configs()[0]
 
@@ -331,7 +316,7 @@ def print_sys_props(props, config_file):
     print(f"  FDW ID         : {props.get_fdw_id()}")
 
 
-def check_config(props):
+def check_config(props : Properties) -> None:
     """Check the system configuration for invalid settings."""
     db_instance_config = props.get_db_instance_config()
     fdw_config = props.get_fdw_config()
@@ -349,7 +334,7 @@ def check_config(props):
         raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
 
 
-def check_log_writable(props):
+def check_log_writable(props : Properties) -> None:
     """Check the log path is writable."""
     # Get the log path and check the parent directory is writable
     log_path = props.get_log_path()
@@ -358,7 +343,7 @@ def check_log_writable(props):
     set_dir_writable(log_path)
 
 
-def fixup_log_perms(props):
+def fixup_log_perms(props : Properties) -> None:
     """Fix up permissions for the given mount path."""
     # Fix up permissions for the given mount path
     if is_linux():
@@ -367,8 +352,11 @@ def fixup_log_perms(props):
             run_command('sudo', ['chmod', 'a+r', log])
 
 
-def gen_dump_tarball(props, build_dir):
-    """Generate a tarball of the log files."""
+def gen_dump_tarball(props : Properties, build_dir : str) -> str:
+    """
+    Generate a tarball of the log files.
+    Returns the path to the tarball.
+    """
     # get paths
     mount_path = props.get_mount_path()
     log_path = props.get_log_path()
@@ -412,7 +400,7 @@ def gen_dump_tarball(props, build_dir):
         return os.path.join(dumps_dir, tarfile)
 
 
-def start(args):
+def start(args : argparse.Namespace) -> None:
     """Main function to start the Springtail system."""
     # Get the config file and build directory from the command line arguments
     config_file = args.config_file
@@ -474,7 +462,7 @@ def start(args):
     print("\nSpringtail system started successfully.")
 
 
-def status():
+def status() -> None:
     """Function to check the status of the Springtail system."""
     print("Checking status...")
     (all_running, not_running) = check_daemons_running(ALL_DAEMONS_NAMES)
@@ -491,7 +479,7 @@ def status():
         print("Postgres is not running.")
 
 
-def stop():
+def stop() -> None:
     """Function to stop the Springtail system."""
     # Get the config file and build directory from the command line arguments
     config_file = args.config_file
@@ -507,7 +495,7 @@ def stop():
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
 
-def check_logs(args):
+def check_logs(args : argparse.Namespace) -> List[str]:
     """Check the logs for errors."""
     # Load the system properties from the system.json file
     config_file = args.config_file
@@ -527,7 +515,7 @@ def check_logs(args):
     return error_logs
 
 
-def dump_logs(args):
+def dump_logs(args : argparse.Namespace) -> None:
     """Dump the log files into a tarball."""
     # Load the system properties from the system.json file
     config_file = args.config_file
@@ -536,8 +524,11 @@ def dump_logs(args):
     gen_dump_tarball(props, args.build_dir)
 
 
-def generate_report(props, build_dir, title, description):
-    """Generate a bug report programmatically."""
+def generate_report(props : Properties, build_dir : str, title :str, description : str) -> str:
+    """
+    Generate a bug report programmatically.
+    Returns issue url.
+    """
     log_path = props.get_log_path()
     error_logs = check_backtrace(log_path)
 
@@ -557,7 +548,7 @@ def generate_report(props, build_dir, title, description):
     return issue['url']
 
 
-def create_report(args):
+def create_report(args : argparse.Namespace) -> None:
     """Create a new bug report."""
     build_dir = args.build_dir
     config_file = args.config_file
@@ -607,7 +598,7 @@ def create_report(args):
     print(f"Bug report created: {issue['url']}")
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """Parse the command line arguments."""
     # Create the argument parser
     parser = argparse.ArgumentParser(description="Process command-line arguments for config file and build directory.")
