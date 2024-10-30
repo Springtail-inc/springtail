@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import psycopg2
 import springtail
 import sysutils
 import time
@@ -10,7 +11,7 @@ class TestCase:
 
     """
 
-    def __init__(self, filename: str, props: springtail.Properties, debug=False: bool) -> None:
+    def __init__(self, filename: str, props: springtail.Properties, debug: bool = False) -> None:
         """Initialize the test case"""
         self._filename = filename
         self._props = props
@@ -21,7 +22,9 @@ class TestCase:
         self._error = ''
 
         self._metadata = {
-            'autocommit': False
+            'autocommit': False,
+            'sync_timeout': 3,
+            'default_txn': 'default'
         }
 
         # Each section is composed of an array of sub-sections which
@@ -37,10 +40,10 @@ class TestCase:
             'cleanup': []
         }
 
-        # the set of transaction names referenced in this test
-        self._txns = set({})
-        self._connections = {}
-        self._fdw = None
+        self._txns = set({}) # the set of transaction names referenced in this test
+        self._connections = {} # connections to the primary for each transaction
+        self._fdw = None # connection to Springtail
+        self._sync_step = 0 # incrementing ID used for replica synchronization
 
         # parse the test file to prepare the test run
         self._parse_file()
@@ -60,6 +63,10 @@ class TestCase:
         command['txn'] = txn_id
         self._txns.add(txn_id)
 
+        # if no sub-section directive has been specified, then we default to a sequential section
+        if len(self._sections[section]) == 0:
+            self._sections[section].append({'sequential': []})
+
         if is_threaded:
             if txn_id not in self._sections[section][-1]['parallel']:
                 self._sections[section][-1]['parallel'][txn_id] = []
@@ -70,7 +77,6 @@ class TestCase:
 
     def _raise_error(self, error: str) -> None:
         """Records the error internally and then raises an Exception"""
-        logging.error(str)
         self._error = error
         raise Exception(error)
         
@@ -80,110 +86,121 @@ class TestCase:
         is_threaded = False
         sql = []
         txns = { }
-        cur_txn = 'default'
+        cur_txn = self._metadata['default_txn']
         line_num = 0
 
-        with open(test_file, 'r') as f:
-            line = f.readline()
-            line_num += 1
+        with open(self._filename, 'r') as f:
+            for line in f:
+                line_num += 1
 
-            # remove leading and trailing whitespace and ignore comments
-            line = line.strip()
-            if not line or line.startswith('--'):
-                continue
+                # remove leading and trailing whitespace and ignore comments
+                line = line.strip()
+                if not line or line.startswith('--'):
+                    continue
 
-            # check for special directives
-            if line.startswith('###'):
-                if len(sql) > 0:
-                    self._raise_error(f'{line_num}: directives cannot be placed within a SQL statement')
+                # check for special directives
+                if line.startswith('###'):
+                    if len(sql) > 0:
+                        self._raise_error(f'{line_num}: directives cannot be placed within a SQL statement')
 
-                # parse the directive
-                directive = line[3:].split()
-                if directive[0] == 'parallel':
-                    if section != 'test':
-                        self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
-                    is_threaded = True
-                    self._sections['test'].append({'parallel': {}})
+                    # parse the directive
+                    directive = line[3:].split()
+                    logging.debug(f'directive: {directive}')
+                    if directive[0] == 'parallel':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
+                        is_threaded = True
+                        self._sections['test'].append({'parallel': {}})
 
-                elif directive[0] == 'txn':
-                    if section != 'test':
-                        self._raise_error(f'{line_num}: "txn" must be in the "test" section')
-                    if len(directive) < 2:
-                        self._raise_error(f'{line_num}: "txn" missing the transaction ID')
-                    cur_txn = directive[1]
+                    elif directive[0] == 'txn':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "txn" must be in the "test" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "txn" missing the transaction ID')
+                        cur_txn = directive[1]
 
-                elif directive[0] == 'sequential':
-                    if section != 'test':
-                        self._raise_error(f'{line_num}: "sequential" must be in the "test" section')
-                    is_threaded = False
-                    self._sections['test'].append({'seq': []})
-                    cur_txn = directive[1] if len(directive) > 1 else 'default'
+                    elif directive[0] == 'sequential':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sequential" must be in the "test" section')
+                        is_threaded = False
+                        self._sections['test'].append({'sequential': []})
+                        cur_txn = directive[1] if len(directive) > 1 else self._metadata['default_txn']
 
-                elif directive[0] == 'load_csv':
-                    if section != 'test' and section != 'setup' and section != 'cleanup':
-                        self._raise_error(f'{line_num}: "load_csv" must be in either the "setup", "test", or "cleanup" sections')
-                    self._append_command({
-                        'type': 'load_csv',
-                        'file': directive[1],
-                        'table': directive[2]
-                    }, section, is_threaded, cur_txn, line_num)
+                    elif directive[0] == 'load_csv':
+                        if section != 'test' and section != 'setup' and section != 'cleanup':
+                            self._raise_error(f'{line_num}: "load_csv" must be in either the "setup", "test", or "cleanup" sections')
+                        self._append_command({
+                            'type': 'load_csv',
+                            'file': directive[1],
+                            'table': directive[2]
+                        }, section, is_threaded, cur_txn, line_num)
 
-                elif directive[0] == 'sleep':
-                    if section != 'test':
-                        self._raise_error(f'{line_num}: "sleep" must be part of the "test" section')
-                    if not is_threaded:
-                        self._raise_error(f'{line_num}: "sleep" must be part of a transaction within a parallel sub-section')
-                    if len(directive) < 2:
-                        self._raise_error(f'{line_num}: "sleep" must specify a duration')
+                    elif directive[0] == 'sleep':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sleep" must be part of the "test" section')
+                        if not is_threaded:
+                            self._raise_error(f'{line_num}: "sleep" must be part of a transaction within a parallel sub-section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "sleep" must specify a duration')
 
-                    self._append_command({
-                        'type': 'sleep',
-                        'duration': directive[1]
-                    }, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'sleep',
+                            'duration': directive[1]
+                        }, section, is_threaded, cur_txn, line_num)
 
-                elif directive[0] == 'sync':
-                    if section != 'test':
-                        self._raise_error(f'{line_num}: "sync" must be part of the "test" section')
-                    if is_threaded:
-                        self._raise_error(f'{line_num}: "sync" must be within a sequential sub-section')
+                    elif directive[0] == 'sync':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sync" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "sync" must be within a sequential sub-section')
 
-                    self._append_command({
-                        'type': 'sync'
-                    }, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
 
-                elif directive[0] == 'autocommit':
-                    if section != 'metadata':
-                        self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
-                    self._metadata['autocommit'] = (directive[0].lower() == 'true')
+                    elif directive[0] == 'autocommit':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
+                        self._metadata['autocommit'] = (directive[1].lower() == 'true')
+
+                    elif directive[0] == 'sync_timeout':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "sync_timeout" must be specified in the "metadata" section')
+                        self._metadata['sync_timeout'] = int(directive[1])
+
+                    elif directive[0] == 'default_txn':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
+                        self._metadata['default_txn'] = directive[1]
+
+                    else:
+                        self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
+
+                elif line.startswith('##'):
+                    # entering a new section
+                    section = line[2:].strip()
+                    if section not in self._sections and section != 'metadata':
+                        self._raise_error(f'{line_num}: Unknown section: {section}')
 
                 else:
-                    self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
+                    # metadata section cannot contain SQL
+                    if section == 'metadata':
+                        self._raise_error(f'{line_num}: "metadata" section may not contain SQL statements')
 
-            elif line.startswith('##'):
-                # entering a new section
-                section = line[2:]
-                if section not in self._sections and section != 'metadata':
-                    self._raise_error(f'{line_num}: Unknown section: {section}')
+                    # continue the sql statement
+                    sql.append(line)
 
-            else:
-                # metadata section cannot contain SQL
-                if section == 'metadata':
-                    self._raise_error(f'{line_num}: "metadata" section may not contain SQL statements')
-
-                # continue the sql statement
-                sql.append(line)
-
-                # record the sql statement
-                if line.endswith(';'):
-                    # end of SQL statement
-                    self._append_command({
-                        'type': 'sql',
-                        'sql': ' '.join(sql)
-                    }, section, is_threaded, cur_txn, line_num)
-                    sql = []
+                    # record the sql statement
+                    if line.endswith(';'):
+                        # end of SQL statement
+                        self._append_command({
+                            'type': 'sql',
+                            'sql': ' '.join(sql)
+                        }, section, is_threaded, cur_txn, line_num)
+                        sql = []
 
 
-    def _load_csv(self, cursor: psycopg2.cursor, filename: str, table: str) -> None:
+    def _load_csv(self, cursor: psycopg2.extensions.cursor, filename: str, table: str) -> None:
         """Load the provided CSV file into the specified table."""
         logging.debug(f'Load CSV {filename} into {table}')
 
@@ -202,17 +219,19 @@ class TestCase:
                 cursor.execute(insert_query, row)
 
 
-    def _execute_sql(self, cursor: psycopg2.cursor, sql: str) -> list:
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
         """Execute the provided SQL using the provided cursor."""
         logging.debug(f'Execute SQL: {sql}')
         if self._debug:
             return []
 
         cursor.execute(sql)
-        return cursor.fetchall()
+        if do_fetch:
+            return cursor.fetchall()
+        return None
         
 
-    def _execute_command(self, command: dict) -> list:
+    def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
         """Execute a sql command or test directive.  When executing a
         SQL statement, will use the "txn" key to determine which
         transaction to run the SQL statement within.
@@ -224,39 +243,38 @@ class TestCase:
         if command['type'] == 'sleep':
             # sleep for 'duration' seconds
             time.sleep(command['duration'])
-            return []
+            return None
 
         # handle SQL statements
         with self._connections[command['txn']].cursor() as cursor:
             if command['type'] == 'load_csv':
                 # call the helper to read the CSV file and populate the table
                 self._load_csv(cursor, command['file'], command['table'])
-                return []
+                return None
 
             elif command['type'] == 'sql':
                 # execute a SQL command
-                return self._execute_sql(cursor, command['sql'])
+                return self._execute_sql(cursor, command['sql'], do_fetch)
 
             elif command['type'] == 'sync':
                 # insert a row to the sync_control table
-                self._sync += 1
-                self._execute_sql(cursor, f'INSERT INTO sync_control (sync) VALUES ({self._sync});')
+                self._sync_step += 1
+                self._execute_sql(cursor, f'BEGIN; INSERT INTO sync_control (sync) VALUES ({self._sync_step}); COMMIT;', False)
 
                 # wait for it to appear in the replica
                 with self._fdw.cursor() as rc:
                     done = False
-                    counter = self._timeout
-                    while not done and counter > 0:
-                        result = self._execute_sql(rc, 'SELECT MAX(sync) FROM sync_control;')
-                        if result[0][0] == self._sync:
+                    start = time.time()
+                    while not done and time.time() < start + self._metadata['sync_timeout']:
+                        result = self._execute_sql(rc, 'SELECT MAX(sync) FROM sync_control;', True)
+                        if len(result) > 0 and result[0][0] == self._sync_step:
                             done = True
                         else:
                             time.sleep(1)
-                            counter -= 1
 
-                    if counter == 0:
+                    if not done:
                         # fail if it takes longer than the timeout
-                        self._raise_error(f'"sync" operation timed out after {self._timeout} seconds')
+                        self._raise_error(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
                 return []
 
 
@@ -269,7 +287,7 @@ class TestCase:
             self._raise_error('Can only execute "sql" commands against the replica.')
 
         with self._fdw.cursor() as cursor:
-            return self._execute_sql(cursor, command['sql'])
+            return self._execute_sql(cursor, command['sql'], True)
 
 
     def _execute_commands(self, commands: list) -> None:
@@ -297,10 +315,14 @@ class TestCase:
         # construct a connection for each transaction in the test
         for txn in self._txns:
             self._connections[txn] = springtail.connect_db_instance(self._props)
-            self._connections[txn].autocommit = self._metadata.autocommit
+            self._connections[txn].autocommit = self._metadata['autocommit']
 
         # execute all of the setup commands
         self._execute_commands(self._sections['setup'][0]['sequential'])
+
+        # create the sync control table
+        with self._connections[next(iter(self._txns))].cursor() as cursor:
+            self._execute_sql(cursor, 'BEGIN; CREATE TABLE IF NOT EXISTS sync_control (sync INT); COMMIT;', False)
 
         self._status = 'SETUP_END'
 
@@ -353,10 +375,10 @@ class TestCase:
 
         # wait for the primary and replica to come into sync
         txn = next(iter(self._txns)) # choose any txn
-        self._sync_step += 1
         self._execute_command({
             'type': 'sync',
-            'txn': txn
+            'txn': txn,
+            'line': -1
         })
 
         self._status = 'TEST_END'
@@ -374,8 +396,8 @@ class TestCase:
         logging.info(f'{self._filename} -- Running verify()')
 
         # execute the verification commands against both databases, compare the results
-        for command in self._sections['test'][0]['sequential']:
-            primary_result = self._execute_command(command)
+        for command in self._sections['verify'][0]['sequential']:
+            primary_result = self._execute_command(command, True)
             replica_result = self._replica_command(command)
 
             if primary_result != replica_result:
@@ -395,10 +417,6 @@ class TestCase:
         all database connections.
 
         """
-        if self._status != 'VERIFY_END':
-            self._raise_error('Must run cleanup() after verify()')
-        self._status = 'CLEANUP_BEGIN'
-
         logging.info(f'{self._filename} -- Running cleanup()')
 
         # run the cleanup commands
@@ -408,8 +426,6 @@ class TestCase:
         for connection in self._connections:
             connection.close()
         self._fdw.close()
-
-        self._status = 'CLEANUP_END'
 
 
     def check_logs(self) -> None:

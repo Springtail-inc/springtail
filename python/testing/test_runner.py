@@ -1,10 +1,11 @@
-import psycopg2
+import argparse
+import jinja2
 import logging
 import os
-import yaml
+import psycopg2
+import springtail
 import time
-from jinja2 import Template
-import argparse
+import yaml
 
 from test_case import TestCase
 
@@ -58,7 +59,7 @@ def log_test_execution(conn, test_name, status):
         """, (test_name, status))
 
 
-def run_all_tests(test_folder: str, props: springtail.Properties, debug_mode: bool) -> None:
+def run_all_tests(test_folder: str, props: springtail.Properties, debug_mode: bool, check_logs: bool) -> None:
     """
     Run all test cases in the specified folder.
 
@@ -81,17 +82,33 @@ def run_all_tests(test_folder: str, props: springtail.Properties, debug_mode: bo
         test_cases.append(test_case)
 
     # run the test cases
+    stop_tests = False
     for test_case in test_cases:
+        # run the actual test
         try:
             test_case.setup()
             test_case.test()
             test_case.verify()
-            test_case.cleanup()
-            test_case.check_logs()
 
         except Exception as e:
-            break # stop running tests
+            logging.error(f'Error: {e}')
+            stop_tests = True # stop running tests
 
+        # try to perform cleanup even on failure
+        try:
+            test_case.cleanup()
+        except Exception as e:
+            logging.error(f'Error on cleanup: {e}')
+
+        # if requested, check the logs
+        if check_logs:
+            test_case.check_logs()
+
+        # if we should stop the tests, break the loop
+        if stop_tests:
+            break
+
+    # generate a report of the test run
     generate_report(test_cases)
 
 
@@ -102,7 +119,7 @@ def generate_report(test_cases: list) -> None:
     Args:
         results (TestResult): Object containing the test results.
     """
-    template = Template('''
+    template = jinja2.Template('''
     <html>
     <head>
         <title>Test Report</title>
@@ -111,8 +128,9 @@ def generate_report(test_cases: list) -> None:
             table { border-collapse: collapse; width: 100%; }
             th, td { border: 1px solid #ddd; padding: 8px; }
             tr:nth-child(even) { background-color: #f2f2f2; }
-            .passed { color: green; }
+            .success { color: green; }
             .failed { color: red; }
+            .unknown { color: gray; }
             .error-logs { margin-top: 20px; }
         </style>
     </head>
@@ -126,15 +144,15 @@ def generate_report(test_cases: list) -> None:
         <table>
             <tr>
                 <th>Test Case</th>
-                <th>Status</th>
+                <th>Result</th>
                 <th>Duration (s)</th>
                 <th>Error</th>
             </tr>
             {% for test_case in test_cases %}
             <tr>
                 <td>{{ test_case['name'] }}</td>
-                <td class="{{ test_case['status'].lower() }}">{{ test_case['status'] }}</td>
-                <td>{{ "%.2f"|format(test_case['duration']) }}</td>
+                <td class="{{ test_case['result'].lower() }}">{{ test_case['result'] }}</td>
+                <td>{{ "%.2f ms"|format(test_case['duration'] * 1000) }}</td>
                 <td>{{ test_case['error'] }}</td>
             </tr>
             {% endfor %}
@@ -183,16 +201,16 @@ def generate_report(test_cases: list) -> None:
     logging.info(f"Tests failed: {failed_tests}")
     logging.info(f"Tests details:")
     for result in results:
-        if results['result'] == 'SUCCESS':
-            logging.info(f'Duration: {results["duration"]}')
-        if results.error:
-            logging.info(f'Errors: {results["error"]}')
+        if result['result'] == 'SUCCESS':
+            logging.info(f'Duration: {result["duration"]}')
+        if result['error']:
+            logging.info(f'Errors: {result["error"]}')
 
 
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
-    parser.add_argument('-d', '--debug', type=bool, default=False, required=False,
+    parser.add_argument('-d', '--debug', action='store_true',
                         help='Set this flag to run in debugging mode (does not execute SQL)')
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the configuration file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
@@ -211,6 +229,6 @@ if __name__ == "__main__":
     if not system_json_path:
         raise ValueError("'system_json_path' is missing in the YAML configuration")
 
-    props = Properties(os.path.abspath(system_json_path))
+    props = springtail.Properties(os.path.abspath(system_json_path))
 
-    run_all_tests(test_folder, props, config, args.debug)
+    run_all_tests(test_folder, props, args.debug, args.check)
