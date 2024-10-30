@@ -5,8 +5,8 @@ import yaml
 import time
 from jinja2 import Template
 import argparse
-from springtail import connect_db_instance, connect_fdw_instance, Properties
-from sysutils import check_backtrace, extract_backtrace
+
+from test_case import TestCase
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -21,25 +21,6 @@ class TestResult:
         self.test_cases = []
         self.error_logs = []  # New field
 
-
-
-class TestCase:
-    """Class to represent a single test case result."""
-
-    def __init__(self, name, status, duration, error=None):
-        """
-        Initialize the test case with its name, status, duration, and error (if any).
-        
-        Args:
-            name (str): Name of the test case.
-            status (str): Status of the test case (e.g., PASSED, FAILED).
-            duration (float): Duration of the test case execution.
-            error (str, optional): Error message if the test failed.
-        """
-        self.name = name
-        self.status = status
-        self.duration = duration
-        self.error = error
 
 def setup(conn):
     """
@@ -76,170 +57,45 @@ def log_test_execution(conn, test_name, status):
         VALUES (%s, %s)
         """, (test_name, status))
 
-def execute_sql(cursor, sql, fetch_results=False):
-    """
-    Execute an SQL statement and log its progress.
 
-    Args:
-        cursor (psycopg2.cursor): Cursor to execute the SQL statement.
-        sql (str): SQL query to execute.
-        fetch_results (bool): Whether to fetch and return results.
-
-    Returns:
-        list: Query results if fetch_results is True, None otherwise.
-    """
-    logging.debug(f"Executing SQL statement:\n{sql}")
-    cursor.execute(sql)
-    if fetch_results:
-        return cursor.fetchall()
-    logging.debug("SQL executed successfully")
-    return None
-
-def split_sql_statements(sql_content):
-    """
-    Split SQL content into individual statements.
-    
-    Args:
-        sql_content (str): SQL content containing one or more statements.
-        
-    Returns:
-        list: List of individual SQL statements.
-    """
-    statements = []
-    current_statement = []
-    
-    for line in sql_content.split('\n'):
-        line = line.strip()
-        if not line or line.startswith('--'):
-            continue
-            
-        current_statement.append(line)
-        
-        if line.endswith(';'):
-            statements.append(' '.join(current_statement))
-            current_statement = []
-            
-    if current_statement:  # Handle last statement if it doesn't end with semicolon
-        statements.append(' '.join(current_statement))
-        
-    return statements
-
-def run_test_case(test_file, main_conn, replica_conn, results, props):
-    """
-    Execute a test case and verify its results across primary and replica databases.
-    """
-    start_time = time.time()
-    with open(test_file, 'r') as f:
-        content = f.read()
-
-    sections = content.split('##')
-    sections = {section.strip().split()[0].lower(): section.split('\n', 1)[1].strip() 
-               for section in sections if section.strip()}
-
-    main_conn.autocommit = True
-    replica_conn.autocommit = True
-    main_cur = main_conn.cursor()
-    replica_cur = replica_conn.cursor()
-    error_msg = None
-    try:
-        for section in ['setup', 'test', 'verify']:
-            if section in sections:
-                logging.info(f"Running {section.upper()} for {test_file}")
-                sql_statements = split_sql_statements(sections[section])
-                
-                for sql in sql_statements:
-                    if section in ['setup', 'test']:
-                        execute_sql(main_cur, sql)
-                    elif section == 'verify':
-                        time.sleep(1)  # Allow time for replication to catch up
-                        logging.info(f"Verifying: {sql}")
-                        
-                        main_result = execute_sql(main_cur, sql, fetch_results=True)
-                        replica_result = execute_sql(replica_cur, sql, fetch_results=True)
-                        
-                        if main_result != replica_result:
-                            raise AssertionError(
-                                f"Verification failed for {test_file}:\n"
-                                f"Statement: {sql}\n"
-                                f"Main DB: {main_result}\n"
-                                f"Replica DB: {replica_result}"
-                            )
-                        logging.info(f"Verification passed for: {sql}")
-
-        if 'cleanup' in sections and sections['cleanup'].strip():
-            logging.info(f"Running CLEANUP for {test_file}")
-            cleanup_statements = split_sql_statements(sections['cleanup'])
-            for sql in cleanup_statements:
-                if sql.strip():
-                    execute_sql(main_cur, sql)
-
-        results.passed += 1
-        status = "PASSED"
-        logging.info(f"Test case {test_file} PASSED")
-    except (psycopg2.Error, AssertionError, Exception) as e:
-        results.failed += 1
-        status = "FAILED"
-        error_msg = str(e)
-        results.errors.append(error_msg)
-        logging.error(f"Test case {test_file} FAILED: {error_msg}")
-    finally:
-        log_test_execution(main_conn, test_file, status)
-
-    duration = time.time() - start_time
-    results.test_cases.append(TestCase(test_file, status, duration, error_msg))
-
-    # Check logs for errors after this test
-    check_logs(props, results)
-    if results.error_logs:
-        logging.error(f"Found errors in logs after running {test_file}")
-        raise Exception(f"Test aborted due to errors found in logs after running {test_file}")
-
-def run_all_tests(test_folder, main_conn, replica_conn, props):
+def run_all_tests(test_folder: str, props: springtail.Properties, debug_mode: bool) -> None:
     """
     Run all test cases in the specified folder.
 
     Args:
         test_folder (str): Path to the folder containing SQL test cases.
-        main_conn (psycopg2.connection): Connection to the primary database.
-        replica_conn (psycopg2.connection): Connection to the replica database.
         props (Properties): System properties object.
     """
     logging.info(f"Running all test cases from folder: {test_folder}")
     results = TestResult()
 
-    setup(main_conn)
+    # parse and prepare all of the test cases
+    test_cases = []
+    for test_file in sorted(os.listdir(test_folder)):
+        # test files must be of the form "<name>.sql"
+        if not test_file.endswith('.sql'):
+            logging.warning(f'skipped test file {test_file} -- must have the ".sql" extension')
+            continue
 
-    for file in sorted(os.listdir(test_folder)):
-        if file.endswith('.sql'):
-            run_test_case(os.path.join(test_folder, file), main_conn, replica_conn, results, props)
-    
-    generate_report(results)
+        test_case = TestCase(os.path.join(test_folder, test_file), props, debug_mode)
+        test_cases.append(test_case)
 
-    logging.info("\n--- Test Summary ---")
-    logging.info(f"Total tests run: {results.passed + results.failed}")
-    logging.info(f"Tests passed: {results.passed}")
-    logging.info(f"Tests failed: {results.failed}")
-    if results.errors:
-        logging.info("\nErrors:")
-        for error in results.errors:
-            logging.error(error)
+    # run the test cases
+    for test_case in test_cases:
+        try:
+            test_case.setup()
+            test_case.test()
+            test_case.verify()
+            test_case.cleanup()
+            test_case.check_logs()
 
-def check_logs(props, results):
-    """Check logs for errors and update test results."""
-    log_path = props.get_log_path()
-    error_logs = check_backtrace(log_path)
-    
-    if error_logs:
-        logging.error(f"Found errors in logs: {error_logs}")
-        results.error_logs = error_logs
-        
-        for log in error_logs:
-            backtrace = extract_backtrace(log)
-            if backtrace:
-                error_msg = f"Error in {os.path.basename(log)}:\n{''.join(backtrace)}"
-                results.errors.append(error_msg)
+        except Exception as e:
+            break # stop running tests
 
-def generate_report(results):
+    generate_report(test_cases)
+
+
+def generate_report(test_cases: list) -> None:
     """
     Generate an HTML report for the test results.
 
@@ -276,35 +132,41 @@ def generate_report(results):
             </tr>
             {% for test_case in test_cases %}
             <tr>
-                <td>{{ test_case.name }}</td>
-                <td class="{{ test_case.status.lower() }}">{{ test_case.status }}</td>
-                <td>{{ "%.2f"|format(test_case.duration) }}</td>
-                <td>{{ test_case.error or '' }}</td>
+                <td>{{ test_case['name'] }}</td>
+                <td class="{{ test_case['status'].lower() }}">{{ test_case['status'] }}</td>
+                <td>{{ "%.2f"|format(test_case['duration']) }}</td>
+                <td>{{ test_case['error'] }}</td>
             </tr>
             {% endfor %}
         </table>
         
-        {% if error_logs %}
-        <div class="error-logs">
-            <h2>Log File Errors</h2>
-            <pre>
-            {% for error in errors %}
-{{ error }}
-            {% endfor %}
-            </pre>
-        </div>
-        {% endif %}
     </body>
     </html>
     ''')
 
+#         {% if error_logs %}
+#         <div class="error-logs">
+#             <h2>Log File Errors</h2>
+#             <pre>
+#             {% for error in errors %}
+# {{ error }}
+#             {% endfor %}
+#             </pre>
+#         </div>
+#         {% endif %}
+
+
+    results = [ c.get_result() for c in test_cases ]
+
+    total_tests = len(results)
+    passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
+    failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+    
     report = template.render(
-        total_tests=len(results.test_cases),
-        passed_tests=results.passed,
-        failed_tests=results.failed,
-        test_cases=results.test_cases,
-        error_logs=results.error_logs,
-        errors=results.errors
+        total_tests=total_tests,
+        passed_tests=passed_tests,
+        failed_tests=failed_tests,
+        test_cases=results
     )
 
     os.makedirs('reports', exist_ok=True)
@@ -314,13 +176,29 @@ def generate_report(results):
 
     logging.info(f"Test report generated: {report_file}")
 
+    logging.info("\n--- Test Summary ---")
+    logging.info(f"Total tests found: {total_tests}")
+    logging.info(f"Total tests run: {passed_tests + failed_tests}")
+    logging.info(f"Tests passed: {passed_tests}")
+    logging.info(f"Tests failed: {failed_tests}")
+    logging.info(f"Tests details:")
+    for result in results:
+        if results['result'] == 'SUCCESS':
+            logging.info(f'Duration: {results["duration"]}')
+        if results.error:
+            logging.info(f'Errors: {results["error"]}')
+
+
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
+    parser.add_argument('-d', '--debug', type=bool, default=False, required=False,
+                        help='Set this flag to run in debugging mode (does not execute SQL)')
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the configuration file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
     return parser.parse_args()
 
+## main()
 if __name__ == "__main__":
     args = parse_arguments()
 
@@ -334,10 +212,5 @@ if __name__ == "__main__":
         raise ValueError("'system_json_path' is missing in the YAML configuration")
 
     props = Properties(os.path.abspath(system_json_path))
-    main_conn = connect_db_instance(props)
-    replica_conn = connect_fdw_instance(props)
 
-    run_all_tests(test_folder, main_conn, replica_conn, props)
-
-    main_conn.close()
-    replica_conn.close()
+    run_all_tests(test_folder, props, config, args.debug)
