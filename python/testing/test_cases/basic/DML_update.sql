@@ -1,12 +1,10 @@
-## setup
+## test
 CREATE TABLE IF NOT EXISTS test2 (
     id SERIAL PRIMARY KEY,
     value TEXT
 );
 
-## test
 INSERT INTO test2 (value) VALUES ('initial_value');
-
 
 UPDATE test2 SET value = 'updated_value' WHERE id = 1;
 

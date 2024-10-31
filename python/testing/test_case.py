@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import os
 import psycopg2
 import springtail
 import sysutils
@@ -23,7 +24,7 @@ class TestCase:
         self._error = ''
 
         self._metadata = {
-            'autocommit': False,
+            'autocommit': True,
             'sync_timeout': 3,
             'default_txn': 'default'
         }
@@ -302,7 +303,7 @@ class TestCase:
 
         """
         if self._status != 'INIT':
-            self._raise_error('Must run setup() first')
+            self._raise_error('Must run setup() first for global config')
         self._status = 'SETUP_BEGIN'
         self._result = 'FAILED' # test is assumed failed until it succeeds
 
@@ -310,6 +311,7 @@ class TestCase:
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
+            logging.debug(f'Connecting to database for txn "{txn}"')
             self._connections[txn] = springtail.connect_db_instance(self._props)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
@@ -328,11 +330,17 @@ class TestCase:
         executed while Springtail is actively replicating data.
 
         """
-        if self._status != 'SETUP_END':
-            self._raise_error('Must run test() after setup()')
+        if self._status != 'INIT':
+            self._raise_error('Must run test() first for individual tests')
         self._status = 'TEST_BEGIN'
 
         logging.info(f'{self._filename} -- Running test()')
+
+        # construct a connection for each transaction in the test
+        for txn in self._txns:
+            logging.debug(f'Connecting to database for txn "{txn}"')
+            self._connections[txn] = springtail.connect_db_instance(self._props)
+            self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._fdw = springtail.connect_fdw_instance(self._props)
@@ -365,10 +373,6 @@ class TestCase:
                     # wait for completion of all threads
                     concurrent.futures.wait(futures)
 
-        # end the timer and record the duration
-        end = time.time()
-        self._duration = end - start
-
         # wait for the primary and replica to come into sync
         txn = next(iter(self._txns)) # choose any txn
         self._execute_command({
@@ -376,6 +380,11 @@ class TestCase:
             'txn': txn,
             'line': -1
         })
+
+        # end the timer and record the duration
+        # XXX currently will be skewed by the 1s polling of the sync call
+        end = time.time()
+        self._duration = end - start
 
         self._status = 'TEST_END'
 
@@ -415,13 +424,19 @@ class TestCase:
         """
         logging.info(f'{self._filename} -- Running cleanup()')
 
+        # re-connect to the database in case there was an error on the connection
+        if self._fdw:
+            self._fdw.close()
+        for connection in self._connections:
+            self._connections[connection].close()
+            self._connections[connection] = springtail.connect_db_instance(self._props)
+
         # run the cleanup commands
         self._execute_commands(self._sections['cleanup'][0]['sequential'])
 
         # close the database connections
         for connection in self._connections:
-            connection.close()
-        self._fdw.close()
+            self._connections[connection].close()
 
 
     def check_logs(self) -> None:
@@ -445,7 +460,7 @@ class TestCase:
 
     def get_result(self) -> dict:
         return {
-            'name': self._filename,
+            'name': os.path.basename(self._filename),
             'status': self._status,
             'result': self._result,
             'duration': self._duration,

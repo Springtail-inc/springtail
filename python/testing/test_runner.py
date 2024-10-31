@@ -8,23 +8,36 @@ import time
 import yaml
 
 from test_case import TestCase
+from test_set import TestSet
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def run_test_cases(test_set: str, test_files: list) -> None:
+def run_test_cases(test_set: str,
+                   test_files: list,
+                   config_file: str,
+                   build_dir: str,
+                   check_logs: bool) -> None:
     """Run specific test cases"""
-    test = TestSet(test_set, config, build_dir)
-    test.run(test_files)
+    test = TestSet(test_set, config_file, build_dir)
+    test.run(test_files, check_logs)
+    test.report()
     # generate_report([ test ])
 
 
-def run_test_set(test_set: str) -> None:
-    test = TestSet(test_set, config, build_dir)
-    test.run()
+def run_test_set(test_set: str,
+                 config_file: str,
+                 build_dir: str,
+                 check_logs: bool) -> None:
+    test = TestSet(test_set, config_file, build_dir)
+    test.run(check_logs=check_logs)
+    test.report()
     # generate_report([ test ])
 
 
-def run_all_tests(test_folder: str, props: springtail.Properties, check_logs: bool) -> None:
+def run_all_tests(test_folder: str,
+                  config_file: str,
+                  build_dir: str,
+                  check_logs: bool) -> None:
     """
     Run all test sets in the test folder.
 
@@ -42,6 +55,10 @@ def run_all_tests(test_folder: str, props: springtail.Properties, check_logs: bo
     # run the test sets
     for test in test_sets:
         test.run()
+
+    # generate a report for each test set
+    for test in test_sets:
+        test.report()
 
     # generate a report of the test run
     # generate_report(test_sets)
@@ -148,7 +165,7 @@ def parse_arguments():
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the test configuration file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
     parser.add_argument('test_set', type=str, help='Limit to a specific test set')
-    parser.add_argument('test_case', type=str, help='Limit to a specific test case from the test set')
+    parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
 
 ## main()
@@ -170,13 +187,13 @@ if __name__ == "__main__":
     if not build_dir:
         raise ValueError('"build_dir" is missing in the YAML configuration')
 
-    if test_set is None:
+    if args.test_set is None:
         run_all_tests(test_folder, system_json_path, build_dir, args.check)
     else:
-        if test_case is None:
-            run_test_set(os.path.join(test_folder, test_set), system_json_path, build_dir, args.check)
+        if args.test_case is None:
+            run_test_set(os.path.join(test_folder, args.test_set), system_json_path, build_dir, args.check)
         else:
-            run_test_cases(os.path.join(test_folder, test_set), test_case, system_json_path, build_dir, args.check)
+            run_test_cases(os.path.join(test_folder, args.test_set), args.test_case, system_json_path, build_dir, args.check)
 
     # props = springtail.Properties(os.path.abspath(system_json_path))
     # run_all_tests(test_folder, props, args.check)

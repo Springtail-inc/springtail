@@ -478,13 +478,8 @@ def gen_dump_tarball(props, build_dir):
         return os.path.join(dumps_dir, tarfile)
 
 
-def start(args):
+def start(config_file: str, build_dir: str, sql_file: str = None) -> None:
     """Main function to start the Springtail system."""
-    # Get the config file and build directory from the command line arguments
-    config_file = args.config_file
-    build_dir = args.build_dir
-    sql_file = args.sql_file
-
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
 
@@ -557,11 +552,8 @@ def status():
         print("Postgres is not running.")
 
 
-def stop():
+def stop(config_file: str) -> None:
     """Function to stop the Springtail system."""
-    # Get the config file and build directory from the command line arguments
-    config_file = args.config_file
-
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
 
@@ -573,10 +565,9 @@ def stop():
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
 
-def check_logs(args):
+def check_logs(config_file: str) -> None:
     """Check the logs for errors."""
     # Load the system properties from the system.json file
-    config_file = args.config_file
     props = Properties(os.path.abspath(config_file), False)
     log_path = props.get_log_path()
 
@@ -593,13 +584,12 @@ def check_logs(args):
     return error_logs
 
 
-def dump_logs(args):
+def dump_logs(config_file: str, build_dir: str) -> None:
     """Dump the log files into a tarball."""
     # Load the system properties from the system.json file
-    config_file = args.config_file
     props = Properties(os.path.abspath(config_file), False)
 
-    gen_dump_tarball(props, args.build_dir)
+    gen_dump_tarball(props, build_dir)
 
 
 def generate_report(props, build_dir, title, description):
@@ -623,10 +613,8 @@ def generate_report(props, build_dir, title, description):
     return issue['url']
 
 
-def create_report(args):
+def create_report(config_file: str, build_dir: str) -> None:
     """Create a new bug report."""
-    build_dir = args.build_dir
-    config_file = args.config_file
     props = Properties(os.path.abspath(config_file), False)
 
     linear = Linear()
@@ -710,22 +698,22 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.kill:
-            stop()
+            stop(args.config_file)
             sys.exit(0)
 
         if args.start:
-            start(args)
+            start(args.config_file, args.build_dir, args.sql_file)
 
         if args.check:
-            check_logs(args)
+            check_logs(args.config_file)
             sys.exit(0)
 
         if args.dump:
-            dump_logs(args)
+            dump_logs(args.config_file, args.build_dir)
             sys.exit(0)
 
         if args.report:
-            create_report(args)
+            create_report(args.config_file, args.build_dir)
             sys.exit(0)
 
     except Exception as e:

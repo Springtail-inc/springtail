@@ -1,4 +1,4 @@
-## setup
+## test
 -- Create a table without a primary key.
 CREATE TABLE IF NOT EXISTS test_delete_duplicates (
     id SERIAL,
@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS test_delete_duplicates (
 -- Set replica identity for delete support.
 ALTER TABLE test_delete_duplicates REPLICA IDENTITY FULL;
 
-## test
 INSERT INTO test_delete_duplicates (value) VALUES ('duplicate');
 INSERT INTO test_delete_duplicates (value) VALUES ('duplicate');
 

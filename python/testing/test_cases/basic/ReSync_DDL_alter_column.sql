@@ -1,11 +1,10 @@
-## setup
+## test
 -- Create a table with a TEXT column.
 CREATE TABLE IF NOT EXISTS ddl_test_alter_column (
     id SERIAL PRIMARY KEY,
     data TEXT
 );
 
-## test
 -- Alter the column's data type from TEXT to VARCHAR(255).
 INSERT INTO ddl_test_alter_column (data) VALUES ('test_data');
 ALTER TABLE ddl_test_alter_column 

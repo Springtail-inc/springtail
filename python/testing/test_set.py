@@ -1,6 +1,11 @@
 import logging
+import os
 import springtail
 import sysutils
+
+from test_case import TestCase
+
+_GLOBAL_CONFIG_FILE = '__config.sql'
 
 class TestSet:
     """Class to manage a set of tests.  A test set is composed of a
@@ -19,7 +24,10 @@ class TestSet:
     the files in the directory.
 
     """
-    def __init__(self, directory: str, config_file: str, build_dir: str) -> None:
+    def __init__(self,
+                 directory: str,
+                 config_file: str,
+                 build_dir: str) -> None:
         """Initialize the test set"""
         self._directory = directory
         self._config_file = config_file
@@ -27,13 +35,13 @@ class TestSet:
         self._props = springtail.Properties(config_file, True)
 
         # constuct the special "config" test case for global setup and cleanup
-        self._config = TestCase(os.path.join(directory, "config"), self._props, ['setup', 'cleanup'])
+        self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, ['setup', 'cleanup'])
 
         # collect and parse the test cases from the directory
-        self._test_files = sorted(os.listdir(directory))
+        self._test_files = [ ]
         self._tests = { }
-        for test_file in self._test_files:
-            if test_file == "config":
+        for test_file in sorted(os.listdir(directory)):
+            if test_file == _GLOBAL_CONFIG_FILE:
                 continue
 
             # test files must be of the form "<name>.sql"
@@ -41,10 +49,11 @@ class TestSet:
                 logging.warning(f'skipped test file {test_file} -- must have the ".sql" extension')
                 continue
 
+            self._test_files.append(test_file)
             self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
 
 
-    def run(self, test_files: list = None) -> None:
+    def run(self, test_files: list = [], check_logs: bool = False) -> None:
         """Runs one or more of the test cases in the test set in the
         provided order.  If no test cases are provided then it runs
         all of the tests in lexographical order.
@@ -52,8 +61,7 @@ class TestSet:
         """
         # make sure Springtail is stopped
         logging.debug('Stopping any existing Springtail instance')
-        sysutils.stop_daemons(self._props.get_pid_path(), springtail.ALL_DAEMONS_NAMES)
-        springtail.cleanup_db_instance(self._props)
+        springtail.stop(self._config_file)
 
         # perform the primary db setup
         logging.debug('Perform the global setup()')
@@ -61,16 +69,12 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start_replication(self._props, self._build_dir)
-        sysutils.start_daemons(self._build_dir, springtail.CORE_DAEMONS)
-        springtail.wait_for_running(self._props)
-        springtail.fdw_import(self._props, self._build_dir, self._config_file)
-        springtail.fixup_log_perms(self._props)
+        springtail.start(self._config_file, self._build_dir)
 
         # run the tests
-        logging.debug('Run the tests')
-        if test_files is None:
+        if not test_files:
             test_files = self._test_files
+        logging.info(f'Run the tests: {test_files}')
 
         stop_tests = False
         for test_file in test_files:
@@ -101,11 +105,11 @@ class TestSet:
             if stop_tests:
                 break
 
+        # XXX if stop_tests then generate a failure report?
+
         # shutdown Springtail
         logging.debug('Stopping the Springtail instance')
-        sysutils.stop_daemons(self._props.get_pid_path(), springtail.ALL_DAEMONS_NAMES)
-        # note: maybe don't clean up in case we need to debug anything
-        # springtail.cleanup_db_instance(self._props)
+        springtail.stop(self._config_file)
 
         # perform the primary db cleanup
         logging.debug('Perform the global cleanup()')
@@ -114,4 +118,22 @@ class TestSet:
 
     def report(self) -> dict:
         """Generates a report about the test set"""
+        results = [ self._tests[t].get_result() for t in self._tests ]
+        passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
+        failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+
+        print('\n')
+        print(f'--- Test Summary: {os.path.basename(self._directory)} ---')
+        print(f'Total tests found: {len(self._tests)}')
+        print(f'Total tests run: {passed_tests + failed_tests}')
+        print(f'Tests passed: {passed_tests}')
+        print(f'Tests failed: {failed_tests}')
+        print('Test durations:')
+        for result in results:
+            if result['result'] == 'SUCCESS':
+                print(f'\t{result["name"]}: {result["duration"]}')
+        print('Test errors:')
+            if result['error']:
+                print(f'\t{result["name"]}: {result["error"]}')
+
         pass

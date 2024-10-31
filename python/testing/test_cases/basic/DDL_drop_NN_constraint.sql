@@ -1,11 +1,10 @@
-## setup
+## test
 -- Create a table with a NOT NULL constraint on a column.
 CREATE TABLE IF NOT EXISTS ddl_test_not_null (
     id SERIAL PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-## test
 -- Insert data with non-NULL value to ensure the initial constraint.
 INSERT INTO ddl_test_not_null (value) VALUES ('valid_value');
 
