@@ -221,7 +221,7 @@ namespace springtail {
         static constexpr char PG_OP_CREATE_TABLE[] = "create table";
         static constexpr char PG_OP_DROP_TABLE[] = "drop table";
         static constexpr char PG_OP_CREATE_INDEX[] = "create index";
-        static constexpr char PG_OP_DROP_INDEX[] = "drop table";
+        static constexpr char PG_OP_DROP_INDEX[] = "drop index";
         static constexpr char PG_OP_BEGIN[] = "begin";
         static constexpr char PG_OP_COMMIT[] = "commit";
         static constexpr char PG_OP_STREAM_START[] = "stream start";
