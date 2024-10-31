@@ -25,7 +25,7 @@ namespace springtail::pg_log_mgr {
             pg_msg::MSG_STREAM_START,
             pg_msg::MSG_STREAM_COMMIT,
             pg_msg::MSG_STREAM_ABORT,
-            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table
+            pg_msg::MSG_MESSAGE // this will capture create_table, drop_table, alter_table, create_index, drop_index
         };
 
         _current_path = path;
@@ -76,6 +76,18 @@ namespace springtail::pg_log_mgr {
                     {
                         PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
                         _process_ddl(drop_msg.oid, drop_msg.xid, msg->is_streaming);
+                        break;
+                    }
+                    case PgMsgEnum::CREATE_INDEX:
+                    {
+                        auto &index_msg = std::get<PgMsgIndex>(msg->msg);
+                        _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming);
+                        break;
+                    }
+                    case PgMsgEnum::DROP_INDEX:
+                    {
+                        auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
+                        _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming);
                         break;
                     }
                     default:

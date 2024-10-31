@@ -1,5 +1,4 @@
 #include <string>
-#include <string_view>
 #include <memory>
 #include <cassert>
 
@@ -21,6 +20,7 @@
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/client_factory.hh>
+#include <vector>
 
 namespace springtail::sys_tbl_mgr {
     /* static initialization must happen outside of class */
@@ -97,15 +97,21 @@ namespace springtail::sys_tbl_mgr {
         return;
     }
 
+    template<typename Req>
+    void _set_request_common(Req& r, uint64_t db_id,
+                       const XidLsn &xid) {
+        r.db_id = db_id;
+        r.xid = xid.xid;
+        r.lsn = xid.lsn;
+    }
+
     TableRequest
     _gen_table_request(uint64_t db_id,
                        const XidLsn &xid,
                        const PgMsgTable &msg)
     {
         TableRequest request;
-        request.db_id = db_id;
-        request.xid = xid.xid;
-        request.lsn = xid.lsn;
+        _set_request_common(request, db_id, xid);
         request.table.id = msg.oid;
         request.table.schema = msg.schema;
         request.table.name = msg.table;
@@ -126,7 +132,28 @@ namespace springtail::sys_tbl_mgr {
 
             request.table.columns.push_back(column);
         }
+        return request;
+    }
 
+    IndexRequest
+    _gen_index_request(uint64_t db_id,
+                       const XidLsn &xid,
+                       const PgMsgIndex &msg)
+    {
+        IndexRequest request;
+        _set_request_common(request, db_id, xid);
+        request.index.id = msg.oid;
+        request.index.schema = msg.schema;
+        request.index.name = msg.index;
+        request.index.is_unique = msg.is_unique;
+        request.index.table_name = msg.table_name;
+        request.index.table_id = msg.table_oid;
+        for (const auto &col : msg.columns) {
+            IndexColumn column;
+            column.__set_name(col.column_name);
+            column.__set_position(col.position);
+            request.index.columns.push_back(column);
+        }
         return request;
     }
 
@@ -184,6 +211,45 @@ namespace springtail::sys_tbl_mgr {
         request.name = msg.table;
 
         c.client->drop_table(result, request);
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+
+        return result.statement;
+    }
+
+
+    std::string 
+    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg)
+    {
+        ThriftClient c = _get_client();
+        DDLStatement result;
+
+        auto &&request = _gen_index_request(db_id, xid, msg);
+
+        c.client->create_index(result, request);
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+
+        return result.statement;
+    }
+
+    std::string 
+    Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
+    {
+        ThriftClient c = _get_client();
+        DDLStatement result;
+
+        DropIndexRequest request;
+        _set_request_common(request, db_id, xid);
+
+        request.index_id = msg.oid;
+        request.schema = msg.schema;
+
+        c.client->drop_index(result, request);
 
         if (result.statement.empty()) {
             throw SysTblMgrError();

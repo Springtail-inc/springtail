@@ -789,6 +789,58 @@ namespace springtail::gc {
                         }
                         break;
                     }
+                    case PgMsgEnum::CREATE_INDEX: {
+                        auto &index_msg = std::get<PgMsgIndex>(msg->msg);
+
+                        // check if we should ignore this message based on ongoing table sync
+                        bool skip = _sync_tracker.should_skip(state->entry.db_id, index_msg.oid,
+                                                              state->entry.pg_xid);
+                        if (skip) {
+                            blocked = false;
+                        } else {
+                            // schema changes should be applied in-order, so need to block this
+                            // operation if there are earlier un-applied schema changes
+                            blocked = _check_backlog(state, index_msg.oid, offset);
+                            if (!blocked) {
+                                // apply the schema change
+                                XidLsn xid(state->entry.xid, state->lsn);
+                                auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_index(state->entry.db_id, xid, index_msg);
+
+                                // note: we don't notify the backlog until the entire XID is
+                                //       processed since there might be additional schema changes
+
+                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                            }
+                        }
+                        break;
+                    }
+                    case PgMsgEnum::DROP_INDEX: {
+                        auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
+
+                        // check if we should ignore this message based on ongoing table sync
+                        bool skip = _sync_tracker.should_skip(state->entry.db_id, index_msg.oid,
+                                                              state->entry.pg_xid);
+                        if (skip) {
+                            blocked = false;
+                        } else {
+                            // schema changes should be applied in-order, so need to block this
+                            // operation if there are earlier un-applied schema changes
+                            blocked = _check_backlog(state, index_msg.oid, offset);
+                            if (!blocked) {
+                                // apply the schema change
+                                XidLsn xid(state->entry.xid, state->lsn);
+                                auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_index(state->entry.db_id, xid, index_msg);
+
+                                // note: we don't notify the backlog until the entire XID is
+                                //       processed since there might be additional schema changes
+
+                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
+                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                            }
+                        }
+                        break;
+                    }
 
                     default:
                         // message should have been filtered, error?

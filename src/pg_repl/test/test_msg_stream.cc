@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include <filesystem>
-#include <memory>
 #include <iostream>
 
 #include <stdio.h>
@@ -72,7 +71,7 @@ namespace {
             EXPECT_EQ(msg, nullptr);
             count++;
         }
-        EXPECT_EQ(count, 6);
+        EXPECT_EQ(count, 7);
     }
 
     TEST_F(MsgStreamReader_Test, Offset)
@@ -107,7 +106,7 @@ namespace {
             EXPECT_EQ(msg, nullptr);
             count++;
         }
-        EXPECT_EQ(count, 26); // 25 commands + final check for eof
+        EXPECT_EQ(count, 27); // 25 commands + final check for eof
     }
 
     TEST_F(MsgStreamReader_Test, Decode)
@@ -120,7 +119,7 @@ namespace {
         while (!eos) {
             PgMsgPtr msg = reader.read_message(reader.ALL_MESSAGES, eos, eob);
             if (msg == nullptr) {
-                EXPECT_EQ(count, 25);
+                EXPECT_EQ(count, 26);
                 continue;
             }
             nlohmann::json &j = _json_cmds[count];
@@ -151,6 +150,9 @@ namespace {
                     break;
                 case PgMsgEnum::DROP_TABLE:
                     EXPECT_EQ(j["cmd"], "drop table");
+                    break;
+                case PgMsgEnum::CREATE_INDEX:
+                    EXPECT_EQ(j["cmd"], "create index");
                     break;
                 case PgMsgEnum::INSERT:
                     EXPECT_EQ(j["cmd"], "insert");

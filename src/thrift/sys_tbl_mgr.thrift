@@ -55,6 +55,38 @@ struct TableStats {
     1: i64 row_count
 }
 
+struct IndexColumn {
+    1: string name,
+    2: i32 position,
+}
+
+struct IndexInfo {
+    1: i64 id,
+    2: string schema,
+    3: string name,
+    4: bool is_unique,
+    5: i64 table_id,
+    6: string table_name,
+    7: list<IndexColumn> columns
+}
+
+struct IndexRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: IndexInfo index,
+    5: i64 snapshot_xid
+}
+
+struct DropIndexRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: i64 index_id,
+    5: string schema,
+    6: string name
+}
+
 struct UpdateRootsRequest {
     1: i64 db_id,
     2: i64 xid,
@@ -120,6 +152,12 @@ struct ExistsRequest {
 // the interface for managing the system tables
 service Service {
     Status ping(),
+
+    // creates a new index at the given xid/lsn
+    DDLStatement create_index(1: IndexRequest request),
+
+    // drops an existing index at the given xid/lsn
+    DDLStatement drop_index(1: DropIndexRequest request),
 
     // creates a new data table at the given xid/lsn
     DDLStatement create_table(1: TableRequest request),

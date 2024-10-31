@@ -9,7 +9,7 @@ DECLARE
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
-        IF NOT obj.is_temporary AND obj.object_type = 'table' THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') THEN
             msg := json_build_object('cmd', tg_tag,
                 'oid', obj.objid::bigint, -- oid is unsigned int, but comes as string
                 'obj', obj.object_type,
@@ -24,7 +24,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_event_trigger_for_ddl()
+CREATE OR REPLACE FUNCTION springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
@@ -32,7 +32,8 @@ DECLARE
     json_columns json;
     has_pkey boolean;
 BEGIN
-    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands()
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd 
+        WHERE cmd.command_tag IN ( 'CREATE TABLE', 'ALTER TABLE' )
     LOOP
         SELECT json_agg(json_col)
         FROM (
@@ -89,17 +90,81 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
+        RETURNS event_trigger LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+    tab_obj record;
+    msg text;
+    json_columns json;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands()
+    LOOP
+        SELECT json_agg(json_col)
+        FROM (
+            SELECT json_build_object('name', column_name,
+                'position', ordinal_position
+            ) AS json_col
+            FROM pg_attribute pga
+            JOIN information_schema.columns
+            ON column_name=pga.attname
+            LEFT OUTER JOIN pg_index pgi
+            ON pga.attrelid=pgi.indrelid
+            WHERE pga.attrelid=obj.objid AND obj.object_type = 'index'
+        ) AS obj_select
+        INTO json_columns;
+
+        -- additionl index and table info
+        EXECUTE format('SELECT 
+                c.oid AS table_oid, 
+                c.relname AS table_name, 
+                i.indisunique AS is_unique,
+                i.indisprimary AS primary_idx
+            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid 
+            WHERE i.indexrelid = %s', obj.objid) INTO tab_obj;
+
+        if tab_obj.primary_idx is true then
+            RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
+        else 
+            -- Note: no obj.object_name, will split identity instead in code
+            msg := json_build_object('xid', txid_current(),
+                'cmd', obj.command_tag,
+                'oid', obj.objid::bigint,
+                'obj', obj.object_type,
+                'schema', obj.schema_name,
+                'identity', obj.object_identity,
+                'table_oid', tab_obj.table_oid::bigint,
+                'table_name', tab_obj.table_name,
+                'is_unique', tab_obj.is_unique,
+                'columns', json_columns );
+
+            -- command_tag is CREATE TABLE or ALTER TABLE
+            PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+
+            RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
+        end if;
+
+    END LOOP;
+END;
+$$;
+
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
-   WHEN TAG IN ( 'DROP TABLE' )
+   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX' )
    EXECUTE FUNCTION springtail_event_trigger_for_drops();
 
-DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_ddl;
-CREATE EVENT TRIGGER springtail_event_trigger_for_ddl
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
+CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
-   EXECUTE FUNCTION springtail_event_trigger_for_ddl();
+   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE', 'CREATE SCHEMA' )
+   EXECUTE FUNCTION springtail_event_trigger_for_table_ddl();
+
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
+CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
+   ON ddl_command_end
+   WHEN TAG IN ( 'ALTER INDEX', 'CREATE INDEX' )
+   EXECUTE FUNCTION springtail_event_trigger_for_index_ddl();
 
 
 
