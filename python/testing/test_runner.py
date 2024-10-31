@@ -11,105 +11,40 @@ from test_case import TestCase
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class TestResult:
-    """Class to store the results of test cases."""
-
-    def __init__(self):
-        """Initialize the test result counters."""
-        self.passed = 0
-        self.failed = 0
-        self.errors = []
-        self.test_cases = []
-        self.error_logs = []  # New field
+def run_test_cases(test_set: str, test_files: list) -> None:
+    """Run specific test cases"""
+    test = TestSet(test_set, config, build_dir)
+    test.run(test_files)
+    # generate_report([ test ])
 
 
-def setup(conn):
+def run_test_set(test_set: str) -> None:
+    test = TestSet(test_set, config, build_dir)
+    test.run()
+    # generate_report([ test ])
+
+
+def run_all_tests(test_folder: str, props: springtail.Properties, check_logs: bool) -> None:
     """
-    Set up the database by creating a log table for test executions.
+    Run all test sets in the test folder.
 
     Args:
-        conn (psycopg2.connection): Connection to the main database.
-    """
-    logging.info("Running global setup")
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS test_execution_log (
-            id SERIAL PRIMARY KEY,
-            test_name TEXT,
-            execution_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT
-        )
-        """)
-
-def log_test_execution(conn, test_name, status):
-    """
-    Log the execution status of a test case to the database.
-
-    Args:
-        conn (psycopg2.connection): Connection to the main database.
-        test_name (str): Name of the test case.
-        status (str): Status of the test case (e.g., PASSED, FAILED).
-    """
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("""
-        INSERT INTO test_execution_log (test_name, status)
-        VALUES (%s, %s)
-        """, (test_name, status))
-
-
-def run_all_tests(test_folder: str, props: springtail.Properties, debug_mode: bool, check_logs: bool) -> None:
-    """
-    Run all test cases in the specified folder.
-
-    Args:
-        test_folder (str): Path to the folder containing SQL test cases.
+        test_folder (str): Path to the folder containing the test set directories.
         props (Properties): System properties object.
     """
     logging.info(f"Running all test cases from folder: {test_folder}")
-    results = TestResult()
 
     # parse and prepare all of the test cases
-    test_cases = []
-    for test_file in sorted(os.listdir(test_folder)):
-        # test files must be of the form "<name>.sql"
-        if not test_file.endswith('.sql'):
-            logging.warning(f'skipped test file {test_file} -- must have the ".sql" extension')
-            continue
+    test_sets = []
+    for test_set in sorted(os.listdir(test_folder)):
+        test_sets.append(TestSet(test_set, config_file, build_dir))
 
-        test_case = TestCase(os.path.join(test_folder, test_file), props, debug_mode)
-        test_cases.append(test_case)
-
-    # run the test cases
-    stop_tests = False
-    for test_case in test_cases:
-        # run the actual test
-        try:
-            test_case.setup()
-            test_case.test()
-            test_case.verify()
-
-        except Exception as e:
-            logging.error(f'Error: {e}')
-            stop_tests = True # stop running tests
-
-        # try to perform cleanup even on failure
-        try:
-            test_case.cleanup()
-        except Exception as e:
-            logging.error(f'Error on cleanup: {e}')
-
-        # if requested, check the logs
-        if check_logs:
-            test_case.check_logs()
-
-        # if we should stop the tests, break the loop
-        if stop_tests:
-            break
+    # run the test sets
+    for test in test_sets:
+        test.run()
 
     # generate a report of the test run
-    generate_report(test_cases)
+    # generate_report(test_sets)
 
 
 def generate_report(test_cases: list) -> None:
@@ -210,25 +145,38 @@ def generate_report(test_cases: list) -> None:
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
-    parser.add_argument('-d', '--debug', action='store_true',
-                        help='Set this flag to run in debugging mode (does not execute SQL)')
-    parser.add_argument('-c', '--config', type=str, required=True, help='Path to the configuration file')
+    parser.add_argument('-c', '--config', type=str, required=True, help='Path to the test configuration file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
+    parser.add_argument('test_set', type=str, help='Limit to a specific test set')
+    parser.add_argument('test_case', type=str, help='Limit to a specific test case from the test set')
     return parser.parse_args()
 
 ## main()
 if __name__ == "__main__":
+    # parse the command line arguments
     args = parse_arguments()
 
+    # parse the test configuration
     with open(args.config, 'r') as f:
         yaml_config = yaml.safe_load(f)
 
     test_folder = yaml_config['test_folder']
+
     system_json_path = yaml_config.get('system_json_path')
-
     if not system_json_path:
-        raise ValueError("'system_json_path' is missing in the YAML configuration")
+        raise ValueError('"system_json_path" is missing in the YAML configuration')
 
-    props = springtail.Properties(os.path.abspath(system_json_path))
+    build_dir = yaml_config.get('build_dir')
+    if not build_dir:
+        raise ValueError('"build_dir" is missing in the YAML configuration')
 
-    run_all_tests(test_folder, props, args.debug, args.check)
+    if test_set is None:
+        run_all_tests(test_folder, system_json_path, build_dir, args.check)
+    else:
+        if test_case is None:
+            run_test_set(os.path.join(test_folder, test_set), system_json_path, build_dir, args.check)
+        else:
+            run_test_cases(os.path.join(test_folder, test_set), test_case, system_json_path, build_dir, args.check)
+
+    # props = springtail.Properties(os.path.abspath(system_json_path))
+    # run_all_tests(test_folder, props, args.check)

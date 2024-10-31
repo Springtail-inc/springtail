@@ -10,12 +10,13 @@ class TestCase:
     test case and stores the result of the test.
 
     """
-
-    def __init__(self, filename: str, props: springtail.Properties, debug: bool = False) -> None:
+    def __init__(self,
+                 filename: str,
+                 props: springtail.Properties,
+                 valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
         self._filename = filename
         self._props = props
-        self._debug = debug
         self._status = 'INIT'
         self._result = 'UNKNOWN'
         self._duration = 0
@@ -33,12 +34,9 @@ class TestCase:
         # specifying which transaction they should be run against.
         # Parallel sub-sections contain an array of commands
         # per-transaction, with transactions being run in parallel.
-        self._sections = {
-            'setup': [],
-            'test': [],
-            'verify': [],
-            'cleanup': []
-        }
+        self._sections = { }
+        for section in valid_sections:
+            self._sections[section] = []
 
         self._txns = set({}) # the set of transaction names referenced in this test
         self._connections = {} # connections to the primary for each transaction
@@ -222,10 +220,8 @@ class TestCase:
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
         """Execute the provided SQL using the provided cursor."""
         logging.debug(f'Execute SQL: {sql}')
-        if self._debug:
-            return []
-
         cursor.execute(sql)
+
         if do_fetch:
             return cursor.fetchall()
         return None
