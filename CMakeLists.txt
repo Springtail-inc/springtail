@@ -74,6 +74,12 @@ endif()
 ## include external projects
 include(ExternalProjects)
 
+## set install directory
+set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/install" CACHE PATH "Installation Directory" FORCE)
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE "${PROJECT_SOURCE_DIR}/install")
+endif()
+
 ## source modules
 set(MODULES
   common

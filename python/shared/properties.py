@@ -41,6 +41,7 @@ class Properties:
                 self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
+                self.replication_user_password = system_json['org']['replication_user_password']
 
                 # set the environment variables
                 env_vars = {
@@ -52,8 +53,10 @@ class Properties:
                     'REDIS_PORT': str(self.redis_port),
                     'REDIS_USER': self.redis_user,
                     'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
-                    'REDIS_USER_DATABASE_ID': str(system_json['redis']['db']),
+                    'REDIS_USER_DATABASE_ID': str(self.redis_data_db),
+                    'REDIS_CONFIG_DATABASE_ID': str(self.redis_config_db),
                     'MOUNT_POINT': system_json['fs']['mount_point'],
+                    'REPLICATION_USER_PASSWORD': self.replication_user_password,
                 }
 
                 for (key, value) in env_vars.items():
@@ -66,9 +69,10 @@ class Properties:
             self.redis_port = os.environ.get('REDIS_PORT', 6379)
             self.redis_user = os.environ.get('REDIS_USER', 'default')
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
-            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 0)
-            self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+            self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
+            self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
+            self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
         self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
@@ -107,6 +111,7 @@ class Properties:
             return self.cache['db_instance_config']
 
         config = json.loads(self.redis.hget(key, 'primary_db'))
+        config['password'] = self.replication_user_password
         self.cache[key] = config
 
         return config
@@ -188,6 +193,10 @@ class Properties:
 
         db_instance_json = system_json['db_instances'][str(db_instance_id)]
         self.redis.hset(db_instance_key, 'primary_db', json.dumps(db_instance_json['primary_db']))
+
+        # set the hostnames for ingestion and proxy instances
+        self.redis.hset(db_instance_key, 'hostname:ingestion', db_instance_json['hostname:ingestion'])
+        self.redis.hset(db_instance_key, 'hostname:proxy', db_instance_json['hostname:proxy'])
 
         db_ids = json.dumps(db_instance_json['database_ids'])
         self.redis.hset(db_instance_key, 'database_ids', db_ids)

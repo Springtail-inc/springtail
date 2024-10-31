@@ -118,6 +118,15 @@ namespace springtail {
         /** Helper to send notification on liveness pubsub */
         static void publish_liveness_notification(const std::string &msg);
 
+        /** Helper to get xid mgr hostname */
+        static std::string get_xid_mgr_hostname() { return _get_ingestion_hostname(); }
+
+        /** Helper to get sys tbl mgr hostname */
+        static std::string get_sys_tbl_mgr_hostname() { return _get_ingestion_hostname(); }
+
+        /** Helper to get write cache hostname */
+        static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
+
     private:
         /** static _instance singleton */
         static Properties *_instance;
@@ -162,6 +171,11 @@ namespace springtail {
             assert(_instance->_redis_config_client != nullptr);
             return _instance->_redis_config_client;
         }
+
+        /**
+         * @brief Get the hostname for the ingestion instance machine
+         */
+        static std::string _get_ingestion_hostname();
 
         // delete move constructor
         Properties(const Properties &)     = delete;

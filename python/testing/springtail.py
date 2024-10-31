@@ -25,6 +25,7 @@ from common import (
     run_command,
     set_dir_writable,
     is_linux,
+    makedir
 )
 
 from sysutils import (
@@ -63,21 +64,31 @@ ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
-def get_lib_ext():
+def get_lib_ext() -> str:
     """Get the library extension for the current platform."""
     if is_linux():
         return 'so'
     return 'dylib'
 
 
-def cleanup_filesystem(props):
+def cleanup_filesystem(props : Properties) -> None:
     """Clear the file system data at the given mount path."""
     # Get the mount path
     mount_path = props.get_mount_path()
     sys_config = props.get_system_config()
-    log_path = sys_config['logging']['log_path']
+    log_path = props.get_log_path()
+    pid_path = props.get_pid_path()
 
     clean_fs(mount_path, log_path)
+
+    # Create log path if it doesn't exist
+    makedir(log_path, '777')
+
+    # Create the mount path if it doesn't exist
+    makedir(mount_path, '755')
+
+    # Check that the pid path exists; if not try to create it
+    makedir(pid_path, '755')
 
 
 def connect_db_instance(props, db_name='postgres'):
@@ -220,7 +231,8 @@ def start_replication(props, build_dir):
     # Create the publication
     execute_sql(conn, f"CREATE PUBLICATION {quote_ident(pub_name, conn)} FOR ALL TABLES;")
 
-    # Create the replication slot
+    # Create the replication slot;
+    # NOTE: it the slot name needs to be globally unique
     execute_sql(conn, "SELECT pg_create_logical_replication_slot(%s, 'pgoutput');", slot_name)
 
     # Trigger scripts
@@ -259,29 +271,6 @@ def fdw_import(props, build_dir, config_file):
     shutil.copy(config_file, os.path.join(mount_path, 'system.json'))
     config_file = os.path.join(mount_path, 'system.json')
 
-    # hash of db names to set of schemas
-    dbs = {}
-    for db_config in db_configs:
-        includes = db_config['include']
-
-        # check for schemas in includes, if so fetch them
-        if '*' in includes['schemas']:
-            schemas = fetch_schemas(props, db_config['name'])
-        else:
-            schemas = includes['schemas']
-
-        # check for tables in includes, if so add their schemas
-        if 'tables' in includes:
-            for table in includes['tables']:
-                schemas.append(table['schema'])
-
-        if 'db_prefix' in fdw_config:
-            db_name = fdw_config['db_prefix'] + db_config['name']
-        else:
-            db_name = db_config['name']
-
-        dbs[db_name] = {'id': db_config['id'], 'schemas': set(schemas)}
-
     # Connect to the foreign data wrapper instance
     conn = connect_fdw_instance(props)
 
@@ -302,52 +291,7 @@ def fdw_import(props, build_dir, config_file):
         if len(rows) == 0 or rows[0][0] != config_file:
             raise Exception("Failed to set the config file path")
 
-    # drop and create the databases
-    print("Creating databases on FDW...")
-    for db_name in dbs:
-        execute_sql(conn, f"DROP DATABASE IF EXISTS {quote_ident(db_name, conn)};")
-        execute_sql(conn, f"CREATE DATABASE {quote_ident(db_name, conn)};")
-
-    # setup primary db
-    execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-    execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-
-    conn.close()
-
-    # get the fdw id
-    fdw_id = props.get_fdw_id()
-
-    # connect to each database, create the foreign server and import the foreign schema
-    for db in dbs:
-        db_name = db
-        db_id = dbs[db]['id']
-        schemas = dbs[db]['schemas']
-
-        # get the current xid from xid mgr for this database
-        xid = run_command(os.path.join(build_dir, 'src/xid_mgr/xid_client'), ['-g', '-d', db_id])
-
-        # Connect to the database
-        conn = connect_fdw_instance(props, db_name)
-
-        # Create the foreign server
-        execute_sql(conn, f"DROP EXTENSION IF EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-        execute_sql(conn, f"CREATE EXTENSION IF NOT EXISTS {quote_ident(FDW_WRAPPER, conn)};")
-        execute_sql(conn, f"DROP SERVER IF EXISTS {quote_ident(FDW_SERVER_NAME, conn)} CASCADE;")
-        execute_sql(conn, "CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id %s, db_id %s, db_name %s, schema_xid %s);".format(quote_ident(FDW_SERVER_NAME, conn), quote_ident(FDW_WRAPPER, conn)), (fdw_id, db_id, db_name, xid))
-
-        # Import the foreign schema
-        for schema in schemas:
-            execute_sql(conn, f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema, conn)};")
-            execute_sql(conn, f"IMPORT FOREIGN SCHEMA {quote_ident(schema, conn)} FROM SERVER {quote_ident(FDW_SERVER_NAME, conn)} INTO {quote_ident(schema, conn)}")
-
-        # import the system catalog
-        execute_sql(conn, f"CREATE SCHEMA IF NOT EXISTS {quote_ident(FDW_SYSTEM_CATALOG, conn)};")
-        execute_sql(conn, f"IMPORT FOREIGN SCHEMA {quote_ident(FDW_SYSTEM_CATALOG, conn)} FROM SERVER {quote_ident(FDW_SERVER_NAME, conn)} INTO {quote_ident(FDW_SYSTEM_CATALOG, conn)}")
-
-        # Close the connection
-        conn.close()
-
-    # startup pg_ddl_daemon
+    # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
     start_daemons(build_dir, FDW_DAEMONS)
 
@@ -403,16 +347,6 @@ def check_config(props):
     # if fdw_prefix is not set
     if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
         raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
-
-    # Check that the pid path exists; if not try to create it
-    pid_path = props.get_pid_path()
-    if not os.path.exists(pid_path):
-        try:
-            user = os.environ.get('USER') or os.environ.get('USERNAME')
-            run_command('sudo', ['mkdir', '-p', pid_path])
-            run_command('sudo', ['chown', '-R', f'{user}:{user}', pid_path])
-        except Exception as e:
-            raise Exception(f"Failed to create pid path: {pid_path}, please create it manually.")
 
 
 def check_log_writable(props):

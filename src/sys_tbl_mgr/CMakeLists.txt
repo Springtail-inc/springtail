@@ -41,3 +41,6 @@ add_dsymutil_command(test_sys_tbl_mgr)
 
 # hook tests into gtest framework
 gtest_discover_tests(test_sys_tbl_mgr)
+
+# install daemon to install directory
+install(TARGETS sys_tbl_mgr_daemon RUNTIME DESTINATION bin/system)

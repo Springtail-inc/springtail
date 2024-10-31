@@ -56,13 +56,10 @@ namespace springtail {
         // init channel pool
         int max_connections;
         int port;
-        std::string server;
         Json::get_to<int>(client_json, "connections", max_connections, 8);
         Json::get_to<int>(server_json, "port", port, 55051);
 
-        if (!Json::get_to<std::string>(client_json, "server", server)) {
-            throw Error("Host not found in write_cache.server settings");
-        }
+        std::string server = Properties::get_write_cache_hostname();
 
         // construct the thrift client pool.
         // First argument is a factory object that constructs a thrift clients

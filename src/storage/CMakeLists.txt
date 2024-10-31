@@ -110,3 +110,5 @@ gtest_discover_tests(test_table_mgr
 gtest_discover_tests(test_cache
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test)
 gtest_discover_tests(test_io)
+
+install(TARGETS dump_system_tables dump_headers RUNTIME DESTINATION bin/utils)

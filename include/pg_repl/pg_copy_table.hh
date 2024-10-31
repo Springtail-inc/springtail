@@ -6,6 +6,8 @@
 #include <vector>
 #include <optional>
 
+#include <nlohmann/json.hpp>
+
 #include <common/common.hh>
 
 #include <pg_repl/libpq_connection.hh>
@@ -176,6 +178,14 @@ namespace springtail
                              std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
 
         /**
+         * @brief Get table oids based on json specifying schema and table includes
+         * @param include_json json object specifying schema and table includes
+         * @param table_oids output: table name, schema name, oid
+         */
+        void _get_table_oids(const nlohmann::json &include_json,
+                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+
+        /**
          * @brief Copy table from remote system
          */
         void _copy_table(uint64_t db_id,
@@ -212,9 +222,10 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr> _internal_copy(uint64_t db_id,
             uint64_t target_xid,
-            std::optional<std::string> schema_name,
-            std::optional<std::pair<std::string, std::string>> table_name,
-            std::optional<std::vector<uint32_t>> table_oids);
+            std::optional<std::string> schema_name = std::nullopt,
+            std::optional<std::pair<std::string, std::string>> table_name = std::nullopt,
+            std::optional<std::vector<uint32_t>> table_oids = std::nullopt,
+            std::optional<nlohmann::json> include_json = std::nullopt);
 
     public:
 
@@ -261,7 +272,7 @@ namespace springtail
         /**
          * @brief Copy all tables from remote system
          * @param db_id database id
-         * @param table_oid table oid
+         * @param xid target xid
          * @return PgCopyResultPtr
          */
         static std::vector<PgCopyResultPtr>
@@ -270,6 +281,7 @@ namespace springtail
         /**
          * @brief Copy all tables in single schema from remote system
          * @param db_id database id
+         * @param xid target xid
          * @param table_oid table oid
          * @return PgCopyResultPtr
          */
@@ -280,6 +292,7 @@ namespace springtail
         /**
          * @brief Copy a single table from remote system
          * @param db_id database id
+         * @param xid target xid
          * @param table_oid table oids (vector)
          * @return PgCopyResultPtr
          */
@@ -290,6 +303,7 @@ namespace springtail
         /**
          * @brief Copy a single table from remote system
          * @param db_id database id
+         * @param xid target xid
          * @param schema_name schema name
          * @param table_name table name
          * @return PgCopyResultPtr
@@ -298,5 +312,17 @@ namespace springtail
             copy_table(uint64_t db_id, uint64_t xid,
                        const std::string &schema_name,
                        const std::string &table_name);
+
+        /**
+         * @brief Copy tables/schemas based on json specifying
+         *        schema and table includes
+         * @param db_id database id
+         * @param xid target xid
+         * @param include_json json object specifying schema and table includes
+         * @return std::vector<PgCopyResultPtr>
+         */
+        static std::vector<PgCopyResultPtr>
+            copy_table(uint64_t db_id, uint64_t xid,
+                       const nlohmann::json &include_json);
     };
 }

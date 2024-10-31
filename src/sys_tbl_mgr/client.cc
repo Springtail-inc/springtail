@@ -57,13 +57,10 @@ namespace springtail::sys_tbl_mgr {
         // init channel pool
         int max_connections;
         int port;
-        std::string server;
         Json::get_to<int>(client_json, "connections", max_connections, 8);
         Json::get_to<int>(server_json, "port", port, 55051);
 
-        if (!Json::get_to<std::string>(client_json, "server", server)) {
-            throw Error("Host not found in sys_tbl_mgr.server settings");
-        }
+        std::string server = Properties::get_sys_tbl_mgr_hostname();
 
         // construct the thrift client pool.
         // First argument is a factory object that constructs a thrift clients
@@ -391,7 +388,7 @@ namespace springtail::sys_tbl_mgr {
 
         return c.client->exists(request);
     }
-    
+
     std::string
     Client::swap_sync_table(const TableRequest &create,
                             const UpdateRootsRequest &roots)

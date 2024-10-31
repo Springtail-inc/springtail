@@ -6,7 +6,7 @@ import platform
 import re
 from typing import Dict, List, Optional
 
-def connect_db(dbname : str, username : str, password :str, host : str, port : int, autocommit : bool=True) -> psycopg2.extensions.connection:
+def connect_db(dbname : str, username : str, password : str, host : str, port : int, autocommit : bool=True) -> psycopg2.extensions.connection:
     """Connect to the given database with the given username, password, host, and port."""
     print(f"Connecting to database: {dbname} with username: {username} and host: {host}")
     try:
@@ -69,7 +69,7 @@ def execute_sql_select(conn, sql : str, args=None) -> List:
     return result
 
 
-def running_pids(names : List[str]) -> tuple:
+def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
     """Return a list of process IDs for the given process names."""
     pids = []
     not_running = []
@@ -86,7 +86,7 @@ def running_pids(names : List[str]) -> tuple:
     return (pids, not_running)
 
 
-def kill_processes(names : List[str]):
+def kill_processes(names : List[str]) -> None:
     """Kill the processes with the given names."""
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] in names:
@@ -140,7 +140,7 @@ def grep_file(file_path: str, search_strings: List[str]) -> bool:
         return False
 
 
-def remove_ansi_escapes(text):
+def remove_ansi_escapes(text : str) -> str:
     """Remove ANSI escape sequences from a string."""
     # Regular expression pattern to match ANSI escape sequences
     ansi_escape_pattern = r'\x1B\[\d{1,2}m'
@@ -168,16 +168,16 @@ def search_and_capture(filename: str, search_strings: List[str]) -> List[str]:
     return captured_output
 
 
-def set_dir_writable(dir) -> None:
+def set_dir_writable(dir : str) -> None:
     """Check the log path is writable."""
     if not os.path.exists(dir):
         # make directory writable by owner, group, and others
-        os.makedirs(dir, mode=0o777)
+        makedir(dir, '777')
         return
 
     if not os.access(dir, os.W_OK) or not (os.stat(dir).st_mode & 0o0007 == 0o0007):
         # set writable by owner, group, and others
-        os.chmod(dir, 0o777)
+        run_command('sudo', ['chmod', '777', dir])
 
 
 def is_linux() -> bool:
@@ -186,3 +186,17 @@ def is_linux() -> bool:
     Returns: True if the system is Linux, False otherwise.
     """
     return platform.system() == 'Linux'
+
+
+def makedir(path : str, mode : str = '755') -> None:
+    """Make the directory at the given path."""
+    if not os.path.exists(path):
+        try:
+            print(f"Creating directory: {path} with mode: {mode}")
+            user = os.environ.get('USER') or os.environ.get('USERNAME')
+            run_command('sudo', ['mkdir', '-p', path])
+            run_command('sudo', ['chown', '-R', f'{user}:{user}', path])
+            run_command('sudo', ['chmod', mode, path])
+        except Exception as e:
+            print(f"Failed to create directory: {path}")
+            raise e

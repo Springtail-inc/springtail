@@ -26,6 +26,7 @@ namespace springtail::environment {
         {"REDIS_USER", STR, "redis", "user"},
         {"REDIS_PASSWORD", STR, "redis", "password"},
         {"REDIS_USER_DATABASE_ID", UINT32, "redis", "db"},
+        {"REDIS_CONFIG_DATABASE_ID", UINT32, "redis", "config_db"},
         {"REDIS_PORT", UINT32, "redis", "port"},
         {"ORGANIZATION_ID", STR, "org", "organization_id"},
         {"ACCOUNT_ID", STR, "org", "account_id"},
@@ -33,6 +34,7 @@ namespace springtail::environment {
         {"LUSTRE_DNS_NAME", STR, "fs", "dns_name"},
         {"LUSTRE_MOUNT_NAME", STR, "fs", "mount_name"},
         {"MOUNT_POINT", STR, "fs", "mount_point"},
-        {"FDW_ID", STR, "org", "fdw_id"}
+        {"FDW_ID", STR, "org", "fdw_id"},
+        {"REPLICATION_USER_PASSWORD", STR, "org", "replication_user_password"}
     };
 } // namespace springtail::environment
