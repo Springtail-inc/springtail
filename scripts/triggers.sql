@@ -103,7 +103,8 @@ BEGIN
         SELECT json_agg(json_col)
         FROM (
             SELECT json_build_object('name', column_name,
-                'position', ordinal_position
+                'position', ordinal_position,
+                'idx_position', array_position(pgi.indkey, pga.attnum)
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
@@ -135,6 +136,7 @@ BEGIN
                 'identity', obj.object_identity,
                 'table_oid', tab_obj.table_oid::bigint,
                 'table_name', tab_obj.table_name,
+                'is_unique', tab_obj.is_unique,
                 'is_unique', tab_obj.is_unique,
                 'columns', json_columns );
 

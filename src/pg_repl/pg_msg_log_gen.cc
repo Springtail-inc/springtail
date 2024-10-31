@@ -229,6 +229,7 @@ namespace springtail {
             nlohmann::json col;
             col["name"] = c.column_name;
             col["position"] = c.position;
+            col["idx_position"] = c.idx_position;
             columns_json.push_back(col);
         }
 
@@ -673,6 +674,7 @@ namespace springtail {
             PgMsgSchemaIndexColumn col;
             col.column_name = c["name"];
             col.position = c["position"];
+            col.idx_position = c["idx_position"];
             columns.push_back(col);
         }
         _log_gen.create_index(index, json["table_name"], json["table_oid"], columns);

@@ -1,7 +1,7 @@
 ### Do not modify in use by test_msg_stream.cc
 {"cmd":"begin"}
 {"cmd":"create table", "table": "table1", "columns":[{"name":"a", "is_nullable": false, "type": 5, "pg_type": 23, "is_pkey": true},{"name":"b", "is_nullable": true, "type":1, "pg_type":25, "is_pkey": false}]}
-{"cmd":"create index","columns":[{"name":"a","position":1}],"identity":"public.table1_a_idx","is_unique":false,"obj":"index","oid":92604,"schema":"public","table_name":"table1","table_oid":92594,"xid":2014}
+{"cmd":"create index","columns":[{"name":"a","position":1,"idx_position":1}],"identity":"public.table1_a_idx","is_unique":false,"obj":"index","oid":92604,"schema":"public","table_name":"table1","table_oid":92594,"xid":2014}
 {"cmd":"insert", "table": "table1", "row": ["1", "one"]}
 {"cmd":"insert", "table": "table1", "row": ["2", "two"]}
 {"cmd":"insert", "table": "table1", "row": ["3", "three"]}

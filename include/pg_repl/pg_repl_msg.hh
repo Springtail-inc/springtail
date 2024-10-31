@@ -190,6 +190,7 @@ namespace springtail
     struct PgMsgSchemaIndexColumn {
         std::string column_name;
         int position;        // position is maintained if column is renamed
+        int idx_position;        // position in the index 
     };
 
     struct PgMsgIndex {

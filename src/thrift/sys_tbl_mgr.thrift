@@ -58,6 +58,7 @@ struct TableStats {
 struct IndexColumn {
     1: string name,
     2: i32 position,
+    3: i32 idx_position
 }
 
 struct IndexInfo {

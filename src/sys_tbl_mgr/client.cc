@@ -152,6 +152,7 @@ namespace springtail::sys_tbl_mgr {
             IndexColumn column;
             column.__set_name(col.column_name);
             column.__set_position(col.position);
+            column.__set_position(col.idx_position);
             request.index.columns.push_back(column);
         }
         return request;

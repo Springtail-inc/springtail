@@ -905,6 +905,7 @@ namespace springtail {
             const auto& v  = el.value();
             v["name"].get_to(col.column_name);
             v["position"].get_to(col.position);
+            v["idx_position"].get_to(col.idx_position);
             msg.columns.push_back(col);
         }
         //_decode_schema_columns(json["columns"], msg.columns);
