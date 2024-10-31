@@ -80,13 +80,13 @@ namespace springtail::pg_log_mgr {
                     }
                     case PgMsgEnum::CREATE_INDEX:
                     {
-                        auto &index_msg = std::get<PgMsgIndex>(msg->msg);
+                        const auto &index_msg = std::get<PgMsgIndex>(msg->msg);
                         _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming);
                         break;
                     }
                     case PgMsgEnum::DROP_INDEX:
                     {
-                        auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
+                        const auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
                         _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming);
                         break;
                     }

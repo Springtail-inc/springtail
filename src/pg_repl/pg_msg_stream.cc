@@ -873,7 +873,7 @@ namespace springtail {
     }
 
     PgMsgPtr
-    PgMsgStreamReader::_decode_create_index(PgMsgMessage &message, char *buffer, int len) {
+    PgMsgStreamReader::_decode_create_index(const PgMsgMessage &message, char *buffer, int len) {
         // convert msg data to string (it is not null terminated)
         // and convert string to json
         std::string data_str(buffer, len);
@@ -916,7 +916,7 @@ namespace springtail {
     }
 
     PgMsgPtr 
-    PgMsgStreamReader::_decode_drop_index(PgMsgMessage &message, char *buffer, int len) {
+    PgMsgStreamReader::_decode_drop_index(const PgMsgMessage &message, char *buffer, int len) {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
