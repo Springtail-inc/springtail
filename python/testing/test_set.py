@@ -128,11 +128,14 @@ class TestSet:
         print(f'Total tests run: {passed_tests + failed_tests}')
         print(f'Tests passed: {passed_tests}')
         print(f'Tests failed: {failed_tests}')
+
         print('Test durations:')
         for result in results:
             if result['result'] == 'SUCCESS':
                 print(f'\t{result["name"]}: {result["duration"]}')
+
         print('Test errors:')
+        for result in results:
             if result['error']:
                 print(f'\t{result["name"]}: {result["error"]}')
 

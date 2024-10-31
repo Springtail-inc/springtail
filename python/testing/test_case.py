@@ -1,4 +1,5 @@
 import concurrent.futures
+import csv
 import logging
 import os
 import psycopg2
@@ -16,7 +17,9 @@ class TestCase:
                  props: springtail.Properties,
                  valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
         """Initialize the test case"""
-        self._filename = filename
+        self._filename = os.path.abspath(filename)
+        self._name = os.path.basename(self._filename)
+        self._directory = os.path.dirname(self._filename)
         self._props = props
         self._status = 'INIT'
         self._result = 'UNKNOWN'
@@ -130,7 +133,7 @@ class TestCase:
                             self._raise_error(f'{line_num}: "load_csv" must be in either the "setup", "test", or "cleanup" sections')
                         self._append_command({
                             'type': 'load_csv',
-                            'file': directive[1],
+                            'file': os.path.join(self._directory, directive[1]),
                             'table': directive[2]
                         }, section, is_threaded, cur_txn, line_num)
 
@@ -307,7 +310,7 @@ class TestCase:
         self._status = 'SETUP_BEGIN'
         self._result = 'FAILED' # test is assumed failed until it succeeds
 
-        logging.info(f'{self._filename} -- Running setup()')
+        logging.info(f'{self._name} -- Running setup()')
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
@@ -334,7 +337,7 @@ class TestCase:
             self._raise_error('Must run test() first for individual tests')
         self._status = 'TEST_BEGIN'
 
-        logging.info(f'{self._filename} -- Running test()')
+        logging.info(f'{self._name} -- Running test()')
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
@@ -373,8 +376,14 @@ class TestCase:
                     # wait for completion of all threads
                     concurrent.futures.wait(futures)
 
+        # force a commit on all connections at the end of the test section
+        for txn in self._connections:
+            self._connections[txn].commit()
+
+        # pick a connection to run the sync against, any will do
+        txn = next(iter(self._txns))
+
         # wait for the primary and replica to come into sync
-        txn = next(iter(self._txns)) # choose any txn
         self._execute_command({
             'type': 'sync',
             'txn': txn,
@@ -398,7 +407,7 @@ class TestCase:
             self._raise_error('Must run verify() after test()')
         self._status = 'VERIFY_BEGIN'
 
-        logging.info(f'{self._filename} -- Running verify()')
+        logging.info(f'{self._name} -- Running verify()')
 
         # execute the verification commands against both databases, compare the results
         for command in self._sections['verify'][0]['sequential']:
@@ -407,7 +416,7 @@ class TestCase:
 
             if primary_result != replica_result:
                 self._raise_error(
-                    f"Verification failed for {self._filename}:\n"
+                    f"Verification failed for {self._name}:\n"
                     f"Statement: {command['sql']}\n"
                     f"Main DB: {primary_result}\n"
                     f"Replica DB: {replica_result}"
@@ -422,7 +431,7 @@ class TestCase:
         all database connections.
 
         """
-        logging.info(f'{self._filename} -- Running cleanup()')
+        logging.info(f'{self._name} -- Running cleanup()')
 
         # re-connect to the database in case there was an error on the connection
         if self._fdw:
@@ -460,7 +469,7 @@ class TestCase:
 
     def get_result(self) -> dict:
         return {
-            'name': os.path.basename(self._filename),
+            'name': self._name,
             'status': self._status,
             'result': self._result,
             'duration': self._duration,
