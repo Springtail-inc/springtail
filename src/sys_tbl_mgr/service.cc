@@ -44,6 +44,51 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
+    Service::create_index(DDLStatement& _return,
+                          const IndexRequest &request)
+    {
+        SPDLOG_INFO("got create_index()");
+
+        // acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_write_mutex);
+
+        // perform the CREATE INDEX
+        auto &&ddl = _create_index(request);
+
+        // serialize the JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_create_index(const IndexRequest &request)
+    {
+        return {};
+    }
+
+    void
+    Service::drop_index(DDLStatement& _return,
+                          const DropIndexRequest &request)
+    {
+        SPDLOG_INFO("got drop_index()");
+
+        // acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_write_mutex);
+
+        // perform the CREATE INDEX
+        auto &&ddl = _drop_index(request);
+
+        // serialize the JSON and return
+        _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    nlohmann::json
+    Service::_drop_index(const DropIndexRequest &request)
+    {
+        return {};
+    }
+
+
+    void
     Service::create_table(DDLStatement& _return,
                           const TableRequest &request)
     {

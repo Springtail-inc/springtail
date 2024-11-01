@@ -1,5 +1,4 @@
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -15,6 +14,15 @@
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/exception.hh>
+
+namespace {
+    std::string _get_identity(const auto& json) {
+        std::string identity;
+        json["identity"].get_to(identity);
+        auto const pos = identity.find_last_of('.');
+        return identity.substr(pos + 1);
+    }
+};
 
 namespace springtail {
 
@@ -834,7 +842,7 @@ namespace springtail {
     }
 
     void
-    PgMsgStreamReader::_decode_schema_columns(nlohmann::json &column_json,
+    PgMsgStreamReader::_decode_schema_columns(const nlohmann::json &column_json,
                                               std::vector<PgMsgSchemaColumn> &columns)
     {
         // iterate through json array
@@ -843,10 +851,10 @@ namespace springtail {
             nlohmann::json json = el.value();
 
             json["name"].get_to(column.column_name);
+            json["position"].get_to(column.position);
             json["pg_type"].get_to(column.pg_type);
             json["is_nullable"].get_to(column.is_nullable);
             json["is_pkey"].get_to(column.is_pkey);
-            json["position"].get_to(column.position);
             json["is_generated"].get_to(column.is_generated);
 
             if (!json["pkey_pos"].is_null()) {
@@ -862,6 +870,79 @@ namespace springtail {
             column.type = static_cast<uint8_t>(pg_msg::convert_pg_type(column.pg_type));
             columns.push_back(column);
         }
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_create_index(const PgMsgMessage &message, char *buffer, int len) {
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        PgMsgIndex msg;
+
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "index") {
+            SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
+            assert(object_type == "index");
+            return {};
+        }
+
+        msg.xid = message.xid; // only valid in streaming mode
+        msg.lsn = message.lsn;
+        json["schema"].get_to(msg.schema);
+        json["oid"].get_to(msg.oid);
+        json["schema"].get_to(msg.schema);
+        json["table_name"].get_to(msg.table_name);
+        json["table_oid"].get_to(msg.table_oid);
+        json["is_unique"].get_to(msg.is_unique);
+
+        msg.index = _get_identity(json);
+
+        const nlohmann::json& cols = json["columns"];
+        for (const auto &el: cols.items()) {
+            PgMsgSchemaIndexColumn col;
+            const auto& v  = el.value();
+            v["name"].get_to(col.column_name);
+            v["position"].get_to(col.position);
+            v["idx_position"].get_to(col.idx_position);
+            msg.columns.push_back(col);
+        }
+        //_decode_schema_columns(json["columns"], msg.columns);
+
+        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_INDEX);
+        decoded_msg->msg.emplace<PgMsgIndex>(msg);
+
+        return decoded_msg;
+    }
+
+    PgMsgPtr 
+    PgMsgStreamReader::_decode_drop_index(const PgMsgMessage &message, char *buffer, int len) {
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        PgMsgDropIndex msg;
+
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "index") {
+            SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
+            return {};
+        }
+
+        msg.xid = message.xid; // only valid in streaming mode
+        msg.lsn = message.lsn;
+        json["schema"].get_to(msg.schema);
+        json["oid"].get_to(msg.oid);
+
+        // identity in form: schema.table; parse out table; no object_name in trigger
+        msg.index = _get_identity(json);
+
+        PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
+        decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
+
+        return decoded_msg;
     }
 
     PgMsgPtr
@@ -889,10 +970,7 @@ namespace springtail {
         json["oid"].get_to(table_msg.oid);
 
         // identity in form: schema.table; parse out table; no object_name in trigger
-        std::string identity;
-        json["identity"].get_to(identity);
-        auto const pos = identity.find_last_of('.');
-        table_msg.table = identity.substr(pos + 1);
+        table_msg.table = _get_identity(json);
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 
@@ -983,15 +1061,20 @@ namespace springtail {
         _decode_string(msg.prefix_str);
 
         int data_len = _recvint32();
-        char buffer[data_len];
-        _read_buffer(buffer, data_len);
+        std::vector<char> buffer;
+        buffer.resize(data_len);
+        _read_buffer(buffer.data(), data_len);
 
         if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_TABLE) {
-            return _decode_create_table(msg, buffer, data_len);
+            return _decode_create_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_TABLE) {
-            return _decode_alter_table(msg, buffer, data_len);
+            return _decode_alter_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TABLE) {
-            return _decode_drop_table(msg, buffer, data_len);
+            return _decode_drop_table(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_INDEX) {
+            return _decode_create_index(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_INDEX) {
+            return _decode_drop_index(msg, buffer.data(), data_len);
         } else {
             return nullptr;
         }

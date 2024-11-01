@@ -37,6 +37,12 @@ namespace springtail::sys_tbl_mgr {
         /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
 
+        /** Creates an index within the system tables. */
+        void create_index(DDLStatement& _return, const IndexRequest &request) override;
+
+        /** Drops an index within the system tables. */
+        void drop_index(DDLStatement& _return, const DropIndexRequest &request) override;
+
         /** Creates a table within the system tables. */
         void create_table(DDLStatement& _return, const TableRequest &request) override;
 
@@ -233,6 +239,16 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The ID of the system table.
          */
         MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id);
+
+        /**
+         * Performs a create_index() assuming that the correct locks are already held.
+         */
+        nlohmann::json _create_index(const IndexRequest &request);
+
+        /**
+         * Performs a drop_index() assuming that the correct locks are already held.
+         */
+        nlohmann::json _drop_index(const DropIndexRequest &request);
 
         /**
          * Performs a create_table() assuming that the correct locks are already held.
