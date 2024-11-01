@@ -25,16 +25,34 @@ namespace springtail::pg_fdw {
         "WHERE schema_name NOT LIKE 'pg_%' "
         " AND schema_name <> 'information_schema'";
 
+    static constexpr char CREATE_FDW_USER[] =
+        "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}'";
+
+    /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
+    static constexpr char CREATE_SCHEMA_WITH_GRANTS[] =
+        "CREATE SCHEMA {} "
+        "  GRANT USAGE ON SCHEMA {} TO {} "
+        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
+        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
+
     // static vars for singleton
     PgDDLMgr* PgDDLMgr::_instance {nullptr};
     std::once_flag PgDDLMgr::_init_flag;
     std::once_flag PgDDLMgr::_shutdown_flag;
 
     void
-    PgDDLMgr::startup(const std::string &fdw_id, const std::optional<std::string> &hostname)
+    PgDDLMgr::startup(const std::string &fdw_id,
+                      const std::string &username,
+                      const std::string &password,
+                      const std::optional<std::string> &hostname)
     {
         // set fdw id
         _fdw_id = fdw_id;
+
+        // set username and password for ddl mgr user
+        // this user has more permissions than the fdw user
+        _username = username;
+        _password = password;
 
         // fetch config for fdw (host, port, user, password)
         nlohmann::json fdw_config;
@@ -52,18 +70,23 @@ namespace springtail::pg_fdw {
         } else {
             Json::get_to<std::string>(fdw_config, "host", _hostname);
         }
-
-        Json::get_to<std::string>(fdw_config, "fdw_user", _username);
-        Json::get_to<std::string>(fdw_config, "password", _password);
         Json::get_to<int>(fdw_config, "port", _port);
+
+        // get fdw user for proxy to use, this user only has select permissions
+        std::string fdw_username, fdw_password;
+        Json::get_to<std::string>(fdw_config, "fdw_user", fdw_username);
+        Json::get_to<std::string>(fdw_config, "password", fdw_password);
 
         if (fdw_config.contains("db_prefix")) {
             // if the FDW is using a prefix, prepend it
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
+        SPDLOG_DEBUG("FDW ID: {}, Host: {}, Port: {}, Username: {}, Password: {}, FDW Username: {}, FDW Password: {}",
+                     _fdw_id, _hostname, _port, _username, _password, fdw_username, fdw_password);
+
         // initialize the fdw, setup fdw server, import foreign schemas, etc
-        _init_fdw();
+        _init_fdw(fdw_username, fdw_password);
 
         // start the main thread
         _main_thread = std::thread(&PgDDLMgr::_main_thread_fn, this);
@@ -151,14 +174,23 @@ namespace springtail::pg_fdw {
         return schemas;
     }
 
-
     void
-    PgDDLMgr::_init_fdw()
+    PgDDLMgr::_init_fdw(const std::string &username, const std::string &password)
     {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
         LibPqConnectionPtr conn = _connect_fdw("postgres");
+
+        // see if the fdw user exists, if not create it
+        _fdw_username = username;
+        conn->exec(fmt::format("SELECT 1 FROM pg_roles WHERE rolname = '{}'", username));
+        if (conn->ntuples() == 0) {
+            // create the user
+            conn->clear();
+            conn->exec(fmt::format(CREATE_FDW_USER, username, password));
+            conn->clear();
+        }
 
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
@@ -173,6 +205,10 @@ namespace springtail::pg_fdw {
             conn->clear();
 
             conn->exec(create_db);
+            conn->clear();
+
+            // grant connect to the fdw user
+            conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
             conn->clear();
         }
 
@@ -218,6 +254,16 @@ namespace springtail::pg_fdw {
                                        escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
                                        escaped_schema));
                 conn->clear();
+
+                // grant usage and select on all tables and sequences to the fdw user
+                conn->exec(fmt::format("GRANT USAGE ON SCHEMA {} TO {}", escaped_schema, _fdw_username));
+                conn->clear();
+                conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
+                conn->clear();
+                conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
+                conn->clear();
+
+                _db_schemas[db_id].insert(schema);
             }
 
             // import catalog schema
@@ -323,10 +369,12 @@ namespace springtail::pg_fdw {
         LibPqConnectionPtr conn = _connect_fdw(_db_prefix + db_name);
 
         try {
+            std::set<std::string> schemas;
+
             // generate a DDL statement for each JSON in the transaction
             std::vector<std::string> txn;
             for (auto ddl : ddls.at("ddls")) {
-                txn.push_back(_gen_sql_from_json(conn, server_name, ddl));
+                txn.push_back(_gen_sql_from_json(conn, server_name, ddl, schemas));
             }
 
             // generate a statement to alter the server options with the schema XID
@@ -334,8 +382,15 @@ namespace springtail::pg_fdw {
                                       server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                       schema_xid));
 
+            // find the difference between the schemas in the db and the schemas in the DDL
+            // these will be added as new schemas
+            std::set<std::string> new_schemas;
+            std::set_difference(schemas.begin(), schemas.end(),
+                                _db_schemas[db_id].begin(), _db_schemas[db_id].end(),
+                                std::inserter(new_schemas, new_schemas.begin()));
+
             // execute the set of statements
-            _execute_ddl(conn, schema_xid, txn);
+            _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
 
             // close the connection
             conn->disconnect();
@@ -352,8 +407,10 @@ namespace springtail::pg_fdw {
 
     void
     PgDDLMgr::_execute_ddl(LibPqConnectionPtr conn,
+                           uint64_t db_id,
                            uint64_t schema_xid,
-                           const std::vector<std::string> &txn)
+                           const std::vector<std::string> &txn,
+                           const std::set<std::string> &schemas)
     {
         // get current schema xid
         std::string xid_sql = "SELECT option FROM ("
@@ -384,6 +441,20 @@ namespace springtail::pg_fdw {
         // start a transaction
         conn->start_transaction();
 
+        // go through each new schema and create it
+        for (const auto &schema : schemas) {
+            std::string escaped_schema = conn->escape_identifier(schema);
+
+            conn->exec(fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
+                                   escaped_schema, _fdw_username,
+                                   escaped_schema, _fdw_username,
+                                   escaped_schema, _fdw_username));
+            conn->clear();
+
+            // add to schema map
+            _db_schemas[db_id].insert(schema);
+        }
+
         // exectute each DDL statement
         for (const auto &sql : txn) {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Executing DDL: {}", sql);
@@ -397,7 +468,8 @@ namespace springtail::pg_fdw {
     std::string
     PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
-                                 nlohmann::json &ddl)
+                                 nlohmann::json &ddl,
+                                 std::set<std::string> &schemas)
     {
         assert(ddl.is_object());
         assert(ddl.contains("action"));
@@ -422,19 +494,25 @@ namespace springtail::pg_fdw {
                     });
             }
 
+            // for create table get the schema name
+            schemas.insert(ddl.at("schema").get<std::string>());
+
             // generate the CREATE TABLE statement
             return _gen_fdw_table_sql(conn, server_name, ddl.at("schema"), ddl.at("table"),
                                       ddl.at("tid"), columns);
         }
 
         if (action == "rename") {
-            return fmt::format("ALTER FOREIGN TABLE {} RENAME TO {};",
+            return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {}.{};",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
+                               conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_table").get<std::string>()));
         }
 
         if (action == "drop") {
-            return fmt::format("DROP FOREIGN TABLE {};",
+            return fmt::format("DROP FOREIGN TABLE {}.{};",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
 
@@ -454,7 +532,8 @@ namespace springtail::pg_fdw {
 
             uint32_t type_oid = col.at("type").get<uint32_t>();
             auto &&type_map = _query_type_names(conn, { type_oid });
-            return fmt::format("ALTER FOREIGN TABLE {} ADD COLUMN {} {} {};",
+            return fmt::format("ALTER FOREIGN TABLE {}.{} ADD COLUMN {} {} {};",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                type_map.at(type_oid),
@@ -462,13 +541,15 @@ namespace springtail::pg_fdw {
         }
 
         if (action == "col_drop") {
-            return fmt::format("ALTER FOREIGN TABLE {} DROP COLUMN {};",
+            return fmt::format("ALTER FOREIGN TABLE {}.{} DROP COLUMN {};",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
         }
 
         if (action == "col_rename") {
-            return fmt::format("ALTER FOREIGN TABLE {} RENAME COLUMN {} TO {};",
+            return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME COLUMN {} TO {};",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("old_name").get<std::string>()),
                                conn->escape_identifier(ddl.at("new_name").get<std::string>()));
@@ -476,7 +557,8 @@ namespace springtail::pg_fdw {
 
         if (action == "col_nullable") {
             auto &col = ddl.at("column");
-            return fmt::format("ALTER FOREIGN TABLE {} ALTER COLUMN {} {} NOT NULL;",
+            return fmt::format("ALTER FOREIGN TABLE {}.{} ALTER COLUMN {} {} NOT NULL;",
+                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                col.at("nullable").get<bool>() ? "DROP" : "SET");
@@ -487,14 +569,58 @@ namespace springtail::pg_fdw {
         assert(0);
     }
 
+    std::set<uint32_t>
+    PgDDLMgr::_type_map_difference(std::set<uint32_t> &pg_types,
+                                   std::map<uint32_t, std::string> &mapped_types)
+    {
+        std::set<uint32_t> diff;
+
+        // Iterators for map and set
+        auto map_it = _type_map.begin();
+        auto set_it = pg_types.begin();
+
+        // Loop through both containers
+        while (map_it != _type_map.end() && set_it != pg_types.end()) {
+            if (map_it->first < *set_it) {
+                // Key in map not in set
+                ++map_it;
+            } else if (map_it->first > *set_it) {
+                // Key in set not in map
+                diff.insert(*set_it);
+                ++set_it;
+            } else {
+                // Keys are equal, so they exist in both
+                mapped_types[map_it->first] = map_it->second;
+                ++map_it;
+                ++set_it;
+            }
+        }
+
+        // Add any remaining keys in the set
+        while (set_it != pg_types.end()) {
+            diff.insert(*set_it);
+            ++set_it;
+        }
+
+        return diff;
+    }
+
     std::map<uint32_t, std::string>
     PgDDLMgr::_query_type_names(LibPqConnectionPtr conn,
                                 std::set<uint32_t> pg_types)
     {
         std::map<uint32_t, std::string> type_map;
 
+        // find the missing type names
+        auto &&missing_oids = _type_map_difference(pg_types, type_map);
+        if (missing_oids.empty()) {
+            // have them all return the map
+            return type_map;
+        }
+
+        // otherwise query the database for the missing type names
         std::string &&query = fmt::format("SELECT oid, typname FROM pg_type WHERE oid IN ({})",
-                                          common::join_string(",", pg_types.begin(), pg_types.end()));
+                                          common::join_string(",", missing_oids.begin(), missing_oids.end()));
 
         conn->exec(query);
 
@@ -506,6 +632,7 @@ namespace springtail::pg_fdw {
 
             // store the mapping
             type_map[oid] = type_name;
+            _type_map[oid] = type_name;
         }
         conn->clear();
 

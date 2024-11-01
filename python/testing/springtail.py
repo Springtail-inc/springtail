@@ -278,7 +278,17 @@ def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
 
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
-    start_daemons(build_dir, FDW_DAEMONS)
+
+    # add args for username password for fdw daemon for ddl user
+    daemons = []
+    for d in FDW_DAEMONS:
+        if d[0] == 'pg_ddl_daemon':
+            s = d[2]
+            daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
+        else:
+            daemons.append(d)
+    print("Daemons: ", daemons)
+    start_daemons(build_dir, daemons)
 
 
 def wait_for_running(props : Properties) -> None:

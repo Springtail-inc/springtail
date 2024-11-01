@@ -195,7 +195,7 @@ def makedir(path : str, mode : str = '755') -> None:
             print(f"Creating directory: {path} with mode: {mode}")
             user = os.environ.get('USER') or os.environ.get('USERNAME')
             run_command('sudo', ['mkdir', '-p', path])
-            run_command('sudo', ['chown', '-R', f'{user}:{user}', path])
+            run_command('sudo', ['chown', '-R', f'{user}', path])
             run_command('sudo', ['chmod', mode, path])
         except Exception as e:
             print(f"Failed to create directory: {path}")

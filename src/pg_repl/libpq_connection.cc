@@ -195,8 +195,8 @@ namespace springtail {
         if (PQresultStatus(res) != PGRES_COMMAND_OK &&
             PQresultStatus(res) != PGRES_TUPLES_OK &&
             PQresultStatus(res) != PGRES_COPY_OUT) {
-            std::cerr << "Error executing query: " << PQerrorMessage(_connection)
-                      << ", status=" << PQresultStatus(res) << std::endl;
+            std::string error_message = fmt::format("msg={}, status={}", PQerrorMessage(_connection), PQresultErrorMessage(res));
+            SPDLOG_ERROR("Error executing query: {}", error_message);
             PQclear(res);
             throw PgQueryError();
         }
