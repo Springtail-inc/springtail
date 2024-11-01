@@ -254,8 +254,15 @@ namespace springtail::gc {
             // retrieve any schema changes available in Redis
             auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
 
-            // pre-commit the DDLs to be applied to the FDWs
-            _redis_ddl.precommit_ddl(db_id, xid, ddls);
+            if (!ddls.is_null()) {
+                auto client = sys_tbl_mgr::Client::get_instance();
+
+                // finalize the system metadata
+                client->finalize(db_id, xid);
+
+                // pre-commit the DDLs to be applied to the FDWs
+                _redis_ddl.precommit_ddl(db_id, xid, ddls);
+            }
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {

@@ -412,7 +412,10 @@ def gen_dump_tarball(props, build_dir):
         return os.path.join(dumps_dir, tarfile)
 
 
-def start(config_file: str, build_dir: str, sql_file: str = None) -> None:
+def start(config_file: str,
+          build_dir: str,
+          sql_file: str = None,
+          do_cleanup: bool = True) -> None:
     """Main function to start the Springtail system."""
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
@@ -436,8 +439,9 @@ def start(config_file: str, build_dir: str, sql_file: str = None) -> None:
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
     # cleanup db instance
-    print("\nCleaning up database instance...")
-    cleanup_db_instance(props)
+    if do_cleanup:
+        print("\nCleaning up database instance...")
+        cleanup_db_instance(props)
 
     if sql_file:
         # execute startup sql
@@ -486,7 +490,7 @@ def status():
         print("Postgres is not running.")
 
 
-def stop(config_file: str) -> None:
+def stop(config_file: str, do_cleanup: bool = False) -> None:
     """Function to stop the Springtail system."""
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
@@ -497,6 +501,11 @@ def stop(config_file: str) -> None:
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
+
+    # cleanup db instance
+    if do_cleanup:
+        print("\nCleaning up database instance...")
+        cleanup_db_instance(props)
 
 
 def check_logs(config_file: str) -> None:

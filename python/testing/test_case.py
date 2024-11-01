@@ -32,6 +32,14 @@ class TestCase:
             'default_txn': 'default'
         }
 
+        fdw_config = props.get_fdw_config()
+        db_configs = props.get_db_configs()
+        self._primary_name = db_configs[0]['name']
+        if 'db_prefix' in fdw_config:
+            self._replica_name = fdw_config['db_prefix'] + self._primary_name
+        else:
+            self._replica_name = self._primary_name
+
         # Each section is composed of an array of sub-sections which
         # are either "sequential" or "parallel".  Sequential
         # sub-sections contain an array of commands, with each command
@@ -211,12 +219,12 @@ class TestCase:
 
             # read the header with the column names
             header = next(csv_reader)
-            headers = ', '.join(header)
+            headers = ', '.join([f'"{h}"' for h in header])
             placeholders = ', '.join(['%s'] * len(header))
 
             # XXX might be faster if we loaded more than one row at a time
             #     could also consider using a COPY command
-            insert_query = f"INSERT INTO {table} ({headers}) VALUES ({placeholders});"
+            insert_query = f'INSERT INTO "{table}" ({headers}) VALUES ({placeholders});'
             for row in csv_reader:
                 cursor.execute(insert_query, row)
 
@@ -308,14 +316,13 @@ class TestCase:
         if self._status != 'INIT':
             self._raise_error('Must run setup() first for global config')
         self._status = 'SETUP_BEGIN'
-        self._result = 'FAILED' # test is assumed failed until it succeeds
 
         logging.info(f'{self._name} -- Running setup()')
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
             logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_db_instance(self._props)
+            self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # execute all of the setup commands
@@ -336,17 +343,18 @@ class TestCase:
         if self._status != 'INIT':
             self._raise_error('Must run test() first for individual tests')
         self._status = 'TEST_BEGIN'
+        self._result = 'FAILED' # test is assumed failed until it succeeds
 
         logging.info(f'{self._name} -- Running test()')
 
         # construct a connection for each transaction in the test
         for txn in self._txns:
             logging.debug(f'Connecting to database for txn "{txn}"')
-            self._connections[txn] = springtail.connect_db_instance(self._props)
+            self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # connect to the replica database -- used to perform any 'sync' directives
-        self._fdw = springtail.connect_fdw_instance(self._props)
+        self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 
@@ -438,7 +446,7 @@ class TestCase:
             self._fdw.close()
         for connection in self._connections:
             self._connections[connection].close()
-            self._connections[connection] = springtail.connect_db_instance(self._props)
+            self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
 
         # run the cleanup commands
         self._execute_commands(self._sections['cleanup'][0]['sequential'])

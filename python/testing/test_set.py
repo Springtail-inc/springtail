@@ -61,7 +61,7 @@ class TestSet:
         """
         # make sure Springtail is stopped
         logging.debug('Stopping any existing Springtail instance')
-        springtail.stop(self._config_file)
+        springtail.stop(self._config_file, do_cleanup=True)
 
         # perform the primary db setup
         logging.debug('Perform the global setup()')
@@ -69,7 +69,7 @@ class TestSet:
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
-        springtail.start(self._config_file, self._build_dir)
+        springtail.start(self._config_file, self._build_dir, do_cleanup=False)
 
         # run the tests
         if not test_files:
