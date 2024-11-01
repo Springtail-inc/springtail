@@ -885,6 +885,7 @@ namespace springtail {
         json["obj"].get_to(object_type);
         if (object_type != "index") {
             SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
+            assert(object_type == "index");
             return {};
         }
 
