@@ -80,7 +80,16 @@ namespace springtail {
 
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, 0, false);
-        auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+
+        ExtentSchemaPtr primary_schema;
+        if (primary_key.empty()) {
+            std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
+            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key);
+
+        } else {
+            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+        }
+
         _primary_index = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
                                                  primary_schema,
