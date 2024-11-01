@@ -877,7 +877,8 @@ namespace springtail::sys_tbl_mgr {
         XidLsn index_xid(fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(*index_i),
                          fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(*index_i));
 
-        for (; index_i != indexes_t->end(); ++index_i) {
+        bool done = false;
+        while (!done) {
             auto &row = *index_i;
 
             // ensure we are reading data for the requested table
@@ -899,6 +900,14 @@ namespace springtail::sys_tbl_mgr {
             uint32_t column_id = fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row);
             uint32_t index_pos = fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row);
             columns[column_id].__set_pk_position(index_pos);
+
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found index row {} for table {}@{}:{}",
+                                column_id, table_id, access_xid.xid, access_xid.lsn);
+
+            done = (index_pos == 0);
+            if (!done) {
+                --index_i;
+            }
         }
 
         return columns;
