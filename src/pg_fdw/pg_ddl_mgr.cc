@@ -82,8 +82,8 @@ namespace springtail::pg_fdw {
             _db_prefix = fdw_config.at("db_prefix").get<std::string>();
         }
 
-        SPDLOG_DEBUG("FDW ID: {}, Host: {}, Port: {}, Username: {}, Password: {}, FDW Username: {}, FDW Password: {}",
-                     _fdw_id, _hostname, _port, _username, _password, fdw_username, fdw_password);
+        SPDLOG_DEBUG("FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
+                     _fdw_id, _hostname, _port, _username, fdw_username);
 
         // initialize the fdw, setup fdw server, import foreign schemas, etc
         _init_fdw(fdw_username, fdw_password);
@@ -194,7 +194,7 @@ namespace springtail::pg_fdw {
 
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "DB ID: {}, DB Name: {}", db_id, db_name);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
 
             // drop and create database on fdw
             std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);

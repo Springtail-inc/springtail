@@ -279,7 +279,7 @@ def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
     # startup pg_ddl_daemon; schema import done by pg_ddl_daemon
     print("Starting pg_ddl_daemon...")
 
-    # add args for username password for fdw daemon for ddl user
+    # a little ugly, but need to add args for username password for fdw daemon for ddl user
     daemons = []
     for d in FDW_DAEMONS:
         if d[0] == 'pg_ddl_daemon':
@@ -287,7 +287,6 @@ def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
             daemons.append((d[0], d[1], s + f',-u,{fdw_config["fdw_user"]},-p,{fdw_config["password"]}'))
         else:
             daemons.append(d)
-    print("Daemons: ", daemons)
     start_daemons(build_dir, daemons)
 
 
@@ -514,7 +513,10 @@ def check_logs(config_file: str) -> List[str]:
 
     # Check the logs for errors
     error_logs = check_backtrace(log_path)
-    print(f"Found the following logs with errors: {error_logs}")
+    if error_logs:
+        print(f"Found the following logs with errors: {error_logs}")
+    else:
+        print("No errors found in the log files.")
 
     # Extract the backtrace from the error logs
     for log in error_logs:
@@ -634,6 +636,10 @@ if __name__ == "__main__":
 
     if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report:
         print("No action specified. Use --start, --status, --dump, --check, --report or --kill.")
+        sys.exit(1)
+
+    if not is_linux():
+        print("This script only supports running on Linux.")
         sys.exit(1)
 
     try:
