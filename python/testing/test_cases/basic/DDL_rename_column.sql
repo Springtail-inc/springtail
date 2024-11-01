@@ -1,4 +1,4 @@
-## setup
+## test
 -- Create a table for testing column renaming.
 CREATE TABLE IF NOT EXISTS ddl_test_rename_column (
     id SERIAL PRIMARY KEY,
@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS ddl_test_rename_column (
 -- Insert data into the table using the original column.
 INSERT INTO ddl_test_rename_column (value) VALUES ('original_value');
 
-## test
 -- Rename the column from 'value' to 'renamed_value'.
 ALTER TABLE ddl_test_rename_column RENAME COLUMN value TO renamed_value;
 

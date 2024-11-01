@@ -1,4 +1,4 @@
-## setup
+## test
 -- Drop the table if it already exists to avoid conflicts.
 DROP TABLE IF EXISTS ddl_test_add_column_default;
 
@@ -7,7 +7,6 @@ CREATE TABLE ddl_test_add_column_default (
     id SERIAL PRIMARY KEY
 );
 
-## test
 -- Add a new column with a default value.
 INSERT INTO ddl_test_add_column_default DEFAULT VALUES;
 ALTER TABLE ddl_test_add_column_default 
