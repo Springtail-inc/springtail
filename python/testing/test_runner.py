@@ -10,8 +10,6 @@ import yaml
 from test_case import TestCase
 from test_set import TestSet
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 def run_test_cases(test_set: str,
                    test_files: list,
                    config_file: str,
@@ -187,6 +185,10 @@ if __name__ == "__main__":
     if not build_dir:
         raise ValueError('"build_dir" is missing in the YAML configuration')
 
+    # set the log level and format
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # run the tests
     if args.test_set is None:
         run_all_tests(test_folder, system_json_path, build_dir, args.check)
     else:
