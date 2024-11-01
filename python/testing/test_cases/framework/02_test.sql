@@ -1,5 +1,5 @@
 ## metadata
-### autocommit true
+### autocommit false
 
 ## test
 INSERT INTO test (table_id, name, "offset") VALUES (10000, 'foo', 12345);

@@ -121,6 +121,7 @@ class TestCase:
                             self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
                         is_threaded = True
                         self._sections['test'].append({'parallel': {}})
+                        cur_txn = self._metadata['default_txn']
 
                     elif directive[0] == 'txn':
                         if section != 'test':
@@ -449,7 +450,8 @@ class TestCase:
             self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
 
         # run the cleanup commands
-        self._execute_commands(self._sections['cleanup'][0]['sequential'])
+        if len(self._sections['cleanup']) > 0:
+            self._execute_commands(self._sections['cleanup'][0]['sequential'])
 
         # close the database connections
         for connection in self._connections:
