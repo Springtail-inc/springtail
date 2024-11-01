@@ -326,12 +326,25 @@ namespace springtail {
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
         SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
 
-        auto primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+        
+        ExtentSchemaPtr primary_schema;
+        if (primary_key.empty()) {
+            std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
+            primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key);
 
-        _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
-                                                        primary_key,
-                                                        primary_schema,
-                                                        _target_xid);
+            _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
+                                                            non_primary_key,
+                                                            primary_schema,
+                                                            _target_xid);
+        } else {
+            primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
+
+            _primary_index = std::make_shared<MutableBTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
+                                                            primary_key,
+                                                            primary_schema,
+                                                            _target_xid);
+        }
+
         if (roots[0] != constant::UNKNOWN_EXTENT) {
             _primary_index->init(roots[0]);
         } else {
@@ -400,8 +413,7 @@ namespace springtail {
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
                 // with no primary key, we just resort to a separate removal and insert
-                auto search_key = _schema->tuple_subset(value, _primary_key);
-                _remove_by_scan(search_key, xid);
+                _remove_by_scan(value, xid);
                 _insert_append(value, xid);
             } else {
                 did_insert = _upsert_by_lookup(value, xid);
@@ -424,6 +436,7 @@ namespace springtail {
         // perform the removal
         if (extent_id == constant::UNKNOWN_EXTENT) {
             if (_primary_key.empty()) {
+                // note: in this case the key will actually be the full row
                 _remove_by_scan(key, xid);
             } else {
                 _remove_by_lookup(key, xid);
@@ -513,10 +526,17 @@ namespace springtail {
         auto orig_page = StorageCache::get_instance()->get(_data_file, old_eid, _access_xid);
 
         // INVALIDATE PRIMARY INDEX
-
-        // get the last row of the original page for the primary index
-        auto pkey_fields = _schema->get_fields(_primary_key);
-        TuplePtr pkey = std::make_shared<FieldTuple>(pkey_fields, *orig_page->last());
+        TuplePtr pkey;
+        if (_primary_key.empty()) {
+            // no primary key, so use the old extent ID as the primary key
+            auto pkey_fields = std::make_shared<FieldArray>(1);
+            pkey_fields->at(0) = std::make_shared<ConstTypeField<uint64_t>>(orig_page->key().second);
+            pkey = std::make_shared<FieldTuple>(pkey_fields, nullptr);
+        } else {
+            // has a primary key, get the last row of the original page for the primary index
+            auto pkey_fields = _schema->get_fields(_primary_key);
+            pkey = std::make_shared<FieldTuple>(pkey_fields, *orig_page->last());
+        }
 
         // remove the old primary index entry
         _primary_index->remove(pkey);
@@ -547,6 +567,8 @@ namespace springtail {
     MutableTable::_flush_and_populate_indexes(StorageCache::PagePtr::element_type* page)
     {
         uint64_t old_eid = page->key().second;
+
+        // note: this will be empty if there is no primary key, but okay because it won't be used
         auto pkey_fields = _schema->get_fields(_primary_key);
 
         // retrieve the extent offsets of the new page
@@ -563,11 +585,17 @@ namespace springtail {
             auto new_page = StorageCache::get_instance()->get(_data_file, extent_id, _target_xid);
 
             // POPULATE PRIMARY INDEX
+            TuplePtr pkey;
 
             // create the new primary index entry
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-
-            auto pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, *new_page->last());
+            if (_primary_key.empty()) {
+                // no primary key, use the extent ID itself as the primary key
+                pkey = std::make_shared<FieldTuple>(value_fields, nullptr);
+            } else {
+                // has a primary key, use the primary key fields
+                pkey = std::make_shared<KeyValueTuple>(pkey_fields, value_fields, *new_page->last());
+            }
 
             // insert the new primary index entry
             _primary_index->insert(pkey);
@@ -715,6 +743,8 @@ namespace springtail {
     MutableTable::_insert_by_lookup(TuplePtr value,
                                     uint64_t xid)
     {
+        assert(!_primary_key.empty());
+
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
@@ -769,6 +799,8 @@ namespace springtail {
     MutableTable::_upsert_by_lookup(TuplePtr value,
                                     uint64_t xid)
     {
+        assert(!_primary_key.empty());
+
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
@@ -914,6 +946,8 @@ namespace springtail {
     MutableTable::_update_by_lookup(TuplePtr value,
                                     uint64_t xid)
     {
+        assert(!_primary_key.empty());
+
         // if the primary_lookup tree is empty, we will maintain a single page of data that we will
         // keep against the table and use for all operations.
         if (_primary_lookup->empty()) {
