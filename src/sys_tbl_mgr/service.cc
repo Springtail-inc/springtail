@@ -818,21 +818,19 @@ namespace springtail::sys_tbl_mgr {
         search_key = sys_tbl::Indexes::Primary::key_tuple(table_id, constant::INDEX_PRIMARY,
                                                           access_xid.xid, access_xid.lsn, 0);
 
-        auto inv_index_i = indexes_t->inverse_lower_bound(search_key);
-        if (inv_index_i == indexes_t->end()) {
+        auto index_i = indexes_t->inverse_lower_bound(search_key);
+        if (index_i == indexes_t->end()) {
             SPDLOG_WARN("Didn't find a primary index for the table: {}@{}:{}",
                         table_id, access_xid.xid, access_xid.lsn);
             return columns;
         }
 
         // determine the XID we found and only read those entries
-        XidLsn index_xid(fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(*inv_index_i),
-                         fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(*inv_index_i));
+        XidLsn index_xid(fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(*index_i),
+                         fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(*index_i));
 
-        search_key = sys_tbl::Indexes::Primary::key_tuple(table_id, constant::INDEX_PRIMARY,
-                                                          index_xid.xid, index_xid.lsn, 0);
-        auto index_i = indexes_t->lower_bound(search_key);
-        for (; index_i != indexes_t->end(); ++index_i) {
+        bool done = false;
+        while (!done) {
             auto &row = *index_i;
 
             // ensure we are reading data for the requested table
@@ -857,6 +855,11 @@ namespace springtail::sys_tbl_mgr {
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found index row {} for table {}@{}:{}",
                                 column_id, table_id, access_xid.xid, access_xid.lsn);
+
+            done = (index_pos == 0);
+            if (!done) {
+                --index_i;
+            }
         }
 
         return columns;
