@@ -16,7 +16,7 @@
 #include <pg_repl/exception.hh>
 
 namespace {
-    std::string get_identity_(const auto& json) {
+    std::string _get_identity(const auto& json) {
         std::string identity;
         json["identity"].get_to(identity);
         auto const pos = identity.find_last_of('.');
@@ -897,7 +897,7 @@ namespace springtail {
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
 
-        msg.index = get_identity_(json);
+        msg.index = _get_identity(json);
 
         const nlohmann::json& cols = json["columns"];
         for (const auto &el: cols.items()) {
@@ -936,7 +936,7 @@ namespace springtail {
         json["oid"].get_to(msg.oid);
 
         // identity in form: schema.table; parse out table; no object_name in trigger
-        msg.index = get_identity_(json);
+        msg.index = _get_identity(json);
 
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
         decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
@@ -969,7 +969,7 @@ namespace springtail {
         json["oid"].get_to(table_msg.oid);
 
         // identity in form: schema.table; parse out table; no object_name in trigger
-        table_msg.table = get_identity_(json);
+        table_msg.table = _get_identity(json);
 
         _decode_schema_columns(json["columns"], table_msg.columns);
 
