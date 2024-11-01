@@ -186,6 +186,33 @@ namespace springtail
         std::string table;
     };
 
+    /** Column schema for a single column used by Create index */
+    struct PgMsgSchemaIndexColumn {
+        std::string column_name;
+        int position;        // position is maintained if column is renamed
+        int idx_position;        // position in the index 
+    };
+
+    struct PgMsgIndex {
+        LSN_t lsn;
+        uint32_t oid;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string index;
+        bool is_unique;
+        uint32_t table_oid;
+        std::string table_name;
+        std::vector<PgMsgSchemaIndexColumn> columns;
+    };
+
+    struct PgMsgDropIndex {
+        LSN_t lsn;
+        uint32_t oid;
+        int32_t xid;        // proto vers 2+ only if streaming
+        std::string schema;
+        std::string index;
+    };
+
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
@@ -193,7 +220,7 @@ namespace springtail
         // version 2
         STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT,
         // decoded messages
-        CREATE_TABLE, ALTER_TABLE, DROP_TABLE
+        CREATE_TABLE, ALTER_TABLE, DROP_TABLE, CREATE_INDEX, DROP_INDEX
     };
 
     /**
@@ -220,7 +247,9 @@ namespace springtail
          PgMsgStreamCommit,
          PgMsgStreamAbort,
          PgMsgTable,
-         PgMsgDropTable
+         PgMsgDropTable,
+         PgMsgIndex,
+         PgMsgDropIndex
         > msg;                 ///< message data
 
         PgMsgEnum msg_type;    ///< type defining union member
@@ -290,6 +319,8 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_CREATE_TABLE[] = "springtail:CREATE TABLE";
         static inline constexpr char MSG_PREFIX_ALTER_TABLE[] = "springtail:ALTER TABLE";
         static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail:DROP TABLE";
+        static inline constexpr char MSG_PREFIX_CREATE_INDEX[] = "springtail:CREATE INDEX";
+        static inline constexpr char MSG_PREFIX_DROP_INDEX[] = "springtail:DROP INDEX";
 
 
         /**

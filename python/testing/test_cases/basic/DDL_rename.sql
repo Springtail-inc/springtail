@@ -1,4 +1,4 @@
-## setup
+## test
 -- Create a table to rename.
 CREATE TABLE IF NOT EXISTS ddl_test_rename (
     id SERIAL PRIMARY KEY,
@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS ddl_test_rename (
 -- Insert data to ensure the rename works with existing rows.
 INSERT INTO ddl_test_rename (value) VALUES ('test_value');
 
-## test
 -- Rename the table.
 ALTER TABLE ddl_test_rename RENAME TO ddl_test_renamed;
 

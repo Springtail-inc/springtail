@@ -1,0 +1,485 @@
+import concurrent.futures
+import csv
+import logging
+import os
+import psycopg2
+import springtail
+import sysutils
+import time
+
+class TestCase:
+    """Class to manage a single test-case.  Handles all phases of the
+    test case and stores the result of the test.
+
+    """
+    def __init__(self,
+                 filename: str,
+                 props: springtail.Properties,
+                 valid_sections: list = ['test', 'verify', 'cleanup']) -> None:
+        """Initialize the test case"""
+        self._filename = os.path.abspath(filename)
+        self._name = os.path.basename(self._filename)
+        self._directory = os.path.dirname(self._filename)
+        self._props = props
+        self._status = 'INIT'
+        self._result = 'UNKNOWN'
+        self._duration = 0
+        self._error = ''
+
+        self._metadata = {
+            'autocommit': True,
+            'sync_timeout': 3,
+            'default_txn': 'default'
+        }
+
+        fdw_config = props.get_fdw_config()
+        db_configs = props.get_db_configs()
+        self._primary_name = db_configs[0]['name']
+        if 'db_prefix' in fdw_config:
+            self._replica_name = fdw_config['db_prefix'] + self._primary_name
+        else:
+            self._replica_name = self._primary_name
+
+        # Each section is composed of an array of sub-sections which
+        # are either "sequential" or "parallel".  Sequential
+        # sub-sections contain an array of commands, with each command
+        # specifying which transaction they should be run against.
+        # Parallel sub-sections contain an array of commands
+        # per-transaction, with transactions being run in parallel.
+        self._sections = { }
+        for section in valid_sections:
+            self._sections[section] = []
+
+        self._txns = set({}) # the set of transaction names referenced in this test
+        self._connections = {} # connections to the primary for each transaction
+        self._fdw = None # connection to Springtail
+        self._sync_step = 0 # incrementing ID used for replica synchronization
+
+        # parse the test file to prepare the test run
+        self._parse_file()
+
+
+    def _append_command(self,
+                        command: dict,
+                        section: str,
+                        is_threaded: bool,
+                        txn_id: str,
+                        line_num: int) -> None:
+        """Add a command to the appropriate position in the test
+        sequence.
+
+        """
+        command['line'] = line_num
+        command['txn'] = txn_id
+        self._txns.add(txn_id)
+
+        # if no sub-section directive has been specified, then we default to a sequential section
+        if len(self._sections[section]) == 0:
+            self._sections[section].append({'sequential': []})
+
+        if is_threaded:
+            if txn_id not in self._sections[section][-1]['parallel']:
+                self._sections[section][-1]['parallel'][txn_id] = []
+            self._sections[section][-1]['parallel'][txn_id].append(command)
+        else:
+            self._sections[section][-1]['sequential'].append(command)
+
+
+    def _raise_error(self, error: str) -> None:
+        """Records the error internally and then raises an Exception"""
+        self._error = error
+        raise Exception(error)
+        
+
+    def _parse_file(self) -> None:
+        """Parse the test file."""
+        is_threaded = False
+        sql = []
+        txns = { }
+        cur_txn = self._metadata['default_txn']
+        line_num = 0
+
+        with open(self._filename, 'r') as f:
+            for line in f:
+                line_num += 1
+
+                # remove leading and trailing whitespace and ignore comments
+                line = line.strip()
+                if not line or line.startswith('--'):
+                    continue
+
+                # check for special directives
+                if line.startswith('###'):
+                    if len(sql) > 0:
+                        self._raise_error(f'{line_num}: directives cannot be placed within a SQL statement')
+
+                    # parse the directive
+                    directive = line[3:].split()
+                    logging.debug(f'directive: {directive}')
+                    if directive[0] == 'parallel':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "parallel" must be in the "test" section')
+                        is_threaded = True
+                        self._sections['test'].append({'parallel': {}})
+
+                    elif directive[0] == 'txn':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "txn" must be in the "test" section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "txn" missing the transaction ID')
+                        cur_txn = directive[1]
+
+                    elif directive[0] == 'sequential':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sequential" must be in the "test" section')
+                        is_threaded = False
+                        self._sections['test'].append({'sequential': []})
+                        cur_txn = directive[1] if len(directive) > 1 else self._metadata['default_txn']
+
+                    elif directive[0] == 'load_csv':
+                        if section != 'test' and section != 'setup' and section != 'cleanup':
+                            self._raise_error(f'{line_num}: "load_csv" must be in either the "setup", "test", or "cleanup" sections')
+                        self._append_command({
+                            'type': 'load_csv',
+                            'file': os.path.join(self._directory, directive[1]),
+                            'table': directive[2]
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'sleep':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sleep" must be part of the "test" section')
+                        if not is_threaded:
+                            self._raise_error(f'{line_num}: "sleep" must be part of a transaction within a parallel sub-section')
+                        if len(directive) < 2:
+                            self._raise_error(f'{line_num}: "sleep" must specify a duration')
+
+                        self._append_command({
+                            'type': 'sleep',
+                            'duration': directive[1]
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'sync':
+                        if section != 'test':
+                            self._raise_error(f'{line_num}: "sync" must be part of the "test" section')
+                        if is_threaded:
+                            self._raise_error(f'{line_num}: "sync" must be within a sequential sub-section')
+
+                        self._append_command({
+                            'type': 'sync'
+                        }, section, is_threaded, cur_txn, line_num)
+
+                    elif directive[0] == 'autocommit':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
+                        self._metadata['autocommit'] = (directive[1].lower() == 'true')
+
+                    elif directive[0] == 'sync_timeout':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "sync_timeout" must be specified in the "metadata" section')
+                        self._metadata['sync_timeout'] = int(directive[1])
+
+                    elif directive[0] == 'default_txn':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
+                        self._metadata['default_txn'] = directive[1]
+
+                    else:
+                        self._raise_error(f'{line_num}: unknown directive "{directive[0]}"')
+
+                elif line.startswith('##'):
+                    # entering a new section
+                    section = line[2:].strip()
+                    if section not in self._sections and section != 'metadata':
+                        self._raise_error(f'{line_num}: Unknown section: {section}')
+
+                else:
+                    # metadata section cannot contain SQL
+                    if section == 'metadata':
+                        self._raise_error(f'{line_num}: "metadata" section may not contain SQL statements')
+
+                    # continue the sql statement
+                    sql.append(line)
+
+                    # record the sql statement
+                    if line.endswith(';'):
+                        # end of SQL statement
+                        self._append_command({
+                            'type': 'sql',
+                            'sql': ' '.join(sql)
+                        }, section, is_threaded, cur_txn, line_num)
+                        sql = []
+
+
+    def _load_csv(self, cursor: psycopg2.extensions.cursor, filename: str, table: str) -> None:
+        """Load the provided CSV file into the specified table."""
+        logging.debug(f'Load CSV {filename} into {table}')
+
+        with open(filename, 'r') as f:
+            csv_reader = csv.reader(f)
+
+            # read the header with the column names
+            header = next(csv_reader)
+            headers = ', '.join([f'"{h}"' for h in header])
+            placeholders = ', '.join(['%s'] * len(header))
+
+            # XXX might be faster if we loaded more than one row at a time
+            #     could also consider using a COPY command
+            insert_query = f'INSERT INTO "{table}" ({headers}) VALUES ({placeholders});'
+            for row in csv_reader:
+                cursor.execute(insert_query, row)
+
+
+    def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
+        """Execute the provided SQL using the provided cursor."""
+        logging.debug(f'Execute SQL: {sql}')
+        cursor.execute(sql)
+
+        if do_fetch:
+            return cursor.fetchall()
+        return None
+        
+
+    def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
+        """Execute a sql command or test directive.  When executing a
+        SQL statement, will use the "txn" key to determine which
+        transaction to run the SQL statement within.
+
+        """
+        logging.debug(f'Execute command {command["type"]} from line {command["line"]}')
+
+        # check for non-SQL statements
+        if command['type'] == 'sleep':
+            # sleep for 'duration' seconds
+            time.sleep(command['duration'])
+            return None
+
+        # handle SQL statements
+        with self._connections[command['txn']].cursor() as cursor:
+            if command['type'] == 'load_csv':
+                # call the helper to read the CSV file and populate the table
+                self._load_csv(cursor, command['file'], command['table'])
+                return None
+
+            elif command['type'] == 'sql':
+                # execute a SQL command
+                return self._execute_sql(cursor, command['sql'], do_fetch)
+
+            elif command['type'] == 'sync':
+                # insert a row to the sync_control table
+                self._sync_step += 1
+                self._execute_sql(cursor, f'BEGIN; INSERT INTO sync_control (sync) VALUES ({self._sync_step}); COMMIT;', False)
+
+                # wait for it to appear in the replica
+                with self._fdw.cursor() as rc:
+                    done = False
+                    start = time.time()
+                    while not done and time.time() < start + self._metadata['sync_timeout']:
+                        result = self._execute_sql(rc, 'SELECT MAX(sync) FROM sync_control;', True)
+                        if len(result) > 0 and result[0][0] == self._sync_step:
+                            done = True
+                        else:
+                            time.sleep(1)
+
+                    if not done:
+                        # fail if it takes longer than the timeout
+                        self._raise_error(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
+                return []
+
+
+    def _replica_command(self, command: dict) -> list:
+        """Runs a SQL command against the Springtail replica
+        database.
+
+        """
+        if command['type'] != 'sql':
+            self._raise_error('Can only execute "sql" commands against the replica.')
+
+        with self._fdw.cursor() as cursor:
+            return self._execute_sql(cursor, command['sql'], True)
+
+
+    def _execute_commands(self, commands: list) -> None:
+        """Helper to execute a set of commands.  Also used as a helper
+        to execute parallel subsections via ThreadPoolExecutor.
+
+        """
+        for command in commands:
+            self._execute_command(command)
+
+
+    def setup(self) -> None:
+        """Run SQL commands prior to starting Springtail.  Used to
+        prepare tables and data that will be copied into Springtail on
+        startup.
+
+        """
+        if self._status != 'INIT':
+            self._raise_error('Must run setup() first for global config')
+        self._status = 'SETUP_BEGIN'
+
+        logging.info(f'{self._name} -- Running setup()')
+
+        # construct a connection for each transaction in the test
+        for txn in self._txns:
+            logging.debug(f'Connecting to database for txn "{txn}"')
+            self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
+            self._connections[txn].autocommit = self._metadata['autocommit']
+
+        # execute all of the setup commands
+        self._execute_commands(self._sections['setup'][0]['sequential'])
+
+        # create the sync control table
+        with self._connections[next(iter(self._txns))].cursor() as cursor:
+            self._execute_sql(cursor, 'BEGIN; CREATE TABLE IF NOT EXISTS sync_control (sync INT); COMMIT;', False)
+
+        self._status = 'SETUP_END'
+
+
+    def test(self) -> None:
+        """Run SQL commands that form the actual test.  Will be
+        executed while Springtail is actively replicating data.
+
+        """
+        if self._status != 'INIT':
+            self._raise_error('Must run test() first for individual tests')
+        self._status = 'TEST_BEGIN'
+        self._result = 'FAILED' # test is assumed failed until it succeeds
+
+        logging.info(f'{self._name} -- Running test()')
+
+        # construct a connection for each transaction in the test
+        for txn in self._txns:
+            logging.debug(f'Connecting to database for txn "{txn}"')
+            self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
+            self._connections[txn].autocommit = self._metadata['autocommit']
+
+        # connect to the replica database -- used to perform any 'sync' directives
+        self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+
+        # XXX need a way to determine when the database is up and running... poll Redis?
+
+        # begin the timer
+        start = time.time()
+
+        # go through each subsection
+        for subsection in self._sections['test']:
+            if 'sequential' in subsection:
+                logging.debug("Entering sequential section")
+
+                # go through each command and execute it against the appropriate transaction
+                self._execute_commands(subsection['sequential'])
+
+            elif 'parallel' in subsection:
+                logging.debug("Entering parallel section")
+
+                # for parallel subsections, execute each transaction's commands in parallel
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    futures = []
+
+                    # execute the transactions in parallel
+                    for txn in subsection['parallel']:
+                        future = executor.submit(self._execute_commands, subsction['parallel'][txn])
+                        futures.append(future)
+
+                    # wait for completion of all threads
+                    concurrent.futures.wait(futures)
+
+        # force a commit on all connections at the end of the test section
+        for txn in self._connections:
+            self._connections[txn].commit()
+
+        # pick a connection to run the sync against, any will do
+        txn = next(iter(self._txns))
+
+        # wait for the primary and replica to come into sync
+        self._execute_command({
+            'type': 'sync',
+            'txn': txn,
+            'line': -1
+        })
+
+        # end the timer and record the duration
+        # XXX currently will be skewed by the 1s polling of the sync call
+        end = time.time()
+        self._duration = end - start
+
+        self._status = 'TEST_END'
+
+
+    def verify(self) -> None:
+        """Run SQL commands to verify that the replication worked as
+        expected.
+
+        """
+        if self._status != 'TEST_END':
+            self._raise_error('Must run verify() after test()')
+        self._status = 'VERIFY_BEGIN'
+
+        logging.info(f'{self._name} -- Running verify()')
+
+        # execute the verification commands against both databases, compare the results
+        for command in self._sections['verify'][0]['sequential']:
+            primary_result = self._execute_command(command, True)
+            replica_result = self._replica_command(command)
+
+            if primary_result != replica_result:
+                self._raise_error(
+                    f"Verification failed for {self._name}:\n"
+                    f"Statement: {command['sql']}\n"
+                    f"Main DB: {primary_result}\n"
+                    f"Replica DB: {replica_result}"
+                )
+
+        self._result = 'SUCCESS'
+        self._status = 'VERIFY_END'
+
+
+    def cleanup(self) -> None:
+        """Run SQL commands to clean up the primary database and close
+        all database connections.
+
+        """
+        logging.info(f'{self._name} -- Running cleanup()')
+
+        # re-connect to the database in case there was an error on the connection
+        if self._fdw:
+            self._fdw.close()
+        for connection in self._connections:
+            self._connections[connection].close()
+            self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
+
+        # run the cleanup commands
+        self._execute_commands(self._sections['cleanup'][0]['sequential'])
+
+        # close the database connections
+        for connection in self._connections:
+            self._connections[connection].close()
+
+
+    def check_logs(self) -> None:
+        log_path = self._props.get_log_path()
+        error_logs = sysutils.check_backtrace(log_path)
+        if not error_logs:
+            return # if no errors, return
+
+        logging.error(f'Found errors in logs: {error_logs}')
+        
+        errors = []
+        for log in error_logs:
+            backtrace = sysutils.extract_backtrace(log)
+            if backtrace:
+                errors.append(f'Error in {os.path.basename(log)}:\n{"\n".join(backtrace)}\n')
+            else:
+                errors.append(f'Error in {os.path.basename(log)} -- could not extract backtrace\n')
+        self._error = '\n'.join(errors)
+        raise Exception(self._error)
+
+
+    def get_result(self) -> dict:
+        return {
+            'name': self._name,
+            'status': self._status,
+            'result': self._result,
+            'duration': self._duration,
+            'error': self._error
+        }

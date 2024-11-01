@@ -51,6 +51,16 @@ namespace springtail::sys_tbl_mgr {
         std::string drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
+         * Call create_index() on the SysTblMgr.
+         */
+        std::string create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg);
+
+        /**
+         * Call drop_index() on the SysTblMgr.
+         */
+        std::string drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);
+
+        /**
          * Call update_roots() on the SysTblMgr.
          */
         void update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid,

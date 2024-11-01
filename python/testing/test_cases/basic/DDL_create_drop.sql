@@ -1,7 +1,5 @@
-## setup
-CREATE TABLE IF NOT EXISTS ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
-
 ## test
+CREATE TABLE IF NOT EXISTS ddl_create_drop (id SERIAL PRIMARY KEY, value TEXT);
 DROP TABLE ddl_create_drop;
 
 ## verify

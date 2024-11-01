@@ -44,6 +44,16 @@ namespace springtail {
         uint32_t create_table(const std::string &table_name, const std::vector<PgMsgSchemaColumn> &columns);
 
         /**
+         * @brief Create index
+         * @param index index name
+         * @param columns list of columns, and types
+         * @return uint32_t index ID
+         */
+        uint32_t create_index(const std::string &index,
+            const std::string& table_name, 
+            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns);
+
+        /**
          * @brief Alter table
          * @param table_id table id
          * @param columns list of columns, and types
@@ -210,6 +220,8 @@ namespace springtail {
         static constexpr char PG_OP_ALTER_TABLE[] = "alter table";
         static constexpr char PG_OP_CREATE_TABLE[] = "create table";
         static constexpr char PG_OP_DROP_TABLE[] = "drop table";
+        static constexpr char PG_OP_CREATE_INDEX[] = "create index";
+        static constexpr char PG_OP_DROP_INDEX[] = "drop index";
         static constexpr char PG_OP_BEGIN[] = "begin";
         static constexpr char PG_OP_COMMIT[] = "commit";
         static constexpr char PG_OP_STREAM_START[] = "stream start";
@@ -260,6 +272,9 @@ namespace springtail {
 
         /** Parse alter table op -- calls into _log_gen */
         void _parse_alter_table(const nlohmann::json &json);
+
+        /** Parse create index table op -- calls into _log_gen */
+        void _parse_create_index(const nlohmann::json &json);
 
         /** Parse drop table op -- calls into _log_gen */
         void _parse_drop_table(const nlohmann::json &json);

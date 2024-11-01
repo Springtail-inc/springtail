@@ -1,4 +1,4 @@
-## setup
+## test
 -- Create a table with an initial primary key.
 CREATE TABLE IF NOT EXISTS test_replace_pkey (
     A INT,
@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS test_replace_pkey (
     PRIMARY KEY (A)
 );
 
-## test
 -- Insert initial data to ensure the table works with the original primary key.
 INSERT INTO test_replace_pkey (A, B, value) VALUES (1, 2, 'original_value');
 

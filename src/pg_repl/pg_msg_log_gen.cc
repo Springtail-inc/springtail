@@ -1,3 +1,4 @@
+#include "pg_repl/pg_repl_msg.hh"
 #include <stdlib.h>
 #include <stdio.h>
 #include <cassert>
@@ -204,6 +205,41 @@ namespace springtail {
         xact->type = type;
         xact->xact_lsn = _begin_lsn;
         _xact_list.push_back(xact);
+    }
+
+    uint32_t PgMsgLogGen::create_index(const std::string &index,
+            const std::string& table_name, 
+            uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns) {
+        uint32_t oid = _next_table_id++;
+
+        nlohmann::json msg;
+
+        msg["cmd"] = "CREATE INDEX";
+        msg["oid"] = oid;
+        msg["obj"] = "index";
+        msg["schema"] = "public";
+        msg["is_unique"] = false;
+        msg["table_oid"] = table_oid;
+        msg["table_name"] = table_name;
+        msg["identity"] = index;
+
+        nlohmann::json columns_json;
+
+        for (auto &&c: columns) {
+            nlohmann::json col;
+            col["name"] = c.column_name;
+            col["position"] = c.position;
+            col["idx_position"] = c.idx_position;
+            columns_json.push_back(col);
+        }
+
+        msg["columns"] = columns_json;
+
+        _current_xact->oids.insert(oid);
+
+        _write_message(pg_msg::MSG_PREFIX_CREATE_INDEX, msg);
+
+        return oid;
     }
 
     uint32_t
@@ -552,6 +588,10 @@ namespace springtail {
             _parse_drop_table(json);
             return;
         }
+        if (cmd == PG_OP_CREATE_INDEX) {
+            _parse_create_index(json);
+            return;
+        }
         if (cmd == PG_OP_TRUNCATE) {
             _parse_truncate(json);
             return;
@@ -622,6 +662,24 @@ namespace springtail {
         }
         return it->second;
     }
+
+    void
+    PgLogGenJson::_parse_create_index(const nlohmann::json &json)
+    {
+        std::string index = json["identity"];
+
+        std::vector<PgMsgSchemaIndexColumn> columns;
+
+        for (auto &&c: json["columns"]) {
+            PgMsgSchemaIndexColumn col;
+            col.column_name = c["name"];
+            col.position = c["position"];
+            col.idx_position = c["idx_position"];
+            columns.push_back(col);
+        }
+        _log_gen.create_index(index, json["table_name"], json["table_oid"], columns);
+    }
+
 
     void
     PgLogGenJson::_parse_create_table(const nlohmann::json &json)
