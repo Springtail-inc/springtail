@@ -126,7 +126,7 @@ namespace springtail::pg_fdw {
     }
 
     std::set<std::string>
-    PgDDLMgr::_get_schemas(int db_id, const std::string &db_name)
+    PgDDLMgr::_get_schemas(uint64_t db_id, const std::string &db_name)
     {
         // get the db config and parse out the included schemas
         auto db_config = Properties::get_db_config(db_id);
@@ -180,7 +180,7 @@ namespace springtail::pg_fdw {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
-        LibPqConnectionPtr conn = _connect_fdw("postgres");
+        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
 
         // see if the fdw user exists, if not create it
         _fdw_username = username;
@@ -224,7 +224,7 @@ namespace springtail::pg_fdw {
             uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
 
             // connect to the database on the fdw
-            conn = _connect_fdw(_db_prefix + db_name);
+            conn = _connect_fdw(db_id, _db_prefix + db_name);
 
             std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
 
@@ -325,7 +325,7 @@ namespace springtail::pg_fdw {
     }
 
     LibPqConnectionPtr
-    PgDDLMgr::_connect_primary(int db_id, const std::string &db_name)
+    PgDDLMgr::_connect_primary(uint64_t db_id, const std::string &db_name)
     {
         // get db config and parse it
         auto db_config = Properties::get_primary_db_config();
@@ -346,11 +346,33 @@ namespace springtail::pg_fdw {
     }
 
     LibPqConnectionPtr
-    PgDDLMgr::_connect_fdw(const std::string &db_name)
+    PgDDLMgr::_connect_fdw(uint64_t db_id, const std::string &db_name)
     {
+        // check if we have a connection in the cache
+        LibPqConnectionPtr conn = _fdw_conn_cache.get(db_id);
+        if (conn != nullptr) {
+            // check connection status
+            try {
+                conn->exec("SELECT 1");
+                if (conn->status() == PGRES_TUPLES_OK) {
+                    return conn;
+                }
+            } catch (Error &e) {
+                SPDLOG_ERROR("Error checking connection status: {}", e.what());
+                _fdw_conn_cache.evict(db_id);
+                conn = nullptr;
+            }
+        }
+
         // use libpq to connect to the database
-        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+        conn = std::make_shared<LibPqConnection>();
         conn->connect(_hostname, db_name, _username, _password, _port, false);
+
+        // save the connection in the cache
+        // if db_id is -1 db is postgres for startup
+        if (db_id != -1) {
+            _fdw_conn_cache.insert(db_id, conn);
+        }
 
         return conn;
     }
@@ -366,7 +388,7 @@ namespace springtail::pg_fdw {
 
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
-        LibPqConnectionPtr conn = _connect_fdw(_db_prefix + db_name);
+        LibPqConnectionPtr conn = _connect_fdw(db_id, _db_prefix + db_name);
 
         try {
             std::set<std::string> schemas;
@@ -392,11 +414,7 @@ namespace springtail::pg_fdw {
             // execute the set of statements
             _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
 
-            // close the connection
-            conn->disconnect();
-
         } catch (Error &e) {
-            conn->disconnect();
             assert(0); // assert in debug
             e.log_backtrace();
             return false;
@@ -450,9 +468,6 @@ namespace springtail::pg_fdw {
                                    escaped_schema, _fdw_username,
                                    escaped_schema, _fdw_username));
             conn->clear();
-
-            // add to schema map
-            _db_schemas[db_id].insert(schema);
         }
 
         // exectute each DDL statement
@@ -463,6 +478,9 @@ namespace springtail::pg_fdw {
         }
 
         conn->end_transaction();
+
+        // add the new schemas to the set after commit
+        _db_schemas[db_id].insert(schemas.begin(), schemas.end());
     }
 
     std::string

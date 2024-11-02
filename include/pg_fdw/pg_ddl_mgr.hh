@@ -6,10 +6,12 @@
 #include <vector>
 #include <set>
 
-#include <libpq-fe.h>
 #include <nlohmann/json.hpp>
 
 #include <common/redis_ddl.hh>
+#include <common/properties.hh>
+#include <common/object_cache.hh>
+
 #include <pg_repl/libpq_connection.hh>
 
 
@@ -17,7 +19,6 @@
  * must be undefined before including postgres.h */
 #undef PACKAGE_STRING
 #undef PACKAGE_VERSION
-#undef UINT64CONST
 
 namespace springtail::pg_fdw {
 
@@ -27,6 +28,9 @@ namespace springtail::pg_fdw {
      */
     class PgDDLMgr {
     public:
+        /** Max number of connections to cache */
+        static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
+
         /** Get DDL Mgr instance */
         static PgDDLMgr* get_instance() {
             std::call_once(_init_flag, _init);
@@ -74,6 +78,8 @@ namespace springtail::pg_fdw {
         std::atomic<bool> _shutting_down {false};  ///< shutdown flag, set in shutdown()
         std::thread _main_thread;                  ///< main thread
 
+        LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
+
         std::string _fdw_id;                       ///< FDW ID
 
         std::string _hostname;                     ///< hostname
@@ -88,7 +94,7 @@ namespace springtail::pg_fdw {
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
         /** Private constructor */
-        PgDDLMgr() {};
+        PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE) {};
 
         /** Initialize singleton */
         static void _init();
@@ -108,10 +114,10 @@ namespace springtail::pg_fdw {
         void _main_thread_fn();
 
         /** Helper to connect to fdw db */
-        LibPqConnectionPtr _connect_fdw(const std::string &db_name);
+        LibPqConnectionPtr _connect_fdw(uint64_t db_id, const std::string &db_name);
 
         /** Helper to connect to primary db */
-        LibPqConnectionPtr _connect_primary(int db_id, const std::string &db_name);
+        LibPqConnectionPtr _connect_primary(uint64_t db_id, const std::string &db_name);
 
         /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
         bool _update_schemas(RedisDDL &redis, const nlohmann::json &ddls,
@@ -139,7 +145,7 @@ namespace springtail::pg_fdw {
          * @param db_name db name
          * @return set of schemas
          */
-        std::set<std::string> _get_schemas(int db_id, const std::string &db_name);
+        std::set<std::string> _get_schemas(uint64_t db_id, const std::string &db_name);
 
         /**
          * @brief Helper to diff oid type set with keys from _type_map
