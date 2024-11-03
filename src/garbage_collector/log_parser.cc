@@ -1091,6 +1091,9 @@ namespace springtail::gc {
                 data.data = extent->serialize();
                 data.op = WriteCacheClient::RowOp::INSERT;
 
+                SPDLOG_DEBUG_MODULE(LOG_GC, "INSERT into db {} @ xid {}:{} on table {}",
+                                    entry->db_id, entry->xid, entry->lsn, entry->table_id);
+
                 write_cache->add_rows(entry->db_id, table->id(), extent_id, { data });
                 if (extent_id != constant::UNKNOWN_EXTENT) {
                     write_cache->set_lookup(entry->db_id, table->id(), entry->xid, extent_id);

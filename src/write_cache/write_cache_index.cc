@@ -25,8 +25,14 @@ namespace springtail
         // iterate through partitions building a resultset of desired size
         for (auto &p: _partitions) {
             p->get_tids(start_xid, end_xid, count, start_offset, end_offset, tids);
+
             // update offsets for new partition
-            start_offset -= end_offset;
+            if (start_offset > end_offset) {
+                // if the provided cursor is further than the partition, update it
+                start_offset -= end_offset;
+            } else {
+                start_offset = 0;
+            }
             new_cursor += end_offset;
 
             // see where we are

@@ -239,6 +239,21 @@ namespace springtail {
         ASSERT_NO_FATAL_FAILURE(vec_eq(eids, {0}));
     }
 
+    TEST_F(WriteCacheIndexTest, TwoInsert_Test)
+    {
+        WriteCacheIndexTestRequestPtr req1 = _make_row_request(1234, 0, 11, 0, 1, 1);
+        WriteCacheIndexTestRequestPtr req2 = _make_row_request(4321, 0, 11, 0, 1, 1);
+
+        (*req1)();
+        (*req2)();
+
+        std::vector<int64_t> tids;
+        uint64_t cursor = 0;
+        uint64_t end_offset;
+        int res = _ts->get_tids(10, 11, 10, cursor, end_offset, tids);
+        ASSERT_EQ(res, 2);
+        ASSERT_NO_FATAL_FAILURE(vec_eq(tids, {1234, 4321}));
+    }
 
     TEST_F(WriteCacheIndexTest, Threaded_Test)
     {

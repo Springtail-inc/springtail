@@ -157,7 +157,6 @@ namespace springtail::gc {
                     break;
                 }
 
-                uint64_t extent_cursor = 0;
                 for (auto tid : table_list) {
                     uint64_t txid = 0, tlsn = 0;
 
@@ -185,10 +184,11 @@ namespace springtail::gc {
                     _table_map[tid] = table;
                     lock.unlock();
 
+                    uint64_t extent_cursor = 0;
                     bool eid_done = false;
                     while (!eid_done) {
                         // request the extents modified in each table
-                        auto extent_list = _write_cache->list_extents(db_id, tid, completed_xid, xid, 100, extent_cursor);
+                        auto &&extent_list = _write_cache->list_extents(db_id, tid, completed_xid, xid, 100, extent_cursor);
 
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got {} extents for table {}", extent_list.size(), tid);
 
