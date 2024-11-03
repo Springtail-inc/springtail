@@ -404,8 +404,22 @@ namespace springtail {
             throw RedisNotFoundError("Error missing fdw_config in redis");
         }
 
+        // get the org config and see if there is a fdw_user_password
+        nlohmann::json org = _instance->_json[ORG_CONFIG];
+        std::string fdw_user_password;
+        if (org.contains("fdw_user_password")) {
+            Json::get_to<std::string>(org, "fdw_user_password", fdw_user_password);
+        }
+
         // convert to json
-        return nlohmann::json::parse(fdw_config_str.value());
+        nlohmann::json json = nlohmann::json::parse(fdw_config_str.value());
+
+        // set the fdw password if it exists
+        if (!fdw_user_password.empty()) {
+            json["password"] = fdw_user_password;
+        }
+
+        return json;
     }
 
     std::string

@@ -195,7 +195,8 @@ namespace springtail::sys_tbl_mgr {
 
         nlohmann::json ddl;
         ddl["tid"] = request.table.id;
-        ddl["table"] = fmt::format("{}.{}", request.table.schema, request.table.name);
+        ddl["schema"] = request.table.schema;
+        ddl["table"] = request.table.name;
 
         boost::shared_lock lock(_write_mutex);
 
@@ -219,7 +220,8 @@ namespace springtail::sys_tbl_mgr {
 
             // set the DDL statement
             ddl["action"] = "rename";
-            ddl["old_table"] = fmt::format("{}.{}", table_info->schema, table_info->name);
+            ddl["old_table"] = table_info->name;
+            ddl["old_schema"] = table_info->schema;
 
         } else {
             XidLsn xid(request.xid, request.lsn);
@@ -266,7 +268,8 @@ namespace springtail::sys_tbl_mgr {
         nlohmann::json ddl;
         ddl["action"] = "drop";
         ddl["tid"] = request.table_id;
-        ddl["table"] = fmt::format("{}.{}", request.schema, request.name);
+        ddl["schema"] = request.schema;
+        ddl["table"] = request.name;
 
         // mark the table as dropped in the table_names
         auto table_info = std::make_shared<TableInfo>(request.table_id,

@@ -61,7 +61,8 @@ namespace springtail {
         // retrieve just the keys for the daemon we care about
         for (auto &&key : all_keys) {
             if (key.starts_with(fmt::format("{}:", enum_to_integral(type)))) {
-                keys.push_back(std::move(key));
+                // remove the daemon type prefix
+                keys.push_back(key.substr(key.find(':') + 1));
             }
         }
 

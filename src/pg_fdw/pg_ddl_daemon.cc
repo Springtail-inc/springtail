@@ -27,11 +27,16 @@ int main(int argc, char *argv[])
     std::optional<std::string> socket_hostname = {};
     std::string socket_host_str;
 
+    std::string username;
+    std::string password;
+
     // parse the arguments
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
         ("daemonize", "Start the server as a daemon")
+        ("username,u", boost::program_options::value<std::string>(&username)->required(), "DDL Postgres username")
+        ("password,p", boost::program_options::value<std::string>(&password)->required(), "DDL Postgres password")
         ("socket,s", boost::program_options::value<std::string>(&socket_host_str), "Unix domain socket path for Postgresql")
     ;
 
@@ -86,7 +91,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    ddl_mgr->startup(fdw_id, socket_hostname);
+    SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
+                 fdw_id, username, password, socket_hostname.value_or(""));
+    ddl_mgr->startup(fdw_id, username, password, socket_hostname);
 
     // wait for shutdown; wait for main thread to join
     ddl_mgr->wait_shutdown();
