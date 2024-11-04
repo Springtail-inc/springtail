@@ -96,18 +96,21 @@ class TestSet:
                 logging.error(f'Error: {e}')
                 test_failed = True
 
+            # if we should stop the tests, break the loop
+            if test_failed and not shutdown_on_fail:
+                if check_logs:
+                    test_case.check_logs()
+                break
+
             # try to perform cleanup
             try:
                 self._tests[test_file].cleanup()
             except Exception as e:
                 logging.error(f'Error on cleanup: {e}')
 
-            # if requested, check the logs
-            if check_logs:
+            # check here if the test failed nad we need to check the logs
+            if test_failed and check_logs:
                 test_case.check_logs()
-
-            # if we should stop the tests, break the loop
-            if test_failed:
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately

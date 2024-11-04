@@ -737,8 +737,11 @@ namespace springtail::gc {
                                 // need to re-sync the table in some cases, eg type change
                                 nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                                 if (action.get<std::string>() == "resync") {
+                                    SPDLOG_DEBUG_MODULE(LOG_GC, "Got a DDL change causing a resync: db {}, xid@{}:{}",
+                                                        state->entry.db_id, xid.xid, xid.lsn);
+
                                     // mark the table to be ignored in the _sync_tracker
-                                    _sync_tracker.mark_resync(state->entry.db_id, table_msg.oid);
+                                    bool is_first = _sync_tracker.mark_resync(state->entry.db_id, table_msg.oid);
 
                                     // clear the table from the backlog in case any other threads
                                     // are waiting for mutations to it (since those mutations will
@@ -750,6 +753,11 @@ namespace springtail::gc {
                                                            Properties::get_db_instance_id(), state->entry.db_id);
                                     RedisQueue<std::string> table_sync_queue(key);
                                     table_sync_queue.push(std::to_string(table_msg.oid));
+
+                                    // notify the Committer to stop committing XIDs
+                                    if (is_first) {
+                                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_START, state->entry.db_id));
+                                    }
                                 } else if (action.get<std::string>() != "no_change") {
                                     // record the DDL statement for this change into Redis to eventually be provided to the FDWs
                                     _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);

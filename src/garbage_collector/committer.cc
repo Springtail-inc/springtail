@@ -523,14 +523,18 @@ namespace springtail::gc {
         std::vector<StorageCache::SafePagePtr> pages;
         for (auto extent_id : extent_ids) {
             auto page = table->read_page(extent_id);
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
+            if (extent_id == constant::UNKNOWN_EXTENT) {
+                assert(extent_ids.size() == 1);
+            } else {
+                auto header = page->header();
+                XidLsn access_xid(header.xid);
 
-            // convert this page to a new schema if needed
-            auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, target_schema, target_xid.xid);
+                // convert this page to a new schema if needed
+                auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
+                if (!meta.history.empty()) {
+                    auto source_schema = std::make_shared<VirtualSchema>(meta);
+                    page->convert(source_schema, target_schema, target_xid.xid);
+                }
             }
 
             pages.push_back(std::move(page));
