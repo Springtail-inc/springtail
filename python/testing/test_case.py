@@ -268,7 +268,7 @@ class TestCase:
             elif command['type'] == 'sync':
                 # insert a row to the sync_control table
                 self._sync_step += 1
-                self._execute_sql(cursor, f'BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, \'{self._name}\'); COMMIT;', False)
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
                 # wait for it to appear in the replica
                 with self._fdw.cursor() as rc:
