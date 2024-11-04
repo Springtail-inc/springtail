@@ -268,14 +268,14 @@ class TestCase:
             elif command['type'] == 'sync':
                 # insert a row to the sync_control table
                 self._sync_step += 1
-                self._execute_sql(cursor, f'BEGIN; INSERT INTO sync_control (sync) VALUES ({self._sync_step}); COMMIT;', False)
+                self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
                 # wait for it to appear in the replica
                 with self._fdw.cursor() as rc:
                     done = False
                     start = time.time()
                     while not done and time.time() < start + self._metadata['sync_timeout']:
-                        result = self._execute_sql(rc, 'SELECT MAX(sync) FROM sync_control;', True)
+                        result = self._execute_sql(rc, f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}';", True)
                         if len(result) > 0 and result[0][0] == self._sync_step:
                             done = True
                         else:
@@ -331,7 +331,7 @@ class TestCase:
 
         # create the sync control table
         with self._connections[next(iter(self._txns))].cursor() as cursor:
-            self._execute_sql(cursor, 'BEGIN; CREATE TABLE IF NOT EXISTS sync_control (sync INT); COMMIT;', False)
+            self._execute_sql(cursor, 'BEGIN; DROP TABLE IF EXISTS sync_control; CREATE TABLE sync_control (sync INT, test TEXT); COMMIT;', False)
 
         self._status = 'SETUP_END'
 
