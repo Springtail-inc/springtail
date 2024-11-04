@@ -521,11 +521,18 @@ namespace springtail::pg_fdw {
         }
 
         if (action == "rename") {
-            return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {}.{};",
-                               conn->escape_identifier(ddl.at("schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("table").get<std::string>()),
-                               conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
-                               conn->escape_identifier(ddl.at("old_table").get<std::string>()));
+            std::string rename = fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {};",
+                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
+                                             conn->escape_identifier(ddl.at("old_table").get<std::string>()),
+                                             conn->escape_identifier(ddl.at("table").get<std::string>()));
+            if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
+                return rename + fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+                                            conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
+                                            conn->escape_identifier(ddl.at("old_table").get<std::string>()),
+                                            conn->escape_identifier(ddl.at("schema").get<std::string>()));
+            } else {
+                return rename;
+            }
         }
 
         if (action == "drop") {

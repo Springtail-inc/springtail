@@ -530,7 +530,7 @@ namespace springtail::gc {
             auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
             if (!meta.history.empty()) {
                 auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, target_schema);
+                page->convert(source_schema, target_schema, target_xid.xid);
             }
 
             pages.push_back(std::move(page));

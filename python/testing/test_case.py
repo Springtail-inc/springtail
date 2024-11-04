@@ -28,7 +28,7 @@ class TestCase:
 
         self._metadata = {
             'autocommit': True,
-            'sync_timeout': 3,
+            'sync_timeout': 10,
             'default_txn': 'default'
         }
 
@@ -356,6 +356,7 @@ class TestCase:
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+        self._fdw.autocommit = True
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 

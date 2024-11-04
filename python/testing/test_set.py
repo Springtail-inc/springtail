@@ -53,10 +53,15 @@ class TestSet:
             self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
 
 
-    def run(self, test_files: list = [], check_logs: bool = False) -> None:
+    def run(self,
+            test_files: list = [],
+            check_logs: bool = False,
+            shutdown_on_fail: bool = False) -> bool:
         """Runs one or more of the test cases in the test set in the
         provided order.  If no test cases are provided then it runs
         all of the tests in lexographical order.
+
+        Returns True if the tests all succeed, False otherwise
 
         """
         # make sure Springtail is stopped
@@ -76,7 +81,7 @@ class TestSet:
             test_files = self._test_files
         logging.info(f'Run the tests: {test_files}')
 
-        stop_tests = False
+        test_failed = False
         for test_file in test_files:
             if test_file not in self._tests:
                 logging.warning(f'unable to find test: {test_file}')
@@ -89,7 +94,7 @@ class TestSet:
                 self._tests[test_file].verify()
             except Exception as e:
                 logging.error(f'Error: {e}')
-                stop_tests = True
+                test_failed = True
 
             # try to perform cleanup
             try:
@@ -102,10 +107,12 @@ class TestSet:
                 test_case.check_logs()
 
             # if we should stop the tests, break the loop
-            if stop_tests:
+            if test_failed:
                 break
 
-        # XXX if stop_tests then generate a failure report?
+        # if a test failed and we don't shutdown on failure, return immediately
+        if test_failed and not shutdown_on_fail:
+            return False
 
         # shutdown Springtail
         logging.debug('Stopping the Springtail instance')
@@ -115,8 +122,10 @@ class TestSet:
         logging.debug('Perform the global cleanup()')
         self._config.cleanup()
 
+        return not test_failed
 
-    def report(self) -> dict:
+
+    def report(self) -> None:
         """Generates a report about the test set"""
         results = [ self._tests[t].get_result() for t in self._tests ]
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
@@ -138,5 +147,3 @@ class TestSet:
         for result in results:
             if result['error']:
                 print(f'\t{result["name"]}: {result["error"]}')
-
-        pass

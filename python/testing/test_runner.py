@@ -19,6 +19,7 @@ def run_test_cases(test_set: str,
     test = TestSet(test_set, config_file, build_dir)
     test.run(test_files, check_logs)
     test.report()
+
     # generate_report([ test ])
 
 
@@ -29,6 +30,7 @@ def run_test_set(test_set: str,
     test = TestSet(test_set, config_file, build_dir)
     test.run(check_logs=check_logs)
     test.report()
+
     # generate_report([ test ])
 
 
@@ -52,7 +54,9 @@ def run_all_tests(test_folder: str,
 
     # run the test sets
     for test in test_sets:
-        test.run()
+        success = test.run()
+        if not success:
+            break
 
     # generate a report for each test set
     for test in test_sets:
@@ -162,7 +166,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Springtail tests")
     parser.add_argument('-c', '--config', type=str, required=True, help='Path to the test configuration file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
-    parser.add_argument('test_set', type=str, help='Limit to a specific test set')
+    parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
     return parser.parse_args()
 

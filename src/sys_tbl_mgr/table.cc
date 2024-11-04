@@ -577,6 +577,11 @@ namespace springtail {
     {
         uint64_t old_eid = page->key().second;
 
+        // if the page is now empty, do nothing since the indexes will be flushed as empty
+        if (page->empty()) {
+            return;
+        }
+
         // note: this will be empty if there is no primary key, but okay because it won't be used
         auto pkey_fields = _schema->get_fields(_primary_key);
 
