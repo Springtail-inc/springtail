@@ -4,10 +4,13 @@
 
 // springtail includes
 #include <common/common.hh>
+#include <common/properties.hh>
+#include <common/json.hh>
 #include <proxy/server.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/session.hh>
+#include <proxy/exception.hh>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
@@ -25,13 +28,35 @@ handle_sigint(int signal)
 static void setup(ProxyServerPtr server)
 {
     // add primary
-    server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, "localhost", 5432));
+    nlohmann::json primary_config = Properties::get_primary_db_config();
+    auto host = Json::get<std::string>(primary_config, "host");
+    auto port = Json::get<uint16_t>(primary_config, "port");
+    if (host.has_value() && port.has_value()) {
+        server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
+    } else {
+        SPDLOG_ERROR("Could not find the value for primary database either host or port");
+        throw ProxyServerError();
+    }
 
-    // add replica
-    server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, "localhost", 5432));
+    std::vector<std::string> fwd_id_list = Properties::get_fdw_ids();
+    for (const auto & fwd_id: fwd_id_list) {
+        nlohmann::json fwd_config = Properties::get_fdw_config(fwd_id);
+        auto host = Json::get<std::string>(fwd_config, "host");
+        auto port = Json::get<uint16_t>(fwd_config, "port");
+        if (host.has_value() && port.has_value()) {
+            // add replica
+            server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
+        } else {
+            SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fwd_id);
+            throw ProxyServerError();
+        }
+    }
 
     // add replicated database
-    server->add_replicated_database("test");
+    std::map<uint64_t, std::string> db_list = Properties::get_databases();
+    for (const auto& db_pair: db_list) {
+        server->add_replicated_database(std::get<1>(db_pair));
+    }
 
     // add test user for test db with trust
     server->add_user("test");
