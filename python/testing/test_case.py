@@ -327,7 +327,8 @@ class TestCase:
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # execute all of the setup commands
-        self._execute_commands(self._sections['setup'][0]['sequential'])
+        if len(self._sections['setup']) > 0:
+            self._execute_commands(self._sections['setup'][0]['sequential'])
 
         # create the sync control table
         with self._connections[next(iter(self._txns))].cursor() as cursor:

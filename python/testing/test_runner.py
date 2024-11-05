@@ -50,7 +50,7 @@ def run_all_tests(test_folder: str,
     # parse and prepare all of the test cases
     test_sets = []
     for test_set in sorted(os.listdir(test_folder)):
-        test_sets.append(TestSet(test_set, config_file, build_dir))
+        test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir))
 
     # run the test sets
     for test in test_sets:
@@ -197,9 +197,8 @@ if __name__ == "__main__":
         run_all_tests(test_folder, system_json_path, build_dir, args.check)
     else:
         if args.test_case is None:
-            run_test_set(os.path.join(test_folder, args.test_set), system_json_path, build_dir, args.check)
+            run_test_set(os.path.join(test_folder, args.test_set),
+                         system_json_path, build_dir, args.check)
         else:
-            run_test_cases(os.path.join(test_folder, args.test_set), args.test_case, system_json_path, build_dir, args.check)
-
-    # props = springtail.Properties(os.path.abspath(system_json_path))
-    # run_all_tests(test_folder, props, args.check)
+            run_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
+                           system_json_path, build_dir, args.check)

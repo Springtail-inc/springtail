@@ -16,9 +16,7 @@ INSERT INTO ddl_test_add_column_default DEFAULT VALUES;
 
 ## verify
 -- Query the row to ensure the default value was applied correctly.
-SELECT status 
-FROM ddl_test_add_column_default
-WHERE id = 1;
+SELECT status FROM ddl_test_add_column_default WHERE id = 1;
 
 ## cleanup
 -- Drop the table after the test.

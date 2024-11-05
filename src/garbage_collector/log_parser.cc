@@ -10,6 +10,8 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
+#include <xid_mgr/xid_mgr_client.hh>
+
 namespace springtail::gc {
 
     void
@@ -376,9 +378,13 @@ namespace springtail::gc {
 
     uint64_t
     LogParser::SyncTracker::clear_syncs(uint64_t db_id,
-                                        uint32_t pg_xid)
+                                        uint32_t pg_xid,
+                                        uint64_t lp_xid)
     {
         boost::unique_lock lock(_mutex);
+
+        // record the XID as being the new max for this DB
+        _max_lp_xid[db_id] = lp_xid;
 
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
@@ -398,17 +404,23 @@ namespace springtail::gc {
             }
         }
 
-        // if the db_map is empty, then all tables have been cleared
+        // if the db_map is empty, then all tables have been cleared and we can consider issuing a
+        // commit at the Committer
         if (db_map.empty()) {
-            // if empty, clear the database entry
-            _sync_map.erase(db_i);
-
-            // return the max target XID seen among the table syncs
+            // get the max target XID seen among the table syncs
             auto xid_i = _max_xid.find(db_id);
             uint64_t xid = xid_i->second;
-            _max_xid.erase(xid_i);
 
-            return xid;
+            // if we've processed all earlier XIDs, return this XID
+            assert(lp_xid < xid);
+            if (lp_xid + 1 == xid) {
+                // if empty, clear the database entry
+                _sync_map.erase(db_i);
+
+                // clear the max XID for this database
+                _max_xid.erase(xid_i);
+                return xid;
+            }
         }
 
         return 0;
@@ -448,6 +460,16 @@ namespace springtail::gc {
     {
         boost::unique_lock lock(_mutex);
 
+        // get the max processed XID
+        uint64_t lp_xid = 0;
+        auto lp_xid_i = _max_lp_xid.find(db_id);
+        if (lp_xid_i == _max_lp_xid.end()) {
+            // XXX get the furthest committed from the XidMgr
+            lp_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+        } else {
+            lp_xid = lp_xid_i->second;
+        }
+
         // check for entries in the resync map
         auto resync_i = _resync_map.find(db_id);
         if (resync_i != _resync_map.end()) {
@@ -464,12 +486,17 @@ namespace springtail::gc {
             return 0;
         }
 
-        // return the max target XID seen among the table syncs
+        // get the max target XID seen among the table syncs
         auto xid_i = _max_xid.find(db_id);
         uint64_t xid = xid_i->second;
-        _max_xid.erase(xid_i);
 
-        return xid;
+        // if we've processed all of the prior XIDs, then proceed with commits
+        if (lp_xid + 1 == xid) {
+            _max_xid.erase(xid_i);
+            return xid;
+        }
+
+        return 0;
     }
 
     void
@@ -502,7 +529,7 @@ namespace springtail::gc {
                     // record the table sync metadata
                     if (xact_msg->type == pg_log_mgr::PgXactMsg::Type::TABLE_SYNC_MSG) {
                         const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(xact_msg->msg);
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_MSG on {}", msg.db_id);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_MSG on {} @ {}", msg.db_id, msg.target_xid);
 
                         bool sync_start = _sync_tracker.add_sync(msg);
                         if (sync_start) {
@@ -521,13 +548,15 @@ namespace springtail::gc {
                         const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncEndMsg>(xact_msg->msg);
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_END_MSG on {}", msg.db_id);
 
-                        // note: if the sync tracker is empty, it means that the database was idle
-                        //       during the table syncs, so we can notify for a "commit" immediately
+                        // note: If the sync tracker is empty, it means that the database was idle
+                        //       when the sync was issued (didn't have in-flight transactions with
+                        //       the table sync starts), so we can notify for a "commit" as soon as
+                        //       the prior XIDs have been processed.  The "commit" in this case
                         //       which will do the table rotates and move the database back to the
-                        //       ready state
+                        //       ready state.
                         uint64_t sync_xid = _sync_tracker.get_xid_if_empty(msg.db_id);
                         if (sync_xid) {
-                            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {}", msg.db_id);
+                            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", msg.db_id, sync_xid);
 
                             // pass the commit to the GC-2 Committer
                             _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id, sync_xid));
@@ -546,7 +575,7 @@ namespace springtail::gc {
                     auto &entry = std::get<pg_log_mgr::PgXactMsg::XactMsg>(xact_msg->msg);
 
                     // add the XID to the map to ensure we commit in-order
-                    _xid_map[entry.xid];
+                    _xid_map[entry.db_id][entry.xid];
 
                     state = std::make_shared<State>(xact_msg);
                 }
@@ -897,21 +926,28 @@ namespace springtail::gc {
 
                     // wait for any earlier XIDs to complete so that when we perform the next
                     // operations we are the known lowest XID being processed
-                    auto xid_i = _xid_map.begin();
-                    assert(xid_i != _xid_map.end());
-                    if (state->entry.xid != xid_i->first) {
-                        xid_i->second.wait(lock);
+                    auto &xid_map = _xid_map[state->entry.db_id];
+                    auto xid_i = xid_map.find(state->entry.xid);
+                    assert(xid_i != xid_map.end());
+                    if (xid_i != xid_map.begin()) {
+                        xid_i->second.wait(lock); // wait to be signaled when we are the first entry
                     }
-                    _xid_map.erase(xid_i);
+                    xid_map.erase(xid_i);
+
+                    // XXX first we need to check if we have at least processed up to the sync XID
 
                     // we know that all earlier XIDs have completed at this point, so we can check if
                     // the sync metadata can be released for any tables based on the pg XID
-                    uint64_t sync_xid = _sync_tracker.clear_syncs(state->entry.db_id, state->entry.pg_xid);
+                    auto sync_xid = _sync_tracker.clear_syncs(state->entry.db_id,
+                                                              state->entry.pg_xid, state->entry.xid);
                     if (sync_xid) {
                         // if this XID is an indication that the ongoing table syncs are aligned,
                         // then we can push a message to perform a commit at the previously seen XID
                         // (before committing the currently processed XID)
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", state->entry.db_id, sync_xid);
                         _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id, sync_xid));
+
+                        // XXX do we need to wait for the reverse notification here??
                     }
 
                     // XXX notify the ExtentMapper that the XID has been fully processed
@@ -925,8 +961,8 @@ namespace springtail::gc {
                     _gc_queue.push(XidReady(state->entry.db_id, state->entry.xid));
                     SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", state->entry.xid);
 
-                    if (!_xid_map.empty()) {
-                        _xid_map.begin()->second.notify_one();
+                    if (!_xid_map[state->entry.db_id].empty()) {
+                        _xid_map[state->entry.db_id].begin()->second.notify_one();
                     }
                 }
             }

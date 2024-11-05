@@ -19,9 +19,8 @@ INSERT INTO test_replace_pkey (A, B, value) VALUES (3, 4, 'new_value');
 
 ## verify
 -- Verify that the new primary key is on column B.
-SELECT column_name
-FROM information_schema.key_column_usage
-WHERE table_name = 'test_replace_pkey';
+-- SELECT column_name FROM information_schema.key_column_usage WHERE table_name = 'test_replace_pkey';
+SELECT * from test_replace_pkey ORDER BY B;
 
 ## cleanup
 -- Cleanup

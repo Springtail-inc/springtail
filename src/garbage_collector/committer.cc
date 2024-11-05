@@ -63,7 +63,7 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}", db_id, completed_xid);
+                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}, current @{}", db_id, result->xid(), completed_xid);
 
                 nlohmann::json ddls;
                 RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
@@ -141,6 +141,7 @@ namespace springtail::gc {
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xid();
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
+            assert(xid > completed_xid);
 
             // find every table associated with this XID
             uint64_t table_cursor = 0;
