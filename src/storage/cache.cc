@@ -892,7 +892,8 @@ namespace springtail {
 
     void
     StorageCache::Page::convert(VirtualSchemaPtr schema,
-                                ExtentSchemaPtr target_schema)
+                                ExtentSchemaPtr target_schema,
+                                uint64_t target_xid)
     {
         boost::unique_lock lock(_mutex);
         _is_dirty = true;
@@ -906,10 +907,19 @@ namespace springtail {
         std::vector<ExtentRef> new_extents;
         for (auto &ref : _extents) {
             // get a new extent
-            auto new_extent = cache->_data_cache->get_empty(_file, header());
+            ExtentHeader new_header(header().type, target_xid, target_schema->row_size());
+            auto new_extent = cache->_data_cache->get_empty(_file, new_header);
 
             // get the old extent
             auto old_extent = ref.make_safe_extent(_file);
+
+            SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
+                                (*old_extent)->key().second,
+                                (*old_extent)->header().xid,
+                                (*old_extent)->header().row_size,
+                                new_extent->key().second,
+                                new_extent->header().xid,
+                                new_extent->header().row_size);
 
             // copy the data
             for (auto &row : **old_extent) {

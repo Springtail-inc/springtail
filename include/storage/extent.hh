@@ -187,7 +187,11 @@ namespace springtail {
 
             reference operator*() const { return _row; }
             pointer operator->() const { return &_row; }
-            Iterator& operator++() { _row.offset += _row.extent->row_size(); return *this; }
+            Iterator& operator++() {
+                assert(_row.offset + _row.extent->row_size() <= _row.extent->row_count() * _row.extent->row_size());
+                _row.offset += _row.extent->row_size();
+                return *this;
+            }
             Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
             Iterator& operator--() { _row.offset -= _row.extent->row_size(); return *this; }
             Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }

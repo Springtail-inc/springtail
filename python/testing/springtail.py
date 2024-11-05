@@ -427,16 +427,16 @@ def start(config_file: str,
     # Check the configuration
     check_config(props)
 
-    # Clear file system data
-    print("\nClearing file system data...")
-    cleanup_filesystem(props)
-
     # Stop the daemons
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
-    # cleanup db instance
     if do_cleanup:
+        # Clear file system data
+        print("\nClearing file system data...")
+        cleanup_filesystem(props)
+
+        # cleanup db instance
         print("\nCleaning up database instance...")
         cleanup_db_instance(props)
 
@@ -499,8 +499,12 @@ def stop(config_file: str, do_cleanup: bool = False) -> None:
     print("\nStopping daemons...")
     stop_daemons(props.get_pid_path(), ALL_DAEMONS_NAMES)
 
-    # cleanup db instance
     if do_cleanup:
+        # Clear file system data
+        print("\nClearing file system data...")
+        cleanup_filesystem(props)
+
+        # Cleanup db instance
         print("\nCleaning up database instance...")
         cleanup_db_instance(props)
 

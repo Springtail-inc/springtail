@@ -227,7 +227,7 @@ namespace springtail::gc {
              *
              * @return 0 if still in progress, otherwise the max assigned XID among the syncs
              */
-            uint64_t clear_syncs(uint64_t db_id, uint32_t pg_xid);
+            uint64_t clear_syncs(uint64_t db_id, uint32_t pg_xid, uint64_t lp_xid);
 
             /**
              * Checks if mutations at the given table + xid should be skipped due to an ongoing table sync.
@@ -235,7 +235,7 @@ namespace springtail::gc {
             bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
             /**
-             * Checks if the tracker has any entries for a given database.
+             * Checks if we should immediately issue a COMMIT message to the Committer.
              * 
              * @return 0 if still in progress, otherwise the max XID seen among the syncs
              */
@@ -302,8 +302,14 @@ namespace springtail::gc {
                 TABLE_SYNC_MSG log entry for the table yet. */
             std::map<uint64_t, std::set<uint64_t>> _resync_map;
 
+            /** db -> xid -- marks that the given DB is ready for a sync_commit at the given XID. */
+            std::map<uint64_t, uint64_t> _ready_map;
+
             /** db -> xid hold the max target XID seen in the sync-set for a given db. */
             std::map<uint64_t, uint64_t> _max_xid;
+
+            /** db -> xid -- the largest XID seen fully processed by the LogParser. */
+            std::map<uint64_t, uint64_t> _max_lp_xid;
         };
 
 
@@ -419,8 +425,9 @@ namespace springtail::gc {
             /** Mutex to control the critical sections of the reader run() loop. */
             boost::mutex _mutex;
 
-            /** Map of XID -> condition variable.  Used to ensure XIDs are passed to the Committer in-order. */
-            std::map<uint64_t, boost::condition_variable> _xid_map;
+            /** Map of DB -> XID -> condition variable.  Used to ensure XIDs are passed to the
+                Committer in-order. */
+            std::map<uint64_t, std::map<uint64_t, boost::condition_variable>> _xid_map;
         };
 
 

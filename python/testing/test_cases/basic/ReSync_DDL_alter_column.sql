@@ -7,14 +7,12 @@ CREATE TABLE IF NOT EXISTS ddl_test_alter_column (
 
 -- Alter the column's data type from TEXT to VARCHAR(255).
 INSERT INTO ddl_test_alter_column (data) VALUES ('test_data');
-ALTER TABLE ddl_test_alter_column 
-ALTER COLUMN data TYPE VARCHAR(255);
+ALTER TABLE ddl_test_alter_column ALTER COLUMN data TYPE VARCHAR(255);
 
 ## verify
 -- Verify that the column type has changed to VARCHAR(255).
-SELECT data_type 
-FROM information_schema.columns 
-WHERE table_name = 'ddl_test_alter_column' AND column_name = 'data';
+-- SELECT data_type FROM information_schema.columns WHERE table_name = 'ddl_test_alter_column' AND column_name = 'data';
+SELECT * FROM ddl_test_alter_column ORDER BY id;
 
 ## cleanup
 -- Drop the table after the test.

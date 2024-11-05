@@ -63,7 +63,7 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}", db_id, completed_xid);
+                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}, current @{}", db_id, result->xid(), completed_xid);
 
                 nlohmann::json ddls;
                 RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
@@ -141,6 +141,7 @@ namespace springtail::gc {
             assert(result->type() == XidReady::Type::XACT_MSG);
             uint64_t xid = result->xid();
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
+            assert(xid > completed_xid);
 
             // find every table associated with this XID
             uint64_t table_cursor = 0;
@@ -523,14 +524,18 @@ namespace springtail::gc {
         std::vector<StorageCache::SafePagePtr> pages;
         for (auto extent_id : extent_ids) {
             auto page = table->read_page(extent_id);
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
+            if (extent_id == constant::UNKNOWN_EXTENT) {
+                assert(extent_ids.size() == 1);
+            } else {
+                auto header = page->header();
+                XidLsn access_xid(header.xid);
 
-            // convert this page to a new schema if needed
-            auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, target_schema);
+                // convert this page to a new schema if needed
+                auto &&meta = sys_tbl_mgr->get_target_schema(table->db(), table->id(), access_xid, target_xid);
+                if (!meta.history.empty()) {
+                    auto source_schema = std::make_shared<VirtualSchema>(meta);
+                    page->convert(source_schema, target_schema, target_xid.xid);
+                }
             }
 
             pages.push_back(std::move(page));
