@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <sw/redis++/redis++.h>
+#include <sw/redis++/command_options.h>
 #include <nlohmann/json.hpp>
 
 #include <common/json.hh>
@@ -236,7 +237,7 @@ namespace springtail {
         void commit(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
-            _redis->rpop(worker_key);
+            _redis->del(worker_key); // delete all items in worker queue
         }
 
         /**
@@ -251,10 +252,11 @@ namespace springtail {
         void abort(const std::string &worker_id)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
-            // note: lmove() not available yet in redis++
-            // _redis->lmove(worker_key, _key, "RIGHT", "LEFT");
-            auto &&res = _redis->command<sw::redis::OptionalString>("LMOVE", worker_key, _key,
-                                                                    "RIGHT", "RIGHT");
+
+            auto len = _redis->llen(worker_key);
+            for (auto i = 0; i < len; i++) {
+                _redis->lmove(worker_key, _key, sw::redis::ListWhence::RIGHT, sw::redis::ListWhence::RIGHT);
+            }
         }
 
         /**
