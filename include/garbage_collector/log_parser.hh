@@ -302,6 +302,9 @@ namespace springtail::gc {
                 TABLE_SYNC_MSG log entry for the table yet. */
             std::map<uint64_t, std::set<uint64_t>> _resync_map;
 
+            /** db -> xid -- marks that the given DB is ready for a sync_commit at the given XID. */
+            std::map<uint64_t, uint64_t> _ready_map;
+
             /** db -> xid hold the max target XID seen in the sync-set for a given db. */
             std::map<uint64_t, uint64_t> _max_xid;
 

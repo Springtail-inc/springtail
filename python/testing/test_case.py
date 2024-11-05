@@ -169,6 +169,15 @@ class TestCase:
                             'type': 'sync'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'schema_check':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
+
+                        command = { 'type': 'schema_check' }
+                        if len(directive) > 1:
+                            command['table'] = directive[1]
+                        self._append_command(command, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
@@ -284,6 +293,16 @@ class TestCase:
                     if not done:
                         # fail if it takes longer than the timeout
                         self._raise_error(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
+                return []
+
+            elif command['type'] == 'schema_check':
+                # retrieve the list of tables to check
+                if 'table' in command:
+                    tables = [ command['table'] ]
+                else:
+                    tables = [] # XXX
+
+                self._raise_error(f'"schema_check" not yet supported')
                 return []
 
 
