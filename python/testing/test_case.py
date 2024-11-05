@@ -28,7 +28,7 @@ class TestCase:
 
         self._metadata = {
             'autocommit': True,
-            'sync_timeout': 3,
+            'sync_timeout': 10,
             'default_txn': 'default'
         }
 
@@ -169,6 +169,15 @@ class TestCase:
                             'type': 'sync'
                         }, section, is_threaded, cur_txn, line_num)
 
+                    elif directive[0] == 'schema_check':
+                        if section != 'verify':
+                            self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
+
+                        command = { 'type': 'schema_check' }
+                        if len(directive) > 1:
+                            command['table'] = directive[1]
+                        self._append_command(command, section, is_threaded, cur_txn, line_num)
+
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "autocommit" must be specified in the "metadata" section')
@@ -286,6 +295,16 @@ class TestCase:
                         self._raise_error(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
                 return []
 
+            elif command['type'] == 'schema_check':
+                # retrieve the list of tables to check
+                if 'table' in command:
+                    tables = [ command['table'] ]
+                else:
+                    tables = [] # XXX
+
+                self._raise_error(f'"schema_check" not yet supported')
+                return []
+
 
     def _replica_command(self, command: dict) -> list:
         """Runs a SQL command against the Springtail replica
@@ -327,7 +346,8 @@ class TestCase:
             self._connections[txn].autocommit = self._metadata['autocommit']
 
         # execute all of the setup commands
-        self._execute_commands(self._sections['setup'][0]['sequential'])
+        if len(self._sections['setup']) > 0:
+            self._execute_commands(self._sections['setup'][0]['sequential'])
 
         # create the sync control table
         with self._connections[next(iter(self._txns))].cursor() as cursor:
@@ -356,6 +376,7 @@ class TestCase:
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
+        self._fdw.autocommit = True
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 

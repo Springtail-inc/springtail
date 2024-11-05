@@ -53,9 +53,8 @@ def clean_fs(mount_path : str, log_path : str) -> None:
     run_command('sudo', ['rm', '-rf', mount_path])
 
     # remove log files
-    log_dir = os.path.dirname(log_path)
-    print(f"Clearing log files at directory: {log_dir}")
-    run_command('sudo', ['rm', '-f', log_dir + '/*.log'])
+    print(f"Clearing log files at directory: {log_path}")
+    run_command('sudo', ['rm', '-rf', log_path])
 
 
 def check_postgres_running() -> bool:

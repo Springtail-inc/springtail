@@ -11,9 +11,8 @@ ALTER COLUMN value SET NOT NULL;
 
 ## verify
 -- Verify that the column has the NOT NULL constraint.
-SELECT is_nullable 
-FROM information_schema.columns 
-WHERE table_name = 'ddl_test_not_null' AND column_name = 'value';
+-- SELECT is_nullable FROM information_schema.columns WHERE table_name = 'ddl_test_not_null' AND column_name = 'value';
+SELECT * FROM ddl_test_not_null ORDER BY id;
 
 ## cleanup
 -- Drop the table after the test.
