@@ -11,8 +11,8 @@ ALTER TABLE ddl_test_alter_column ALTER COLUMN data TYPE VARCHAR(255);
 
 ## verify
 -- Verify that the column type has changed to VARCHAR(255).
--- SELECT data_type FROM information_schema.columns WHERE table_name = 'ddl_test_alter_column' AND column_name = 'data';
 SELECT * FROM ddl_test_alter_column ORDER BY id;
+### schema_check public ddl_test_alter_column
 
 ## cleanup
 -- Drop the table after the test.

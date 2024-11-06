@@ -172,11 +172,14 @@ class TestCase:
                     elif directive[0] == 'schema_check':
                         if section != 'verify':
                             self._raise_error(f'{line_num}: "schema_check" must be part of the "verify" section')
+                        if len(directive) < 3:
+                            self._raise_error(f'{line_num}: "schema_check" must specify a schema and table')
 
-                        command = { 'type': 'schema_check' }
-                        if len(directive) > 1:
-                            command['table'] = directive[1]
-                        self._append_command(command, section, is_threaded, cur_txn, line_num)
+                        self._append_command({
+                            'type': 'schema_check',
+                            'schema': directive[1],
+                            'table': directive[2]
+                        }, section, is_threaded, cur_txn, line_num)
 
                     elif directive[0] == 'autocommit':
                         if section != 'metadata':
@@ -296,14 +299,35 @@ class TestCase:
                 return []
 
             elif command['type'] == 'schema_check':
-                # retrieve the list of tables to check
-                if 'table' in command:
-                    tables = [ command['table'] ]
-                else:
-                    tables = [] # XXX
+                results = {}
 
-                self._raise_error(f'"schema_check" not yet supported')
-                return []
+                sql = f""" SELECT a.attname AS name,
+                                  t.oid AS pg_type,
+                                  NOT a.attnotnull AS nullable,
+                                  a.attnum AS position
+                           FROM pg_catalog.pg_attribute a
+                           JOIN pg_class c ON a.attrelid = c.oid
+                           JOIN pg_type t ON a.atttypid = t.oid
+                           JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+                           WHERE n.nspname = '{command["schema"]}' AND c.relname = '{command["table"]}'
+                                 AND c.relkind = 'r'
+                                 AND a.attnum > 0
+                                 AND NOT a.attisdropped
+                           ORDER BY a.attnum ASC;"""
+                results['columns'] = self._execute_sql(cursor, sql, True)
+
+                # retrieve the primary index information for the table
+                sql = f"""SELECT unnest(conkey) AS column_id,
+                                 generate_subscripts(conkey, 1) - 1 AS position
+                            FROM pg_catalog.pg_constraint c
+                            JOIN pg_catalog.pg_class t ON (t.oid = c.conrelid)
+                            JOIN pg_catalog.pg_namespace n ON (t.relnamespace = n.oid)
+                           WHERE n.nspname = '{command["schema"]}' AND t.relname = '{command["table"]}' AND c.contype = 'p';"""
+                results['primary'] = self._execute_sql(cursor, sql, True)
+
+                # XXX retrieve the secondary index information for the table
+
+                return results
 
 
     def _replica_command(self, command: dict) -> list:
@@ -311,11 +335,53 @@ class TestCase:
         database.
 
         """
-        if command['type'] != 'sql':
-            self._raise_error('Can only execute "sql" commands against the replica.')
-
         with self._fdw.cursor() as cursor:
-            return self._execute_sql(cursor, command['sql'], True)
+            if command['type'] == 'sql':
+                return self._execute_sql(cursor, command['sql'], True)
+
+            elif command['type'] == 'schema_check':
+                results = {}
+
+                # retrieve the column data
+                with_sql = f"""SELECT table_id, exists
+                                 FROM "__pg_springtail_catalog"."table_names"
+                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
+                                ORDER BY xid DESC, lsn DESC
+                                LIMIT 1"""
+                ranking_sql = """SELECT *,
+                                 ROW_NUMBER() OVER (PARTITION BY name ORDER BY xid DESC, lsn DESC) AS rn
+                                 FROM "__pg_springtail_catalog"."schemas"
+                                 WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)"""
+                sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
+                          SELECT name, pg_type, nullable, position FROM ranked_columns WHERE rn = 1 AND exists IS TRUE ORDER BY position ASC;"""
+
+                results['columns'] = self._execute_sql(cursor, sql, True)
+
+                # retrieve the primary key data
+                with_sql = f"""SELECT table_id, exists
+                                 FROM "__pg_springtail_catalog"."table_names"
+                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
+                                ORDER BY xid DESC, lsn DESC
+                                LIMIT 1"""
+                xid_sql = """SELECT xid, lsn
+                               FROM "__pg_springtail_catalog"."indexes"
+                              WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+                                AND index_id = 0
+                              ORDER BY xid DESC, lsn DESC
+                              LIMIT 1"""
+                ranking_sql = f"""SELECT *
+                                  FROM "__pg_springtail_catalog"."indexes"
+                                  WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+                                    AND index_id = 0
+                                    AND (xid, lsn) IN ({xid_sql})"""
+                sql = f"""WITH latest_table AS ({with_sql}), ranked_columns AS ({ranking_sql})
+                          SELECT column_id, position FROM ranked_columns ORDER BY position ASC;"""
+                results['primary'] = self._execute_sql(cursor, sql, True)
+
+                return results
+
+            else:
+                self._raise_error(f'Cannot execute "{command["type"]}" commands against the replica.')
 
 
     def _execute_commands(self, commands: list) -> None:
@@ -447,7 +513,7 @@ class TestCase:
             if primary_result != replica_result:
                 self._raise_error(
                     f"Verification failed for {self._name}:\n"
-                    f"Statement: {command['sql']}\n"
+                    f"Statement: {command}\n"
                     f"Main DB: {primary_result}\n"
                     f"Replica DB: {replica_result}"
                 )
