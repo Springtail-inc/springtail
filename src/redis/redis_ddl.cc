@@ -1,9 +1,12 @@
 #include <common/common.hh>
 #include <common/constants.hh>
 #include <common/logging.hh>
-#include <common/redis_ddl.hh>
-#include <common/redis_types.hh>
 #include <common/properties.hh>
+#include <common/redis_types.hh>
+
+#include <redis/redis_ddl.hh>
+#include <redis/redis_db_tables.hh>
+#include <redis/redis_containers.hh>
 
 namespace springtail {
 
@@ -96,7 +99,37 @@ namespace springtail {
         for (const auto &key : commit_keys) {
             auto ts = _redis->transaction(false, false);
             auto r = ts.redis();
+            // NOTE: if the precommit_key hash could change, then we should do a watch here
             auto &&value = r.hget(precommit_key, key);
+            assert (value.has_value());
+
+            // iterate through the DDL statements and see if any
+            // result in the addition or removal of a table/schema
+            // or the renaming of a table and add them to the table set for this db
+            nlohmann::json ddls = nlohmann::json::parse(*value);
+            for (auto ddl: ddls.at("ddls")) {
+                assert(ddl.is_object());
+                assert(ddl.contains("action"));
+                auto &action = ddl.at("action");
+
+                // only care about create, drop and rename
+                if (action == "create") {
+                    auto schema = ddl.at("schema").get<std::string>();
+                    auto table = ddl.at("table").get<std::string>();
+                    RedisDbTables::add_table(ts, db_id, table, schema);
+                } else if (action == "drop") {
+                    auto schema = ddl.at("schema").get<std::string>();
+                    auto table = ddl.at("table").get<std::string>();
+                    RedisDbTables::remove_table(ts, db_id, table, schema);
+                } else if (action == "rename") {
+                    auto schema = ddl.at("schema").get<std::string>();
+                    auto table = ddl.at("table").get<std::string>();
+                    auto old_schema = ddl.at("old_schema").get<std::string>();
+                    auto old_table = ddl.at("old_table").get<std::string>();
+                    RedisDbTables::remove_table(ts, db_id, old_table, old_schema);
+                    RedisDbTables::add_table(ts, db_id, table, schema);
+                }
+            }
 
             // get the set of FDWs
             std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
@@ -168,6 +201,14 @@ namespace springtail {
         std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
         RedisQueue<std::string> queue(key);
         queue.abort("active");
+    }
+
+    void
+    RedisDDL::commit_fdw_no_update(const std::string &fdw_id)
+    {
+        std::string key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
+        RedisQueue<std::string> queue(key);
+        queue.commit("active");
     }
 
     void

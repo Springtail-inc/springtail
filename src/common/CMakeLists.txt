@@ -10,7 +10,6 @@ set(COMMON_LIB_SOURCES
   common.cc
   properties.cc
   redis.cc
-  redis_ddl.cc
   tracking_allocator.cc
   dns_resolver.cc
   coordinator.cc
@@ -52,11 +51,6 @@ target_include_directories(test_counter PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_counter PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_counter)
 
-add_executable(test_redis test/test_redis.cc)
-target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_redis PRIVATE springtail_common Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_redis)
-
 add_executable(test_dns test/test_dns.cc)
 target_include_directories(test_dns PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_dns PRIVATE springtail_common Boost::thread GTest::gtest_main)
@@ -82,7 +76,6 @@ gtest_discover_tests(test_queue)
 gtest_discover_tests(test_common)
 gtest_discover_tests(test_filesystem)
 gtest_discover_tests(test_counter)
-gtest_discover_tests(test_redis)
 gtest_discover_tests(test_dns)
 gtest_discover_tests(test_synchronizer)
 gtest_discover_tests(test_exception)

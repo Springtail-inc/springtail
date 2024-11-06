@@ -42,6 +42,7 @@ target_include_directories(pg_ddl_daemon
 target_link_libraries(pg_ddl_daemon
     PRIVATE springtail_common
     PRIVATE springtail_pg
+    PRIVATE springtail_redis
     PRIVATE Boost::program_options
 )
 add_dsymutil_command(pg_ddl_daemon)

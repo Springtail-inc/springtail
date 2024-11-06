@@ -2,10 +2,12 @@
 #include <libpq-fe.h>
 
 #include <common/redis.hh>
-#include <common/redis_ddl.hh>
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
+#include <common/json.hh>
+
+#include <redis/redis_ddl.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/libpq_connection.hh>
@@ -275,6 +277,9 @@ namespace springtail::pg_fdw {
                                    escaped_schema));
             conn->clear();
 
+            // set the schema xid in the map
+            _db_xid_map[db_id] = xid;
+
             // close the connection
             conn->disconnect();
         }
@@ -300,16 +305,30 @@ namespace springtail::pg_fdw {
                     continue;
                 }
 
+                uint64_t db_id = ddls.at("db_id").get<uint64_t>();
+                uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
+
+                if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
+                    SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
+                                db_id, _db_xid_map[db_id], schema_xid);
+                    redis_ddl.commit_fdw_no_update(_fdw_id);
+                    continue;
+                }
+
                 // apply the DDL statements
-                if (_update_schemas(redis_ddl, ddls, SPRINGTAIL_FDW_SERVER_NAME)) {
+                bool status = _update_schemas(redis_ddl, db_id, schema_xid, ddls);
+                if (status) {
                     // update schema XID if applied, otherwise they may be queued
-                    uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
                     SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}", schema_xid);
                     redis_ddl.update_schema_xid(_fdw_id, schema_xid);
+                    _db_xid_map[db_id] = schema_xid;
+                    break;
                 } else {
+                    // error occured, abort the DDL
                     SPDLOG_ERROR("Failed to apply DDL statements");
                     assert(0);
                     redis_ddl.abort_fdw(_fdw_id);
+                    break;
                 }
 
             } catch (Error &e) {
@@ -379,13 +398,10 @@ namespace springtail::pg_fdw {
 
     bool
     PgDDLMgr::_update_schemas(RedisDDL &redis,
-                              const nlohmann::json &ddls,
-                              const std::string &server_name)
+                              uint64_t db_id,
+                              uint64_t schema_xid,
+                              const nlohmann::json &ddls)
     {
-        // get the db id and schema xid
-        uint64_t db_id = ddls.at("db_id").get<uint64_t>();
-        uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
-
         // get the database name for the db_id; XXX should see if we can swtich to OID
         std::string db_name = Properties::get_db_name(db_id);
         LibPqConnectionPtr conn = _connect_fdw(db_id, _db_prefix + db_name);
@@ -395,13 +411,14 @@ namespace springtail::pg_fdw {
 
             // generate a DDL statement for each JSON in the transaction
             std::vector<std::string> txn;
-            for (auto ddl : ddls.at("ddls")) {
-                txn.push_back(_gen_sql_from_json(conn, server_name, ddl, schemas));
+            for (const auto &ddl : ddls.at("ddls")) {
+                txn.push_back(_gen_sql_from_json(conn, SPRINGTAIL_FDW_SERVER_NAME, ddl, schemas));
             }
 
             // generate a statement to alter the server options with the schema XID
             txn.push_back(fmt::format("ALTER SERVER {} OPTIONS (SET {} '{}')",
-                                      server_name, SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
+                                      SPRINGTAIL_FDW_SERVER_NAME,
+                                      SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                       schema_xid));
 
             // find the difference between the schemas in the db and the schemas in the DDL
@@ -414,13 +431,13 @@ namespace springtail::pg_fdw {
             // execute the set of statements
             _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
 
+            return true;
+
         } catch (Error &e) {
             assert(0); // assert in debug
             e.log_backtrace();
             return false;
         }
-
-        return true;
     }
 
     void
@@ -430,32 +447,6 @@ namespace springtail::pg_fdw {
                            const std::vector<std::string> &txn,
                            const std::set<std::string> &schemas)
     {
-        // get current schema xid
-        std::string xid_sql = "SELECT option FROM ("
-            "SELECT unnest(srvoptions) AS option "
-            "FROM pg_foreign_server "
-            "WHERE srvname = '"
-            SPRINGTAIL_FDW_SERVER_NAME
-            "' "
-        ") AS options WHERE option LIKE 'schema_xid%';";
-
-        // get the schema XID from the server options
-        conn->exec(xid_sql);
-
-        // extract the schema XID from the result
-        uint64_t current_schema_xid = 0;
-        std::string option = conn->get_string(0, 0);
-        std::string xid_str = option.substr(option.find('=') + 1);
-        current_schema_xid = std::stoull(xid_str);
-
-        conn->clear();
-
-        if (current_schema_xid >= schema_xid) {
-            SPDLOG_WARN("Schema XID has already been applied: current={}, new={}",
-                        current_schema_xid, schema_xid);
-            return;
-        }
-
         // start a transaction
         conn->start_transaction();
 
@@ -486,7 +477,7 @@ namespace springtail::pg_fdw {
     std::string
     PgDDLMgr::_gen_sql_from_json(LibPqConnectionPtr conn,
                                  const std::string &server_name,
-                                 nlohmann::json &ddl,
+                                 const nlohmann::json &ddl,
                                  std::set<std::string> &schemas)
     {
         assert(ddl.is_object());
@@ -498,13 +489,13 @@ namespace springtail::pg_fdw {
 
             // retrieve the column type names
             std::set<uint32_t> type_set;
-            for (auto &col : ddl.at("columns")) {
+            for (const auto &col : ddl.at("columns")) {
                 type_set.insert(col.at("type").get<uint32_t>());
             }
             auto &&type_map = _query_type_names(conn, type_set);
 
             // save the column details
-            for (auto &col : ddl.at("columns")) {
+            for (const auto &col : ddl.at("columns")) {
                 columns.push_back({
                         col.at("name"),
                         type_map.at(col.at("type").get<uint32_t>()),

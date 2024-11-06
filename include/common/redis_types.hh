@@ -161,4 +161,12 @@ namespace springtail::redis {
      * value: <daemon_type>:<thread_id>
      */
     static constexpr char PUBSUB_LIVENESS_NOTIFY[] = "pubsub:liveness_notify:{}";
+
+    //// For Redis table cache
+    /**
+     * Set holding schema.table names for each db id
+     * args: <db_instance_id>, <db_id>
+     * value: quoted(schema).quoted(table)
+     */
+    static constexpr char SET_DB_TABLES[] = "set:db_tables:{}:{}";
 }

@@ -296,7 +296,7 @@ namespace springtail {
         char *_buffer = nullptr;
 
         /** Simple version of escape identifier */
-        std::string _escape_identifier(const char *str);
+        static std::string _escape_identifier(const char *str);
     };
     using LibPqConnectionPtr = std::shared_ptr<LibPqConnection>;
 };

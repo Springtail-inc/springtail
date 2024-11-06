@@ -627,6 +627,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--check', action=argparse.BooleanOptionalAction, help="Check for backtrace on error")
     parser.add_argument('--dump', action=argparse.BooleanOptionalAction, help="Dump the log files into a tarball")
     parser.add_argument('--report', action=argparse.BooleanOptionalAction, help="Create a new bug report")
+    parser.add_argument('--load-redis', action=argparse.BooleanOptionalAction, help="Load redis from the system file")
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -638,8 +639,8 @@ if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
 
-    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report:
-        print("No action specified. Use --start, --status, --dump, --check, --report or --kill.")
+    if not args.start and not args.status and not args.kill and not args.dump and not args.check and not args.report and not args.load_redis:
+        print("No action specified. Use --start, --status, --dump, --check, --report, --load-redis or --kill.")
         sys.exit(1)
 
     if not is_linux():
@@ -668,6 +669,11 @@ if __name__ == "__main__":
 
         if args.report:
             create_report(args.config_file, args.build_dir)
+            sys.exit(0)
+
+        if args.load_redis:
+            props = Properties(args.config_file, True)
+            print("Redis loaded from the system settings file.")
             sys.exit(0)
 
     except Exception as e:
