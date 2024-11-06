@@ -144,7 +144,7 @@ class TestSet:
         print('Test durations:')
         for result in results:
             if result['result'] == 'SUCCESS':
-                print(f'\t{result["name"]}: {result["duration"]}')
+                print(f'\t{result["name"]}: {round(result["duration"],2)}s')
 
         print('Test errors:')
         for result in results:

@@ -308,6 +308,8 @@ namespace springtail::pg_fdw {
                 uint64_t db_id = ddls.at("db_id").get<uint64_t>();
                 uint64_t schema_xid = ddls.at("xid").get<uint64_t>();
 
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Applying DDLs for db_id: {}, schema_xid: {}", db_id, schema_xid);
+
                 if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                     SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                 db_id, _db_xid_map[db_id], schema_xid);
@@ -317,19 +319,18 @@ namespace springtail::pg_fdw {
 
                 // apply the DDL statements
                 bool status = _update_schemas(redis_ddl, db_id, schema_xid, ddls);
-                if (status) {
-                    // update schema XID if applied, otherwise they may be queued
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}", schema_xid);
-                    redis_ddl.update_schema_xid(_fdw_id, schema_xid);
-                    _db_xid_map[db_id] = schema_xid;
-                    break;
-                } else {
+                if (!status) {
                     // error occured, abort the DDL
                     SPDLOG_ERROR("Failed to apply DDL statements");
-                    assert(0);
                     redis_ddl.abort_fdw(_fdw_id);
-                    break;
+                    assert(0);
+                    continue;
                 }
+
+                // success, update schema XID if applied, otherwise they may be queued
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}", schema_xid);
+                redis_ddl.update_schema_xid(_fdw_id, schema_xid);
+                _db_xid_map[db_id] = schema_xid;
 
             } catch (Error &e) {
                 SPDLOG_ERROR("Springtail exception in DDL thread");

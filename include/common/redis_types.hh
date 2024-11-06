@@ -102,7 +102,7 @@ namespace springtail::redis {
      * HASH of pre-commit DDL operations.  Stored with a key of "db_id:xid"
      * args: <db_instance_id>
      */
-    static constexpr char HASH_DDL_PRECOMMIT[] = "queue:ddl:pc:{}";
+    static constexpr char HASH_DDL_PRECOMMIT[] = "hash:ddl:pc:{}";
 
     /**
      * Queue of DDL changes for the FDW to process coming out of the GC2 Committer
@@ -123,7 +123,7 @@ namespace springtail::redis {
      * Table sync hash set, key is the table OID/TID, value is 'xmin:xmax:xid,xid,xid...'
      * args: <db_instance_id>, <db_id>
      */
-    static constexpr char HASH_SYNC_TABLE_STATE[] = "set:sync_table_state:{}:{}";
+    static constexpr char HASH_SYNC_TABLE_STATE[] = "hash:sync_table_state:{}:{}";
 
     /**
      * Queue for table sync requests; value is the table OID/TID

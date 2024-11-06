@@ -139,7 +139,7 @@ namespace springtail {
                 // note: this is equivalent to RedisQueue::push()
                 ts.lpush(fdw_key, *value);
             }
-            ts.del(key).exec();
+            ts.hdel(precommit_key, key).exec();
         }
     }
 
