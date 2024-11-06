@@ -2,10 +2,7 @@
 
 #include <mutex>
 #include <memory>
-#include <vector>
 #include <string>
-#include <string_view>
-#include <iostream>
 
 #include <common/object_pool.hh>
 #include <pg_repl/pg_repl_msg.hh>

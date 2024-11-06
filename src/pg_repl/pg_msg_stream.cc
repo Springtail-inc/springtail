@@ -909,7 +909,6 @@ namespace springtail {
             v["idx_position"].get_to(col.idx_position);
             msg.columns.push_back(col);
         }
-        //_decode_schema_columns(json["columns"], msg.columns);
 
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_INDEX);
         decoded_msg->msg.emplace<PgMsgIndex>(msg);

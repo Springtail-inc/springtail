@@ -25,7 +25,9 @@ namespace springtail {
         NAME_CHANGE = 2,
         NULLABLE_CHANGE = 3,
         RESYNC = 4,
-        NO_CHANGE = 5
+        NEW_INDEX = 5,
+        DROP_INDEX = 6,
+        NO_CHANGE = 7
     };
 
     /**

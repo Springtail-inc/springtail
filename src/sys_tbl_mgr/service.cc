@@ -1,3 +1,4 @@
+#include "common/constants.hh"
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 
 #include <sys_tbl_mgr/service.hh>
@@ -7,6 +8,7 @@
 
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+
 
 namespace springtail::sys_tbl_mgr {
     /* static member initialization must happen outside of class */
@@ -62,7 +64,52 @@ namespace springtail::sys_tbl_mgr {
     nlohmann::json
     Service::_create_index(const IndexRequest &request)
     {
-        return {};
+        XidLsn xid(request.xid, request.lsn);
+
+        nlohmann::json ddl;
+        ddl["action"] = "create index";
+        ddl["schema"] = request.index.schema;
+        ddl["index"] = request.index.name;
+        ddl["id"] = request.index.id;
+        ddl["is_unique"] = request.index.is_unique;
+        ddl["columns"] = nlohmann::json::array();
+
+        if (request.index.columns.empty()) {
+            return ddl;
+        }
+
+        std::map<uint32_t, uint32_t> keys;
+        for (const auto &column : request.index.columns) {
+            ColumnHistory history;
+            history.xid = xid.xid;
+            history.lsn = xid.lsn;
+            history.exists = true;
+            history.update_type = static_cast<uint8_t>(SchemaUpdateType::NEW_INDEX);
+            history.__set_index_column(column);
+            history.index_column.name = column.name;
+            history.index_column.idx_position = column.idx_position;
+            history.index_column.position = column.position;
+
+            {
+                boost::unique_lock lock(_mutex);
+                _schema_cache[request.db_id][request.index.table_id][column.position].push_back(history);
+            }
+
+            assert(keys.find(column.idx_position) == keys.end());
+            keys[column.idx_position] = column.position;
+
+            // store the column data into the json
+            nlohmann::json column_json;
+            column_json["name"] = column.name;
+            column_json["idx_position"] = column.idx_position;
+            column_json["position"] = column.position;
+
+            ddl["columns"].push_back(column_json);
+        }
+
+        _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
+
+        return ddl;
     }
 
     void
@@ -139,7 +186,7 @@ namespace springtail::sys_tbl_mgr {
             history.lsn = xid.lsn;
             history.exists = true;
             history.update_type = static_cast<uint8_t>(SchemaUpdateType::NEW_COLUMN);
-            history.column = column;
+            history.__set_column(column);
 
             columns.push_back(history);
 
@@ -163,26 +210,7 @@ namespace springtail::sys_tbl_mgr {
         _set_schema_info(request.db_id, request.table.id, columns);
 
         // update the primary index information
-        if (!primary_keys.empty()) {
-            auto write_xid = _get_write_xid(request.db_id);
-            auto indexes_t = _get_mutable_system_table(request.db_id, sys_tbl::Indexes::ID);
-            auto fields = sys_tbl::Indexes::Data::fields(request.table.id,
-                                                         constant::INDEX_PRIMARY,
-                                                         xid.xid,
-                                                         xid.lsn,
-                                                         0, // empty position; filled below
-                                                         0); // empty column ID; filled below
-
-            for (auto &&entry : primary_keys) {
-                fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
-                fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
-
-                indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
-                                  write_xid, constant::UNKNOWN_EXTENT);
-            }
-        }
-
-        //    f. XXX anything to do for secondary indexes?
+        _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
 
         return ddl;
     }
@@ -292,7 +320,7 @@ namespace springtail::sys_tbl_mgr {
             change.lsn = request.lsn;
             change.exists = false;
             change.update_type = static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN);
-            change.column = column;
+            change.__set_column(column);
 
             changes.push_back(change);
         }
@@ -994,7 +1022,7 @@ namespace springtail::sys_tbl_mgr {
             entry.lsn = lsn;
             entry.exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);;
             entry.update_type = fields->at(sys_tbl::Schemas::Data::UPDATE_TYPE)->get_uint8(row);
-
+            entry.__set_column({});
             entry.column.name = fields->at(sys_tbl::Schemas::Data::NAME)->get_text(row);
             entry.column.type = fields->at(sys_tbl::Schemas::Data::TYPE)->get_uint8(row);
             entry.column.pg_type = fields->at(sys_tbl::Schemas::Data::PG_TYPE)->get_int32(row);
@@ -1059,6 +1087,9 @@ namespace springtail::sys_tbl_mgr {
 
         // add the column change history to the cache
         for (auto &history : columns) {
+            assert(history.__isset.column);
+            assert(!history.__isset.index_column);
+
             // XXX do we need to enforce XID ordering somehow here?  are we guaranteed to apply these in xid order?
             boost::unique_lock lock(_mutex);
             _schema_cache[db_id][table_id][history.column.position].push_back(history);
@@ -1080,7 +1111,6 @@ namespace springtail::sys_tbl_mgr {
                                                        history.column.is_nullable,
                                                        value,
                                                        history.update_type);
-
             schemas_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
     }
@@ -1137,6 +1167,25 @@ namespace springtail::sys_tbl_mgr {
         return table;
     }
 
+    void Service::_write_index(const XidLsn& xid, uint64_t db_id, uint64_t tab_id, uint64_t index_id, const std::map<uint32_t, uint32_t>& keys) {
+        auto write_xid = _get_write_xid(db_id);
+        auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
+        auto fields = sys_tbl::Indexes::Data::fields(tab_id,
+                index_id,
+                xid.xid,
+                xid.lsn,
+                0, // empty position; filled below
+                0); // empty column ID; filled below
+
+        for (auto &&entry : keys) {
+            fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
+            fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
+
+            indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
+                              write_xid, constant::UNKNOWN_EXTENT);
+        }
+    }
+
     ColumnHistory
     Service::_generate_update(const std::vector<TableColumn> &old_schema,
                               const std::vector<TableColumn> &new_schema,
@@ -1146,6 +1195,7 @@ namespace springtail::sys_tbl_mgr {
         ColumnHistory update;
         update.xid = xid.xid;
         update.lsn = xid.lsn;
+        update.__set_column({});
 
         // if the old schema has more columns, then a column was removed
         if (old_schema.size() > new_schema.size()) {
@@ -1159,7 +1209,7 @@ namespace springtail::sys_tbl_mgr {
                 auto &&new_i = lookup.find(old_entry.position);
                 if (new_i == lookup.end()) {
                     // copy the old column details
-                    update.column = old_entry;
+                    update.__set_column(old_entry);
 
                     // mark as a REMOVE_COLUMN update
                     update.update_type = static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN);

@@ -82,7 +82,8 @@ namespace springtail::sys_tbl {
         { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
         { "lsn", 4, SchemaType::UINT64, INT8OID, false, 3 },
         { "position", 5, SchemaType::UINT32, INT4OID, false, 4 },
-        { "column_id", 6, SchemaType::UINT32, INT4OID, false }
+        { "column_id", 6, SchemaType::UINT32, INT4OID, false },
+        { "exists", 7, SchemaType::BOOLEAN, BOOLOID, false }
     };
 
     const std::vector<SchemaColumn> Indexes::Primary::SCHEMA = {

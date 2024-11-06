@@ -108,10 +108,13 @@ BEGIN
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
-            ON column_name=pga.attname
+                ON column_name=pga.attname
             LEFT OUTER JOIN pg_index pgi
-            ON pga.attrelid=pgi.indrelid
-            WHERE pga.attrelid=obj.objid AND obj.object_type = 'index'
+                ON pgi.indexrelid=obj.objid
+            WHERE pgi.indexrelid=obj.objid
+                AND pga.attrelid=pgi.indrelid
+                AND obj.object_type = 'index'
+                AND (array_position(pgi.indkey, pga.attnum) IS NOT NULL)
         ) AS obj_select
         INTO json_columns;
 
@@ -136,7 +139,6 @@ BEGIN
                 'identity', obj.object_identity,
                 'table_oid', tab_obj.table_oid::bigint,
                 'table_name', tab_obj.table_name,
-                'is_unique', tab_obj.is_unique,
                 'is_unique', tab_obj.is_unique,
                 'columns', json_columns );
 
