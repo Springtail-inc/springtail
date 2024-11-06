@@ -38,16 +38,29 @@ static void setup(ProxyServerPtr server)
         throw ProxyServerError();
     }
 
+<<<<<<< HEAD
     std::vector<std::string> fwd_id_list = Properties::get_fdw_ids();
     for (const auto & fwd_id: fwd_id_list) {
         nlohmann::json fwd_config = Properties::get_fdw_config(fwd_id);
         auto host = Json::get<std::string>(fwd_config, "host");
         auto port = Json::get<uint16_t>(fwd_config, "port");
+=======
+    // TODO: rename fwd_id to fdw_id, naming mistake
+    std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
+    for (const auto & fdw_id: fdw_id_list) {
+        nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
+        auto host = Json::get<std::string>(fdw_config, "host");
+        auto port = Json::get<uint16_t>(fdw_config, "port");
+>>>>>>> 450b2e3 (changed proxy server to get database info from properties)
         if (host.has_value() && port.has_value()) {
             // add replica
             server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
         } else {
+<<<<<<< HEAD
             SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fwd_id);
+=======
+            SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
+>>>>>>> 450b2e3 (changed proxy server to get database info from properties)
             throw ProxyServerError();
         }
     }
