@@ -50,6 +50,9 @@ def run_all_tests(test_folder: str,
     # parse and prepare all of the test cases
     test_sets = []
     for test_set in sorted(os.listdir(test_folder)):
+        if not os.path.isfile(os.path.join(test_folder, test_set, '__config.sql')):
+            print(f'Skipping test set {test_set} -- missing __config.sql')
+            continue
         test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir))
 
     # run the test sets

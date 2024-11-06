@@ -225,6 +225,15 @@ namespace springtail {
         return r;
     }
 
+    std::optional<int32_t>
+    LibPqConnection::get_int32_optional(int row, int col)
+    {
+        if (PQgetisnull(_result, row, col)) {
+            return {};
+        }
+        return get_int32(row, col);
+    }
+
     int64_t LibPqConnection::get_int64(int row, int col)
     {
         char *value = PQgetvalue(_result, row, col);
