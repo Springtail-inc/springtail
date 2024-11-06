@@ -46,17 +46,17 @@ namespace springtail::redis {
 
     /**
      * Pubsub channel for all DB config changes
-     * args: <db_instance_id>, <db_id>
+     * args: <db_instance_id>
      * message: TBD (Type 1: include schema/table changes)
      */
-    static constexpr char PUBSUB_DB_CONFIG_CHANGES[] = "pubsub:db_config_changes:{}:{}";
+    static constexpr char PUBSUB_DB_CONFIG_CHANGES[] = "pubsub:db_config_changes:{}";
 
     /**
      * Pubsub channel for all DB state changes
-     * args: <db_instance_id>, <db_id>
-     * message: <new state>
+     * args: <db_instance_id>
+     * message: db_id:<new state>
      */
-    static constexpr char PUBSUB_DB_STATE_CHANGES[] = "pubsub:db_state_changes:{}:{}";
+    static constexpr char PUBSUB_DB_STATE_CHANGES[] = "pubsub:db_state_changes:{}";
 
     //// Data DB (1) accessed via RedisClient::
 
@@ -169,4 +169,11 @@ namespace springtail::redis {
      * value: quoted(schema).quoted(table)
      */
     static constexpr char SET_DB_TABLES[] = "set:db_tables:{}:{}";
+
+    /**
+     * Pub/sub for notifying the proxy of a table change or addition
+     * msg: <db_id>:<add|remove>:<schema>:<table>
+     * see RedisDbTables::decode_pubsub_msg()
+     */
+    static constexpr char PUBSUB_DB_TABLE_CHANGES[] = "pubsub:db_table_changes:{}";
 }

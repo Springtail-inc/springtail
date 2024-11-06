@@ -139,5 +139,110 @@ namespace springtail {
 
             return obj;
         }
+
+        /**
+         * @brief Escape a string with quotes in it, returns a quoted string with quotes escaped
+         * @param input input string
+         * @return std::string
+         */
+        static inline std::string
+        escape_quoted_string(const std::string &input)
+        {
+            std::string result;
+            result.reserve(input.length() + 2);  // Reserve space for quotes and potential escapes
+
+            // Add opening quote
+            result.push_back('"');
+
+            // Process each character
+            for (char c : input) {
+                if (c == '"') {
+                    result.push_back('\\');
+                }
+                result.push_back(c);
+            }
+
+            // Add closing quote
+            result.push_back('"');
+
+            return result;
+        }
+
+        /**
+         * @brief Unescape a quoted string, returns a string with quotes unescaped
+         * @param input input string
+         * @return std::string
+         */
+        static inline std::string
+        unescape_quoted_string(const std::string &input)
+        {
+            std::string result;
+            result.reserve(input.length());
+
+            bool in_quotes = false;
+            for (size_t i = 0; i < input.length(); ++i) {
+                char c = input[i];
+
+                if (c == '"' && (i == 0 || input[i-1] != '\\')) {
+                    // Unescaped quote - toggle quote mode
+                    in_quotes = !in_quotes;
+                    continue;
+                }
+
+                if (c == '\\' && in_quotes && i + 1 < input.length() && input[i+1] == '"') {
+                    // Escaped quote - skip the escape character
+                    c = '"';
+                    ++i;
+                }
+                result.push_back(c);
+            }
+
+            assert(!in_quotes);
+
+            return result;
+        }
+
+        /**
+         * @brief Split a delimited string into a vector of quoted strings
+         * @param delimiter delimiter char
+         * @param input input string
+         * @param std::vector<std::string> output vector
+         */
+        static inline void
+        split_quoted_string(const char delimiter,
+                            const std::string &input,
+                            std::vector<std::string> &result)
+        {
+            std::string current;
+            bool in_quotes = false;
+
+            for (size_t i = 0; i < input.length(); ++i) {
+                char c = input[i];
+
+                if (c == '"' && (i == 0 || input[i-1] != '\\')) {
+                    // Unescaped quote - toggle quote mode
+                    in_quotes = !in_quotes;
+                    current += c;
+                }
+                else if (c == delimiter && !in_quotes) {
+                    // Delimiter found outside quotes - split here
+                    result.push_back(current);
+                    current.clear();
+                }
+                else {
+                    // Regular character or escaped quote
+                    current += c;
+                }
+            }
+
+            // Add the last part
+            if (!current.empty()) {
+                result.push_back(current);
+            }
+
+            assert(!in_quotes);
+
+            return;
+        }
     }
 }

@@ -194,14 +194,28 @@ namespace springtail::pg_log_mgr {
         RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(5);
 
         // subscribe to the state change channel
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id, _db_id);
+        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
         subscriber->subscribe(state_change_channel);
 
-        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
-            if (channel == state_change_channel) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
-                _handle_external_state_change(msg);
+        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg)
+        {
+            if (channel != state_change_channel) {
+                return;
             }
+
+            // decode message
+            std::vector<std::string> msg_parts; // db_id, state
+            common::split_string(":", msg, msg_parts);
+            assert(msg_parts.size() == 2);
+
+            // check db_id matches
+            uint64_t db_id = stoull(msg_parts[0]);
+            if (db_id != _db_id) {
+                return;
+            }
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg_parts[1]);
+            _handle_external_state_change(msg_parts[1]);
         });
 
         while (!_shutdown) {

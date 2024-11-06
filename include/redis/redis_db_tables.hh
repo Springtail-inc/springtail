@@ -3,6 +3,7 @@
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
+#include <common/common.hh>
 #include <common/properties.hh>
 #include <common/redis_types.hh>
 
@@ -23,10 +24,11 @@ namespace springtail {
         static void add_table(sw::redis::Transaction &ts, uint64_t db_id, const std::string &table_name, const std::string &schema_name)
         {
             std::string key = fmt::format(redis::SET_DB_TABLES, Properties::get_db_instance_id(), db_id);
-
-            // escape the strings and add to set
-            std::string value = fmt::format("{}:{}", _escape_string(table_name), _escape_string(schema_name));
+            std::string schema = common::escape_quoted_string(schema_name);
+            std::string table = common::escape_quoted_string(table_name);
+            std::string value = fmt::format("{}:{}", schema, table);
             ts.sadd(key, value);
+            ts.publish(fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, Properties::get_db_instance_id()), fmt::format("{}:add:{}:{}", db_id, schema_name, table_name));
         }
 
         /**
@@ -37,11 +39,13 @@ namespace springtail {
          */
         static void remove_table(sw::redis::Transaction &ts, uint64_t db_id, const std::string &table_name, const std::string &schema_name)
         {
+            uint64_t instance_id = Properties::get_db_instance_id();
             std::string key = fmt::format(redis::SET_DB_TABLES, Properties::get_db_instance_id(), db_id);
-
-            // escape the strings and add to set
-            std::string value = fmt::format("{}:{}", _escape_string(table_name), _escape_string(schema_name));
+            std::string schema = common::escape_quoted_string(schema_name);
+            std::string table = common::escape_quoted_string(table_name);
+            std::string value = fmt::format("{}:{}", schema, table);
             ts.srem(key, value);
+            ts.publish(fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, instance_id), fmt::format("{}:remove:{}:{}", db_id, schema_name, table_name));
         }
 
         /**
@@ -53,26 +57,32 @@ namespace springtail {
          */
         static bool lookup_table(uint64_t db_id, const std::string &table_name, const std::string &schema_name)
         {
-            std::string key = fmt::format(redis::SET_DB_TABLES, Properties::get_db_instance_id(), db_id);
-
-            // escape the strings and add to set
-            std::string value = fmt::format("{}:{}", _escape_string(table_name), _escape_string(schema_name));
+            uint64_t instance_id = Properties::get_db_instance_id();
+            std::string key = fmt::format(redis::SET_DB_TABLES, instance_id, db_id);
+            std::string value = fmt::format("{}:{}", common::escape_quoted_string(schema_name), common::escape_quoted_string(table_name));
             return RedisMgr::get_instance()->get_client()->sismember(key, value);
+        }
+
+        /**
+         * @brief Decode a pubsub message into db_id, action, schema, table
+         * @param msg pubsub message
+         * @param db_id db id (output)
+         * @param action action, one of add, remove (output)
+         * @param schema schema name (output)
+         * @param table table name (output)
+         */
+        static void decode_pubsub_msg(const std::string &msg, uint64_t &db_id, std::string &action, std::string &schema, std::string &table)
+        {
+            std::vector<std::string> parts;
+            common::split_quoted_string(':', msg, parts);
+            db_id = stoull(parts[0]);
+            action = parts[1];
+            schema = common::unescape_quoted_string(parts[2]);
+            table = common::unescape_quoted_string(parts[3]);
         }
 
     private:
         // private constructor
         RedisDbTables() = delete;
-
-        /**
-         * @brief Simple escape a string for json
-         * @param str string to escape
-         * @return escaped string
-         */
-        static std::string _escape_string(const std::string &str)
-        {
-            nlohmann::json j = str;
-            return j.dump();
-        }
     };
 }
