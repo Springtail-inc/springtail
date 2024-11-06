@@ -53,6 +53,31 @@ class TestSet:
             self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
 
 
+    def _apply_replica_full(self) -> None:
+        table_sql = """SELECT nspname::text, relname::text
+                         FROM pg_catalog.pg_class
+                         JOIN pg_catalog.pg_namespace ON relnamespace=pg_namespace.oid
+                         LEFT OUTER JOIN pg_catalog.pg_index ON indrelid=pg_class.oid
+                        WHERE relkind = 'r'
+                          AND nspname NOT LIKE 'pg_%'
+                          AND nspname != 'information_schema'
+                          AND pg_index.indexrelid IS NULL
+                        ORDER BY pg_class.oid"""
+        primary_name = self._props.get_db_configs()[0]['name']
+        connection = springtail.connect_db_instance(self._props, primary_name)
+        with connection.cursor() as cursor:
+            # retrieve the list of tables without primary keys
+            cursor.execute(table_sql)
+            results = cursor.fetchall()
+
+            # apply REPLICA IDENITFY FULL to each
+            for row in results:
+                logging.debug(f'ALTER TABLE "{row[0]}"."{row[1]}" REPLICA IDENTITY FULL')
+                cursor.execute(f'ALTER TABLE "{row[0]}"."{row[1]}" REPLICA IDENTITY FULL')
+        connection.commit()
+        connection.close()
+
+
     def run(self,
             test_files: list = [],
             check_logs: bool = False,
@@ -71,6 +96,9 @@ class TestSet:
         # perform the primary db setup
         logging.debug('Perform the global setup()')
         self._config.setup()
+
+        # apply the REPLICA IDENTITY FULL to any tables without primary keys
+        self._apply_replica_full()
 
         # start Springtail
         logging.debug('Starting the Springtail instance')
