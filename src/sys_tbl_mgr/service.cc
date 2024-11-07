@@ -101,7 +101,6 @@ namespace springtail::sys_tbl_mgr {
 
             // store the column data into the json
             nlohmann::json column_json;
-            column_json["name"] = column.name;
             column_json["idx_position"] = column.idx_position;
             column_json["position"] = column.position;
 
