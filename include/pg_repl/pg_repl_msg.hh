@@ -213,6 +213,11 @@ namespace springtail
         std::string index;
     };
 
+    struct PgMsgCopySync {
+        int64_t target_xid;
+        int32_t pg_xid;
+    };
+
     /** Message types */
     enum PgMsgEnum {
         INVALID=-1, COPY_HDR, KEEP_ALIVE, BEGIN, COMMIT, RELATION, INSERT, DELETE, UPDATE, TRUNCATE,
@@ -220,7 +225,7 @@ namespace springtail
         // version 2
         STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT,
         // decoded messages
-        CREATE_TABLE, ALTER_TABLE, DROP_TABLE, CREATE_INDEX, DROP_INDEX
+        CREATE_TABLE, ALTER_TABLE, DROP_TABLE, CREATE_INDEX, DROP_INDEX, COPY_SYNC
     };
 
     /**
@@ -249,7 +254,8 @@ namespace springtail
          PgMsgTable,
          PgMsgDropTable,
          PgMsgIndex,
-         PgMsgDropIndex
+         PgMsgDropIndex,
+         PgMsgCopySync
         > msg;                 ///< message data
 
         PgMsgEnum msg_type;    ///< type defining union member
@@ -321,7 +327,7 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_DROP_TABLE[] = "springtail:DROP TABLE";
         static inline constexpr char MSG_PREFIX_CREATE_INDEX[] = "springtail:CREATE INDEX";
         static inline constexpr char MSG_PREFIX_DROP_INDEX[] = "springtail:DROP INDEX";
-
+        static inline constexpr char MSG_PREFIX_COPY_SYNC[] = "springtail:COPY SYNC";
 
         /**
          * @brief convert a message to a printable string

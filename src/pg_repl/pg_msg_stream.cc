@@ -916,7 +916,7 @@ namespace springtail {
         return decoded_msg;
     }
 
-    PgMsgPtr 
+    PgMsgPtr
     PgMsgStreamReader::_decode_drop_index(const PgMsgMessage &message, char *buffer, int len) {
         std::string data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
@@ -1022,6 +1022,22 @@ namespace springtail {
         return msg;
     }
 
+    PgMsgPtr
+    PgMsgStreamReader::_decode_copy_sync(const PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgCopySync copy_sync_msg;
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        json["pg_xid"].get_to(copy_sync_msg.pg_xid);
+        json["target_xid"].get_to(copy_sync_msg.target_xid);
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::COPY_SYNC);
+        msg->msg.emplace<PgMsgCopySync>(copy_sync_msg);
+
+        return msg;
+    }
+
     void
     PgMsgStreamReader::_skip_message()
     {
@@ -1074,7 +1090,10 @@ namespace springtail {
             return _decode_create_index(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_INDEX) {
             return _decode_drop_index(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_COPY_SYNC) {
+            return _decode_copy_sync(msg, buffer.data(), data_len);
         } else {
+            SPDLOG_INFO("Unknown message prefix: {}", msg.prefix_str);
             return nullptr;
         }
     }
