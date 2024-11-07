@@ -11,6 +11,9 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
+#include <common/json.hh>
+
+#include <redis/redis_containers.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_types.hh>

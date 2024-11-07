@@ -10,9 +10,11 @@
 #include <common/concurrent_queue.hh>
 #include <common/constants.hh>
 #include <common/redis.hh>
-#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
+
+#include <redis/redis_ddl.hh>
+#include <redis/redis_containers.hh>
 
 #include <garbage_collector/xid_ready.hh>
 

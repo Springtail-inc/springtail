@@ -14,6 +14,8 @@
 #include <common/common.hh>
 #include <common/redis.hh>
 
+#include <redis/redis_containers.hh>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres Redis Value for transaction queue
