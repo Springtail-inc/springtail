@@ -25,7 +25,9 @@ namespace springtail {
         NAME_CHANGE = 2,
         NULLABLE_CHANGE = 3,
         RESYNC = 4,
-        NO_CHANGE = 5
+        NEW_INDEX = 5,
+        DROP_INDEX = 6,
+        NO_CHANGE = 7
     };
 
     /**
@@ -148,7 +150,7 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn> columns);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns);
 
     public:
         /**

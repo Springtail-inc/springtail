@@ -49,6 +49,7 @@ namespace {
         PgMsgTable _create_table(uint64_t tid, const std::string &name);
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
+        PgMsgIndex _create_index(uint64_t db_id, const std::string& name);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
         uint64_t _db = 1;
@@ -88,6 +89,27 @@ namespace {
 
         // finalize
         _client->finalize(_db, xid.xid);
+    }
+
+    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name) {
+        auto xid = _next_lsn();
+
+        std::vector<PgMsgSchemaIndexColumn> columns;
+        PgMsgIndex msg;
+
+        msg.lsn = xid.lsn;
+        msg.xid = xid.xid;
+        msg.schema = "public";
+        msg.index = name;
+        msg.is_unique = true;
+        msg.table_oid = tid;
+
+        msg.columns.push_back({"col2", 2, 0});
+        msg.columns.push_back({"col1", 1, 1});
+
+        _client->create_index(_db, xid, msg);
+
+        return msg;
     }
 
     PgMsgTable
@@ -133,6 +155,18 @@ namespace {
     // Tests the schema modification paths
     TEST_F(SysTblMgr_Test, Basic) {
         _client->ping();
+    }
+
+    // Tests table create / alter / drop
+    TEST_F(SysTblMgr_Test, CreateIndex) {
+        uint64_t tid = 100000;
+
+        // create the table
+        _create_table(tid, "x");
+
+        PgMsgIndex &&msg = _create_index(tid, "x");
+
+        _finalize();
     }
 
     // Tests table create / alter / drop
