@@ -1,3 +1,4 @@
+#include "sys_tbl_mgr/system_tables.hh"
 #include <stdlib.h>
 #include <shared_mutex>
 
@@ -703,41 +704,20 @@ namespace springtail::pg_fdw {
         List        *commands = NIL;
         std::string  sql;
 
-        // go through system tables, make sure that they are not excluded and add them to the list
-        if (!((exclude && table_set.contains(CATALOG_TABLE_NAMES)) ||
-              (limit && !table_set.contains(CATALOG_TABLE_NAMES)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_NAMES,
-                                        sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
+        auto import_catalog = [&]<typename T>(const auto& tab_name) {
+            if (!((exclude && table_set.contains(tab_name)) ||
+                  (limit && !table_set.contains(tab_name)))) {
+                sql = _gen_fdw_system_table(server, tab_name, T::ID, T::Data::SCHEMA);
+                commands = lappend(commands, pstrdup(sql.c_str()));
+            }
+        };
 
-        if (!((exclude && table_set.contains(CATALOG_TABLE_ROOTS)) ||
-              (limit && !table_set.contains(CATALOG_TABLE_ROOTS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_ROOTS,
-                                        sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
-
-        if (!((exclude && table_set.contains(CATALOG_TABLE_INDEXES)) ||
-              (limit && !table_set.contains(CATALOG_TABLE_INDEXES)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_INDEXES,
-                                        sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
-
-        if (!((exclude && table_set.contains(CATALOG_TABLE_SCHEMAS)) ||
-              (limit && !table_set.contains(CATALOG_TABLE_SCHEMAS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_SCHEMAS,
-                                        sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
-
-        if (!((exclude && table_set.contains(CATALOG_TABLE_STATS)) ||
-              (limit && !table_set.contains(CATALOG_TABLE_STATS)))) {
-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_STATS,
-                                        sys_tbl::TableStats::ID, sys_tbl::TableStats::Data::SCHEMA);
-            commands = lappend(commands, pstrdup(sql.c_str()));
-        }
+        import_catalog.operator()<sys_tbl::TableNames>(CATALOG_TABLE_NAMES);
+        import_catalog.operator()<sys_tbl::TableRoots>(CATALOG_TABLE_ROOTS);
+        import_catalog.operator()<sys_tbl::Indexes>(CATALOG_TABLE_INDEXES);
+        import_catalog.operator()<sys_tbl::Schemas>(CATALOG_TABLE_SCHEMAS);
+        import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
+        import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
 
         return commands;
     }

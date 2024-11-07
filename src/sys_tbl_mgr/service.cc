@@ -72,6 +72,7 @@ namespace springtail::sys_tbl_mgr {
         ddl["index"] = request.index.name;
         ddl["id"] = request.index.id;
         ddl["is_unique"] = request.index.is_unique;
+        ddl["table_name"] = request.index.table_name;
         ddl["columns"] = nlohmann::json::array();
 
         if (request.index.columns.empty()) {
@@ -105,6 +106,22 @@ namespace springtail::sys_tbl_mgr {
             column_json["position"] = column.position;
 
             ddl["columns"].push_back(column_json);
+        }
+
+        // update index names
+        {
+            auto write_xid = _get_write_xid(request.db_id);
+            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
+            auto tuple = sys_tbl::IndexNames::Data::tuple(request.index.schema,
+                    request.index.name,
+                    request.index.table_id,
+                    request.index.id,
+                    xid.xid,
+                    xid.lsn,
+                    true,
+                    request.index.is_unique );
+
+            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
 
         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
@@ -210,7 +227,20 @@ namespace springtail::sys_tbl_mgr {
         _set_schema_info(request.db_id, request.table.id, columns);
 
         // update the primary index information
-        _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
+        {
+            auto write_xid = _get_write_xid(request.db_id);
+            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
+            auto tuple = sys_tbl::IndexNames::Data::tuple(request.table.schema,
+                    "primary_key",
+                    request.table.id,
+                    constant::INDEX_PRIMARY, //index id
+                    xid.xid,
+                    xid.lsn,
+                    true, true );
+            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+
+            _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
+        }
 
         return ddl;
     }

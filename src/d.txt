@@ -1,0 +1,471 @@
+diff --git a/include/pg_fdw/pg_fdw_mgr.hh b/include/pg_fdw/pg_fdw_mgr.hh
+index b446943..418758f 100644
+--- a/include/pg_fdw/pg_fdw_mgr.hh
++++ b/include/pg_fdw/pg_fdw_mgr.hh
+@@ -110,6 +110,7 @@ namespace springtail::pg_fdw {
+         static constexpr char CATALOG_TABLE_INDEXES[] = "indexes";        ///< Table name for system table indexes
+         static constexpr char CATALOG_TABLE_SCHEMAS[] = "schemas";        ///< Table name for system table schemas
+         static constexpr char CATALOG_TABLE_STATS[] = "table_stats";      ///< Table name for system table stats
++        static constexpr char CATALOG_INDEX_NAMES[] = "index_names";      ///< Table name for system index names
+ 
+         static constexpr char PG_FDW_LOG_FILE_PREFIX[] = "pg_fdw";         ///< Log file prefix
+ 
+diff --git a/include/storage/field.hh b/include/storage/field.hh
+index 0958d08..1f009d5 100644
+--- a/include/storage/field.hh
++++ b/include/storage/field.hh
+@@ -1,7 +1,6 @@
+ #pragma once
+ 
+ #include <any>
+-#include <iostream>
+ #include <type_traits>
+ #include <cassert>
+ 
+diff --git a/include/storage/schema.hh b/include/storage/schema.hh
+index c0a8a5e..d4533c1 100644
+--- a/include/storage/schema.hh
++++ b/include/storage/schema.hh
+@@ -150,7 +150,7 @@ namespace springtail {
+          * Construct the set of column fields based on the column definitions.
+          * @param columns A map from column position to column definition.
+          */
+-        void _populate(const std::map<uint32_t, SchemaColumn> columns);
++        void _populate(const std::map<uint32_t, SchemaColumn>& columns);
+ 
+     public:
+         /**
+diff --git a/include/sys_tbl_mgr/system_tables.hh b/include/sys_tbl_mgr/system_tables.hh
+index c2162cd..96d10c8 100644
+--- a/include/sys_tbl_mgr/system_tables.hh
++++ b/include/sys_tbl_mgr/system_tables.hh
+@@ -75,6 +75,7 @@ namespace springtail::sys_tbl {
+         };
+     };
+ 
++
+     /**
+      * Helper functions and constants for the table_roots table.
+      */
+@@ -142,7 +143,6 @@ namespace springtail::sys_tbl {
+             static constexpr uint32_t LSN = 3;
+             static constexpr uint32_t POSITION = 4;
+             static constexpr uint32_t COLUMN_ID = 5;
+-            static constexpr uint32_t EXISTS = 6;
+ 
+             static const std::vector<SchemaColumn> SCHEMA;
+ 
+@@ -152,18 +152,16 @@ namespace springtail::sys_tbl {
+                    uint64_t xid,
+                    uint64_t lsn,
+                    uint32_t position,
+-                   uint32_t column_id,
+-                   bool exists = true
++                   uint32_t column_id
+                    )
+             {
+-                auto fields = std::make_shared<FieldArray>(7);
++                auto fields = std::make_shared<FieldArray>(6);
+                 fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
+                 fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
+                 fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
+                 fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
+                 fields->at(POSITION) = std::make_shared<ConstTypeField<uint32_t>>(position);
+                 fields->at(COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(column_id);
+-                fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+                 return fields;
+             }
+         };
+@@ -311,4 +309,72 @@ namespace springtail::sys_tbl {
+             }
+         };
+     };
++
++    /**
++     * Helper functions and constants for the indexes table.
++     */
++    class IndexNames {
++    public:
++        static constexpr uint32_t ID = 6;
++
++        struct Data {
++            static constexpr uint32_t NAMESPACE = 0;
++            static constexpr uint32_t NAME = 1;
++            static constexpr uint32_t TABLE_ID = 2;
++            static constexpr uint32_t INDEX_ID = 3;
++            static constexpr uint32_t XID = 4;
++            static constexpr uint32_t LSN = 5;
++            static constexpr uint32_t EXISTS = 6;
++            static constexpr uint32_t IS_UNIQUE = 7;
++
++            static const std::vector<SchemaColumn> SCHEMA;
++
++            static TuplePtr
++            tuple(const std::string &schema,
++                  const std::string &name,
++                  uint64_t table_id,
++                  uint64_t index_id,
++                  uint64_t xid,
++                  uint64_t lsn,
++                  bool exists,
++                  bool is_unique)
++            {
++                auto fields = std::make_shared<FieldArray>(8);
++                fields->at(NAMESPACE) = std::make_shared<ConstTypeField<std::string>>(schema);
++                fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
++                fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
++                fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
++                fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
++                fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
++                fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
++                fields->at(IS_UNIQUE) = std::make_shared<ConstTypeField<bool>>(is_unique);
++                return std::make_shared<FieldTuple>(fields, nullptr);
++            }
++        };
++
++        struct Primary {
++            static constexpr uint32_t TABLE_ID = 0;
++            static constexpr uint32_t INDEX_ID = 1;
++            static constexpr uint32_t XID = 2;
++            static constexpr uint32_t LSN = 3;
++
++            static const std::vector<SchemaColumn> SCHEMA;
++            static const std::vector<std::string> KEY;
++
++            static TuplePtr
++            key_tuple(uint64_t table_id,
++                      uint64_t index_id,
++                      uint64_t xid,
++                      uint64_t lsn)
++            {
++                auto fields = std::make_shared<FieldArray>(4);
++                fields->at(TABLE_ID) = std::make_shared<ConstTypeField<uint64_t>>(table_id);
++                fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
++                fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
++                fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
++                return std::make_shared<FieldTuple>(fields, nullptr);
++            }
++        };
++    };
++
+ }
+diff --git a/src/pg_fdw/pg_fdw_mgr.cc b/src/pg_fdw/pg_fdw_mgr.cc
+index 3c7a0f0..e97f2d6 100644
+--- a/src/pg_fdw/pg_fdw_mgr.cc
++++ b/src/pg_fdw/pg_fdw_mgr.cc
+@@ -1,3 +1,4 @@
++#include "sys_tbl_mgr/system_tables.hh"
+ #include <stdlib.h>
+ #include <shared_mutex>
+ 
+@@ -703,41 +704,20 @@ namespace springtail::pg_fdw {
+         List        *commands = NIL;
+         std::string  sql;
+ 
+-        // go through system tables, make sure that they are not excluded and add them to the list
+-        if (!((exclude && table_set.contains(CATALOG_TABLE_NAMES)) ||
+-              (limit && !table_set.contains(CATALOG_TABLE_NAMES)))) {
+-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_NAMES,
+-                                        sys_tbl::TableNames::ID, sys_tbl::TableNames::Data::SCHEMA);
+-            commands = lappend(commands, pstrdup(sql.c_str()));
+-        }
+-
+-        if (!((exclude && table_set.contains(CATALOG_TABLE_ROOTS)) ||
+-              (limit && !table_set.contains(CATALOG_TABLE_ROOTS)))) {
+-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_ROOTS,
+-                                        sys_tbl::TableRoots::ID, sys_tbl::TableRoots::Data::SCHEMA);
+-            commands = lappend(commands, pstrdup(sql.c_str()));
+-        }
+-
+-        if (!((exclude && table_set.contains(CATALOG_TABLE_INDEXES)) ||
+-              (limit && !table_set.contains(CATALOG_TABLE_INDEXES)))) {
+-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_INDEXES,
+-                                        sys_tbl::Indexes::ID, sys_tbl::Indexes::Data::SCHEMA);
+-            commands = lappend(commands, pstrdup(sql.c_str()));
+-        }
+-
+-        if (!((exclude && table_set.contains(CATALOG_TABLE_SCHEMAS)) ||
+-              (limit && !table_set.contains(CATALOG_TABLE_SCHEMAS)))) {
+-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_SCHEMAS,
+-                                        sys_tbl::Schemas::ID, sys_tbl::Schemas::Data::SCHEMA);
+-            commands = lappend(commands, pstrdup(sql.c_str()));
+-        }
+-
+-        if (!((exclude && table_set.contains(CATALOG_TABLE_STATS)) ||
+-              (limit && !table_set.contains(CATALOG_TABLE_STATS)))) {
+-            sql = _gen_fdw_system_table(server, CATALOG_TABLE_STATS,
+-                                        sys_tbl::TableStats::ID, sys_tbl::TableStats::Data::SCHEMA);
+-            commands = lappend(commands, pstrdup(sql.c_str()));
+-        }
++        auto import_catalog = [&]<typename T>(const auto& tab_name) {
++            if (!((exclude && table_set.contains(tab_name)) ||
++                  (limit && !table_set.contains(tab_name)))) {
++                sql = _gen_fdw_system_table(server, tab_name, T::ID, T::Data::SCHEMA);
++                commands = lappend(commands, pstrdup(sql.c_str()));
++            }
++        };
++
++        import_catalog.operator()<sys_tbl::TableNames>(CATALOG_TABLE_NAMES);
++        import_catalog.operator()<sys_tbl::TableRoots>(CATALOG_TABLE_ROOTS);
++        import_catalog.operator()<sys_tbl::Indexes>(CATALOG_TABLE_INDEXES);
++        import_catalog.operator()<sys_tbl::Schemas>(CATALOG_TABLE_SCHEMAS);
++        import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
++        import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
+ 
+         return commands;
+     }
+diff --git a/src/storage/schema.cc b/src/storage/schema.cc
+index 83c6527..874ca46 100644
+--- a/src/storage/schema.cc
++++ b/src/storage/schema.cc
+@@ -9,7 +9,7 @@
+ namespace springtail {
+ 
+     void
+-    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn> columns)
++    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns)
+     {
+         // track how many primary key columns there are
+         uint32_t pkey_count = 0;
+@@ -153,6 +153,7 @@ namespace springtail {
+ 
+             // handle primary key data
+             if (column.pkey_position) {
++                assert(_sort_keys[*column.pkey_position].empty());
+                 _sort_fields->at(*column.pkey_position) = field;
+                 _sort_keys[*column.pkey_position] = column.name;
+             }
+@@ -278,6 +279,9 @@ namespace springtail {
+         auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
+         for (auto &&column : columns) {
+             auto &&i = _field_map.find(column);
++            if (i == _field_map.end()) {
++                assert(i != _field_map.end());
++            }
+             fields->push_back(tuple->field(i->second.second));
+         }
+ 
+diff --git a/src/sys_tbl_mgr/schema_mgr.cc b/src/sys_tbl_mgr/schema_mgr.cc
+index 981ddde..a7f6333 100644
+--- a/src/sys_tbl_mgr/schema_mgr.cc
++++ b/src/sys_tbl_mgr/schema_mgr.cc
+@@ -55,6 +55,9 @@ namespace springtail {
+ 
+         // TableStats
+         _system_cache[{ sys_tbl::TableStats::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableStats::Data::SCHEMA);
++
++        // IndexNames
++        _system_cache[{ sys_tbl::IndexNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::IndexNames::Data::SCHEMA);
+     }
+ 
+     std::map<uint32_t, SchemaColumn>
+@@ -83,6 +86,8 @@ namespace springtail {
+                     return _convert_columns(sys_tbl::Schemas::Data::SCHEMA);
+                 case sys_tbl::TableStats::ID:
+                     return _convert_columns(sys_tbl::TableStats::Data::SCHEMA);
++                case sys_tbl::IndexNames::ID:
++                    return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
+                 default:
+                     assert(false);
+                     break;
+diff --git a/src/sys_tbl_mgr/service.cc b/src/sys_tbl_mgr/service.cc
+index 835492b..cbe17c6 100644
+--- a/src/sys_tbl_mgr/service.cc
++++ b/src/sys_tbl_mgr/service.cc
+@@ -72,6 +72,7 @@ namespace springtail::sys_tbl_mgr {
+         ddl["index"] = request.index.name;
+         ddl["id"] = request.index.id;
+         ddl["is_unique"] = request.index.is_unique;
++        ddl["table_name"] = request.index.table_name;
+         ddl["columns"] = nlohmann::json::array();
+ 
+         if (request.index.columns.empty()) {
+@@ -107,6 +108,22 @@ namespace springtail::sys_tbl_mgr {
+             ddl["columns"].push_back(column_json);
+         }
+ 
++        // update index names
++        {
++            auto write_xid = _get_write_xid(request.db_id);
++            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
++            auto tuple = sys_tbl::IndexNames::Data::tuple(request.index.schema,
++                    request.index.name,
++                    request.index.table_id,
++                    request.index.id,
++                    xid.xid,
++                    xid.lsn,
++                    true,
++                    request.index.is_unique );
++
++            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
++        }
++
+         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
+ 
+         return ddl;
+@@ -210,7 +227,20 @@ namespace springtail::sys_tbl_mgr {
+         _set_schema_info(request.db_id, request.table.id, columns);
+ 
+         // update the primary index information
+-        _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
++        {
++            auto write_xid = _get_write_xid(request.db_id);
++            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
++            auto tuple = sys_tbl::IndexNames::Data::tuple(request.table.schema,
++                    "primary_key",
++                    request.table.id,
++                    constant::INDEX_PRIMARY, //index id
++                    xid.xid,
++                    xid.lsn,
++                    true, true );
++            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
++
++            _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
++        }
+ 
+         return ddl;
+     }
+diff --git a/src/sys_tbl_mgr/system_tables.cc b/src/sys_tbl_mgr/system_tables.cc
+index 3df2326..25f4693 100644
+--- a/src/sys_tbl_mgr/system_tables.cc
++++ b/src/sys_tbl_mgr/system_tables.cc
+@@ -83,7 +83,6 @@ namespace springtail::sys_tbl {
+         { "lsn", 4, SchemaType::UINT64, INT8OID, false, 3 },
+         { "position", 5, SchemaType::UINT32, INT4OID, false, 4 },
+         { "column_id", 6, SchemaType::UINT32, INT4OID, false },
+-        { "exists", 7, SchemaType::BOOLEAN, BOOLOID, false }
+     };
+ 
+     const std::vector<SchemaColumn> Indexes::Primary::SCHEMA = {
+@@ -151,4 +150,31 @@ namespace springtail::sys_tbl {
+         "table_id",
+         "xid"
+     };
++
++    // IndexNames
++    const std::vector<SchemaColumn> IndexNames::Data::SCHEMA = {
++        { "namespace", 1, SchemaType::TEXT, TEXTOID, false },
++        { "name", 2, SchemaType::TEXT, TEXTOID, false },
++        { "table_id", 3, SchemaType::UINT64, INT8OID, false, 0 },
++        { "index_id", 4, SchemaType::UINT64, INT8OID, false, 1 },
++        { "xid", 5, SchemaType::UINT64, INT8OID, false, 2 },
++        { "lsn", 6, SchemaType::UINT64, INT8OID, false, 3 },
++        { "exists", 7, SchemaType::BOOLEAN, BOOLOID, false },
++        { "is_unique", 8, SchemaType::BOOLEAN, BOOLOID, false }
++    };
++
++    const std::vector<SchemaColumn> IndexNames::Primary::SCHEMA = {
++        { "table_id", 1, SchemaType::UINT64, INT8OID, false },
++        { "index_id", 2, SchemaType::UINT64, INT8OID, false },
++        { "xid", 3, SchemaType::UINT64, INT8OID, false },
++        { "lsn", 4, SchemaType::UINT64, INT8OID, false },
++    };
++
++    const std::vector<std::string> IndexNames::Primary::KEY = {
++        "table_id",
++        "index_id",
++        "xid",
++        "lsn"
++    };
++
+ }
+diff --git a/src/sys_tbl_mgr/table_mgr.cc b/src/sys_tbl_mgr/table_mgr.cc
+index 1193152..c6035d7 100644
+--- a/src/sys_tbl_mgr/table_mgr.cc
++++ b/src/sys_tbl_mgr/table_mgr.cc
+@@ -194,6 +194,11 @@ namespace springtail {
+                                            sys_tbl::TableStats::Primary::KEY,
+                                            secondary_keys, tbl_meta, schema);
+         }
++        case (sys_tbl::IndexNames::ID): {
++            return std::make_shared<Table>(db_id, table_id, xid, _table_base,
++                                           sys_tbl::IndexNames::Primary::KEY,
++                                           secondary_keys, tbl_meta, schema);
++        }
+         default:
+             assert(0);
+         }
+@@ -253,6 +258,11 @@ namespace springtail {
+                                                   sys_tbl::TableStats::Primary::KEY,
+                                                   secondary_keys, tbl_meta, schema);
+         }
++        case (sys_tbl::IndexNames::ID): {
++            return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
++                                                  sys_tbl::IndexNames::Primary::KEY,
++                                                  secondary_keys, tbl_meta, schema);
++        }
+         default:
+             SPDLOG_ERROR("Unable to find the requested system table: {}", table_id);
+             throw SchemaError();
+diff --git a/src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc b/src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc
+index 009e724..f0741e6 100644
+--- a/src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc
++++ b/src/sys_tbl_mgr/test/test_sys_tbl_mgr.cc
+@@ -49,6 +49,7 @@ namespace {
+         PgMsgTable _create_table(uint64_t tid, const std::string &name);
+         void _drop_table(uint64_t tid, const std::string &name);
+         void _alter_table(const PgMsgTable &msg);
++        PgMsgIndex _create_index(uint64_t db_id, const std::string& name);
+ 
+         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
+         uint64_t _db = 1;
+@@ -90,6 +91,27 @@ namespace {
+         _client->finalize(_db, xid.xid);
+     }
+ 
++    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name) {
++        auto xid = _next_lsn();
++
++        std::vector<PgMsgSchemaIndexColumn> columns;
++        PgMsgIndex msg;
++
++        msg.lsn = xid.lsn;
++        msg.xid = xid.xid;
++        msg.schema = "public";
++        msg.index = name;
++        msg.is_unique = true;
++        msg.table_oid = tid;
++
++        msg.columns.push_back({"col2", 2, 0});
++        msg.columns.push_back({"col1", 1, 1});
++
++        _client->create_index(_db, xid, msg);
++
++        return msg;
++    }
++
+     PgMsgTable
+     SysTblMgr_Test::_create_table(uint64_t tid,
+                                   const std::string &name)
+@@ -135,6 +157,18 @@ namespace {
+         _client->ping();
+     }
+ 
++    // Tests table create / alter / drop
++    TEST_F(SysTblMgr_Test, CreateIndex) {
++        uint64_t tid = 100000;
++
++        // create the table
++        _create_table(tid, "x");
++
++        PgMsgIndex &&msg = _create_index(tid, "x");
++
++        _finalize();
++    }
++
+     // Tests table create / alter / drop
+     TEST_F(SysTblMgr_Test, CreateAlterDrop) {
+         uint64_t tid = 100000;
+diff --git a/src/thrift/sys_tbl_mgr.thrift b/src/thrift/sys_tbl_mgr.thrift
+index 4e2aaea..a05121f 100644
+--- a/src/thrift/sys_tbl_mgr.thrift
++++ b/src/thrift/sys_tbl_mgr.thrift
+@@ -141,7 +141,7 @@ struct ColumnHistory {
+ 
+ struct GetSchemaResponse {
+     1: list<TableColumn> columns,
+-    2: list<ColumnHistory> history
++    2: list<ColumnHistory> history,
+ }
+ 
+ struct ExistsRequest {

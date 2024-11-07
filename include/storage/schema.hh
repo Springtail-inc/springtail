@@ -150,7 +150,7 @@ namespace springtail {
          * Construct the set of column fields based on the column definitions.
          * @param columns A map from column position to column definition.
          */
-        void _populate(const std::map<uint32_t, SchemaColumn> columns);
+        void _populate(const std::map<uint32_t, SchemaColumn>& columns);
 
     public:
         /**
