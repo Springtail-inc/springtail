@@ -30,10 +30,13 @@ for key in keys:
     if type == "set":
         vals = r.smembers(key)
 
-    print(f"{key}");
+    print(f"Key: {key}, Type: {type}");
     if val:
         print(f"  -> {val}")
     elif vals:
-        for v in vals:
-            print(f"  -> {v} = {vals[v]}")
+        if type == "list" or type == "set" or type == "zset":
+            print("  Values:", vals)
+        else:
+            for v in vals:
+                print(f"  -> {v} = {vals[v]}")
     print()

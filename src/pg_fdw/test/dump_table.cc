@@ -7,9 +7,12 @@
 
 #include <fmt/format.h>
 #include <boost/program_options.hpp>
+#include <nlohmann/json.hpp>
 
 #include <common/common.hh>
 #include <common/constants.hh>
+#include <common/json.hh>
+
 #include <pg_fdw/pg_fdw_mgr.hh>
 
 #include <storage/field.hh>
