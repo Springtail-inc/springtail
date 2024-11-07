@@ -4,6 +4,8 @@
 #include <common/redis.hh>
 #include <common/threaded_test.hh>
 
+#include <redis/redis_containers.hh>
+
 using namespace springtail;
 
 namespace {

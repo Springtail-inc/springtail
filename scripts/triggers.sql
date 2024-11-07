@@ -32,7 +32,7 @@ DECLARE
     json_columns json;
     has_pkey boolean;
 BEGIN
-    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd 
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ( 'CREATE TABLE', 'ALTER TABLE' )
     LOOP
         SELECT json_agg(json_col)
@@ -119,17 +119,17 @@ BEGIN
         INTO json_columns;
 
         -- additionl index and table info
-        EXECUTE format('SELECT 
-                c.oid AS table_oid, 
-                c.relname AS table_name, 
+        EXECUTE format('SELECT
+                c.oid AS table_oid,
+                c.relname AS table_name,
                 i.indisunique AS is_unique,
                 i.indisprimary AS primary_idx
-            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid 
+            FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
             WHERE i.indexrelid = %s', obj.objid) INTO tab_obj;
 
         if tab_obj.primary_idx is true then
             RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
-        else 
+        else
             -- Note: no obj.object_name, will split identity instead in code
             msg := json_build_object('xid', txid_current(),
                 'cmd', obj.command_tag,

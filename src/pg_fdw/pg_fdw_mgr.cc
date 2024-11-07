@@ -3,17 +3,17 @@
 #include <shared_mutex>
 
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <common/redis_ddl.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
-#include <common/redis_types.hh>
 #include <common/json.hh>
+#include <common/redis_types.hh>
 
-#include <nlohmann/json.hpp>
+#include <redis/redis_ddl.hh>
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>

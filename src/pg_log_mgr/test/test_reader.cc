@@ -12,6 +12,8 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
+#include <redis/redis_containers.hh>
+
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>

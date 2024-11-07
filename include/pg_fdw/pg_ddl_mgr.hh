@@ -8,9 +8,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <common/redis_ddl.hh>
 #include <common/properties.hh>
 #include <common/object_cache.hh>
+
+#include <redis/redis_ddl.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -89,6 +90,8 @@ namespace springtail::pg_fdw {
         std::string _fdw_username;                 ///< FDW username
         int _port;                                 ///< port
 
+        std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
+
         std::map<uint64_t, std::set<std::string>> _db_schemas;  ///< map of db id to set of schemas
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
@@ -119,9 +122,18 @@ namespace springtail::pg_fdw {
         /** Helper to connect to primary db */
         LibPqConnectionPtr _connect_primary(uint64_t db_id, const std::string &db_name);
 
-        /** Helper to apply outstanding DDL changes to the FDW tables. Return true if applied */
-        bool _update_schemas(RedisDDL &redis, const nlohmann::json &ddls,
-                             const std::string &servername);
+        /**
+         * @brief Helper to apply outstanding DDL changes to the FDW tables.
+         * @param redis RedisDDL instance
+         * @param db_id The database ID to apply the changes to.
+         * @param schema_xid The XID at which the DDL changes were applied.
+         * @param ddls A JSON array of DDL statements to apply.
+         * @return Status of the operation. True if successful, false otherwise.
+         */
+        bool _update_schemas(RedisDDL &redis,
+                             uint64_t db_id,
+                             uint64_t schema_xid,
+                             const nlohmann::json &ddls);
 
 
         /** Helper to execute ddl statements for this db */
@@ -176,7 +188,7 @@ namespace springtail::pg_fdw {
         std::string
         _gen_sql_from_json(LibPqConnectionPtr conn,
                            const std::string &server_name,
-                           nlohmann::json &ddl,
+                           const nlohmann::json &ddl,
                            std::set<std::string> &schemas);
 
         /** Helper to generate sql for FDW foreign table */

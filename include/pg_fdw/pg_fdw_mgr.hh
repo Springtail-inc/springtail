@@ -8,8 +8,9 @@
 #include <atomic>
 
 #include <common/constants.hh>
-#include <common/redis_ddl.hh>
 #include <common/concurrent_queue.hh>
+
+#include <redis/redis_ddl.hh>
 
 #include <storage/field.hh>
 #include <storage/schema.hh>
