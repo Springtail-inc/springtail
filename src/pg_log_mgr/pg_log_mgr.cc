@@ -205,6 +205,7 @@ namespace springtail::pg_log_mgr {
 
             // decode message
             std::vector<std::string> msg_parts; // db_id, state
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received message: {}", msg);
             common::split_string(":", msg, msg_parts);
             assert(msg_parts.size() == 2);
 

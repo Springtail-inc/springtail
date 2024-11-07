@@ -299,7 +299,7 @@ namespace springtail {
         redis_client->hset(db_instance_state_hash, std::to_string(db_id), state);
 
         // publish the state
-        redis_client->publish(std::format(redis::PUBSUB_DB_STATE_CHANGES, db_instance_id), db_id + ":" + state);
+        redis_client->publish(fmt::format(redis::PUBSUB_DB_STATE_CHANGES, db_instance_id), fmt::format("{}:{}", db_id, state));
     }
 
     void
