@@ -231,7 +231,7 @@ namespace springtail::sys_tbl_mgr {
             auto write_xid = _get_write_xid(request.db_id);
             auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
             auto tuple = sys_tbl::IndexNames::Data::tuple(request.table.schema,
-                    "primary_key",
+                    request.table.name + ".primary_key",
                     request.table.id,
                     constant::INDEX_PRIMARY, //index id
                     xid.xid,
