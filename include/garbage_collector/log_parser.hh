@@ -208,7 +208,7 @@ namespace springtail::gc {
             /**
              * Marks that the LogParser has issued a resync request for the given table so that
              * mutations can be ignored.  This record is replaced by a full XidRecord when
-             * add_sync() is called from the message coming through the log.
+             * add_sync() is called from the TABLE_SYNC_MSG message coming through the log.
              *
              * @return true if this is the first table from this sync-set
              */
@@ -223,7 +223,9 @@ namespace springtail::gc {
 
             /**
              * Remove a given table from the sync tracker.  Called after we have passed all of the
-             * skipable transaction records.
+             * skipable transaction records.  We know this because we will see a COPY_SYNC message
+             * come through the postgres replication stream (i.e., via an XactMsg with type
+             * XACT_MSG).
              *
              * @return 0 if still in progress, otherwise the max assigned XID among the syncs
              */
@@ -235,11 +237,15 @@ namespace springtail::gc {
             bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
             /**
-             * Checks if we should immediately issue a COMMIT message to the Committer.
+             * Checks if we should immediately issue a COMMIT message to the Committer.  This will
+             * occur if we have already processed all of the XIDs prior to the table sync and there
+             * are no pg_xids that might need to be skipped due to the pipeline stall.  This is
+             * expected in the case that a sync occurs isolated from any other database activity
+             * (e.g., an idle database).
              * 
              * @return 0 if still in progress, otherwise the max XID seen among the syncs
              */
-            uint64_t get_xid_if_empty(uint64_t db_id);
+            uint64_t check_immediate_commit(uint64_t db_id);
 
         private:
             /**
@@ -306,10 +312,10 @@ namespace springtail::gc {
             std::map<uint64_t, uint64_t> _ready_map;
 
             /** db -> xid hold the max target XID seen in the sync-set for a given db. */
-            std::map<uint64_t, uint64_t> _max_xid;
+            std::map<uint64_t, uint64_t> _target_xid;
 
-            /** db -> xid -- the largest XID seen fully processed by the LogParser. */
-            std::map<uint64_t, uint64_t> _max_lp_xid;
+            /** db -> xid -- the furthest XID processed by the LogParser. */
+            std::map<uint64_t, uint64_t> _furthest_xid;
         };
 
 
@@ -380,6 +386,19 @@ namespace springtail::gc {
              * and returns a flag indicating that the processing should be blocked.
              */
             bool _process_mutation(StatePtr state, uint64_t rel_id, PgMsgPtr msg, uint64_t offset);
+
+            /**
+             * Submits a request for the Committer to commit the TABLE SYNC operations.  Then it
+             * waits for the Committer to notify it that the TABLE_SYNC_COMMIT is complete.  We need
+             * to wait because if we attempt to process mutations to a table that is being swapped
+             * in a TABLE_SYNC_COMMIT then we will get invalid extent IDs, which will cause the
+             * Committer to fail updating the data tables.
+             *
+             * Eventually we should change this to optimistically continue and only block a
+             * LogParser::Parser at the time it is about to process a mutation for that table if
+             * there is an outstanding TABLE_SYNC_COMMIT for that table.
+             */
+            void _issue_table_sync_commit(uint64_t db_id, uint64_t xid);
 
         private:
             /** The filter to use at the start of processing. */
