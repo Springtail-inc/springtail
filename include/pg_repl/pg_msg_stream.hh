@@ -185,7 +185,7 @@ namespace springtail {
         PgMsgPtr _decode_drop_table(PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_create_index(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_index(const PgMsgMessage &message, char *buffer, int len);
-
+        PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
 
         // helpers
         void _decode_schema_columns(const nlohmann::json &json, std::vector<PgMsgSchemaColumn> &columns);
