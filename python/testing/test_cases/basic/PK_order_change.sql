@@ -7,7 +7,8 @@ ALTER TABLE test_pkey_order ADD PRIMARY KEY (B, C, A);
 INSERT INTO test_pkey_order (A, B, C, value) VALUES (4, 5, 6, 'test_value');
 
 ## verify
-SELECT column_name FROM information_schema.key_column_usage WHERE table_name = 'test_pkey_order' ORDER BY ordinal_position;
+SELECT * FROM test_pkey_order ORDER BY B, C, A;
+### schema_check public test_pkey_order
 
 ## cleanup
 DROP TABLE IF EXISTS test_pkey_order;

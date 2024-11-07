@@ -49,7 +49,8 @@ namespace springtail
     static constexpr char SCHEMA_QUERY[] =
         "SELECT column_name, ordinal_position, is_nullable::boolean, "
         "       column_default, atttypid, "
-        "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey "
+        "       coalesce((pga.attnum=any(pgi.indkey))::boolean, false) as is_pkey, "
+        "       array_position(pgi.indkey, pga.attnum) "
         "FROM pg_catalog.pg_attribute pga "
         "JOIN information_schema.columns "
         "ON column_name=pga.attname "
@@ -224,7 +225,7 @@ namespace springtail
             throw PgTableNotFoundError();
         }
 
-        if (_connection.nfields() != 6) {
+        if (_connection.nfields() != 7) {
             SPDLOG_ERROR("Error: unexpected data from schema query or table not found");
             SPDLOG_ERROR("fields: {}, tuples: {}", _connection.nfields(), _connection.ntuples());
             _connection.clear();
@@ -241,7 +242,6 @@ namespace springtail
             int rows = _connection.ntuples();
             _schema.columns.resize(rows);
 
-            uint32_t pkey_pos = 0;
             for (int i = 0; i < rows; i++) {
                 // add column to schema
                 // PgColumn column;
@@ -267,8 +267,12 @@ namespace springtail
 
                 // is primary key
                 bool is_pkey = _connection.get_boolean(i, 5);
-                if (is_pkey) {
-                    column.pkey_position = pkey_pos++;
+
+                // set the primary key position if available
+                auto pkey_pos = _connection.get_int32_optional(i, 6);
+                if (pkey_pos) {
+                    assert(is_pkey);
+                    column.pkey_position = (*pkey_pos);
                 }
 
                 SPDLOG_DEBUG_MODULE(LOG_PG_REPL,

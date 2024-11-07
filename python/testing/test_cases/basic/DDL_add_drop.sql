@@ -6,7 +6,8 @@ INSERT INTO ddl_test_column (value, extra_column) VALUES ('value1', 'extra1');
 ALTER TABLE ddl_test_column DROP COLUMN extra_column;
 
 ## verify
-SELECT column_name FROM information_schema.columns WHERE table_name = 'ddl_test_column' AND column_name = 'extra_column';
+SELECT * FROM ddl_test_column ORDER BY id;
+### schema_check public ddl_test_column
 
 ## cleanup
 DROP TABLE IF EXISTS ddl_test_column;

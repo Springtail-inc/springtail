@@ -801,10 +801,14 @@ namespace springtail {
             void remove(const Iterator &pos);
 
             /**
-             * Converts the page to the provided target_schema using the provided schema to read
-             * target_schema formatted rows from the existing extents and writing them to new extents.
+             * Converts the page to the provided target_schema.  It reads rows from the existing
+             * extents using the current "schema" and writes them to new extents constructed with
+             * the "target_schema".
+             * @param schema The existing schema of the extents.
+             * @param target_schema The new schema of the extents.
+             * @param target_xid The XID at which the conversion is being performed.
              */
-            void convert(VirtualSchemaPtr schema, ExtentSchemaPtr target_schema);
+            void convert(VirtualSchemaPtr schema, ExtentSchemaPtr target_schema, uint64_t target_xid);
 
         private:
             // HELPER FUNCTIONS

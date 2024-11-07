@@ -127,6 +127,15 @@ namespace springtail {
         int32_t get_int32(int row, int col);
 
         /**
+         * @brief Retreive an int32 column value from a query result; maintains NULL value
+         *
+         * @param row row index
+         * @param col col index
+         * @return int32 value for row/col; optional is false if int is null
+         */
+        std::optional<int32_t> get_int32_optional(int row, int col);
+
+        /**
          * @brief Retreive an int64 column value from a query result
          *
          * @param row row index
