@@ -888,6 +888,12 @@ namespace springtail::gc {
                         }
                         break;
                     }
+                    case PgMsgEnum::COPY_SYNC: {
+                        auto &copy_sync_msg = std::get<PgMsgCopySync>(msg->msg);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got COPY_SYNC on {} @ {}, pg_xid={}",
+                                            state->entry.db_id, copy_sync_msg.target_xid, copy_sync_msg.pg_xid);
+                        break;
+                    }
 
                     default:
                         // message should have been filtered, error?

@@ -7,6 +7,8 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
+#include <redis/redis_containers.hh>
+
 #include <pg_repl/pg_copy_table.hh>
 
 #include <sys_tbl_mgr/client.hh>

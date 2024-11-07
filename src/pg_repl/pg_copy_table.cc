@@ -11,6 +11,9 @@
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
+#include <common/json.hh>
+
+#include <redis/redis_containers.hh>
 
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_types.hh>
@@ -78,7 +81,10 @@ namespace springtail
 
     /** select current xmin:xmax:list of xids in progress from DB as start of this transaction;
      *  result: xmin:xmax:xid,xid,... */
-    static constexpr char XID_QUERY[] = "SELECT pg_current_snapshot()";
+    static constexpr char XID_QUERY[] = "SELECT pg_current_xact_id(), pg_current_snapshot()";
+
+    /** query to send replication sync message */
+    static constexpr char REPL_MSG_QUERY[] = "SELECT pg_logical_emit_message(true, '{}', '{}')";
 
     /** copy command, output in binary using utf-8 encoding */
     static constexpr char COPY_QUERY[] = "COPY {}.{} TO STDOUT WITH (FORMAT binary, ENCODING 'UTF-8')";
@@ -166,7 +172,8 @@ namespace springtail
     }
 
 
-    std::string PgCopyTable::_get_xact_xids()
+    std::pair<uint64_t, std::string>
+    PgCopyTable::_get_xact_xids()
     {
         _connection.exec(XID_QUERY);
         if (_connection.ntuples() == 0) {
@@ -175,11 +182,12 @@ namespace springtail
             throw PgQueryError();
         }
 
-        _schema.xids = _connection.get_string(0, 0);
+        uint64_t pg_xid8 = _connection.get_int64(0, 0);
+        _schema.xids = _connection.get_string(0, 1);
 
         _connection.clear();
 
-        return _schema.xids;
+        return {pg_xid8, _schema.xids};
     }
 
     void PgCopyTable::_get_secondary_indexes()
@@ -748,8 +756,8 @@ namespace springtail
         XidLsn xid(target_xid, 0);
 
         // start transaction and get the xids associated w/snapshot
-        std::string snapshot = copy_table._get_xact_xids();
-        result->set_snapshot(snapshot);
+        std::pair<uint64_t, std::string> snapshot_info = copy_table._get_xact_xids();
+        result->set_snapshot(snapshot_info.first, snapshot_info.second);
 
         // iterate through the copy queue
         while (true) {
@@ -781,9 +789,27 @@ namespace springtail
             }
         }
 
+        copy_table._send_sync_msg(result);
+
         // end the copy
         copy_table._end_copy();
         copy_table.disconnect();
+    }
+
+    void
+    PgCopyTable::_send_sync_msg(PgCopyResultPtr result)
+    {
+        std::string sync_msg = fmt::format(R"({{"target_xid":{}, "pg_xid":{}}})", result->target_xid, result->pg_xid);
+        std::string query = fmt::format(REPL_MSG_QUERY, pg_msg::MSG_PREFIX_COPY_SYNC, sync_msg);
+
+        _connection.exec(query);
+        if (_connection.status() != PGRES_TUPLES_OK) {
+            SPDLOG_ERROR("Error sending sync message");
+            _connection.clear();
+            throw PgQueryError();
+        }
+
+        _connection.clear();
     }
 
     std::vector<PgCopyResultPtr>

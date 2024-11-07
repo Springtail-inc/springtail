@@ -11,9 +11,11 @@
 #include <common/concurrent_queue.hh>
 #include <common/counter.hh>
 #include <common/redis.hh>
-#include <common/redis_ddl.hh>
 #include <common/redis_types.hh>
 #include <common/properties.hh>
+
+#include <redis/redis_ddl.hh>
+#include <redis/redis_containers.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -367,7 +369,7 @@ namespace springtail::gc {
             /**
              * Checks if the provided XID should be excluded from processing based on it being part
              * of an aborted sub-transaction.
-             * 
+             *
              * @return Returns true if the XID was aborted, false otherwise.
              */
             bool _check_aborted_xid(StatePtr state, uint64_t pg_xid);

@@ -14,6 +14,8 @@
 #include <common/common.hh>
 #include <common/redis.hh>
 
+#include <redis/redis_containers.hh>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres Redis Value for transaction queue
@@ -84,6 +86,7 @@ namespace springtail::pg_log_mgr {
         struct TableSyncMsg {
             uint64_t db_id;
             uint64_t target_xid;
+            uint32_t pg_xid;               ///< postgres xid
             uint32_t xmin;                 ///< xmin; lowest xid still active
             uint32_t xmax;                 ///< xmax; one past highest completed xid
             uint32_t xmin_epoch;
@@ -93,6 +96,7 @@ namespace springtail::pg_log_mgr {
 
             TableSyncMsg(uint64_t db_id, PgCopyResultPtr copy_result)
                 : db_id(db_id), target_xid(copy_result->target_xid),
+                  pg_xid(copy_result->pg_xid),
                   xmin(copy_result->xmin), xmax(copy_result->xmax),
                   xmin_epoch(copy_result->xmin_epoch), xmax_epoch(copy_result->xmax_epoch),
                   tids(copy_result->tids), xips(copy_result->xips)
@@ -104,6 +108,7 @@ namespace springtail::pg_log_mgr {
                 int idx = 0;
                 db_id = std::stoull(split[idx++]); // db_id
                 target_xid = std::stoull(split[idx++]); // target_xid
+                pg_xid = std::stoul(split[idx++]); // pg_xid
                 xmin = std::stoul(split[idx++]); // xmin
                 xmax = std::stoul(split[idx++]); // xmax
                 xmin_epoch = std::stoul(split[idx++]); // xmin epoch
@@ -134,8 +139,8 @@ namespace springtail::pg_log_mgr {
             /** Serialize table sync message to string */
             explicit operator std::string() const
             {
-                return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}",
-                    db_id, target_xid, xmin, xmax, xmin_epoch, xmax_epoch,
+                return fmt::format("{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                    db_id, target_xid, pg_xid, xmin, xmax, xmin_epoch, xmax_epoch,
                     common::join_string(",", tids.begin(), tids.end()),
                     common::join_string(",", xips.begin(), xips.end()));
             }
