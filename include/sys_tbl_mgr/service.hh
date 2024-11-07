@@ -241,6 +241,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Writes the index info int the system table.
          *
+         * @param xid The XID/LSN at which the transaction occured.
          * @param db_id The database ID.
          * @param tab_id The ID of the user table.
          * @param index_id The index ID.

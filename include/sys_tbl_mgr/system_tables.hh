@@ -311,7 +311,7 @@ namespace springtail::sys_tbl {
     };
 
     /**
-     * Helper functions and constants for the indexes table.
+     * Helper functions and constants for the index_names table.
      */
     class IndexNames {
     public:

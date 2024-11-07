@@ -67,7 +67,7 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
 
         nlohmann::json ddl;
-        ddl["action"] = "create index";
+        ddl["action"] = "create_index";
         ddl["schema"] = request.index.schema;
         ddl["index"] = request.index.name;
         ddl["id"] = request.index.id;
@@ -236,7 +236,8 @@ namespace springtail::sys_tbl_mgr {
                     constant::INDEX_PRIMARY, //index id
                     xid.xid,
                     xid.lsn,
-                    true, true );
+                    !primary_keys.empty(), // mark not existent if no keys
+                    true );
             index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
@@ -1198,6 +1199,9 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void Service::_write_index(const XidLsn& xid, uint64_t db_id, uint64_t tab_id, uint64_t index_id, const std::map<uint32_t, uint32_t>& keys) {
+        if (keys.empty()) {
+            return;
+        }
         auto write_xid = _get_write_xid(db_id);
         auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
         auto fields = sys_tbl::Indexes::Data::fields(tab_id,

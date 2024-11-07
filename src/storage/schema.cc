@@ -279,9 +279,7 @@ namespace springtail {
         auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
         for (auto &&column : columns) {
             auto &&i = _field_map.find(column);
-            if (i == _field_map.end()) {
-                assert(i != _field_map.end());
-            }
+            assert(i != _field_map.end());
             fields->push_back(tuple->field(i->second.second));
         }
 
