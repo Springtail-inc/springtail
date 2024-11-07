@@ -426,7 +426,7 @@ namespace springtail::gc {
         assert(!pages.empty());
         // if only one page, return it
         if (pages.size() == 1) {
-            return pages.begin(); 
+            return pages.begin();
         }
 
         // otherwise, use the key to find the appropriate page

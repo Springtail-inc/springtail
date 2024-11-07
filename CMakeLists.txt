@@ -83,8 +83,8 @@ endif()
 ## source modules
 set(MODULES
   common
+  redis
   storage
-  benchmarks
   garbage_collector
   pg_repl
   write_cache

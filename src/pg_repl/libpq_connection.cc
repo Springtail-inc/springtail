@@ -330,7 +330,8 @@ namespace springtail {
     std::string LibPqConnection::_escape_identifier(const char *input)
     {
         int output_size = 2 * strlen(input) + 1;
-        char output[output_size];
+        std::vector<char> data(output_size);
+        char *output = data.data();
         const char *p = input;
         size_t len = 0;
 

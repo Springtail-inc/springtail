@@ -1,5 +1,11 @@
 #pragma once
 
+#include <memory>
+#include <string>
+#include <vector>
+#include <utility>
+#include <nlohmann/json.hpp>
+
 #include <common/redis.hh>
 
 namespace springtail {
@@ -95,6 +101,14 @@ namespace springtail {
          * @param schema_xid The XID from the last get_next_ddls() call that was applied.
          */
         void update_schema_xid(const std::string &fdw_id, uint64_t schema_xid);
+
+        /**
+         * Used by the FDW to commit the record without updating the schema XID.
+         * This is used when the FDW already has the change applied and needs to remove
+         * it from the queue.
+         * @param fdw_id The ID of the FDW we are updating.
+         */
+        void commit_fdw_no_update(const std::string &fdw_id);
 
         /**
          * Used by the XidMgr to identify when it can remove XIDs from it's schema XID history.

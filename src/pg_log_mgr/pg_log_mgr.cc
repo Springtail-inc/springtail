@@ -194,14 +194,29 @@ namespace springtail::pg_log_mgr {
         RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(5);
 
         // subscribe to the state change channel
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id, _db_id);
+        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
         subscriber->subscribe(state_change_channel);
 
-        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
-            if (channel == state_change_channel) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
-                _handle_external_state_change(msg);
+        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg)
+        {
+            if (channel != state_change_channel) {
+                return;
             }
+
+            // decode message
+            std::vector<std::string> msg_parts; // db_id, state
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received message: {}", msg);
+            common::split_string(":", msg, msg_parts);
+            assert(msg_parts.size() == 2);
+
+            // check db_id matches
+            uint64_t db_id = stoull(msg_parts[0]);
+            if (db_id != _db_id) {
+                return;
+            }
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg_parts[1]);
+            _handle_external_state_change(msg_parts[1]);
         });
 
         while (!_shutdown) {
@@ -231,18 +246,21 @@ namespace springtail::pg_log_mgr {
             std::vector<uint32_t> table_ids;
 
             // block on redis table sync queue w/timeout for shutdown
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
             StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
             if (table_id_ptr == nullptr) {
                 continue; // timeout, check for shutdown
             }
 
             // populate the tables to copy; check for more work
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
             table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
             while (_redis_sync_queue.size() > 0) {
                 table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
                 if (table_id_ptr == nullptr) {
                     break;
                 }
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table sync queue: {}", table_id_ptr->c_str());
                 table_ids.push_back(strtol(table_id_ptr->c_str(), nullptr, 10));
             }
 
@@ -254,6 +272,7 @@ namespace springtail::pg_log_mgr {
             _do_table_copies(table_ids);
 
             // update redis state
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Committing table sync queue");
             _redis_sync_queue.commit(REDIS_WORKER_ID);
         }
     }
@@ -277,12 +296,15 @@ namespace springtail::pg_log_mgr {
 
         // copy tables
         std::vector<PgCopyResultPtr> res;
+        auto xid = _get_next_xid();
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
-            res = PgCopyTable::copy_tables(_db_id, _get_next_xid(), table_ids.value());
+            res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
         } else {
-            res = PgCopyTable::copy_db(_db_id, _get_next_xid());
+            res = PgCopyTable::copy_db(_db_id, xid);
         }
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table copy done; res size={}", res.size());
         if (res.size() > 0) {
             // process copy results
             _process_copy_results(res);
@@ -319,7 +341,6 @@ namespace springtail::pg_log_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to redis");
 
-
         for (const auto &r : res) {
             // go through result tids and update Redis with table state info
             for (const auto &tid : r->tids) {
@@ -327,11 +348,13 @@ namespace springtail::pg_log_mgr {
             }
 
             // send table sync message to GC
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync msgs: target_xid={}", r->target_xid);
             PgXactMsg redis_xact(_db_id, r);
             _redis_queue.push(redis_xact);
         }
 
         // push done message to redis GC queue
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync done msg");
         PgXactMsg redis_xact2(_db_id);
         _redis_queue.push(redis_xact2);
 
@@ -633,6 +656,7 @@ namespace springtail::pg_log_mgr {
         assert (xact->xact_lsn > _last_pushed_lsn);
         _last_pushed_lsn = xact->xact_lsn;
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing xact to redis: xid={}, xact_lsn={}", xid, xact->xact_lsn);
         _redis_queue.push(redis_xact);
     }
 
@@ -659,6 +683,8 @@ namespace springtail::pg_log_mgr {
             // track last xact lsn we've pushed to redis
             assert (xact->xact_lsn > _last_pushed_lsn);
             _last_pushed_lsn = xact->xact_lsn;
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing (batch) xact to redis: xid={}, xact_lsn={}", xid, xact->xact_lsn);
 
             // convert to string and push to redis queue
             msgs.push_back(static_cast<std::string>(redis_xact));

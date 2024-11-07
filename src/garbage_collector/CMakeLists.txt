@@ -6,7 +6,13 @@ set(GC_SOURCES log_parser.cc committer.cc)
 add_library(springtail_gc ${GC_SOURCES})
 target_include_directories(springtail_gc PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_gc
-  PUBLIC springtail_common springtail_storage springtail_xid_mgr springtail_write_cache springtail_pg springtail_sys_tbl_mgr
+  PUBLIC springtail_common
+         springtail_storage
+         springtail_redis
+         springtail_xid_mgr
+         springtail_write_cache
+         springtail_pg
+         springtail_sys_tbl_mgr
   PRIVATE thrift_write_cache thrift_xid_mgr Boost::thread)
 
 add_executable(gc_daemon gc_daemon.cc)
