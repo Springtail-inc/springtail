@@ -26,20 +26,36 @@ namespace springtail
         uint32_t xmax;               ///< xmax; one past highest completed xid
         uint32_t xmin_epoch;
         uint32_t xmax_epoch;
+        uint32_t pg_xid;
+        uint32_t pg_epoch;
         std::vector<int32_t> tids;   ///< table ids
         std::vector<uint32_t> xips;  ///< transactions in progress: xmin <= X < xmax
         std::string pg_xids;         ///< pg_current_snapshot(); xmin:xmax:xids
 
         explicit PgCopyResult(uint64_t target_xid) : target_xid(target_xid) {}
 
+        /**
+         * @brief Add table to result
+         * @param tid table id
+         */
         void add_table(int32_t tid)
         {
             tids.push_back(tid);
         }
 
-        void set_snapshot(const std::string &pg_xids)
+        /**
+         * @brief Set snapshot information
+         * @param pg_xid8 pg_xid
+         * @param pg_xids xmin:xmax:xids
+         */
+        void set_snapshot(uint64_t pg_xid8, const std::string &pg_xids)
         {
             this->pg_xids = pg_xids;
+
+            // parse pg_xid
+            this->pg_xid = static_cast<uint32_t>(pg_xid8 & 0xFFFFFFFFLL);
+            this->pg_epoch = static_cast<uint32_t>(pg_xid8 >> 32);
+
             // parse xids: xmin:xmax:xids
             std::vector<std::string> xid_parts;
             common::split_string(":", pg_xids, xid_parts);
@@ -123,13 +139,14 @@ namespace springtail
 
         /**
          * @brief Get transaction ids for current transaction snapshot
-         * @details calls: SELECT txid_current_snapshot() returns string
-         *          in format: "xid_min:xid_max:xid,xid,xid" showing set of
+         * @details calls: SELECT pg_current_xact_id(), pg_current_snapshot()
+         *          to get current transaction pg_xid and
+         *          "xid_min:xid_max:xid,xid,xid" showing set of
          *          transactions overlapping with current transaction
-         * @return std::string xid string from pg_current_snapshot()
+         * @return std::pair<uint64_t, std::string> pg_xid, xid string from pg_current_snapshot()
          * @throws PgQueryError
          */
-        std::string _get_xact_xids();
+        std::pair<uint64_t, std::string> _get_xact_xids();
 
         /**
          * @brief Get secondary index columns for table by oid
@@ -198,6 +215,11 @@ namespace springtail
          * @brief End the copy, commit the transaction
          */
         void _end_copy();
+
+        /**
+         * @brief Send sync replication message
+         */
+        void _send_sync_msg(PgCopyResultPtr result);
 
         /**
          * @brief Worker thread for copying tables
