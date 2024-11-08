@@ -157,8 +157,6 @@ namespace springtail::pg_log_mgr {
         _redis_queue.clear();
         // Table sync queue
         _redis_sync_queue.clear();
-        // Table sync pg xid hset
-        RedisMgr::get_instance()->get_client()->del(_redis_sync_table);
 
         _internal_state.set(STATE_STARTUP_SYNC);
     }
@@ -342,9 +340,9 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to redis");
 
         for (const auto &r : res) {
-            // go through result tids and update Redis with table state info
-            for (const auto &tid : r->tids) {
-                redis->hset(_redis_sync_table, std::to_string(tid), r->pg_xids);
+            // skip the result if it contains no tables
+            if (r->tids.empty()) {
+                continue;
             }
 
             // send table sync message to GC

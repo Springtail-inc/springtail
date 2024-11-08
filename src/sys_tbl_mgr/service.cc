@@ -338,7 +338,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid(1, 0);
+        auto xid = xid_mgr->get_committed_xid(db_id, 0);
 
         _read_xid[db_id] = XidLsn(xid);
         _write_xid[db_id] = xid + 1;
@@ -356,7 +356,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         auto xid_mgr = XidMgrClient::get_instance();
-        auto xid = xid_mgr->get_committed_xid(1, 0);
+        auto xid = xid_mgr->get_committed_xid(db_id, 0);
 
         _read_xid[db_id] = XidLsn(xid);
         _write_xid[db_id] = xid + 1;

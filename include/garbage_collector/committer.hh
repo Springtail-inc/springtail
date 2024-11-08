@@ -156,9 +156,12 @@ namespace springtail::gc {
         /** Cache of mutable tables that are in-flight. */
         std::map<uint64_t, MutableTablePtr> _table_map;
 
-        /** The most recently completed XID by db_id.  Note: if we are in a table sync, this may be
+        /** The most recently completed XID by db.  Note: if we are in a table sync, this may be
             ahead of the most recently committed XID at the XidMgr. */
         std::map<uint64_t, uint64_t> _completed_xids;
+
+        /** The most recently committed XID by db. */
+        std::map<uint64_t, uint64_t> _committed_xids;
 
         /** The set of databases that are currently not committing XIDs because they are in a table
             sync state. */

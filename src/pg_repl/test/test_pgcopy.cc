@@ -76,12 +76,16 @@ namespace {
 
         // apply the system table changes
         auto client = sys_tbl_mgr::Client::get_instance();
-        RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
-                                                         Properties::get_db_instance_id(), db_id));
-        std::string worker_id = "test_worker";
-        auto ops_str = sync_table_q.try_pop(worker_id);
-        while (ops_str != nullptr) {
-            auto json = nlohmann::json::parse(*ops_str);
+
+        auto redis = RedisMgr::get_instance()->get_client();
+        std::string key = fmt::format(redis::HASH_SYNC_TABLE_OPS,
+                                      Properties::get_db_instance_id(), db_id);
+        std::vector<std::string> hkeys;
+        redis->hkeys(key, std::back_inserter(hkeys));
+
+        for (const std::string &hkey : hkeys) {
+            auto &&value = redis->hget(key, hkey);
+            auto json = nlohmann::json::parse(*value);
 
             // perform the table swap
             // note: we wait to perform this operation in the GC-2 to ensure that all system
@@ -97,9 +101,8 @@ namespace {
 
             client->swap_sync_table(create, roots);
 
-            // get the next set of operations
-            sync_table_q.commit(worker_id);
-            ops_str = sync_table_q.try_pop(worker_id);
+            // clear the table entry from the hash
+            redis->hdel(key, hkey);
         }
 
         // finalize the system metadata
