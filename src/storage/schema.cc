@@ -9,7 +9,7 @@
 namespace springtail {
 
     void
-    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn> columns)
+    ExtentSchema::_populate(const std::map<uint32_t, SchemaColumn>& columns)
     {
         // track how many primary key columns there are
         uint32_t pkey_count = 0;
@@ -153,6 +153,7 @@ namespace springtail {
 
             // handle primary key data
             if (column.pkey_position) {
+                assert(_sort_keys[*column.pkey_position].empty());
                 _sort_fields->at(*column.pkey_position) = field;
                 _sort_keys[*column.pkey_position] = column.name;
             }
@@ -278,6 +279,7 @@ namespace springtail {
         auto fields = std::make_shared<std::vector<std::shared_ptr<Field>>>();
         for (auto &&column : columns) {
             auto &&i = _field_map.find(column);
+            assert(i != _field_map.end());
             fields->push_back(tuple->field(i->second.second));
         }
 

@@ -55,6 +55,9 @@ namespace springtail {
 
         // TableStats
         _system_cache[{ sys_tbl::TableStats::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::TableStats::Data::SCHEMA);
+
+        // IndexNames
+        _system_cache[{ sys_tbl::IndexNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::IndexNames::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>
@@ -83,6 +86,8 @@ namespace springtail {
                     return _convert_columns(sys_tbl::Schemas::Data::SCHEMA);
                 case sys_tbl::TableStats::ID:
                     return _convert_columns(sys_tbl::TableStats::Data::SCHEMA);
+                case sys_tbl::IndexNames::ID:
+                    return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
                 default:
                     assert(false);
                     break;

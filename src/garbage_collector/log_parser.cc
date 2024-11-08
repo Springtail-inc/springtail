@@ -863,8 +863,7 @@ namespace springtail::gc {
                                 // note: we don't notify the backlog until the entire XID is
                                 //       processed since there might be additional schema changes
 
-                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                // no need to record the DDL statement for this change
                             }
                         }
                         break;
@@ -889,10 +888,15 @@ namespace springtail::gc {
                                 // note: we don't notify the backlog until the entire XID is
                                 //       processed since there might be additional schema changes
 
-                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                // no need to record the DDL statement for this change
                             }
                         }
+                        break;
+                    }
+                    case PgMsgEnum::COPY_SYNC: {
+                        auto &copy_sync_msg = std::get<PgMsgCopySync>(msg->msg);
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Got COPY_SYNC on {} @ {}, pg_xid={}",
+                                            state->entry.db_id, copy_sync_msg.target_xid, copy_sync_msg.pg_xid);
                         break;
                     }
 
