@@ -210,7 +210,7 @@ namespace springtail::gc {
             /**
              * Marks that the LogParser has issued a resync request for the given table so that
              * mutations can be ignored.  This record is replaced by a full XidRecord when
-             * add_sync() is called from the message coming through the log.
+             * add_sync() is called from the TABLE_SYNC_MSG message coming through the log.
              *
              * @return true if this is the first table from this sync-set
              */
@@ -224,8 +224,25 @@ namespace springtail::gc {
             bool add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg);
 
             /**
+             * Check if there are any sync'd tables to swap/commit.
+             * @param db_id The database to check.
+             * @param pg_xid The pg_xid of the current transaction.
+             * @return An optional XidReady containing the swap/commit details if available.
+             */
+            std::optional<XidReady> check_commit(uint64_t db_id, uint32_t pg_xid);
+
+            /**
+             * Clears any tables that were part of the swap/commit.
+             * @param db_id The database to clear.
+             * @param commit_msg The XidReady containing the swap/commit details.
+             */
+            void clear_tables(uint64_t db_id, const XidReady &commit_msg);
+
+            /**
              * Remove a given table from the sync tracker.  Called after we have passed all of the
-             * skipable transaction records.
+             * skipable transaction records.  We know this because we will see a COPY_SYNC message
+             * come through the postgres replication stream (i.e., via an XactMsg with type
+             * XACT_MSG).
              *
              * @return 0 if still in progress, otherwise the max assigned XID among the syncs
              */
@@ -237,11 +254,15 @@ namespace springtail::gc {
             bool should_skip(uint64_t db_id, uint64_t table_id, uint32_t pg_xid) const;
 
             /**
-             * Checks if we should immediately issue a COMMIT message to the Committer.
-             *
+             * Checks if we should immediately issue a COMMIT message to the Committer.  This will
+             * occur if we have already processed all of the XIDs prior to the table sync and there
+             * are no pg_xids that might need to be skipped due to the pipeline stall.  This is
+             * expected in the case that a sync occurs isolated from any other database activity
+             * (e.g., an idle database).
+             * 
              * @return 0 if still in progress, otherwise the max XID seen among the syncs
              */
-            uint64_t get_xid_if_empty(uint64_t db_id);
+            uint64_t check_immediate_commit(uint64_t db_id);
 
         private:
             /**
@@ -251,7 +272,8 @@ namespace springtail::gc {
             public:
                 XidRecord(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
                     : _xmax(sync_msg.xmax),
-                      _inflight(sync_msg.xips.begin(), sync_msg.xips.end())
+                      _inflight(sync_msg.xips.begin(), sync_msg.xips.end()),
+                      _tids(sync_msg.tids)
                 { }
 
                 /**
@@ -288,9 +310,14 @@ namespace springtail::gc {
                     return true;
                 }
 
+                const std::vector<int32_t> &tids() {
+                    return _tids;
+                }
+
             private:
                 uint32_t _xmax;
                 std::set<uint32_t> _inflight;
+                std::vector<int32_t> _tids;
             };
 
         private:
@@ -298,20 +325,17 @@ namespace springtail::gc {
             mutable boost::shared_mutex _mutex;
 
             /** db -> table -> XidRecord containing table sync details. */
-            std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _sync_map;
+            std::map<uint64_t, std::map<uint64_t, std::shared_ptr<XidRecord>>> _table_map;
+
+            /** db -> pgxid -> XidRecord. */
+            std::map<uint64_t, std::map<uint32_t, std::shared_ptr<XidRecord>>> _sync_map;
+
+            /** db -> target XID of sync. */
+            std::map<uint64_t, uint64_t> _target_xid_map;
 
             /** db-> table indicating that a resync was issued but we haven't seen the
                 TABLE_SYNC_MSG log entry for the table yet. */
             std::map<uint64_t, std::set<uint64_t>> _resync_map;
-
-            /** db -> xid -- marks that the given DB is ready for a sync_commit at the given XID. */
-            std::map<uint64_t, uint64_t> _ready_map;
-
-            /** db -> xid hold the max target XID seen in the sync-set for a given db. */
-            std::map<uint64_t, uint64_t> _max_xid;
-
-            /** db -> xid -- the largest XID seen fully processed by the LogParser. */
-            std::map<uint64_t, uint64_t> _max_lp_xid;
         };
 
 
@@ -383,6 +407,15 @@ namespace springtail::gc {
              */
             bool _process_mutation(StatePtr state, uint64_t rel_id, PgMsgPtr msg, uint64_t offset);
 
+            /**
+             * Waits for all of the prior XIDs at a given DB to be completed.  Optionally removes
+             * the XID from the set of active XIDs.
+             * @param db_id The database ID.
+             * @param xid The XID to wait until.
+             * @param do_erase If true then the XID will be removed from the set once the wait is complete.
+             */
+            void _wait_for_xid(uint64_t db_id, uint64_t xid, bool do_erase);
+
         private:
             /** The filter to use at the start of processing. */
             static const std::vector<char> START_FILTER;
@@ -430,6 +463,12 @@ namespace springtail::gc {
             /** Map of DB -> XID -> condition variable.  Used to ensure XIDs are passed to the
                 Committer in-order. */
             std::map<uint64_t, std::map<uint64_t, boost::condition_variable>> _xid_map;
+
+            /** Flag indicating if the processing should be halted. */
+            bool _halt_processing;
+
+            /** Condition variable used to notify when processing can continue. */
+            boost::condition_variable _halt_cond;
         };
 
 

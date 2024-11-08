@@ -476,9 +476,9 @@ namespace springtail
         }
 
         // store the system table operations into redis for the GC-2
-        auto &&key = fmt::format(redis::QUEUE_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
-        RedisQueue<std::string> sync_table_q(key);
-        sync_table_q.push(ops.dump());
+        auto &&key = fmt::format(redis::HASH_SYNC_TABLE_OPS, Properties::get_db_instance_id(), db_id);
+        auto redis = RedisMgr::get_instance()->get_client();
+        redis->hset(key, fmt::format("{}", table_oid), ops.dump());
     }
 
     int32_t PgCopyTable::_verify_copy_header(const std::string_view &header)
@@ -789,7 +789,9 @@ namespace springtail
             }
         }
 
-        copy_table._send_sync_msg(result);
+        if (result->tids.size() > 0) {
+            copy_table._send_sync_msg(result);
+        }
 
         // end the copy
         copy_table._end_copy();

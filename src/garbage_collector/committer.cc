@@ -38,7 +38,7 @@ namespace springtail::gc {
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
-            uint64_t db_id = result->db_id();
+            uint64_t db_id = result->db();
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
@@ -56,30 +56,38 @@ namespace springtail::gc {
             if (itr == _completed_xids.end()) {
                 completed_xid = _xid_mgr->get_committed_xid(db_id, 0);
                 _completed_xids[db_id] = completed_xid;
+                _committed_xids[db_id] = completed_xid;
             } else {
                 completed_xid = itr->second;
             }
             SPDLOG_INFO("Last completed XID: {}@{}", db_id, completed_xid);
 
             // handle a TABLE_SYNC_COMMIT
-            if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
-                SPDLOG_INFO("Handle a TABLE_SYNC_COMMIT: {}@{}, current @{}", db_id, result->xid(), completed_xid);
+            if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
+                result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
+                SPDLOG_INFO("Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                            static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
-                RedisQueue<std::string> sync_table_q(fmt::format(redis::QUEUE_SYNC_TABLE_OPS,
-                                                                 Properties::get_db_instance_id(), db_id));
 
-                // note: Need to check the completed XID against the most recent XID assigned during
-                //       the table syncs.  If the completed XID before the table sync XID, then set
-                //       the completed XID to the table sync XID
-                completed_xid = std::max(completed_xid, result->xid());
+                auto redis = RedisMgr::get_instance()->get_client();
+                std::string key = fmt::format(redis::HASH_SYNC_TABLE_OPS,
+                                              Properties::get_db_instance_id(), db_id);
+
+                // note: Need to check the completed XID against the most recent committed XID.  If
+                //       it is ahead, then we commit at the completed XID.  If it is the same then
+                //       we commit at the provided XID.
+                if (completed_xid == _committed_xids[db_id]) {
+                    completed_xid = result->swap().xid();
+                }
 
                 // for operations at the SysTblMgr
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // go through the hash of sys tbl operations
-                auto ops_str = sync_table_q.try_pop(_worker_id);
-                while (ops_str != nullptr) {
+                for (auto table_id : result->swap().tids()) {
+                    auto ops_str = redis->hget(key, fmt::format("{}", table_id));
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "table_id {}, ops: {}", table_id, *ops_str);
                     auto json = nlohmann::json::parse(*ops_str);
 
                     // perform the table swap
@@ -103,34 +111,40 @@ namespace springtail::gc {
                         ddls.push_back(ddl_ops[i]);
                     }
 
-                    // get the next set of operations
-                    sync_table_q.commit(_worker_id);
-                    ops_str = sync_table_q.try_pop(_worker_id);
+                    // clear the hash entry for the table
+                    redis->hdel(key, fmt::format("{}", table_id));
                 }
 
-                SPDLOG_INFO("(Re-)created all synced tables: {}@{}", db_id, completed_xid);
-
-                // finalize the system metadata
-                client->finalize(db_id, completed_xid);
+                SPDLOG_INFO("Swapped synced tables: {}@{}", db_id, completed_xid);
 
                 // pre-commit the DDLs in case there's a failure
                 _redis_ddl.precommit_ddl(db_id, completed_xid, ddls);
 
-                // perform a commit to the XidMgr
-                _xid_mgr->commit_xid(db_id, completed_xid, true);
+                if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+                    // finalize the system metadata
+                    client->finalize(db_id, completed_xid);
+
+                    // perform a commit to the XidMgr
+                    _xid_mgr->commit_xid(db_id, completed_xid, true);
+                    _committed_xids[db_id] = completed_xid;
+                } else {
+                    _xid_mgr->record_ddl_change(db_id, completed_xid);
+                }
                 _completed_xids[db_id] = completed_xid;
 
                 // notify the FDW of the schema changes
                 _redis_ddl.commit_ddl(db_id, completed_xid);
 
-                // notify everyone that the database is now in the "ready" state
-                Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
+                if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
+                    // notify everyone that the database is now in the "ready" state
+                    Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
+
+                    // allow commits on future XIDs
+                    _block_commit.erase(db_id);
+                }
 
                 // signal the GC-1 LogParser that it can unblock and continue operation
-                _parser_notify.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, db_id));
-
-                // allow commits on future XIDs
-                _block_commit.erase(db_id);
+                _parser_notify.push(XidReady(db_id));
 
                 // commit this work item and continue
                 _redis.commit(_worker_id);
@@ -139,7 +153,7 @@ namespace springtail::gc {
 
             // note: from here we know we have an XACT_MSG
             assert(result->type() == XidReady::Type::XACT_MSG);
-            uint64_t xid = result->xid();
+            uint64_t xid = result->xact().xid();
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
@@ -269,6 +283,7 @@ namespace springtail::gc {
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
                 _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
+                _committed_xids[db_id] = xid;
             } else if (!ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);

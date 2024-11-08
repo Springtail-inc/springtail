@@ -120,12 +120,6 @@ namespace springtail::redis {
     //// For Log Mgr Table Sync
 
     /**
-     * Table sync hash set, key is the table OID/TID, value is 'xmin:xmax:xid,xid,xid...'
-     * args: <db_instance_id>, <db_id>
-     */
-    static constexpr char HASH_SYNC_TABLE_STATE[] = "hash:sync_table_state:{}:{}";
-
-    /**
      * Queue for table sync requests; value is the table OID/TID
      * args: <db_instance_id>, <db_id>
      */
@@ -138,11 +132,11 @@ namespace springtail::redis {
     static constexpr char STRING_LOG_RESYNC[] = "string:log_resync:{}:{}";
 
     /**
-     * List holding the table operations (drop, create and update_roots) for each table sync.  Each
-     * entry in the list is stored as a JSON array of JSON objects.
+     * Hash table holding the table operations (drop, create and update_roots) for each table sync.
+     * Each entry in the hash is stored as a JSON array of JSON objects.
      * args: <db_instance_id>, <db_id>
      */
-    static constexpr char QUEUE_SYNC_TABLE_OPS[] = "queue:sync_table_ops:{}:{}";
+    static constexpr char HASH_SYNC_TABLE_OPS[] = "hash:sync_table_ops:{}:{}";
 
     //// For coordinator
 

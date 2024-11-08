@@ -11,31 +11,109 @@ namespace springtail::gc {
     class XidReady {
     public:
         /**
+         * A sub-class holding data used by the XACT_MSG type.
+         */
+        class XactMsg {
+            friend XidReady;
+
+            /** Internal constructor for constructing from a packed string. */
+            XactMsg(const std::span<std::string> &values)
+            {
+                _xid = std::stoull(values[0]);
+            }
+
+        public:
+            XactMsg(uint64_t xid)
+                : _xid(xid)
+            { }
+
+            explicit operator std::string() const {
+                return fmt::format("{}", _xid);
+            }
+
+            uint64_t xid() const {
+                return _xid;
+            }
+
+        private:
+            uint64_t _xid;
+        };
+
+        /**
+         * A sub-class holding data used by the TABLE_SYNC_SWAP and TABLE_SYNC_COMMIT types.
+         */
+        class SwapMsg {
+            friend XidReady;
+
+            /** Internal constructor for constructing from a packed string. */
+            SwapMsg(const std::span<std::string> &values)
+            {
+                // sanity check
+                assert(values.size() > 1);
+
+                // parse the XID
+                _xid = std::stoull(values[0]);
+
+                // copy the table IDs, starting after the XID
+                std::transform(values.begin() + 1, values.end(), std::back_inserter(_tids),
+                               [](const std::string &v) {
+                                   return std::stoull(v);
+                               });
+            }
+
+        public:
+            SwapMsg(uint64_t xid, std::vector<uint64_t> &&tids)
+                : _xid(xid),
+                  _tids(tids)
+            { }
+
+            explicit operator std::string() const {
+                return fmt::format("{}:{}", _xid, fmt::join(_tids, ":"));
+            }
+
+            const uint64_t xid() const {
+                return _xid;
+            }
+
+            const std::vector<uint64_t> &tids() const {
+                return _tids;
+            }
+
+        private:
+            uint64_t _xid;
+            std::vector<uint64_t> _tids;
+        };
+
+        /**
          * Type enum for the various XidReady messages to the Committer.
          */
         enum Type : char {
             XACT_MSG = 'X',
             TABLE_SYNC_START = 'S',
+            TABLE_SYNC_SWAP = 'W',
             TABLE_SYNC_COMMIT = 'C'
         };
 
-        /** Constructor for messages that aren't XACT_MSG. */
-        XidReady(const Type &type,
-                 uint64_t db_id,
-                 uint64_t xid = 0)
+        /** Constructor for SWAP and COMMIT messages. */
+        XidReady(const Type &type, uint64_t db_id, SwapMsg &&msg)
             : _type(type),
               _db_id(db_id),
-              _xid(xid)
+              _msg(msg)
         {
-            assert(_type != Type::XACT_MSG);
+            assert(_type == Type::TABLE_SYNC_SWAP || _type == Type::TABLE_SYNC_COMMIT);
         }
 
+        /** Constructor for TABLE_SYNC_START messages. */
+        XidReady(uint64_t db_id)
+            : _type(Type::TABLE_SYNC_START),
+              _db_id(db_id)
+        { }
+
         /** Constructor for messages that are XACT_MSG. */
-        XidReady(uint64_t db_id,
-                 uint64_t xid)
+        XidReady(uint64_t db_id, XactMsg &&msg)
             : _type(Type::XACT_MSG),
               _db_id(db_id),
-              _xid(xid)
+              _msg(msg)
         { }
 
         /** Constructor for parsing an XidReady out of a redis value. */
@@ -43,19 +121,54 @@ namespace springtail::gc {
         {
             std::vector<std::string> split;
             common::split_string(":", value, split);
-
-            // verify that the type is just one character
+            assert(split.size() >= 2);
             assert(split[0].size() == 1);
 
-            // set the internal values
-            _type = Type(split[0][0]);
+            _type = static_cast<Type>(split[0][0]);
             _db_id = std::stoull(split[1]);
-            _xid = std::stoull(split[2]);
+            std::span<std::string> remaining(split.begin() + 2, split.end());
+
+            switch (_type) {
+            case Type::XACT_MSG:
+                _msg = XactMsg(remaining);
+                break;
+
+            case Type::TABLE_SYNC_START:
+                // nothing to do
+                break;
+
+            case Type::TABLE_SYNC_SWAP:
+            case Type::TABLE_SYNC_COMMIT:
+                _msg = SwapMsg(remaining);
+                break;
+
+            default:
+                SPDLOG_ERROR("Invalid type: {}", value[0]);
+                assert(0);
+            }
         }
 
         /** Serialize an XidReady into a string to store in redis. */
         explicit operator std::string() const {
-            return fmt::format("{}:{}:{}", static_cast<char>(_type), _db_id, _xid);
+            switch (_type) {
+            case Type::XACT_MSG:
+                return fmt::format("{}:{}:{}",
+                                   static_cast<char>(_type), _db_id,
+                                   static_cast<std::string>(xact()));
+
+            case Type::TABLE_SYNC_START:
+                return fmt::format("{}:{}",
+                                   static_cast<char>(_type), _db_id);
+
+            case Type::TABLE_SYNC_SWAP:
+            case Type::TABLE_SYNC_COMMIT:
+                return fmt::format("{}:{}:{}",
+                                   static_cast<char>(_type), _db_id,
+                                   static_cast<std::string>(swap()));
+            }
+
+            SPDLOG_ERROR("Unknown type: {}", static_cast<char>(_type));
+            assert(0);
         }
 
         /** A getter for the type. */
@@ -64,19 +177,24 @@ namespace springtail::gc {
         }
 
         /** A getter for the database ID. */
-        uint64_t db_id() const {
+        uint64_t db() const {
             return _db_id;
         }
 
-        /** A getter for the XID. */
-        uint64_t xid() const {
-            return _xid;
+        /** A getter for the XactMsg. */
+        const XactMsg &xact() const {
+            return std::get<XactMsg>(*_msg);
+        }
+
+        /** A getter for the SwapMsg. */
+        const SwapMsg &swap() const {
+            return std::get<SwapMsg>(*_msg);
         }
 
     private:
         Type _type; ///< The message type.
         uint64_t _db_id; ///< The database ID.
-        uint64_t _xid; ///< The XID (for XACT_MSG types).
+        std::optional<std::variant<XactMsg, SwapMsg>> _msg; ///< The underlying message data.
     };
 
 }
