@@ -14,12 +14,14 @@ BEGIN
         -- Check for table or index drops
         IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') THEN
 
+            -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
                 tag_name := 'DROP TABLE';
             ELSE
                 tag_name := 'DROP INDEX';
             END IF;
 
+            -- generate message same for DROP TABLE/INDEX
             msg := json_build_object('cmd', tag_name,
                 'oid', obj.objid::bigint, -- oid is unsigned int, but comes as string
                 'obj', obj.object_type,
@@ -29,7 +31,7 @@ BEGIN
 
             RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
 
-            -- tg_tag is DROP TABLE
+            -- tag_name is DROP TABLE or DROP INDEX
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
         END IF;
     END LOOP;
