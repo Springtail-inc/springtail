@@ -10,12 +10,16 @@ namespace springtail::gc {
      */
     class XidReady {
     public:
+        /**
+         * A sub-class holding data used by the XACT_MSG type.
+         */
         class XactMsg {
             friend XidReady;
 
-            XactMsg(const std::vector<std::string> &values)
+            /** Internal constructor for constructing from a packed string. */
+            XactMsg(const std::span<std::string> &values)
             {
-                _xid = std::stoull(values[2]);
+                _xid = std::stoull(values[0]);
             }
 
         public:
@@ -35,17 +39,23 @@ namespace springtail::gc {
             uint64_t _xid;
         };
 
+        /**
+         * A sub-class holding data used by the TABLE_SYNC_SWAP and TABLE_SYNC_COMMIT types.
+         */
         class SwapMsg {
             friend XidReady;
 
-            SwapMsg(const std::vector<std::string> &values)
+            /** Internal constructor for constructing from a packed string. */
+            SwapMsg(const std::span<std::string> &values)
             {
                 // sanity check
-                assert(values.size() > 3);
+                assert(values.size() > 1);
 
-                // set the internal values
-                _xid = std::stoull(values[2]);
-                std::transform(values.begin() + 3, values.end(), std::back_inserter(_tids),
+                // parse the XID
+                _xid = std::stoull(values[0]);
+
+                // copy the table IDs, starting after the XID
+                std::transform(values.begin() + 1, values.end(), std::back_inserter(_tids),
                                [](const std::string &v) {
                                    return std::stoull(v);
                                });
@@ -116,10 +126,11 @@ namespace springtail::gc {
 
             _type = static_cast<Type>(split[0][0]);
             _db_id = std::stoull(split[1]);
+            std::span<std::string> remaining(split.begin() + 2, split.end());
 
             switch (_type) {
             case Type::XACT_MSG:
-                _msg = XactMsg(split);
+                _msg = XactMsg(remaining);
                 break;
 
             case Type::TABLE_SYNC_START:
@@ -128,7 +139,7 @@ namespace springtail::gc {
 
             case Type::TABLE_SYNC_SWAP:
             case Type::TABLE_SYNC_COMMIT:
-                _msg = SwapMsg(split);
+                _msg = SwapMsg(remaining);
                 break;
 
             default:
