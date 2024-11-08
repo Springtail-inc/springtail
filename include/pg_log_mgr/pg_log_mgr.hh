@@ -30,6 +30,8 @@
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 
+#include <redis/db_state_change.hh>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres log manager
@@ -265,7 +267,7 @@ namespace springtail::pg_log_mgr {
         void _redis_pubsub_thread();
 
         /** Handle state change; callback from Redis pubsub */
-        void _handle_external_state_change(const std::string &new_state);
+        void _handle_external_state_change(const redis::db_state_change::DBState new_state);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

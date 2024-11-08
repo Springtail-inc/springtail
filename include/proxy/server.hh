@@ -21,6 +21,8 @@
 #include <proxy/database.hh>
 #include <proxy/logger.hh>
 
+#include <redis/db_state_change.hh>
+
 namespace springtail::pg_proxy {
 
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
@@ -62,10 +64,41 @@ namespace springtail::pg_proxy {
             _user_mgr->add_user(username, password, salt);
         }
 
-        /** Add a database */
-        void add_replicated_database(const std::string &dbname) {
+        /**
+         * @brief Add replicated database id and name the collection of replicated databases
+         *          and setup initial state per database
+         *
+         * @param db_id - database id
+         * @param dbname - database name
+         */
+        void add_replicated_database(const uint64_t db_id, const std::string &dbname) {
             std::unique_lock lock(_db_mutex);
-            _replicated_databases.insert(dbname);
+            _replicated_databases[dbname] = db_id;
+
+            std::unique_lock db_state_lock(_db_state_mutex);
+            _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
+        }
+
+        /**
+         * @brief Get database id for given database name
+         *
+         * @param dbname - database name
+         * @return uint64_t - database id
+         */
+        uint64_t get_database_id(const std::string &dbname) {
+            std::shared_lock lock(_db_mutex);
+            return _replicated_databases[dbname];
+        }
+
+        /**
+         * @brief Get the state of the given database
+         *
+         * @param db_id - database id
+         * @return redis::db_state_change::DBState
+         */
+        redis::db_state_change::DBState get_database_state(const uint64_t db_id) {
+            std::shared_lock lock(_db_state_mutex);
+            return _replicated_database_states[db_id];
         }
 
         /** Check if a database is replicated */
@@ -100,7 +133,8 @@ namespace springtail::pg_proxy {
         }
 
         /** Set primary db instance */
-        void set_primary(DatabaseInstancePtr instance) {
+        void set_primary(uint64_t instance_id, DatabaseInstancePtr instance) {
+            _db_instance_id = instance_id;
             _primary_database.set_primary(instance);
         }
 
@@ -127,14 +161,19 @@ namespace springtail::pg_proxy {
             return _id;
         }
 
+        void startup();
+        void teardown();
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
 
         uint32_t _id;  ///< unique id for this proxy server
+        uint64_t _db_instance_id;           ///< primary database instance id
 
         UserMgrPtr _user_mgr;                ///< user manager object
 
+        std::thread _pubsub_thread;         ///< redis publisher/subscriber thread
         ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
 
         std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map
@@ -150,7 +189,10 @@ namespace springtail::pg_proxy {
         DatabaseReplicaSet _replica_set;      ///< set of replica databases
 
         std::shared_mutex _db_mutex;
-        std::set<std::string> _replicated_databases; ///< list of authorized databases
+        std::map<std::string, uint64_t> _replicated_databases; ///< list of authorized databases with associated ids
+
+        std::shared_mutex _db_state_mutex;   ///< share mutex for read/write access to database state
+        std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
 
         bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
         std::atomic<bool> _shutdown = false;    ///< true if server is shutting down
@@ -169,6 +211,20 @@ namespace springtail::pg_proxy {
 
         /** Log disconnect */
         void _log_disconnect(SessionPtr session);
+
+        /**
+         * @brief Redis PubSub thread runs this function
+         *
+         */
+        void _pubsub_thread_run();
+
+        /**
+         * @brief Database state chang handling
+         *
+         * @param db_id - database id
+         * @param state - new database state
+         */
+        void _handle_db_state_change(const uint64_t db_id, const redis::db_state_change::DBState state);
 
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;

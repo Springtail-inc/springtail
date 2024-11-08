@@ -29,10 +29,13 @@ static void setup(ProxyServerPtr server)
 {
     // add primary
     nlohmann::json primary_config = Properties::get_primary_db_config();
+    uint64_t primary_instance_id = Properties::get_db_instance_id();
+    std::cout << "***** " << "Primary id: " << primary_instance_id << std::endl;
+    std::cout << "***** " << primary_config.dump() << std::endl; 
     auto host = Json::get<std::string>(primary_config, "host");
     auto port = Json::get<uint16_t>(primary_config, "port");
     if (host.has_value() && port.has_value()) {
-        server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
+        server->set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
     } else {
         SPDLOG_ERROR("Could not find the value for primary database either host or port");
         throw ProxyServerError();
@@ -52,10 +55,11 @@ static void setup(ProxyServerPtr server)
         }
     }
 
-    // add replicated database
+    // add replicated databases
     std::map<uint64_t, std::string> db_list = Properties::get_databases();
     for (const auto& db_pair: db_list) {
-        server->add_replicated_database(std::get<1>(db_pair));
+        std::cout << "***** " << std::get<0>(db_pair) << ", " <<  std::get<1>(db_pair) << std::endl; 
+        server->add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
     }
 
     // add test user for test db with trust
@@ -127,6 +131,9 @@ int main(int argc, char* argv[])
     server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
 
     setup(server);
+    server->startup();
 
     server->run();
+
+    server->teardown();
 }

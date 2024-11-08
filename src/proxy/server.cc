@@ -14,13 +14,19 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#include <fmt/core.h>
+
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
+#include <common/redis.hh>
+#include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
+
+// #include <redis/db_state_change.hh>
 
 namespace springtail::pg_proxy {
 
@@ -107,6 +113,21 @@ namespace springtail::pg_proxy {
         ::signal(SIGPIPE, SIG_IGN);
 
         SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
+    }
+
+    void ProxyServer::startup() {
+        // initiate the pubsub thread
+        _pubsub_thread = std::thread(&ProxyServer::_pubsub_thread_run, this);
+
+        // TODO: we probably should not start accepting any of the client connections till we intialized
+        //  database states
+    }
+
+    void ProxyServer::teardown() {
+        _pubsub_thread.join();
+        close(_socket);
+        close(_pipe[0]);
+        close(_pipe[1]);
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -458,5 +479,61 @@ namespace springtail::pg_proxy {
         if (waiting_session_insert) {
             _waiting_sessions.insert(socket);
         }
+    }
+
+    void ProxyServer::_handle_db_state_change(const uint64_t db_id, const redis::db_state_change::DBState state) {
+        std::cout << "Handling DB state change to " << redis::db_state_change::db_state_to_name[state] << std::endl;
+        std::unique_lock db_state_lock(_db_state_mutex);
+        _replicated_database_states[db_id] = state;
+    }
+
+    void ProxyServer::_pubsub_thread_run() {
+        // create subscriber for redis pubsub, set timeout to 5 secs.
+        std::cout << "PubSub thread id " << std::this_thread::get_id() << std::endl;
+        RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(1);
+
+        // subscribe to the state change channel
+        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
+        subscriber->subscribe(state_change_channel);
+
+        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
+            if (channel != state_change_channel) {
+                return;
+            }
+            std::cout << "state chagne" << std::endl;
+            std::cout << "Received state change: " << channel << "; msg: " << msg << std::endl;
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
+            uint64_t db_id;
+            redis::db_state_change::DBState state;
+            redis::db_state_change::parse_db_state_change(msg, db_id, state);
+            if (db_id != _db_instance_id) {
+                return;
+            }
+            _handle_db_state_change(db_id, state);
+        });
+
+        // refresh all database states
+        std::shared_lock db_name_lock(_db_mutex);
+        std::unique_lock db_state_lock(_db_state_mutex);
+        for (const auto &[db_name, db_id]: _replicated_databases) {
+            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
+            _replicated_database_states[db_id] = db_state;
+        }
+
+        while (!_shutdown) {
+            try {
+                // consume from subscriber, timeout is set above
+                subscriber->consume();
+            } catch (const sw::redis::TimeoutError &e) {
+                // timeout, check for shutdown
+                continue;
+            } catch (const sw::redis::Error &e) {
+                SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
+                break;
+            }
+        }
+
+        subscriber->unsubscribe(state_change_channel);
+
     }
 } // namespace springtail::pg_proxy
