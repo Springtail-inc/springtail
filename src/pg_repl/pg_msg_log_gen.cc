@@ -208,7 +208,7 @@ namespace springtail {
     }
 
     uint32_t PgMsgLogGen::create_index(const std::string &index,
-            const std::string& table_name, 
+            const std::string& table_name,
             uint32_t table_oid, const std::vector<PgMsgSchemaIndexColumn> &columns) {
         uint32_t oid = _next_table_id++;
 
@@ -256,7 +256,7 @@ namespace springtail {
         msg["obj"] = "table";
         msg["schema"] = "public";
         msg["columns"] = _gen_table_schema(table_id, columns);
-        msg["identity"] = "public." + table_name;
+        msg["table"] = table_name;
 
         _current_xact->oids.insert(table_id);
 
@@ -275,7 +275,7 @@ namespace springtail {
         msg["obj"] = "table";
         msg["schema"] = "public";
         msg["columns"] = _gen_table_schema(table_id, columns);
-        msg["identity"] = "public." + _table_id_to_name[table_id];
+        msg["table"] = _table_id_to_name[table_id];
 
         _current_xact->oids.insert(table_id);
 
