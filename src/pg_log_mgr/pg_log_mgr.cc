@@ -203,17 +203,13 @@ namespace springtail::pg_log_mgr {
                 return;
             }
 
-            // std::vector<std::string> msg_parts; // db_id, state
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received message: {}", msg);
             uint64_t db_id;
             redis::db_state_change::DBState state;
             // decode message
             redis::db_state_change::parse_db_state_change(msg, db_id, state);
-            // common::split_string(":", msg, msg_parts);
-            // assert(msg_parts.size() == 2);
 
             // check db_id matches
-            // uint64_t db_id = stoull(msg_parts[0]);
             if (db_id != _db_id) {
                 return;
             }
