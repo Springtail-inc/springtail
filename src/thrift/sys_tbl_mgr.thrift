@@ -135,7 +135,8 @@ struct ColumnHistory {
     2: i64 lsn,
     3: bool exists,
     4: i8 update_type
-    5: TableColumn column
+    5: optional TableColumn column
+    6: optional IndexColumn index_column
 }
 
 struct GetSchemaResponse {

@@ -15,15 +15,6 @@
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/exception.hh>
 
-namespace {
-    std::string _get_identity(const auto& json) {
-        std::string identity;
-        json["identity"].get_to(identity);
-        auto const pos = identity.find_last_of('.');
-        return identity.substr(pos + 1);
-    }
-};
-
 namespace springtail {
 
     PgMsgStreamReader::PgMsgStreamReader(const std::filesystem::path &start_file,
@@ -897,8 +888,7 @@ namespace springtail {
         json["table_name"].get_to(msg.table_name);
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
-
-        msg.index = _get_identity(json);
+        json["identity"].get_to(msg.index);
 
         const nlohmann::json& cols = json["columns"];
         for (const auto &el: cols.items()) {
@@ -909,7 +899,6 @@ namespace springtail {
             v["idx_position"].get_to(col.idx_position);
             msg.columns.push_back(col);
         }
-        //_decode_schema_columns(json["columns"], msg.columns);
 
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_INDEX);
         decoded_msg->msg.emplace<PgMsgIndex>(msg);
@@ -935,9 +924,7 @@ namespace springtail {
         msg.lsn = message.lsn;
         json["schema"].get_to(msg.schema);
         json["oid"].get_to(msg.oid);
-
-        // identity in form: schema.table; parse out table; no object_name in trigger
-        msg.index = _get_identity(json);
+        json["identity"].get_to(msg.index);
 
         PgMsgPtr decoded_msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_INDEX);
         decoded_msg->msg.emplace<PgMsgDropIndex>(msg);
@@ -966,13 +953,13 @@ namespace springtail {
 
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
+        json["table"].get_to(table_msg.table);
         json["schema"].get_to(table_msg.schema);
         json["oid"].get_to(table_msg.oid);
 
-        // identity in form: schema.table; parse out table; no object_name in trigger
-        table_msg.table = _get_identity(json);
-
         _decode_schema_columns(json["columns"], table_msg.columns);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create table: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_TABLE);
         msg->msg.emplace<PgMsgTable>(table_msg);
@@ -1007,6 +994,7 @@ namespace springtail {
         json["obj"].get_to(object_type);
         if (object_type != "table") {
             SPDLOG_INFO("Drop table not for table object, for: {}\n", object_type);
+            assert(object_type == "table");
             return nullptr;
         }
 

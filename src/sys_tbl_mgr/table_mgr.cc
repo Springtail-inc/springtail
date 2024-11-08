@@ -194,6 +194,11 @@ namespace springtail {
                                            sys_tbl::TableStats::Primary::KEY,
                                            secondary_keys, tbl_meta, schema);
         }
+        case (sys_tbl::IndexNames::ID): {
+            return std::make_shared<Table>(db_id, table_id, xid, _table_base,
+                                           sys_tbl::IndexNames::Primary::KEY,
+                                           secondary_keys, tbl_meta, schema);
+        }
         default:
             assert(0);
         }
@@ -251,6 +256,11 @@ namespace springtail {
         case (sys_tbl::TableStats::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                   sys_tbl::TableStats::Primary::KEY,
+                                                  secondary_keys, tbl_meta, schema);
+        }
+        case (sys_tbl::IndexNames::ID): {
+            return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
+                                                  sys_tbl::IndexNames::Primary::KEY,
                                                   secondary_keys, tbl_meta, schema);
         }
         default:

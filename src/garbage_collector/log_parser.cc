@@ -849,8 +849,7 @@ namespace springtail::gc {
                                 // note: we don't notify the backlog until the entire XID is
                                 //       processed since there might be additional schema changes
 
-                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                // no need to record the DDL statement for this change
                             }
                         }
                         break;
@@ -875,8 +874,7 @@ namespace springtail::gc {
                                 // note: we don't notify the backlog until the entire XID is
                                 //       processed since there might be additional schema changes
 
-                                // record the DDL statement for this change into Redis to eventually be provided to the FDWs
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                // no need to record the DDL statement for this change
                             }
                         }
                         break;
