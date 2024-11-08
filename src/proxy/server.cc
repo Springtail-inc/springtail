@@ -482,14 +482,12 @@ namespace springtail::pg_proxy {
     }
 
     void ProxyServer::_handle_db_state_change(const uint64_t db_id, const redis::db_state_change::DBState state) {
-        std::cout << "Handling DB state change to " << redis::db_state_change::db_state_to_name[state] << std::endl;
         std::unique_lock db_state_lock(_db_state_mutex);
         _replicated_database_states[db_id] = state;
     }
 
     void ProxyServer::_pubsub_thread_run() {
         // create subscriber for redis pubsub, set timeout to 5 secs.
-        std::cout << "PubSub thread id " << std::this_thread::get_id() << std::endl;
         RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(1);
 
         // subscribe to the state change channel
@@ -500,8 +498,6 @@ namespace springtail::pg_proxy {
             if (channel != state_change_channel) {
                 return;
             }
-            std::cout << "state chagne" << std::endl;
-            std::cout << "Received state change: " << channel << "; msg: " << msg << std::endl;
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
             uint64_t db_id;
             redis::db_state_change::DBState state;
