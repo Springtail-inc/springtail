@@ -148,7 +148,6 @@ BEGIN
             WHERE i.indexrelid = %s', obj.objid) INTO tab_obj;
 
         IF tab_obj.primary_idx is true THEN
-            RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
             RETURN;
         END IF;
 
@@ -161,10 +160,13 @@ BEGIN
             ) AS json_col
             FROM pg_attribute pga
             JOIN information_schema.columns
-            ON column_name=pga.attname
+                ON column_name=pga.attname
             LEFT OUTER JOIN pg_index pgi
-            ON pga.attrelid=pgi.indrelid
-            WHERE pga.attrelid=obj.objid AND obj.object_type = 'index'
+                ON pgi.indexrelid=obj.objid
+            WHERE pgi.indexrelid=obj.objid
+                AND pga.attrelid=pgi.indrelid
+                AND obj.object_type = 'index'
+                AND (array_position(pgi.indkey, pga.attnum) IS NOT NULL)
         ) AS obj_select
         INTO json_columns;
 

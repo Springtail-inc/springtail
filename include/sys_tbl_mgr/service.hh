@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include <boost/thread.hpp>
 #include <thrift/transport/TSocket.h>
 
@@ -239,6 +237,17 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The ID of the system table.
          */
         MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id);
+
+        /**
+         * Writes the index info int the system table.
+         *
+         * @param xid The XID/LSN at which the transaction occured.
+         * @param db_id The database ID.
+         * @param tab_id The ID of the user table.
+         * @param index_id The index ID.
+         * @param keys The index keys consisting of (column index position, column position in the table).
+         */
+        void _write_index(const XidLsn& xid, uint64_t db_id, uint64_t tab_id, uint64_t index_id, const std::map<uint32_t, uint32_t>& keys);
 
         /**
          * Performs a create_index() assuming that the correct locks are already held.
