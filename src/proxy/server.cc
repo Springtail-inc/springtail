@@ -16,12 +16,14 @@
 
 #include <fmt/core.h>
 
+#include <common/json.hh>
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
+#include <proxy/exception.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
@@ -113,21 +115,63 @@ namespace springtail::pg_proxy {
         ::signal(SIGPIPE, SIG_IGN);
 
         SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
-    }
 
-    void ProxyServer::startup() {
+        // add primary
+        nlohmann::json primary_config = Properties::get_primary_db_config();
+        uint64_t primary_instance_id = Properties::get_db_instance_id();
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Primary id: {}", primary_instance_id);
+        auto host = Json::get<std::string>(primary_config, "host");
+        auto port = Json::get<uint16_t>(primary_config, "port");
+        if (host.has_value() && port.has_value()) {
+            set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
+        } else {
+            SPDLOG_ERROR("Could not find the value for primary database either host or port");
+            throw ProxyServerError();
+        }
+
+        std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
+        for (const auto & fdw_id: fdw_id_list) {
+            nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
+            auto host = Json::get<std::string>(fdw_config, "host");
+            auto port = Json::get<uint16_t>(fdw_config, "port");
+            if (host.has_value() && port.has_value()) {
+                // add replica
+                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
+            } else {
+                SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
+                throw ProxyServerError();
+            }
+        }
+
+        // add replicated databases
+        std::map<uint64_t, std::string> db_list = Properties::get_databases();
+        for (const auto& db_pair: db_list) {
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database (id, name): ({}, {})", get<0>(db_pair), get<1>(db_pair));
+            add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
+        }
+
+        // add test user for test db with trust
+        add_user("test");
+
+        // add test user for test db with md5
+        std::string username = "test_md5";
+        std::string passwd = "test";
+        char md5[36]; // md5sum('pwd'+'user') = md5+digest
+        pg_md5_encrypt(passwd.c_str(), username.c_str(), strlen(username.c_str()), md5);
+        md5[35] = '\0'; // null terminate
+        uint32_t salt;
+        get_random_bytes((uint8_t*)&salt, 4);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
+        add_user("test_md5", md5, salt);
+
+        // add user for test db with scram
+        add_user("test_scram", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
+
         // initiate the pubsub thread
         _pubsub_thread = std::thread(&ProxyServer::_pubsub_thread_run, this);
 
         // TODO: we probably should not start accepting any of the client connections till we intialized
         //  database states
-    }
-
-    void ProxyServer::teardown() {
-        _pubsub_thread.join();
-        close(_socket);
-        close(_pipe[0]);
-        close(_pipe[1]);
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -436,6 +480,8 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
+        _pubsub_thread.join();
+
         // flush logger
         if (_logger) {
             _logger->flush();
@@ -487,7 +533,7 @@ namespace springtail::pg_proxy {
     }
 
     void ProxyServer::_pubsub_thread_run() {
-        // create subscriber for redis pubsub, set timeout to 5 secs.
+        // create subscriber for redis pubsub, set timeout to 1 sec.
         RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(1);
 
         // subscribe to the state change channel

@@ -128,8 +128,8 @@ namespace springtail::pg_proxy {
         }
 
         /** Get replica database instance  -- use username/dbname as a hint */
-        DatabaseInstancePtr get_replica_instance(const std::string &dbname, const std::string &username) {
-            return _replica_set.get_replica(dbname, username);
+        DatabaseInstancePtr get_replica_instance(const uint64_t db_id, const std::string &username) {
+            return _replica_set.get_replica(db_id, username);
         }
 
         /** Set primary db instance */
@@ -160,9 +160,6 @@ namespace springtail::pg_proxy {
         uint32_t id() {
             return _id;
         }
-
-        void startup();
-        void teardown();
 
     private:
         int _socket;   ///< server socket

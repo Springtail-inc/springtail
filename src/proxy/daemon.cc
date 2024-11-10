@@ -3,14 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
-#include <common/properties.hh>
-#include <common/json.hh>
 #include <proxy/server.hh>
-#include <proxy/user_mgr.hh>
-#include <proxy/auth/md5.h>
-#include <proxy/session.hh>
-#include <proxy/exception.hh>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
@@ -23,61 +16,6 @@ handle_sigint(int signal)
     if (server != nullptr) {
         server->shutdown();
     }
-}
-
-static void setup(ProxyServerPtr server)
-{
-    // add primary
-    nlohmann::json primary_config = Properties::get_primary_db_config();
-    uint64_t primary_instance_id = Properties::get_db_instance_id();
-    std::cout << "***** " << "Primary id: " << primary_instance_id << std::endl;
-    std::cout << "***** " << primary_config.dump() << std::endl; 
-    auto host = Json::get<std::string>(primary_config, "host");
-    auto port = Json::get<uint16_t>(primary_config, "port");
-    if (host.has_value() && port.has_value()) {
-        server->set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
-    } else {
-        SPDLOG_ERROR("Could not find the value for primary database either host or port");
-        throw ProxyServerError();
-    }
-
-    std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
-    for (const auto & fdw_id: fdw_id_list) {
-        nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
-        auto host = Json::get<std::string>(fdw_config, "host");
-        auto port = Json::get<uint16_t>(fdw_config, "port");
-        if (host.has_value() && port.has_value()) {
-            // add replica
-            server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
-        } else {
-            SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
-            throw ProxyServerError();
-        }
-    }
-
-    // add replicated databases
-    std::map<uint64_t, std::string> db_list = Properties::get_databases();
-    for (const auto& db_pair: db_list) {
-        std::cout << "***** " << std::get<0>(db_pair) << ", " <<  std::get<1>(db_pair) << std::endl; 
-        server->add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
-    }
-
-    // add test user for test db with trust
-    server->add_user("test");
-
-    // add test user for test db with md5
-    std::string username = "test_md5";
-    std::string passwd = "test";
-    char md5[36]; // md5sum('pwd'+'user') = md5+digest
-    pg_md5_encrypt(passwd.c_str(), username.c_str(), strlen(username.c_str()), md5);
-    md5[35] = '\0'; // null terminate
-    uint32_t salt;
-    get_random_bytes((uint8_t*)&salt, 4);
-    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
-    server->add_user("test_md5", md5, salt);
-
-    // add user for test db with scram
-    server->add_user("test_scram", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
 }
 
 int main(int argc, char* argv[])
@@ -130,10 +68,5 @@ int main(int argc, char* argv[])
 
     server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
 
-    setup(server);
-    server->startup();
-
     server->run();
-
-    server->teardown();
 }

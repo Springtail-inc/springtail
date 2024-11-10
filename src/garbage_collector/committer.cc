@@ -125,7 +125,7 @@ namespace springtail::gc {
                 _redis_ddl.commit_ddl(db_id, completed_xid);
 
                 // notify everyone that the database is now in the "ready" state
-                Properties::set_db_state(db_id, redis::db_state_change::REDIS_STATE_RUNNING);
+                redis::db_state_change::set_db_state(db_id, redis::db_state_change::DB_STATE_RUNNING);
 
                 // signal the GC-1 LogParser that it can unblock and continue operation
                 _parser_notify.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, db_id));

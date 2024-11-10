@@ -42,7 +42,7 @@ namespace springtail {
         };
 
         /**
-         * @brief Functio for parsing database state change notification from redis
+         * @brief Function for parsing database state change notification from redis
          *
          * @param msg - message from redis
          * @param db_id - database id recorded in redis
@@ -56,7 +56,7 @@ namespace springtail {
             state = db_state_map[msg_parts[1]];
         }
 
-        /** Function for getting database state enum from properties *//**
+        /**
          * @brief Function for getting database state enum from properties
          *
          * @param db_id - database id
@@ -64,6 +64,16 @@ namespace springtail {
          */
         static inline DBState get_db_state(uint64_t db_id) {
             return db_state_map[Properties::get_db_state(db_id)];
+        }
+
+        /**
+         * @brief Set the db state by converting enum to string and passing it to Properties
+         *
+         * @param db_id - database id
+         * @param state - new database state
+         */
+        static inline void set_db_state(uint64_t db_id, DBState state) {
+            Properties::set_db_state(db_id, db_state_to_name[state]);
         }
     }
 }

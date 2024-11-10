@@ -5,6 +5,7 @@
 #include <common/logging.hh>
 
 #include <proxy/database.hh>
+#include <proxy/server.hh>
 #include <proxy/session.hh>
 #include <proxy/client_session.hh>
 #include <proxy/server_session.hh>
@@ -20,12 +21,12 @@ namespace springtail::pg_proxy {
     }
 
     DatabasePoolPtr
-    DatabaseInstance::get_pool(const std::string &dbname,
+    DatabaseInstance::get_pool(const uint64_t db_id,
                                const std::string &username) const
     {
         std::shared_lock lock(_mutex);
         // get size of pool based on dbname and username
-        auto it = _sessions.find({dbname, username});
+        auto it = _sessions.find({db_id, username});
         if (it == _sessions.end()) {
             return nullptr;
         }
@@ -35,23 +36,23 @@ namespace springtail::pg_proxy {
     /**
      * @brief Get a free session from the db instance (and associated pool).
      * Removes session from LRU list (so it can't be evicted), incr active count.
-     * @param dbname database name
+     * @param db_id database id
      * @param username username
      * @return ServerSessionPtr
      */
     ServerSessionPtr
-    DatabaseInstance::get_session(const std::string &dbname,
+    DatabaseInstance::get_session(const uint64_t db_id,
                                     const std::string &username)
     {
         std::unique_lock lock(_mutex);
-        return _internal_get_session(dbname, username);
+        return _internal_get_session(db_id, username);
     }
 
     void
     DatabaseInstance::release_session(ServerSessionPtr session)
     {
         std::unique_lock lock(_mutex);
-        auto it = _sessions.find({session->database(), session->username()});
+        auto it = _sessions.find({session->database_id(), session->username()});
         if (it == _sessions.end()) {
             SPDLOG_WARN("Database pool not found for: {}:{}", session->database(), session->username());
             return;
@@ -68,7 +69,7 @@ namespace springtail::pg_proxy {
     {
         std::unique_lock lock(_mutex);
 
-        auto it = _sessions.find({session->database(), session->username()});
+        auto it = _sessions.find({session->database_id(), session->username()});
         if (it != _sessions.end()) {
             it->second->delete_session(session);
         }
@@ -84,8 +85,10 @@ namespace springtail::pg_proxy {
     {
         std::unique_lock lock(_mutex);
 
+        uint64_t db_id = server->get_database_id(database);
+
         // try to get a free one first
-        ServerSessionPtr session = _internal_get_session(database, user->username());
+        ServerSessionPtr session = _internal_get_session(db_id, user->username());
         if (session != nullptr) {
             return session;
         }
@@ -105,11 +108,11 @@ namespace springtail::pg_proxy {
         // however before releasing the lock we need to reserve space for the new session in the pool
 
         // create a db pool if one doesn't exist
-        auto it = _sessions.find({database, user->username()});
+        auto it = _sessions.find({db_id, user->username()});
         DatabasePoolPtr pool;
         if (it == _sessions.end()) {
             pool = std::make_shared<DatabasePool>();
-            _sessions[{database, user->username()}] = pool;
+            _sessions[{db_id, user->username()}] = pool;
         } else {
             pool = it->second;
         }
@@ -130,11 +133,11 @@ namespace springtail::pg_proxy {
     }
 
     ServerSessionPtr
-    DatabaseInstance::_internal_get_session(const std::string &dbname,
+    DatabaseInstance::_internal_get_session(const uint64_t db_id,
                                             const std::string &username)
     {
         // lock must be held
-        auto it = _sessions.find({dbname, username});
+        auto it = _sessions.find({db_id, username});
         if (it == _sessions.end()) {
             return nullptr;
         }
@@ -161,7 +164,7 @@ namespace springtail::pg_proxy {
         _sessions_lru.pop_back();
 
         // find the session in the pool and release it
-        auto it = _sessions.find({session->database(), session->username()});
+        auto it = _sessions.find({session->database_id(), session->username()});
         assert (it != _sessions.end());
         if (it != _sessions.end()) {
             it->second->delete_session(session);
