@@ -1,5 +1,6 @@
 import os
 from component import Component
+from postgres_component import PostgresComponent
 
 class ComponentFactory:
     """
@@ -89,4 +90,13 @@ class ComponentFactory:
             args=["--daemon"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'proxy.pid')
+        )
+
+    def create_postgres(self) -> Component:
+        """Create a new postgres component."""
+        return PostgresComponent(
+            name="postgres",
+            id=self.POSTGRES,
+            path=self.install_dir,
+            pid_path='/var/run/postgresql/16-main.pid'
         )

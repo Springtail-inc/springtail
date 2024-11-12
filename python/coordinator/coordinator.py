@@ -42,7 +42,7 @@ def parse_arguments():
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-f', '--config-file', type=str, required=True, help='Path to the configuration file')
     parser.add_argument('-d', '--install-dir', type=str, required=True, help='Path to the install directory')
-    parser.add_argument('-s', '--service', type=str, required=False, help='Name of the service')
+    parser.add_argument('-s', '--service', type=str, required=False, help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
     # Parse the arguments and return them
@@ -91,7 +91,8 @@ if __name__ == "__main__":
         scheduler.register_component(factory.create_gc_daemon(), 4)
         scheduler.register_component(factory.create_log_mgr_daemon(), 5)
     elif service_type == "fdw":
-        scheduler.register_component(factory.create_ddl_daemon(), 1)
+        scheduler.register_component(factory.create_postgres(), 1)
+        scheduler.register_component(factory.create_ddl_daemon(), 2)
     elif service_type == "proxy":
         scheduler.register_component(factory.create_proxy(), 1)
     else:
