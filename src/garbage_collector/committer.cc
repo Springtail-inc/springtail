@@ -5,6 +5,7 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
+#include <redis/db_state_change.hh>
 
 namespace springtail::gc {
 
@@ -137,7 +138,7 @@ namespace springtail::gc {
 
                 if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT) {
                     // notify everyone that the database is now in the "ready" state
-                    Properties::set_db_state(db_id, redis::REDIS_STATE_RUNNING);
+                    redis::db_state_change::set_db_state(db_id, redis::db_state_change::DB_STATE_RUNNING);
 
                     // allow commits on future XIDs
                     _block_commit.erase(db_id);

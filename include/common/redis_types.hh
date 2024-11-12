@@ -4,13 +4,6 @@ namespace springtail::redis {
 
     ///// Config DB paths accessed via Properties (DB=0)::
 
-    // redis db state
-    static constexpr char const * const REDIS_STATE_STARTUP = "startup";
-    static constexpr char const * const REDIS_STATE_INITIALIZE = "initialize";
-    static constexpr char const * const REDIS_STATE_RUNNING = "running";
-    static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
-    static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
-
     /**
      * Config for database instance: var db_instance_id (hashset)
      * args: db_instance_id

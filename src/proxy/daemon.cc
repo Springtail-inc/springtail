@@ -3,11 +3,7 @@
 #include <boost/program_options.hpp>
 
 // springtail includes
-#include <common/common.hh>
 #include <proxy/server.hh>
-#include <proxy/user_mgr.hh>
-#include <proxy/auth/md5.h>
-#include <proxy/session.hh>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
@@ -20,35 +16,6 @@ handle_sigint(int signal)
     if (server != nullptr) {
         server->shutdown();
     }
-}
-
-static void setup(ProxyServerPtr server)
-{
-    // add primary
-    server->set_primary(std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, "localhost", 5432));
-
-    // add replica
-    server->add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, "localhost", 5432));
-
-    // add replicated database
-    server->add_replicated_database("test");
-
-    // add test user for test db with trust
-    server->add_user("test");
-
-    // add test user for test db with md5
-    std::string username = "test_md5";
-    std::string passwd = "test";
-    char md5[36]; // md5sum('pwd'+'user') = md5+digest
-    pg_md5_encrypt(passwd.c_str(), username.c_str(), strlen(username.c_str()), md5);
-    md5[35] = '\0'; // null terminate
-    uint32_t salt;
-    get_random_bytes((uint8_t*)&salt, 4);
-    SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
-    server->add_user("test_md5", md5, salt);
-
-    // add user for test db with scram
-    server->add_user("test_scram", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
 }
 
 int main(int argc, char* argv[])
@@ -100,8 +67,6 @@ int main(int argc, char* argv[])
     LoggerPtr logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
 
     server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
-
-    setup(server);
 
     server->run();
 }
