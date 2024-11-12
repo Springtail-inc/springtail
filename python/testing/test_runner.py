@@ -1,49 +1,44 @@
 import argparse
 import jinja2
 import logging
+from lxml import etree
 import os
 import psycopg2
 import springtail
+import sys
 import time
 import yaml
 
 from test_case import TestCase
 from test_set import TestSet
 
-def run_test_cases(test_set: str,
+def gen_test_cases(test_set: str,
                    test_files: list,
                    config_file: str,
-                   build_dir: str,
-                   check_logs: bool) -> None:
-    """Run specific test cases"""
-    test = TestSet(test_set, config_file, build_dir)
-    test.run(test_files, check_logs)
-    test.report()
-
-    # generate_report([ test ])
+                   build_dir: str) -> list[TestSet]:
+    """Generate a test set with specific test cases."""
+    test = TestSet(test_set, config_file, build_dir, test_files)
+    return [ test ]
 
 
-def run_test_set(test_set: str,
+def gen_test_set(test_set: str,
                  config_file: str,
-                 build_dir: str,
-                 check_logs: bool) -> None:
+                 build_dir: str) -> list[TestSet]:
+    """Generate all of the test cases in a specific test set."""
     test = TestSet(test_set, config_file, build_dir)
-    test.run(check_logs=check_logs)
-    test.report()
-
-    # generate_report([ test ])
+    return [ test ]
 
 
-def run_all_tests(test_folder: str,
+def gen_all_tests(test_folder: str,
                   config_file: str,
-                  build_dir: str,
-                  check_logs: bool) -> None:
-    """
-    Run all test sets in the test folder.
+                  build_dir: str) -> list[TestSet]:
+    """Generate all test sets in the test folder.
 
     Args:
         test_folder (str): Path to the folder containing the test set directories.
         props (Properties): System properties object.
+
+    Returns True if all test cases pass.
     """
     logging.info(f"Running all test cases from folder: {test_folder}")
 
@@ -55,18 +50,24 @@ def run_all_tests(test_folder: str,
             continue
         test_sets.append(TestSet(os.path.join(test_folder, test_set), config_file, build_dir))
 
-    # run the test sets
-    for test in test_sets:
-        success = test.run()
-        if not success:
-            break
+    return test_sets
 
-    # generate a report for each test set
-    for test in test_sets:
-        test.report()
 
-    # generate a report of the test run
-    # generate_report(test_sets)
+def try_generate_junit(junit_file: str, test_sets: list[TestSet]) -> None:
+    """Optionally generates a JUnit XML file with the test results if
+    an output file was specified.
+
+    """
+    if not junit_file:
+        return
+
+    suites = etree.Element('testsuites')
+    for test_set in test_sets:
+        suites.append(test_set.junit())
+
+    with open(junit_file, 'wb') as f:
+        tree = etree.ElementTree(suites)
+        tree.write(f, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 
 def generate_report(test_cases: list) -> None:
@@ -167,7 +168,8 @@ def generate_report(test_cases: list) -> None:
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail tests")
-    parser.add_argument('-c', '--config', type=str, required=True, help='Path to the test configuration file')
+    parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
+    parser.add_argument('-j', '--junit', type=str, help='Output test results to the specified JUnit XML file')
     parser.add_argument('--check', action='store_true', help='Check logs for errors after tests complete')
     parser.add_argument('test_set', type=str, nargs='?', help='Limit to a specific test set')
     parser.add_argument('test_case', type=str, nargs='*', help='Limit to a specific test case from the test set')
@@ -195,13 +197,29 @@ if __name__ == "__main__":
     # set the log level and format
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # run the tests
+    # build the test sets
     if args.test_set is None:
-        run_all_tests(test_folder, system_json_path, build_dir, args.check)
+        tests = gen_all_tests(test_folder, system_json_path, build_dir)
     else:
         if args.test_case is None:
-            run_test_set(os.path.join(test_folder, args.test_set),
-                         system_json_path, build_dir, args.check)
+            tests = gen_test_set(os.path.join(test_folder, args.test_set),
+                                 system_json_path, build_dir)
         else:
-            run_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
-                           system_json_path, build_dir, args.check)
+            tests = gen_test_cases(os.path.join(test_folder, args.test_set), args.test_case,
+                                   system_json_path, build_dir)
+
+    # run the tests
+    for test in tests:
+        success = test.run()
+        if not success:
+            break
+
+    # generate the JUnit report, if requested
+    try_generate_junit(args.junit, tests)
+
+    # print a report for each test set
+    success = all([ test.report() for test in tests ])
+
+    # exit with error on failure
+    if not success:
+        sys.exit(-1)
