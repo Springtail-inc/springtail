@@ -30,6 +30,8 @@
 
 #include <pg_log_mgr/pg_redis_xact.hh>
 
+#include <redis/db_state_change.hh>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Postgres log manager
@@ -83,8 +85,7 @@ namespace springtail::pg_log_mgr {
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _redis_sync_table(fmt::format(redis::HASH_SYNC_TABLE_STATE, _db_instance_id, _db_id))
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
         /**
@@ -100,8 +101,7 @@ namespace springtail::pg_log_mgr {
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id)),
-          _redis_sync_table(fmt::format(redis::HASH_SYNC_TABLE_STATE, _db_instance_id, _db_id))
+          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
         /** Start the pipeline; setup the log reader/writer log files etc. */
@@ -243,7 +243,6 @@ namespace springtail::pg_log_mgr {
 
         //// Table copy
         RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
-        std::string _redis_sync_table;             ///< redis key for table sync hset
         std::thread _table_copy_thread;            ///< table copy thread
 
         /** Do the table copies; return the results */
@@ -265,7 +264,7 @@ namespace springtail::pg_log_mgr {
         void _redis_pubsub_thread();
 
         /** Handle state change; callback from Redis pubsub */
-        void _handle_external_state_change(const std::string &new_state);
+        void _handle_external_state_change(const redis::db_state_change::DBState new_state);
     };
     using PgLogMgrPtr = std::shared_ptr<PgLogMgr>;
 

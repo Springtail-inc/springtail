@@ -164,6 +164,11 @@ namespace springtail::pg_proxy {
             return _database;
         }
 
+        /** Get database id for this session */
+        const uint64_t database_id() const {
+            return _db_id;
+        }
+
         /** Get user name for this session */
         const std::string &username() const {
             return _user->username();
@@ -280,6 +285,7 @@ namespace springtail::pg_proxy {
         int32_t      _pid;                 ///< pid for cancel request
         int32_t      _cancel_key;          ///< cancel key for cancel request
 
+        uint64_t     _db_id;               ///< database id associated with this session
         std::string  _database;            ///< database name associated with this session
 
         DatabaseInstancePtr _instance;     ///< database instance associated with this session

@@ -1,4 +1,5 @@
 import logging
+from lxml import etree
 import os
 import springtail
 import sysutils
@@ -27,7 +28,8 @@ class TestSet:
     def __init__(self,
                  directory: str,
                  config_file: str,
-                 build_dir: str) -> None:
+                 build_dir: str,
+                 test_files: list[str] = []) -> None:
         """Initialize the test set"""
         self._directory = directory
         self._config_file = config_file
@@ -36,11 +38,13 @@ class TestSet:
 
         # constuct the special "config" test case for global setup and cleanup
         self._config = TestCase(os.path.join(directory, _GLOBAL_CONFIG_FILE), self._props, ['setup', 'cleanup'])
+        self._config.parse_file()
 
         # collect and parse the test cases from the directory
         self._test_files = [ ]
         self._tests = { }
         for test_file in sorted(os.listdir(directory)):
+            # skip the test set configuration file
             if test_file == _GLOBAL_CONFIG_FILE:
                 continue
 
@@ -49,8 +53,19 @@ class TestSet:
                 logging.warning(f'skipped test file {test_file} -- must have the ".sql" extension')
                 continue
 
-            self._test_files.append(test_file)
-            self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
+            try:
+                # parse the test
+                self._tests[test_file] = TestCase(os.path.join(directory, test_file), self._props)
+                self._tests[test_file].parse_file()
+
+                # if only a subset of test cases was requsted, limit them here
+                if test_files and test_file not in test_files:
+                    self._tests[test_file].skip()
+                else:
+                    self._test_files.append(test_file)
+
+            except:
+                pass # this test was recorded as an error and we continue
 
 
     def _apply_replica_full(self) -> None:
@@ -79,8 +94,6 @@ class TestSet:
 
 
     def run(self,
-            test_files: list = [],
-            check_logs: bool = False,
             shutdown_on_fail: bool = False) -> bool:
         """Runs one or more of the test cases in the test set in the
         provided order.  If no test cases are provided then it runs
@@ -105,29 +118,34 @@ class TestSet:
         springtail.start(self._config_file, self._build_dir, do_cleanup=False)
 
         # run the tests
-        if not test_files:
-            test_files = self._test_files
-        logging.info(f'Run the tests: {test_files}')
+        logging.info(f'Run the tests: {self._test_files}')
 
         test_failed = False
-        for test_file in test_files:
+        for test_file in self._test_files:
             if test_file not in self._tests:
                 logging.warning(f'unable to find test: {test_file}')
                 continue
             logging.debug(f'Running the test: {test_file}')
 
+            # start capturing the logs
+            self._tests[test_file].start_capture()
+
             # run the actual test
             try:
                 self._tests[test_file].test()
                 self._tests[test_file].verify()
+
             except Exception as e:
                 logging.error(f'Error: {e}')
-                test_failed = True
+                if self._tests[test_file].get_result()['result'] == 'FAILED':
+                    test_failed = True
+
+            # save the logs
+            self._tests[test_file].stop_capture()
 
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                if check_logs:
-                    test_case.check_logs()
+                test_case.check_logs()
                 break
 
             # try to perform cleanup
@@ -137,7 +155,7 @@ class TestSet:
                 logging.error(f'Error on cleanup: {e}')
 
             # check here if the test failed nad we need to check the logs
-            if test_failed and check_logs:
+            if test_failed:
                 test_case.check_logs()
                 break
 
@@ -156,7 +174,7 @@ class TestSet:
         return not test_failed
 
 
-    def report(self) -> None:
+    def report(self) -> bool:
         """Generates a report about the test set"""
         results = [ self._tests[t].get_result() for t in self._tests ]
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
@@ -178,3 +196,23 @@ class TestSet:
         for result in results:
             if result['error']:
                 print(f'\t{result["name"]}: {result["error"]}')
+
+        # returns True if no failed tests
+        return (failed_tests == 0)
+
+
+    def junit(self) -> etree.Element:
+        """Generate a JUnit <testsuite> report and return it."""
+        results = [ self._tests[t].get_result() for t in self._tests ]
+        passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
+        failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+
+        suite = etree.Element('testsuite',
+                              name=os.path.basename(self._directory),
+                              tests=f'{len(results)}',
+                              failures=f'{failed_tests}')
+
+        for test_file in self._tests:
+            suite.append(self._tests[test_file].junit())
+
+        return suite

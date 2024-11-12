@@ -32,12 +32,12 @@ namespace springtail::pg_log_mgr {
             state = Properties::get_db_state(_db_id);
         } catch (RedisNotFoundError &e) {
             // db state not found, assume initial state
-            state = redis::REDIS_STATE_RUNNING;
+            state = redis::db_state_change::REDIS_STATE_RUNNING;
             Properties::set_db_state(_db_id, state);
         }
 
         // reset state if we were stuck in syncing
-        if (state == redis::REDIS_STATE_SYNCING) {
+        if (state == redis::db_state_change::REDIS_STATE_SYNCING) {
             // XXX need to handle, not sure whether to reset to running or initialize
             assert(false);
         }
@@ -52,7 +52,7 @@ namespace springtail::pg_log_mgr {
         _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
         uint64_t lsn = INVALID_LSN;
-        if (state == redis::REDIS_STATE_INITIALIZE) {
+        if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
             _startup_init();
         } else {
             lsn = _startup_running();
@@ -133,7 +133,7 @@ namespace springtail::pg_log_mgr {
         _redis_sync_queue.abort(REDIS_WORKER_ID);
 
         // set state to running
-        Properties::set_db_state(_db_id, redis::REDIS_STATE_RUNNING);
+        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
 
         // set internal state to running
         _internal_state.set(STATE_RUNNING);
@@ -157,18 +157,16 @@ namespace springtail::pg_log_mgr {
         _redis_queue.clear();
         // Table sync queue
         _redis_sync_queue.clear();
-        // Table sync pg xid hset
-        RedisMgr::get_instance()->get_client()->del(_redis_sync_table);
 
         _internal_state.set(STATE_STARTUP_SYNC);
     }
 
     void
-    PgLogMgr::_handle_external_state_change(const std::string &new_state)
+    PgLogMgr::_handle_external_state_change(const redis::db_state_change::DBState new_state)
     {
         StateEnum internal_state = _internal_state.get();
 
-        if (new_state == redis::REDIS_STATE_RUNNING) {
+        if (new_state == redis::db_state_change::DB_STATE_RUNNING) {
             if (internal_state == STATE_RUNNING) {
                 // already in running state
                 return;
@@ -203,20 +201,19 @@ namespace springtail::pg_log_mgr {
                 return;
             }
 
-            // decode message
-            std::vector<std::string> msg_parts; // db_id, state
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received message: {}", msg);
-            common::split_string(":", msg, msg_parts);
-            assert(msg_parts.size() == 2);
+            uint64_t db_id;
+            redis::db_state_change::DBState state;
+            // decode message
+            redis::db_state_change::parse_db_state_change(msg, db_id, state);
 
             // check db_id matches
-            uint64_t db_id = stoull(msg_parts[0]);
             if (db_id != _db_id) {
                 return;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg_parts[1]);
-            _handle_external_state_change(msg_parts[1]);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", redis::db_state_change::db_state_to_name[state]);
+            _handle_external_state_change(state);
         });
 
         while (!_shutdown) {
@@ -287,7 +284,7 @@ namespace springtail::pg_log_mgr {
         _notify_xact_start_sync();
 
         // set db state to syncing
-        Properties::set_db_state(_db_id, redis::REDIS_STATE_SYNCING);
+        Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_SYNCING);
 
         // wait for pipeline stall to complete
         _internal_state.wait_for_state(STATE_SYNCING);
@@ -317,7 +314,7 @@ namespace springtail::pg_log_mgr {
             _create_xact_logger();
             // ste to running this unblocks the xact handler
             _internal_state.set(STATE_RUNNING);
-            Properties::set_db_state(_db_id, redis::REDIS_STATE_RUNNING);
+            Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
         }
     }
 
@@ -342,9 +339,9 @@ namespace springtail::pg_log_mgr {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing copy results to redis");
 
         for (const auto &r : res) {
-            // go through result tids and update Redis with table state info
-            for (const auto &tid : r->tids) {
-                redis->hset(_redis_sync_table, std::to_string(tid), r->pg_xids);
+            // skip the result if it contains no tables
+            if (r->tids.empty()) {
+                continue;
             }
 
             // send table sync message to GC

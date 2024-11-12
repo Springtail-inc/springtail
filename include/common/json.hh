@@ -60,7 +60,7 @@ namespace springtail {
         }
 
         /**
-         * @brief Get value from json blob, no default value
+         * @brief Get value from json blob, default value assigned if no value exists
          * @tparam T type of value
          * @param json input json blob
          * @param key  json key to lookup

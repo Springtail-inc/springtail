@@ -1,6 +1,8 @@
 import concurrent.futures
 import csv
+import io
 import logging
+from lxml import etree
 import os
 import psycopg2
 import springtail
@@ -25,11 +27,14 @@ class TestCase:
         self._result = 'UNKNOWN'
         self._duration = 0
         self._error = ''
+        self._log_errors = []
+        self._logged_output = ''
 
         self._metadata = {
             'autocommit': True,
-            'sync_timeout': 10,
-            'default_txn': 'default'
+            'sync_timeout': 3,
+            'default_txn': 'default',
+            'query_timeout': 5
         }
 
         fdw_config = props.get_fdw_config()
@@ -54,9 +59,6 @@ class TestCase:
         self._connections = {} # connections to the primary for each transaction
         self._fdw = None # connection to Springtail
         self._sync_step = 0 # incrementing ID used for replica synchronization
-
-        # parse the test file to prepare the test run
-        self._parse_file()
 
 
     def _append_command(self,
@@ -86,12 +88,20 @@ class TestCase:
 
 
     def _raise_error(self, error: str) -> None:
-        """Records the error internally and then raises an Exception"""
+        """Called where there is a configuration error in the test."""
+        self._result = 'ERROR'
         self._error = error
         raise Exception(error)
-        
 
-    def _parse_file(self) -> None:
+
+    def _raise_failure(self, error: str) -> None:
+        """Called where there is an execution or verification failure."""
+        self._result = 'FAILURE'
+        self._error = error
+        _raise_error(self, error)
+
+
+    def parse_file(self) -> None:
         """Parse the test file."""
         is_threaded = False
         sql = []
@@ -191,6 +201,11 @@ class TestCase:
                             self._raise_error(f'{line_num}: "sync_timeout" must be specified in the "metadata" section')
                         self._metadata['sync_timeout'] = int(directive[1])
 
+                    elif directive[0] == 'query_timeout':
+                        if section != 'metadata':
+                            self._raise_error(f'{line_num}: "query_timeout" must be specified in the "metadata" section')
+                        self._metadata['query_timeout'] = int(directive[1])
+
                     elif directive[0] == 'default_txn':
                         if section != 'metadata':
                             self._raise_error(f'{line_num}: "default_txn" must be specified in the "metadata" section')
@@ -245,11 +260,14 @@ class TestCase:
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
         """Execute the provided SQL using the provided cursor."""
         logging.debug(f'Execute SQL: {sql}')
-        cursor.execute(sql)
+        try:
+            cursor.execute(sql)
 
-        if do_fetch:
-            return cursor.fetchall()
-        return None
+            if do_fetch:
+                return cursor.fetchall()
+            return None
+        except psycopg2.OperationalError as e:
+            self._raise_failure(f'Query timed out: {e}')
         
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
@@ -295,7 +313,7 @@ class TestCase:
 
                     if not done:
                         # fail if it takes longer than the timeout
-                        self._raise_error(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
+                        self._raise_failure(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
                 return []
 
             elif command['type'] == 'schema_check':
@@ -410,6 +428,8 @@ class TestCase:
             logging.debug(f'Connecting to database for txn "{txn}"')
             self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
+            with self._connections[txn].cursor() as c:
+                self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
 
         # execute all of the setup commands
         if len(self._sections['setup']) > 0:
@@ -422,6 +442,22 @@ class TestCase:
         self._status = 'SETUP_END'
 
 
+    def start_capture(self) -> None:
+        # capture the logs
+        self._log_stream = io.StringIO()
+        self._log_handler = logging.StreamHandler(self._log_stream)
+
+        logger = logging.getLogger()
+        logger.addHandler(self._log_handler)
+
+
+    def stop_capture(self) -> None:
+        logger = logging.getLogger()
+        logger.removeHandler(self._log_handler)
+
+        self._logged_output = self._log_stream.getvalue()
+
+
     def test(self) -> None:
         """Run SQL commands that form the actual test.  Will be
         executed while Springtail is actively replicating data.
@@ -430,7 +466,6 @@ class TestCase:
         if self._status != 'INIT':
             self._raise_error('Must run test() first for individual tests')
         self._status = 'TEST_BEGIN'
-        self._result = 'FAILED' # test is assumed failed until it succeeds
 
         logging.info(f'{self._name} -- Running test()')
 
@@ -439,10 +474,14 @@ class TestCase:
             logging.debug(f'Connecting to database for txn "{txn}"')
             self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
+            with self._connections[txn].cursor() as c:
+                self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)
         self._fdw.autocommit = True
+        with self._fdw.cursor() as c:
+            self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
 
         # XXX need a way to determine when the database is up and running... poll Redis?
 
@@ -511,7 +550,7 @@ class TestCase:
             replica_result = self._replica_command(command)
 
             if primary_result != replica_result:
-                self._raise_error(
+                self._raise_failure(
                     f"Verification failed for {self._name}:\n"
                     f"Statement: {command}\n"
                     f"Main DB: {primary_result}\n"
@@ -535,7 +574,7 @@ class TestCase:
         for connection in self._connections:
             self._connections[connection].close()
             self._connections[connection] = springtail.connect_db_instance(self._props, self._primary_name)
-
+            
         # run the cleanup commands
         if len(self._sections['cleanup']) > 0:
             self._execute_commands(self._sections['cleanup'][0]['sequential'])
@@ -553,15 +592,16 @@ class TestCase:
 
         logging.error(f'Found errors in logs: {error_logs}')
         
-        errors = []
         for log in error_logs:
             backtrace = sysutils.extract_backtrace(log)
             if backtrace:
-                errors.append(f'Error in {os.path.basename(log)}:\n{"\n".join(backtrace)}\n')
+                self._log_errors.append(f'Error in {os.path.basename(log)}:\n{"\n".join(backtrace)}\n')
             else:
-                errors.append(f'Error in {os.path.basename(log)} -- could not extract backtrace\n')
-        self._error = '\n'.join(errors)
-        raise Exception(self._error)
+                self._log_errors.append(f'Error in {os.path.basename(log)} -- could not extract backtrace\n')
+
+
+    def skip(self) -> None:
+        self._result = 'SKIPPED'
 
 
     def get_result(self) -> dict:
@@ -572,3 +612,44 @@ class TestCase:
             'duration': self._duration,
             'error': self._error
         }
+
+
+    def junit(self) -> etree.Element:
+        root = etree.Element('testcase',
+                             name=self._name,
+                             time=f'{self._duration:.2f}')
+        if self._result == 'ERROR':
+            error = etree.Element('error')
+            error.text = self._error
+            root.append(error)
+            
+        elif self._result == 'FAILED':
+            failure = etree.Element('failure')
+            failure.text = self._error
+            root.append(failure)
+
+        elif self._result == 'SKIPPED':
+            skipped = etree.Element('skipped',
+                                    message='Skipped due to user request')
+            root.append(skipped)
+
+        elif self._result == 'UNKNOWN':
+            skipped = etree.Element('skipped',
+                                    message='Skipped due to earlier failure')
+            root.append(skipped)
+
+        # record the logging output for the test case
+        if self._logged_output:
+            system_out = etree.Element('system-out')
+            system_out.text = self._logged_output
+            root.append(system_out)
+
+        # record any backtraces to stderr
+        if self._log_errors:
+            system_err = etree.Element('system-err')
+            system_err.text = '\n'.join(self._log_errors)
+            root.append(system_err)
+
+        return root
+            
+        

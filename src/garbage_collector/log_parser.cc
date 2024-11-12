@@ -317,9 +317,8 @@ namespace springtail::gc {
     LogParser::SyncTracker::mark_resync(uint64_t db_id,
                                         uint64_t table_id)
     {
-        boost::unique_lock lock(_mutex);
-
         SPDLOG_DEBUG_MODULE(LOG_GC, "db {} table {}", db_id, table_id);
+        boost::unique_lock lock(_mutex);
 
         bool first_table = _resync_map[db_id].empty() && !_sync_map.contains(db_id);
 
@@ -332,17 +331,8 @@ namespace springtail::gc {
     bool
     LogParser::SyncTracker::add_sync(const pg_log_mgr::PgXactMsg::TableSyncMsg &sync_msg)
     {
-        boost::unique_lock lock(_mutex);
-
         SPDLOG_DEBUG_MODULE(LOG_GC, "db {} xid {}", sync_msg.db_id, sync_msg.target_xid);
-
-        // update the max XID seen
-        auto xid_i = _max_xid.find(sync_msg.db_id);
-        if (xid_i == _max_xid.end()) {
-            _max_xid[sync_msg.db_id] = sync_msg.target_xid;
-        } else {
-            xid_i->second = std::max(xid_i->second, sync_msg.target_xid);
-        }
+        boost::unique_lock lock(_mutex);
 
         // clear the resync map for the provided tables in the db
         auto resync_i = _resync_map.find(sync_msg.db_id);
@@ -361,91 +351,99 @@ namespace springtail::gc {
         auto db_i = _sync_map.find(sync_msg.db_id);
 
         // check if this is the first table(s) to be added for syncing
+        // note: we also check the resync map since adding a resync also forces commits to stop
         bool first_table = ((db_i == _sync_map.end()) && (resync_i == _resync_map.end()));
-
-        // see if this sync occurred on an idle database
-        if (sync_msg.xmin == sync_msg.xmax && sync_msg.xips.empty()) {
-            // move the db to the ready map at the given XID
-            _ready_map[sync_msg.db_id] = sync_msg.target_xid;
-
-            return first_table;
-        }
-
-        auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
 
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
+
+        // store it against the pg_xid for this sync's snapshot
+        auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
+        db_map[sync_msg.pg_xid] = record;
+
+        // also keep a map to the record for each table being copied
+        auto &table_map = _table_map[sync_msg.db_id];
         for (int32_t table_id : sync_msg.tids) {
-            db_map[table_id] = record; // add the record to the sync map
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Add table: {}", table_id);
+            table_map[table_id] = record; // add the record to the sync map
         }
+
+        // record the target XID of the sync
+        _target_xid_map[sync_msg.db_id] = sync_msg.target_xid;
 
         return first_table;
     }
 
-    uint64_t
-    LogParser::SyncTracker::clear_syncs(uint64_t db_id,
-                                        uint32_t pg_xid,
-                                        uint64_t lp_xid)
+    std::optional<XidReady>
+    LogParser::SyncTracker::check_commit(uint64_t db_id,
+                                         uint32_t pg_xid)
     {
+        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} pg_xid {}", db_id, pg_xid);
         boost::unique_lock lock(_mutex);
-
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {} pg_xid {} xid {}", db_id, pg_xid, lp_xid);
-
-        // record the XID as being the new max processed for this DB
-        _max_lp_xid[db_id] = lp_xid;
-
+        
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
-        if (db_i != _sync_map.end()) {
-            auto &db_map = db_i->second;
+        if (db_i == _sync_map.end()) {
+            return {}; // no ongoing sync
+        }
 
-            // check for any tables with xmax <= pg_xid or pg_xid in the inflight set
-            auto table_i = db_map.begin();
-            while (table_i != db_map.end()) {
-                auto current_i = table_i++;
+        // find any XidRecords that wouldn't be skipped by this pg_xid
+        std::vector<std::shared_ptr<XidRecord>> completed;
 
-                // once we see an XID that we shouldn't skip, we can remove the table
-                if (!current_i->second->should_skip(pg_xid)) {
-                    db_map.erase(current_i);
-                }
-            }
+        auto sync_i = db_i->second.begin();
+        while (sync_i != db_i->second.end()) {
+            auto current_i = sync_i++;
 
-            // if the db_map is empty, then all tables have been cleared and we can consider issuing a
-            // commit at the Committer
-            if (db_map.empty()) {
-                // if empty, clear the database entry
-                _sync_map.erase(db_i);
+            // check each XidRecord
+            if (!current_i->second->should_skip(pg_xid)) {
+                completed.push_back(current_i->second);
 
-                // get the max target XID seen among the table syncs
-                auto xid_i = _max_xid.find(db_id);
-                uint64_t xid = xid_i->second;
-
-                // mark the db as ready for a commit
-                _ready_map[db_id] = xid;
-                _max_xid.erase(xid_i);
+                // clear from the _sync_map
+                // note: we don't clear the _table_map here in case there are prior XIDs in-flight
+                db_i->second.erase(current_i);
             }
         }
 
-        // check if we are ready to perform a sync commit
-        auto ready_i = _ready_map.find(db_id);
-        if (ready_i == _ready_map.end()) {
-            return 0;
+        // if nothing is completed, then we have to wait to swap/commit
+        if (completed.empty()) {
+            return {};
         }
 
-        // if we have completed XIDs up to or past the target XID, continue
-        if (lp_xid + 1 >= ready_i->second) {
-            // retrieve the target XID of the table sync
-            uint64_t xid = ready_i->second;
-            _ready_map.erase(ready_i);
+        // We pass the target XID to the committer to be used if the completed XID is not ahead of the committed XID.
+        uint64_t xid = _target_xid_map[db_id];
 
-            // if it is the furthest XID, update the max XID map
-            if (xid > lp_xid) {
-                _max_lp_xid[db_id] = xid;
-            }
-
-            return xid;
+        auto type = XidReady::Type::TABLE_SYNC_SWAP;
+        if (db_i->second.empty()) {
+            type = XidReady::Type::TABLE_SYNC_COMMIT;
+            _sync_map.erase(db_i);
+            _target_xid_map.erase(db_id);
         }
-        return 0;
+
+        // construct an XidReady record from the XidRecord objects
+        std::vector<uint64_t> tids;
+        for (auto record : completed) {
+            tids.insert(tids.end(), record->tids().begin(), record->tids().end());
+        }
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Found {} tables", tids.size());
+
+        return XidReady(type, db_id, XidReady::SwapMsg(xid, std::move(tids)));
+    }
+
+    void
+    LogParser::SyncTracker::clear_tables(uint64_t db_id,
+                                         const XidReady &commit_msg)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_GC, "db {}", db_id);
+        boost::unique_lock lock(_mutex);
+
+        // get the table map for this database
+        auto db_i = _table_map.find(db_id);
+        assert(db_i != _table_map.end());
+
+        // remove all of the tables referenced in the commit message
+        for (auto table_id : commit_msg.swap().tids()) {
+            db_i->second.erase(table_id);
+        }
     }
 
     bool
@@ -465,9 +463,9 @@ namespace springtail::gc {
             }
         }
 
-        // then check the sync map
-        auto db_i = _sync_map.find(db_id);
-        if (db_i == _sync_map.end()) {
+        // then check the table map
+        auto db_i = _table_map.find(db_id);
+        if (db_i == _table_map.end()) {
             return false;
         }
 
@@ -477,43 +475,6 @@ namespace springtail::gc {
         }
 
         return table_i->second->should_skip(pg_xid);
-    }
-
-    uint64_t
-    LogParser::SyncTracker::get_xid_if_empty(uint64_t db_id)
-    {
-        boost::unique_lock lock(_mutex);
-
-        SPDLOG_DEBUG_MODULE(LOG_GC, "db {}", db_id);
-
-        // get the max processed XID
-        uint64_t lp_xid = 0;
-        auto lp_xid_i = _max_lp_xid.find(db_id);
-        if (lp_xid_i == _max_lp_xid.end()) {
-            // XXX get the furthest committed from the XidMgr
-            lp_xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-        } else {
-            lp_xid = lp_xid_i->second;
-        }
-
-        // check if the database is ready for a sync commit
-        auto ready_i = _ready_map.find(db_id);
-        if (ready_i == _ready_map.end()) {
-            return 0;
-        }
-
-        // check that we have processed all of the prior XIDs
-        // note: we can never have gotten ahead because this call is only made to check if the
-        //       database was idle during the sync
-        assert(lp_xid < ready_i->second);
-        if (ready_i->second == lp_xid + 1) {
-            uint64_t xid = ready_i->second;
-            _ready_map.erase(ready_i);
-            _max_lp_xid[db_id] = xid;
-            return xid;
-        }
-
-        return 0;
     }
 
     void
@@ -529,12 +490,18 @@ namespace springtail::gc {
 
         // loop until we are asked to shutdown; on shutdown drain the backlog
         while (!_shutdown || !_backlog.empty()) {
+            // a flag used to skip sending an entire XID at the committer
+            bool skip_xid = false;
+
             // check the backlog for an XID to process
             StatePtr state = _backlog.pop();
             if (state == nullptr) {
                 // if nothing ready in backlog, pull an XID from redis
                 {
-                    std::unique_lock lock(_mutex);
+                    boost::unique_lock lock(_mutex);
+
+                    // check if we need to wait for a table sync swap/commit to occur
+                    _halt_cond.wait(lock, [this]{ return !_halt_processing; });
 
                     // note: blocks for 1 second
                     auto xact_msg = _reader_queue.pop(worker_id, 1);
@@ -553,7 +520,7 @@ namespace springtail::gc {
                             SPDLOG_DEBUG_MODULE(LOG_GC, "First TABLE_SYNC_MSG on {}", msg.db_id);
 
                             // this is the first table sync, issue a message to the Committer to stop committing XIDs
-                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_START, msg.db_id));
+                            _gc_queue.push(XidReady(msg.db_id));
                         }
 
                         _reader_queue.commit(worker_id);
@@ -565,25 +532,8 @@ namespace springtail::gc {
                         const auto &msg = std::get<pg_log_mgr::PgXactMsg::TableSyncEndMsg>(xact_msg->msg);
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got TABLE_SYNC_END_MSG on {}", msg.db_id);
 
-                        // note: If the sync tracker is empty, it means that the database was idle
-                        //       when the sync was issued (didn't have in-flight transactions with
-                        //       the table sync starts), so we can notify for a "commit" as soon as
-                        //       the prior XIDs have been processed.  The "commit" in this case
-                        //       which will do the table rotates and move the database back to the
-                        //       ready state.
-                        uint64_t sync_xid = _sync_tracker.get_xid_if_empty(msg.db_id);
-                        if (sync_xid) {
-                            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", msg.db_id, sync_xid);
-
-                            // pass the commit to the GC-2 Committer
-                            _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, msg.db_id, sync_xid));
-
-                            // block until the Committer notifies us that the commit is complete
-                            // XXX this actually blocks all databases, but logically we only need to
-                            //     block one and could process messages for the others
-                            _parser_notify.pop_and_commit();
-                        }
-
+                        // note: currently nothing to do... from here we must wait for a transaction
+                        //       that allows us to swap and commit the resync'd tables
                         _reader_queue.commit(worker_id);
                         continue;
                     }
@@ -593,6 +543,42 @@ namespace springtail::gc {
 
                     // add the XID to the map to ensure we commit in-order
                     _xid_map[entry.db_id][entry.xid];
+
+                    // check if this record's pg_xid indicates that we need to perform a sync
+                    // swap/commit before proceeding
+                    auto &&commit_msg = _sync_tracker.check_commit(entry.db_id, entry.pg_xid);
+                    if (commit_msg) {
+                        // block other Reader threads from processing newer XIDs
+                        // XXX This blocks all databases, but ideally it would only block this
+                        //     database.  Implementing that would require some way to separately
+                        //     queue messages for this database while continuing to process messages
+                        //     for other databases...
+                        _halt_processing = true;
+
+                        // wait for prior XIDs to complete processing to ensure all records that
+                        // may have mutations that need to be skipped are processed
+                        _wait_for_xid(entry.db_id, entry.xid, false);
+
+                        // synchronously issue the swap/commit at the GC-2
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", entry.db_id, entry.xid);
+                        _gc_queue.push(*commit_msg);
+
+                        // block until the Committer notifies us that the swap/commit is complete
+                        // XXX this actually blocks all databases, but logically we only need to
+                        //     block one and could process messages for the others.  Or better yet,
+                        //     we could optimistically continue and only block if we attempt to
+                        //     mutate a table being swapped prior to the TABLE_SYNC_COMMIT
+                        //     completing.
+                        _parser_notify.pop_and_commit();
+
+                        // once the swap/commit is complete, we can clear the entry from the sync
+                        // tracker and continue processing
+                        _sync_tracker.clear_tables(entry.db_id, *commit_msg);
+
+                        // notify any blocked Reader threads
+                        _halt_processing = false;
+                        _halt_cond.notify_all();
+                    }
 
                     state = std::make_shared<State>(xact_msg);
                 }
@@ -802,7 +788,7 @@ namespace springtail::gc {
 
                                     // notify the Committer to stop committing XIDs
                                     if (is_first) {
-                                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_START, state->entry.db_id));
+                                        _gc_queue.push(XidReady(state->entry.db_id));
                                     }
                                 } else if (action.get<std::string>() != "no_change") {
                                     // record the DDL statement for this change into Redis to eventually be provided to the FDWs
@@ -897,6 +883,10 @@ namespace springtail::gc {
                         auto &copy_sync_msg = std::get<PgMsgCopySync>(msg->msg);
                         SPDLOG_DEBUG_MODULE(LOG_GC, "Got COPY_SYNC on {} @ {}, pg_xid={}",
                                             state->entry.db_id, copy_sync_msg.target_xid, copy_sync_msg.pg_xid);
+
+                        // note: we will skip this XID at the committer since it's only for
+                        //       triggering a TABLE_SYNC_COMMIT, which is done above
+                        skip_xid = true;
                         break;
                     }
 
@@ -947,27 +937,7 @@ namespace springtail::gc {
 
                     // wait for any earlier XIDs to complete so that when we perform the next
                     // operations we are the known lowest XID being processed
-                    auto &xid_map = _xid_map[state->entry.db_id];
-                    auto xid_i = xid_map.find(state->entry.xid);
-                    assert(xid_i != xid_map.end());
-                    if (xid_i != xid_map.begin()) {
-                        xid_i->second.wait(lock); // wait to be signaled when we are the first entry
-                    }
-                    xid_map.erase(xid_i);
-
-                    // we know that all earlier XIDs have completed at this point, so we can check if
-                    // the sync metadata can be released for any tables based on the pg XID
-                    auto sync_xid = _sync_tracker.clear_syncs(state->entry.db_id,
-                                                              state->entry.pg_xid, state->entry.xid);
-                    if (sync_xid && sync_xid < state->entry.xid) {
-                        // if this XID is an indication that the ongoing table syncs are aligned,
-                        // then we can push a message to perform a commit at the previously seen XID
-                        // (before committing the currently processed XID)
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", state->entry.db_id, sync_xid);
-                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id, sync_xid));
-
-                        // XXX do we need to wait for the reverse notification here??
-                    }
+                    _wait_for_xid(state->entry.db_id, state->entry.xid, true);
 
                     // XXX notify the ExtentMapper that the XID has been fully processed
                     //     note: we would only do this if the FDW supports roll-forward of uncommited XIDs
@@ -977,17 +947,11 @@ namespace springtail::gc {
                     _backlog.clear_dep(state->entry.db_id, state->entry.xid);
                     _reader_queue.commit(worker_id);
 
-                    _gc_queue.push(XidReady(state->entry.db_id, state->entry.xid));
-                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", state->entry.xid);
-
-                    if (sync_xid && sync_xid > state->entry.xid) {
-                        // the table sync was already aligned, but we had to wait for this XID to
-                        // complete before performing the table swap
-                        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", state->entry.db_id, sync_xid);
-                        _gc_queue.push(XidReady(XidReady::Type::TABLE_SYNC_COMMIT, state->entry.db_id, sync_xid));
-
-                        // XXX do we need to wait for the reverse notification here??
+                    if (!skip_xid) {
+                        _gc_queue.push(XidReady(state->entry.db_id, XidReady::XactMsg(state->entry.xid)));
+                        skip_xid = false;
                     }
+                    SPDLOG_DEBUG_MODULE(LOG_GC, "Processing {} -- Complete", state->entry.xid);
 
                     // notify the next XID waiting for this critical section
                     if (!_xid_map[state->entry.db_id].empty()) {
@@ -1005,6 +969,29 @@ namespace springtail::gc {
     LogParser::Reader::shutdown()
     {
         _shutdown = true;
+    }
+
+    void
+    LogParser::Reader::_wait_for_xid(uint64_t db_id,
+                                     uint64_t xid,
+                                     bool do_erase)
+    {
+        // note: requires that we are already holding the _mutex
+        boost::unique_lock lock(_mutex, boost::adopt_lock);
+
+        auto &xm = _xid_map[db_id];
+        auto xid_i = xm.find(xid);
+        assert(xid_i != xm.end());
+        if (xid_i != xm.begin()) {
+            xid_i->second.wait(lock); // wait to be signaled when we are the first entry
+        }
+
+        if (do_erase) {
+            xm.erase(xid_i);
+        }
+
+        // release the mutex without unlocking it
+        lock.release();
     }
 
     bool

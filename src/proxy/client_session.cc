@@ -295,6 +295,7 @@ namespace springtail::pg_proxy {
             return;
         }
         _database = database;
+        _db_id = _server->get_database_id(_database);
 
         // get login info for the user
         _login = _user->get_user_login();
@@ -579,7 +580,7 @@ namespace springtail::pg_proxy {
     {
         DatabaseInstancePtr primary = _server->get_primary_instance();
         assert (primary != nullptr);
-        DatabasePoolPtr pool = primary->get_pool(_database, _user->username());
+        DatabasePoolPtr pool = primary->get_pool(_db_id, _user->username());
         if (pool == nullptr || pool->total_count() == 0) {
             return false;
         }
@@ -1090,8 +1091,16 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
+        redis::db_state_change::DBState db_state = _server->get_database_state(_db_id);
+        if (type == REPLICA && db_state != redis::db_state_change::DB_STATE_RUNNING) {
+            type = PRIMARY;
+        }
+
         // if we have an associated session use it (typically in a transaction)
         if (get_associated_session() != nullptr) {
+            if (type == PRIMARY && type != associated_session_type()) {
+                // TODO: handle change of associated session type
+            }
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Using associated session: id={}", _id, session->id());
             return session;
@@ -1137,12 +1146,12 @@ namespace springtail::pg_proxy {
             instance = _server->get_primary_instance();
         } else {
             // get a replica session
-            instance = _server->get_replica_instance(_database, _user->username());
+            instance = _server->get_replica_instance(_db_id, _user->username());
         }
         assert (instance != nullptr);
 
         // get a session from the instance
-        ServerSessionPtr session = instance->get_session(_database, _user->username());
+        ServerSessionPtr session = instance->get_session(_db_id, _user->username());
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());

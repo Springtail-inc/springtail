@@ -140,21 +140,21 @@ namespace pg_proxy {
 
         /**
          * @brief Get the size of the pool for a given dbname, username
-         * @param dbname database name
+         * @param db_id database id
          * @param username username
          * @returns size of the pool
          */
-        DatabasePoolPtr get_pool(const std::string &dbname,
+        DatabasePoolPtr get_pool(const uint64_t db_id,
                                  const std::string &username) const;
 
         /**
          * @brief Get a free session from the db instance (and associated pool).
          * Removes session from LRU list (so it can't be evicted), incr active count.
-         * @param dbname database name
+         * @param db_id database id
          * @param username username
          * @return ServerSessionPtr
          */
-        ServerSessionPtr get_session(const std::string &dbname,
+        ServerSessionPtr get_session(const uint64_t db_id,
                                      const std::string &username);
 
         /**
@@ -209,13 +209,13 @@ namespace pg_proxy {
         int _active_sessions=0;
 
         /** map of dbname, username to database pool */
-        std::map<std::pair<std::string, std::string>, DatabasePoolPtr> _sessions;
+        std::map<std::pair<uint64_t, std::string>, DatabasePoolPtr> _sessions;
 
         /** lru list of sessions that are not in use */
         std::list<ServerSessionPtr> _sessions_lru;
 
         /** Internal call to get a session, assumes lock is held */
-        ServerSessionPtr _internal_get_session(const std::string &dbname,
+        ServerSessionPtr _internal_get_session(const uint64_t db_id,
                                                const std::string &username);
 
         /** Internal call to evict a session, assumes lock is held */
@@ -243,17 +243,17 @@ namespace pg_proxy {
 
         /**
          * @brief Does a replica exist for this user and database?
-         * @param dbname database name
+         * @param db_id database id
          * @param username username
          * @return true if any replica exists with a session for this user and database
          * @return false if replica does not exist
          */
-        bool pool_exists(const std::string &dbname,
+        bool pool_exists(const uint64_t db_id,
                             const std::string &username)
         {
             std::shared_lock lock(_mutex);
             for (auto &replica : _replicas) {
-                DatabasePoolPtr pool = replica->get_pool(dbname, username);
+                DatabasePoolPtr pool = replica->get_pool(db_id, username);
                 if (pool != nullptr) {
                     return true;
                 }
@@ -265,7 +265,7 @@ namespace pg_proxy {
          * @brief Get a replica from the replica set.  Returns a session from the replica
          * @returns session or nullptr if no sessions available
          */
-        DatabaseInstancePtr get_replica(const std::string &dbname,
+        DatabaseInstancePtr get_replica(const uint64_t db_id,
                                         const std::string &username)
         {
             std::unique_lock lock(_mutex);
@@ -283,7 +283,7 @@ namespace pg_proxy {
                     min_instance = replica;
                 }
                 if (count < min_sessions_alloced) {
-                    DatabasePoolPtr pool = replica->get_pool(dbname, username);
+                    DatabasePoolPtr pool = replica->get_pool(db_id, username);
                     if (pool != nullptr && pool->free_count() > 0) {
                         min_alloced_instance = replica;
                         min_sessions_alloced = count;
@@ -338,15 +338,15 @@ namespace pg_proxy {
 
         /**
          * @brief Does a replica exist for this user and database?
-         * @param dbname database name
+         * @param db_id database id
          * @param username username
          * @return true if any replica exists with a session for this user and database
          * @return false if replica does not exist
          */
-        bool pool_exists(const std::string &dbname,
+        bool pool_exists(const uint64_t db_id,
                          const std::string &username)
         {
-            DatabasePoolPtr pool = _primary->get_pool(dbname, username);
+            DatabasePoolPtr pool = _primary->get_pool(db_id, username);
             if (pool != nullptr) {
                 return true;
             }
