@@ -67,6 +67,8 @@ class Component:
             self.process = None
             self.state = ComponentState.STOPPED
 
+        self.logger.info(f"Initialized component {self.name}: state={self.state}")
+
     def __check_running(self, pid : Optional[int]) -> Optional[int]:
         """
         Check if the component is already running.
@@ -79,7 +81,7 @@ class Component:
             return pid
 
         # next check if a pid file exists and pid is running
-        pid = self.__pid_from_file()
+        pid = self._pid_from_file()
         if pid and psutil.pid_exists(pid):
             return pid
 
@@ -96,9 +98,9 @@ class Component:
 
         return None
 
-    def __pid_from_file(self) -> Optional[int]:
+    def _pid_from_file(self) -> Optional[int]:
         """
-        Read the PID from the PID file
+        Read the PID from the PID file (protected method)
         Returns:
             The PID as an integer if successful, None otherwise
         """
@@ -112,7 +114,7 @@ class Component:
                 pid = int(f.read().strip())
                 if psutil.pid_exists(pid):
                     # process is running, mark it as such
-                    self.logger.info(f"Found running PID for component {self.name}: {self.pid}")
+                    self.logger.info(f"Found running PID for component {self.name}: {pid}")
                     return pid
         except Exception as e:
             pass
@@ -156,6 +158,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
+        self.logger.debug("Starting component")
         try:
             self.state = ComponentState.STARTING
             self.process = None
@@ -172,7 +175,7 @@ class Component:
                     continue
 
                 # read pid from file
-                pid = self.__pid_from_file()
+                pid = self._pid_from_file()
                 if pid and psutil.pid_exists(pid):
                     self.process = psutil.Process(pid)
                     break
@@ -201,6 +204,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
+        self.logger.debug("Killing component: {self.name}")
         if self.pid:
             try:
                 os.kill(self.pid, signal.SIGKILL)
@@ -237,6 +241,8 @@ class Component:
             if os.path.exists(self.pid_path):
                 os.remove(self.pid_path)
 
+            self.logger.debug(f"Component {self.name} shutdown")
+
             return True
 
         self.state = ComponentState.FAILED
@@ -250,6 +256,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
+        self.logger.debug("Shutting down component: {self.name}")
         if sig is None:
             sig = self.shutdown_signal.value
 
@@ -261,8 +268,8 @@ class Component:
             os.kill(self.pid, sig)
 
             if self.__wait_shutdown():
-                self.logger.info(f"Shutdown component {self.name}")
                 return True
+
         except ProcessLookupError:
             # Process already terminated
             self.state = ComponentState.STOPPED
@@ -287,10 +294,16 @@ class Component:
             if not self.process:
                 self.process = psutil.Process(self.pid)
 
-            return self.process.is_running()
+            running = self.process.is_running()
+            self.logger.debug(f"Process {self.pid} {'is' if running else 'is not'} running")
+
+            return running
+
         except psutil.NoSuchProcess:
+            self.logger.warning(f"Process {self.pid} not found")
             return False
         except Exception:
+            self.logger.warning(f"Exception, Process {self.pid} not found")
             return False
 
     def is_alive(self) -> bool:

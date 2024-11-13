@@ -1,7 +1,10 @@
 import os
 import sys
+import yaml
 import logging
 import argparse
+import string
+from random import SystemRandom
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,27 +43,41 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Process command-line arguments for config file and build directory.")
 
     # Add arguments -f for config file and -b for build directory
-    parser.add_argument('-f', '--config-file', type=str, required=True, help='Path to the configuration file')
-    parser.add_argument('-d', '--install-dir', type=str, required=True, help='Path to the install directory')
+    parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
     parser.add_argument('-s', '--service', type=str, required=False, help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--env', action='store_true', help='Use environment variables instead of config file')
 
     # Parse the arguments and return them
     args = parser.parse_args()
     return args
 
 
+def gen_random_string(length: int) -> str:
+    """Generate a random string of the specified length."""
+    return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
 if __name__ == "__main__":
     # Configure logging
     args = parse_arguments()
 
+    if not os.path.exists(args.config_file):
+        raise ValueError(f"Config file not found: {args.config_file}")
+
+    with open(args.config_file, 'r') as f:
+        yaml_config = yaml.safe_load(f)
+
     # Load properties from config file if provided;
     # otherwise assume environment variables
     props = None
-    if args.config_file:
-        props = Properties(args.config_file)
-    else:
+    if args.env:
         props = Properties()
+    else:
+        config_file = yaml_config.get('system_json_path')
+        if not config_file or not os.path.exists(config_file):
+            raise ValueError(f"System JSON file not found: {config_file}")
+        props = Properties(config_file)
 
     # Sanity check the properties
     if not props:
@@ -81,7 +98,10 @@ if __name__ == "__main__":
     scheduler = Scheduler(props)
 
     # Create component factory
-    factory = ComponentFactory(args.install_dir, props.get_pid_path())
+    bin_dir = os.path.join(yaml_config.get('install_dir'), 'bin/system')
+    if not os.path.exists(bin_dir):
+        raise ValueError(f"Invalid binary directory: {bin_dir}")
+    factory = ComponentFactory(bin_dir, props.get_pid_path())
 
     # Register components
     if service_type == "ingestion":
@@ -91,8 +111,17 @@ if __name__ == "__main__":
         scheduler.register_component(factory.create_gc_daemon(), 4)
         scheduler.register_component(factory.create_log_mgr_daemon(), 5)
     elif service_type == "fdw":
-        scheduler.register_component(factory.create_postgres(), 1)
-        scheduler.register_component(factory.create_ddl_daemon(), 2)
+        # startup postgres if not running
+        postgres = factory.create_postgres()
+        if not postgres.is_running():
+            postgres.start()
+
+        # create the ddl user
+        ddl_password = gen_random_string(16)
+        postgres.create_user('ddl_user', ddl_password, True, True)
+
+        scheduler.register_component(postgres, 1)
+        scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 2)
     elif service_type == "proxy":
         scheduler.register_component(factory.create_proxy(), 1)
     else:

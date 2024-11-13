@@ -1,6 +1,7 @@
 import os
 from component import Component
 from postgres_component import PostgresComponent
+from common import run_command
 
 class ComponentFactory:
     """
@@ -72,12 +73,12 @@ class ComponentFactory:
             pid_path=os.path.join(self.pid_dir, 'write_cache.pid')
         )
 
-    def create_ddl_daemon(self) -> Component:
+    def create_ddl_daemon(self, user: str, password: str) -> Component:
         """Create a new write cache component."""
         return Component(
             name="pg_ddl_daemon",
             id=self.DDL_ID,
-            args=["--daemon"],
+            args=["--daemon", "--username", user, "--password", password],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'pg_ddl_mgr.pid')
         )
@@ -94,9 +95,14 @@ class ComponentFactory:
 
     def create_postgres(self) -> Component:
         """Create a new postgres component."""
+        # get the path to the postgres binary, and the version
+        bindir = run_command('pg_config', ['--bindir']).strip()
+        version_str = run_command('pg_config', ['--version']).strip()
+        # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+        version = version_str.split(' ')[1].split('.')[0]
         return PostgresComponent(
             name="postgres",
             id=self.POSTGRES,
-            path=self.install_dir,
-            pid_path='/var/run/postgresql/16-main.pid'
+            path=bindir,
+            pid_path=f'/var/run/postgresql/{version}-main.pid'
         )
