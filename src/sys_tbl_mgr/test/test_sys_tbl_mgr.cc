@@ -1,6 +1,7 @@
 /*
  * Tests the interfaces of the SysTblMgr service.
  */
+#include "sys_tbl_mgr/system_tables.hh"
 #include <algorithm>
 #include <barrier>
 
@@ -107,7 +108,7 @@ namespace {
         msg.columns.push_back({"col2", 2, 0});
         msg.columns.push_back({"col1", 1, 1});
 
-        _client->create_index(_db, xid, msg);
+        _client->create_index(_db, xid, msg, sys_tbl::IndexNames::State::READY);
 
         return msg;
     }

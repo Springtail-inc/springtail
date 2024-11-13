@@ -76,7 +76,7 @@ struct IndexRequest {
     2: i64 xid,
     3: i64 lsn,
     4: IndexInfo index,
-    5: i64 snapshot_xid
+    5: i8 state,
 }
 
 struct DropIndexRequest {

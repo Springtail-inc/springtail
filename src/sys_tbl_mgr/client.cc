@@ -222,12 +222,13 @@ namespace springtail::sys_tbl_mgr {
 
 
     std::string 
-    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg)
+    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
     {
         ThriftClient c = _get_client();
         DDLStatement result;
 
         auto &&request = _gen_index_request(db_id, xid, msg);
+        request.state=static_cast<int8_t>(state);
 
         c.client->create_index(result, request);
 

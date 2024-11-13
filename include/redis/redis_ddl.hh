@@ -61,6 +61,16 @@ namespace springtail {
         void precommit_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls);
 
         /**
+         * Used by the gc::Committer (GC-2) to pre-commit the DDL statements prior to committing the
+         * associated XID for table index mutations. This is similar to precommit_ddl() but uses
+         * a separate hash set. This is to run multiple indexing processes in parallel.
+         * @param db_id The ID of the database instance we are updating.
+         * @param xid The XID at which these DDL statements were applied.
+         * @param ddls A JSON array of DDL statements to apply, retrieved from get_ddls_xid()
+         */
+        void precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls);
+
+        /**
          * Used by gc::Committer (GC-2) to provide the list of DDL statements to the FDWs.
          * @param db_id The ID of the database instance we are updating.
          * @param xid The XID at which these DDL statements were applied.

@@ -8,6 +8,35 @@
 #include <redis/redis_db_tables.hh>
 #include <redis/redis_containers.hh>
 
+namespace {
+    using namespace springtail;
+
+    void _precommit(
+            RedisClient& redis,
+            std::string_view hash_set, 
+            uint64_t db_id,
+            uint64_t xid,
+            nlohmann::json ddls
+            ) {
+        nlohmann::json op;
+        op["db_id"] = db_id;
+        op["xid"] = xid;
+        op["ddls"] = ddls;
+        std::string value = nlohmann::to_string(op);
+
+        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
+                                                Properties::get_db_instance_id());
+        std::string hkey = fmt::format("{}:{}", db_id, xid);
+        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
+                                          Properties::get_db_instance_id(), db_id, xid);
+
+        // perform the pre-commit in a single transaction
+        auto ts = redis.transaction(false, false);
+        ts.hset(precommit_key, hkey, value).del(ddl_key).exec();
+    }
+
+}
+
 namespace springtail {
 
     void
@@ -55,24 +84,11 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
-        // construct the DDL value and place it into the pre-commit hash in a single transaction
-        // with clearing the DDL_XID queue
+        _precommit(*_redis, redis::HASH_DDL_PRECOMMIT, db_id, xid, ddls);
+    }
 
-        nlohmann::json op;
-        op["db_id"] = db_id;
-        op["xid"] = xid;
-        op["ddls"] = ddls;
-        std::string value = nlohmann::to_string(op);
-
-        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
-                                                Properties::get_db_instance_id());
-        std::string hkey = fmt::format("{}:{}", db_id, xid);
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
-                                          Properties::get_db_instance_id(), db_id, xid);
-
-        // perform the pre-commit in a single transaction
-        auto ts = _redis->transaction(false, false);
-        ts.hset(precommit_key, hkey, value).del(ddl_key).exec();
+    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) {
+        _precommit(*_redis, redis::HASH_DDL_INDEX_PRECOMMIT, db_id, xid, ddls);
     }
 
     void

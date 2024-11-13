@@ -159,7 +159,7 @@ namespace springtail::sys_tbl {
         { "index_id", 4, SchemaType::UINT64, INT8OID, false, 1 },
         { "xid", 5, SchemaType::UINT64, INT8OID, false, 2 },
         { "lsn", 6, SchemaType::UINT64, INT8OID, false, 3 },
-        { "exists", 7, SchemaType::BOOLEAN, BOOLOID, false },
+        { "state", 7, SchemaType::UINT8, INT8OID, false },
         { "is_unique", 8, SchemaType::BOOLEAN, BOOLOID, false }
     };
 

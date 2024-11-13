@@ -117,7 +117,7 @@ namespace springtail::sys_tbl_mgr {
                     request.index.id,
                     xid.xid,
                     xid.lsn,
-                    true,
+                    static_cast<sys_tbl::IndexNames::State>(request.state),
                     request.index.is_unique );
 
             index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
@@ -235,7 +235,7 @@ namespace springtail::sys_tbl_mgr {
                     constant::INDEX_PRIMARY, //index id
                     xid.xid,
                     xid.lsn,
-                    !primary_keys.empty(), // mark not existent if no keys
+                    sys_tbl::IndexNames::State::READY,
                     true );
             index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 

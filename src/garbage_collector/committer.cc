@@ -271,31 +271,52 @@ namespace springtail::gc {
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
             // retrieve any schema changes available in Redis
-            auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            nlohmann::json index_ddls;
+            nlohmann::json table_ddls;
+            {
+                auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+                for (auto ddl: ddls) {
+                    const auto it = ddl.find("action");
+                    if (it != ddl.end() && 
+                            (*it == "create_index" ||
+                             *it == "alter_index") ) {
+                        index_ddls.push_back(std::move(ddl));
+                    } else {
+                        table_ddls.push_back(std::move(ddl));
+                    }
+                }
+            }
 
-            if (!ddls.is_null()) {
+            if (!table_ddls.is_null() || !index_ddls.is_null()) {
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // finalize the system metadata
                 client->finalize(db_id, xid);
+            }
 
+            if (!table_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, ddls);
+                _redis_ddl.precommit_ddl(db_id, xid, table_ddls);
+            }
+
+            if (!index_ddls.empty()) {
+                // The DDLs will be commited to the FDWs after indexing is completed.
+                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
+                _xid_mgr->commit_xid(db_id, xid, !table_ddls.is_null());
                 _committed_xids[db_id] = xid;
-            } else if (!ddls.is_null()) {
+            } else if (!table_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
 
-            // push any DDL changes to the FDWs
-            if (!ddls.is_null()) {
+            if (!table_ddls.is_null()) {
+                // push completed DDL changes to the FDWs
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
@@ -303,6 +324,7 @@ namespace springtail::gc {
 
             // mark the XID message as complete in the redis queue
             _redis.commit(_worker_id);
+
 
             // clear the DDL dependency data from the redis SortedSet
             std::string key = fmt::format(redis::SET_PG_OID_XIDS,

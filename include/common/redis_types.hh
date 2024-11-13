@@ -164,4 +164,10 @@ namespace springtail::redis {
      * see RedisDbTables::decode_pubsub_msg()
      */
     static constexpr char PUBSUB_DB_TABLE_CHANGES[] = "pubsub:db_table_changes:{}";
+
+    /**
+     * HASH of pre-commit DDL operations for index mutations.  Stored with a key of "db_id:xid"
+     * args: <db_instance_id>
+     */
+    static constexpr char HASH_DDL_INDEX_PRECOMMIT[] = "hash:idx:ddl:pc:{}";
 }

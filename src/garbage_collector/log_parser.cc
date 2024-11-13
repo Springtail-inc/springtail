@@ -1,3 +1,4 @@
+#include "sys_tbl_mgr/system_tables.hh"
 #include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <common/filesystem.hh>
@@ -852,12 +853,11 @@ namespace springtail::gc {
                             if (!blocked) {
                                 // apply the schema change
                                 XidLsn xid(state->entry.xid, state->lsn);
-                                auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_index(state->entry.db_id, xid, index_msg);
+                                auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->create_index(state->entry.db_id, xid,
+                                        index_msg, sys_tbl::IndexNames::State::NOT_READY);
 
-                                // note: we don't notify the backlog until the entire XID is
-                                //       processed since there might be additional schema changes
-
-                                // no need to record the DDL statement for this change
+                                // Send the DDL statement to GC2
+                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
                             }
                         }
                         break;
