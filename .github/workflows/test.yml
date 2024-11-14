@@ -9,6 +9,9 @@ on:
         type: string
         required: true
     secrets:
+      aws_role_arn:
+        description: "The ARN of the role to assume."
+        required: true
       aws_ecr_docker_password:
         description: "The password for the ECR docker registry."
         required: true
@@ -38,6 +41,13 @@ jobs:
           version: 2                         # default
           verbose: false                     # default
           arch: arm64
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
 
       - name: Prepare Tests
         run: |
@@ -72,11 +82,13 @@ jobs:
           badge-title: 'unit tests'
 
       - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Unit Test Logs'
           path: debug/unit-test-*.log
 
       - name: Create Superuser for test
+        if: success() || failure()      # run this step even if previous step failed
         run: |
           service postgresql start
           USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
@@ -108,6 +120,7 @@ jobs:
           badge-title: 'integration tests'
 
       - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Integration Test Logs'
           path: ./python/testing/integration-test-*.log

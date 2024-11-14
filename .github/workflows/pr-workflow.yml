@@ -1,4 +1,4 @@
-name: PR Actions
+name: PR Actions (PR to Main)
 
 on:
   push:
@@ -21,4 +21,5 @@ jobs:
     with:
       builder_image_version_tag:  ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
     secrets:
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
       aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
