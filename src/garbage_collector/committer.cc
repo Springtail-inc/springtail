@@ -2,6 +2,7 @@
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
 #include <garbage_collector/log_parser.hh>
+#include <memory>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -12,6 +13,9 @@ namespace springtail::gc {
     void
     Committer::run()
     {
+        // use the ame worker count for Indexer
+        _indexer = std::make_unique<Indexer>(_worker_count);
+
         // perform cleanup for any Committer threads in a previous run
         cleanup();
 
@@ -277,9 +281,7 @@ namespace springtail::gc {
                 auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
                 for (auto ddl: ddls) {
                     const auto it = ddl.find("action");
-                    if (it != ddl.end() && 
-                            (*it == "create_index" ||
-                             *it == "alter_index") ) {
+                    if (it != ddl.end() && *it == "create_index") {
                         index_ddls.push_back(std::move(ddl));
                     } else {
                         table_ddls.push_back(std::move(ddl));
@@ -291,17 +293,24 @@ namespace springtail::gc {
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // finalize the system metadata
+                // Note: for create index ddls, we save the state
+                // in the system tables but don't notify FDW until
+                // the index is built
                 client->finalize(db_id, xid);
-            }
-
-            if (!table_ddls.is_null()) {
-                // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, table_ddls);
             }
 
             if (!index_ddls.empty()) {
                 // The DDLs will be commited to the FDWs after indexing is completed.
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+                for (auto const& ddl: index_ddls) {
+                    _indexer->build({db_id, completed_xid, xid, ddl});
+                    //TODO: need to implement notification when the build is completed to notify FDW
+                }
+            }
+
+            if (!table_ddls.is_null()) {
+                // pre-commit the DDLs to be applied to the FDWs
+                _redis_ddl.precommit_ddl(db_id, xid, table_ddls);
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
@@ -340,6 +349,9 @@ namespace springtail::gc {
 
         // unregister the thread on shutdown
         coordinator->unregister_thread(daemon_type, _worker_id);
+
+        _indexer.reset();
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Committer shutdown");
     }
 
     void

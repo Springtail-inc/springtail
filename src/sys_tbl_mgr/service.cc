@@ -73,6 +73,7 @@ namespace springtail::sys_tbl_mgr {
         ddl["id"] = request.index.id;
         ddl["is_unique"] = request.index.is_unique;
         ddl["table_name"] = request.index.table_name;
+        ddl["table_id"] = request.index.table_id;
         ddl["columns"] = nlohmann::json::array();
 
         if (request.index.columns.empty()) {

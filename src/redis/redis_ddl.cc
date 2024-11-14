@@ -11,9 +11,9 @@
 namespace {
     using namespace springtail;
 
+    template<const char* hash_set>
     void _precommit(
             RedisClient& redis,
-            std::string_view hash_set, 
             uint64_t db_id,
             uint64_t xid,
             nlohmann::json ddls
@@ -24,7 +24,7 @@ namespace {
         op["ddls"] = ddls;
         std::string value = nlohmann::to_string(op);
 
-        std::string precommit_key = fmt::format(redis::HASH_DDL_PRECOMMIT,
+        std::string precommit_key = fmt::format(hash_set,
                                                 Properties::get_db_instance_id());
         std::string hkey = fmt::format("{}:{}", db_id, xid);
         std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
@@ -84,11 +84,41 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
-        _precommit(*_redis, redis::HASH_DDL_PRECOMMIT, db_id, xid, ddls);
+        _precommit<redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
     void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) {
-        _precommit(*_redis, redis::HASH_DDL_INDEX_PRECOMMIT, db_id, xid, ddls);
+        _precommit<redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
+    }
+
+    std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>>
+    RedisDDL::get_precommit_index_ddl()
+    {
+        std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>> ddlss;
+
+        // retrieve the pre-commit keys
+        std::vector<std::string> hkeys;
+        std::string precommit_key = fmt::format(redis::HASH_DDL_INDEX_PRECOMMIT,
+                                                Properties::get_db_instance_id());
+
+        _redis->hkeys(precommit_key, std::back_inserter(hkeys));
+
+        // keys are stored as "db_id:xid", so split and store them
+        for (const auto &key : hkeys) {
+            std::vector<std::string> split_key;
+            common::split_string(":", key, split_key);
+
+            auto db_id = stoull(split_key[0]);
+            auto xid = stoull(split_key[1]);
+
+            auto &&value = _redis->hget(precommit_key, key);
+            assert (value.has_value());
+            auto ddls = nlohmann::json::parse(*value);
+
+            ddlss.emplace_back(db_id, xid, std::move(ddls));
+        }
+
+        return ddlss;
     }
 
     void

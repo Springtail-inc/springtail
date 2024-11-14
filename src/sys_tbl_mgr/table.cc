@@ -9,7 +9,8 @@ namespace springtail {
 
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
-            { 0, 0, "root", 0, SchemaType::UINT64, 0, true, false }
+            { 0, 0, "root", 0, SchemaType::UINT64, 0, true, false },
+            { 0, 0, "index_id", 0, SchemaType::UINT64, 0, true, false }
         };
 
         std::filesystem::path _get_table_dir(const std::filesystem::path &base,

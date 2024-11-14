@@ -84,6 +84,13 @@ namespace springtail {
         std::vector<std::pair<uint64_t, uint64_t>> get_precommit_ddl();
 
         /**
+         * Used by the gc::Committer (GC-2) to handle the pre-commit index DDLs on restart.
+         * @return A list of <db_id, xid> pairs in the pre-commit step.
+         */
+        std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>>
+        get_precommit_index_ddl();
+
+        /**
          * Used by the gc::Committer (GC-2) to abort incomplete XIDs that are in the pre-commit
          * phase.
          * @param db_id The ID of the database instance we are updating.
