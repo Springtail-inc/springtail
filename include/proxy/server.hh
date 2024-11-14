@@ -22,6 +22,7 @@
 #include <proxy/logger.hh>
 
 #include <redis/db_state_change.hh>
+#include <redis/pubsub_thread.hh>
 
 namespace springtail::pg_proxy {
 
@@ -75,6 +76,7 @@ namespace springtail::pg_proxy {
             std::unique_lock lock(_db_mutex);
             _replicated_databases[dbname] = db_id;
 
+            // TODO: I think this is no longer needed
             std::unique_lock db_state_lock(_db_state_mutex);
             _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
         }
@@ -161,6 +163,11 @@ namespace springtail::pg_proxy {
             return _id;
         }
 
+        bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
+            std::shared_lock lock(_schema_tables_mutex);
+            return _schema_tables.has_item(db_id, schema, table);
+
+        }
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
@@ -170,7 +177,9 @@ namespace springtail::pg_proxy {
 
         UserMgrPtr _user_mgr;                ///< user manager object
 
-        std::thread _pubsub_thread;         ///< redis publisher/subscriber thread
+        // std::thread _pubsub_thread[2];         ///< redis publisher/subscriber threads one per redis database
+        PubSubThread _config_sub_thread;
+        PubSubThread _data_sub_thread;
         ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
 
         std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map
@@ -185,11 +194,14 @@ namespace springtail::pg_proxy {
         DatabasePrimarySet _primary_database; ///< set of primary databases
         DatabaseReplicaSet _replica_set;      ///< set of replica databases
 
-        std::shared_mutex _db_mutex;
+        std::shared_mutex _db_mutex;          ///< shared mutex for read/write access to the replicated databases map
         std::map<std::string, uint64_t> _replicated_databases; ///< list of authorized databases with associated ids
 
-        std::shared_mutex _db_state_mutex;   ///< share mutex for read/write access to database state
+        std::shared_mutex _db_state_mutex;   ///< shared mutex for read/write access to database state
         std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
+
+        std::shared_mutex _schema_tables_mutex;  ///< shared mutex lock for schema tables storage
+        DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
 
         bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
         std::atomic<bool> _shutdown = false;    ///< true if server is shutting down
@@ -210,18 +222,30 @@ namespace springtail::pg_proxy {
         void _log_disconnect(SessionPtr session);
 
         /**
-         * @brief Redis PubSub thread runs this function
+         * @brief Database state change handling
          *
+         * @param msg - message
          */
-        void _pubsub_thread_run();
+        void _handle_db_state_change(const std::string &msg);
 
         /**
-         * @brief Database state chang handling
+         * @brief Database schema and table change handling
          *
-         * @param db_id - database id
-         * @param state - new database state
+         * @param msg - message
          */
-        void _handle_db_state_change(const uint64_t db_id, const redis::db_state_change::DBState state);
+        void _handle_db_table_change(const std::string &msg);
+
+        /**
+         * @brief Initialize pubsub thread for database state change
+         *
+         */
+        void _init_db_states_subscriber();
+
+        /**
+         * @brief Initialize pubsub thread for database tables subscriber
+         *
+         */
+        void _init_db_tables_subscriber();
 
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
