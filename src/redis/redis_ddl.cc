@@ -11,13 +11,16 @@
 namespace {
     using namespace springtail;
 
+    // pass hash_set as a template parameter
+    // becuase fmt::format() expects a constexpr
     template<const char* hash_set>
     void _precommit(
             RedisClient& redis,
             uint64_t db_id,
             uint64_t xid,
             nlohmann::json ddls
-            ) {
+            ) 
+    {
         nlohmann::json op;
         op["db_id"] = db_id;
         op["xid"] = xid;
@@ -30,11 +33,11 @@ namespace {
         std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
                                           Properties::get_db_instance_id(), db_id, xid);
 
-        // perform the pre-commit in a single transaction
+        // construct the DDL value and place it into the pre-commit hash in a single transaction
+        // with clearing the DDL_XID queue
         auto ts = redis.transaction(false, false);
         ts.hset(precommit_key, hkey, value).del(ddl_key).exec();
     }
-
 }
 
 namespace springtail {
@@ -87,7 +90,8 @@ namespace springtail {
         _precommit<redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
-    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) {
+    void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) 
+    {
         _precommit<redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
