@@ -4,6 +4,7 @@ import yaml
 import logging
 import argparse
 import string
+import signal
 from random import SystemRandom
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -20,7 +21,11 @@ from component_factory import ComponentFactory
 from scheduler import Scheduler
 
 def check_properties(props: Properties) -> None:
-    """Check the properties; check paths exist."""
+    """
+    Check the properties; check paths exist.
+    Arguments:
+        props -- the properties object
+    """
     mount_path = props.get_mount_path()
     log_path = props.get_log_path()
 
@@ -54,24 +59,27 @@ def parse_arguments():
 
 
 def gen_random_string(length: int) -> str:
-    """Generate a random string of the specified length."""
+    """
+    Generate a random string of the specified length.
+    Arguments:
+        length -- the length of the string
+    Returns:
+        a random string of the specified length
+    """
     return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
-if __name__ == "__main__":
-    # Configure logging
-    args = parse_arguments()
-
-    if not os.path.exists(args.config_file):
-        raise ValueError(f"Config file not found: {args.config_file}")
-
-    with open(args.config_file, 'r') as f:
-        yaml_config = yaml.safe_load(f)
-
+def setup_props(yaml_config: dict, env: bool) -> Properties:
+    """
+    Load properties from the config file or environment variables.
+    Arguments:
+        yaml_config -- the YAML configuration
+        env -- use environment variables
+    """
     # Load properties from config file if provided;
     # otherwise assume environment variables
     props = None
-    if args.env:
+    if env:
         props = Properties()
     else:
         config_file = yaml_config.get('system_json_path')
@@ -82,28 +90,73 @@ if __name__ == "__main__":
     # Sanity check the properties
     if not props:
         raise ValueError("Failed to load properties")
+
     check_properties(props)
+
+    return props
+
+if __name__ == "__main__":
+    """Main entry point for the coordinator script."""
+    # Parse the command line arguments
+    args = parse_arguments()
+
+    if not os.path.exists(args.config_file):
+        raise ValueError(f"Config file not found: {args.config_file}")
+
+    # Load the yaml configuration file
+    with open(args.config_file, 'r') as f:
+        yaml_config = yaml.safe_load(f)
+
+    # Load properties from the config file or environment variables
+    props = setup_props(yaml_config, args.env)
 
     # Configure logging
     log_path = props.get_log_path()
-    logging.basicConfig(filename=os.path.join(log_path, 'coordinator.log'),
-                        level=logging.DEBUG if args.debug else logging.INFO)
+
+    handlers = []
+    # Add a file handler to the logger for stdout and file output
+    if args.debug:
+        handlers.append(logging.StreamHandler(sys.stdout))
+    handlers.append(logging.FileHandler(os.path.join(log_path, 'coordinator.log')))
+
+    logging.basicConfig(format='%(asctime)s.%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                        datefmt='%Y-%m-%d:%H:%M:%S',
+                        level=logging.DEBUG if args.debug else logging.INFO,
+                        handlers=handlers)
+
+    logger = logging.getLogger("Coordinator")
 
     # Get the service type
     service_type = args.service
-    if service_type is None:
+    if not service_type:
         service_type = os.environ.get('SERVICE_TYPE')
+        if not service_type:
+            raise ValueError("Service type not provided")
 
     # Create scheduler
+    logger.debug("Starting scheduler")
     scheduler = Scheduler(props)
+
+    # Set up signal handlers
+    def signal_handler(signum, frame):
+        if scheduler:
+            logger.info(f"Received signal {signum}, shutting down...")
+            scheduler.shutdown()
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # Create component factory
     bin_dir = os.path.join(yaml_config.get('install_dir'), 'bin/system')
     if not os.path.exists(bin_dir):
         raise ValueError(f"Invalid binary directory: {bin_dir}")
+
+    logger.debug(f"Creating component factory with bin_dir={bin_dir}")
     factory = ComponentFactory(bin_dir, props.get_pid_path())
 
     # Register components
+    logger.debug(f"Starting {service_type} service")
+
     if service_type == "ingestion":
         scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
         scheduler.register_component(factory.create_write_cache_daemon(), 2)
@@ -128,10 +181,18 @@ if __name__ == "__main__":
         raise ValueError(f"Invalid service type: {service_type}; must be one of: ingestion, fdw, proxy")
 
     # Start all components
-    if scheduler.start_all():
-        print("All components started successfully")
-    else:
-        print("Failed to start all components")
+    if not scheduler.start_all():
+        logger.error("Failed to start all components")
+        raise ValueError("Failed to start all components")
+
+    logger.info("All components started successfully")
 
     # Monitor for timeouts (this could be in a separate thread)
+    # this will exit on a SIGINT or SIGTERM
+    logger.debug("Scheduler entering monitor loop")
     scheduler.monitor_timeouts()
+
+    # shutdown all components
+    logger.debug("Shutting down all components")
+    scheduler.shutdown_all()
+

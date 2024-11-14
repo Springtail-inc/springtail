@@ -51,6 +51,8 @@ namespace springtail::pg_log_mgr {
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
         _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
 
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", _next_xid-1);
+
         uint64_t lsn = INVALID_LSN;
         if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
             _startup_init();
@@ -100,6 +102,9 @@ namespace springtail::pg_log_mgr {
             if (num_xacts == 0) {
                 break;
             }
+            for (auto &xact: committed_xacts) {
+                assert (xact->springtail_xid >= _next_xid);
+            }
             _push_xacts_to_redis(committed_xacts);
             last_xact = committed_xacts.back();
             committed_xacts.clear();
@@ -108,6 +113,7 @@ namespace springtail::pg_log_mgr {
         // update next xid if we find an xid higher than committed xid in the log
         uint64_t last_allocated_xid = xact_reader.get_max_sp_xid();
         if (last_allocated_xid > _next_xid) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", _next_xid, last_allocated_xid + 1);
             _next_xid = last_allocated_xid + 1;
         }
 

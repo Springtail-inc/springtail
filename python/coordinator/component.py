@@ -159,6 +159,11 @@ class Component:
             True if successful, False otherwise
         """
         self.logger.debug("Starting component")
+
+        if self.is_running():
+            self.logger.info(f"Component {self.name} already running")
+            return True
+
         try:
             self.state = ComponentState.STARTING
             self.process = None
@@ -204,7 +209,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
-        self.logger.debug("Killing component: {self.name}")
+        self.logger.debug(f"Killing component: {self.name}")
         if self.pid:
             try:
                 os.kill(self.pid, signal.SIGKILL)
@@ -256,7 +261,7 @@ class Component:
         Returns:
             True if successful, False otherwise
         """
-        self.logger.debug("Shutting down component: {self.name}")
+        self.logger.debug(f"Shutting down component: {self.name}")
         if sig is None:
             sig = self.shutdown_signal.value
 
@@ -288,6 +293,7 @@ class Component:
             True if running, False otherwise
         """
         if not self.pid:
+            self.logger.debug(f"Component {self.name} has no PID")
             return False
 
         try:
@@ -312,4 +318,8 @@ class Component:
         Returns:
             True if alive, False otherwise
         """
-        return self.is_running()
+        self.logger.debug(f"Checking if component {self.name} is alive")
+        isrunning = self.is_running()
+        self.logger.debug(f"Component {self.name} {'is' if isrunning else 'is not'} alive")
+        return isrunning
+

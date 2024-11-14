@@ -48,6 +48,14 @@ target_link_libraries(xid_client
 )
 add_dsymutil_command(xid_client)
 
+add_executable(xid_dump test/xid_dump.cc)
+target_include_directories(xid_dump PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
+target_link_libraries(xid_dump
+    PUBLIC springtail_common
+    PRIVATE Boost::program_options
+)
+add_dsymutil_command(xid_dump)
+
 # install daemon to install directory
 install(TARGETS xid_mgr_daemon RUNTIME DESTINATION bin/system)
-install(TARGETS xid_client RUNTIME DESTINATION bin/utils)
+install(TARGETS xid_client xid_dump RUNTIME DESTINATION bin/utils)

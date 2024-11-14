@@ -3,6 +3,8 @@ import os
 import time
 import logging
 import redis
+import threading
+import traceback
 from typing import Dict
 
 from component import Component
@@ -39,6 +41,8 @@ class Scheduler:
         # Setup pubsub for liveness notifications
         self.pubsub = self.redis.pubsub(ignore_subscribe_messages=True)
         self.pubsub.subscribe(self.liveness_pubsub)
+
+        self.shutdown_event = threading.Event()
 
     def register_component(self, component: Component, startup_order: int) -> None:
         """Register a new component with the scheduler"""
@@ -104,6 +108,7 @@ class Scheduler:
         Returns:
             True if all components restarted successfully
         """
+        self.logger.info("Restarting all components")
         if not self.shutdown_all():
             return False
 
@@ -113,7 +118,7 @@ class Scheduler:
         """
         Check for messages on the liveness pubsub channel
         Returns:
-            True if any components has failed.
+            True if any component has failed.
         """
         try:
             # get message from pubsub channel
@@ -126,7 +131,7 @@ class Scheduler:
                 if id not in self.components:
                     return False
 
-                self.logger.error(f"Error for component: {id}: {self.components[id].name}")
+                self.logger.error(f"PubSub: Error for component: {id}: {self.components[id].name}")
                 return True
 
         except redis.TimeoutError:
@@ -140,14 +145,14 @@ class Scheduler:
             True if any components has failed.
         """
         # Check for timeout messages in Redis
-        data = self.redis_client.hgetall(self.liveness_hash)
+        data = self.redis.hgetall(self.liveness_hash)
         if not data:
             return False
 
         # Go through and merge time values for the same id, taking minimum
         # key format: daemon_id:thread_id
         # value format: timestamp (epoch ms)
-        timeouts : Dict[str, int] = {}
+        timeouts: Dict[str, int] = {}
         for key, value in data.items():
             id, _ = key.split(':')
             if id not in self.components:
@@ -162,8 +167,8 @@ class Scheduler:
 
         # Check for timeouts
         min_time = time.time() * 1000 - self.allowed_timeout
-        for id, time in self.timeouts.items():
-            if time < min_time:
+        for id, timestamp in self.timeouts.items():
+            if timestamp < min_time:
                 self.logger.error(f"Timeout for component: {id}: {self.components[id].name}")
                 if id in self.components:  # this should always be true
                     return True
@@ -184,19 +189,25 @@ class Scheduler:
 
         return failed
 
+    def shutdown(self) -> None:
+        """
+        Shutdown the scheduler
+        """
+        self.shutdown_event.set()
 
     def monitor_timeouts(self) -> None:
         """
         Monitor Redis queue for timeout events
         """
-        while True:
+        while not self.shutdown_event.is_set():
             try:
                 if (
-                   not self.__check_pubsub() or    # check for messages on the pubsub channel
-                   not self.__check_timeouts() or  # check for timeouts
-                   not self.__check_components()   # check for component failures
+                   self.__check_pubsub() or    # check for messages on the pubsub channel
+                   self.__check_timeouts() or  # check for timeouts
+                   self.__check_components()   # check for component failures
                 ):
                     # restart all components
+                    self.logger.warning("Restarting all components")
                     if not self.restart_all():
                         # XXX handle
                         self.logger.error("Failed to restart all components")
@@ -208,7 +219,11 @@ class Scheduler:
                 continue
             except Exception as e:
                 # XXX handle
+                error_message = traceback.format_exc()
                 self.logger.error(f"Unexpected error in monitor_timeouts: {str(e)}")
+                self.logger.error(error_message)
                 continue
 
         # end of loop, continue
+        self.pubsub.close()
+        self.redis.close()
