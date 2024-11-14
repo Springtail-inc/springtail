@@ -90,7 +90,7 @@ namespace springtail::pg_proxy {
     }
 
     std::vector<Parser::StmtContextPtr>
-    Parser::parse_query(const std::string_view query)
+    Parser::parse_query(const std::string_view query, VerifyTableFn verify_table_fn)
     {
         ParseContext context;
 
@@ -109,7 +109,7 @@ namespace springtail::pg_proxy {
 
         // if we have a single statement, we can return early
         if (context.stmts.size() == 1) {
-            context.stmts[0]->is_read_safe = _is_query_readonly(*context.stmts[0]);
+            context.stmts[0]->is_read_safe = _is_query_readonly(*context.stmts[0], verify_table_fn);
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Single query is_read_safe: {}", context.stmts[0]->is_read_safe);
             return context.stmts;
         }
@@ -117,7 +117,7 @@ namespace springtail::pg_proxy {
         // otherwise we need to check each statement and break it apart
         // will stop at first false result
         for (auto &stmt: context.stmts) {
-            bool is_readable = _is_query_readonly(*stmt);
+            bool is_readable = _is_query_readonly(*stmt, verify_table_fn);
             stmt->is_read_safe = is_readable;
         }
 
@@ -125,7 +125,7 @@ namespace springtail::pg_proxy {
     }
 
     bool
-    Parser::_is_query_readonly(const StmtContext &context)
+    Parser::_is_query_readonly(const StmtContext &context, VerifyTableFn verify_table_fn)
     {
         // debugging
         dump_context(context);
@@ -147,7 +147,7 @@ namespace springtail::pg_proxy {
 
         // go through table names and check if they are safe
         for (auto iter = context.tables.begin(); iter != context.tables.end(); iter++) {
-            if (!_is_table_readonly_safe(*iter)) {
+            if (!_is_table_readonly_safe(*iter, verify_table_fn)) {
                 return false;
             }
         }
@@ -163,7 +163,7 @@ namespace springtail::pg_proxy {
     }
 
     bool
-    Parser::_is_table_readonly_safe(const std::pair<std::string, std::string> &table)
+    Parser::_is_table_readonly_safe(const std::pair<std::string, std::string> &table, VerifyTableFn verify_table_fn)
     {
         if (!table.first.empty()) {
             if (table.first == "pg_catalog" || table.first == "information_schema") {
@@ -171,9 +171,8 @@ namespace springtail::pg_proxy {
             }
         }
 
-        // XXX need to check which schemas/tables we are replicating
-
-        return true;
+        // check which schemas/tables we are replicating
+        return verify_table_fn(table.first, table.second);
     }
 
     bool

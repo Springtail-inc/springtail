@@ -97,9 +97,10 @@ namespace springtail {
          * Creates a new connection to Redis, so should be reusued
          * Caller must catch sw::redis::TimeoutError
          * @param timeout_secs timeout in seconds
+         * @param config_db if true, use the config db
          * @return SubscriberPtr
          */
-        SubscriberPtr get_subscriber(int timeout_secs=5);
+        SubscriberPtr get_subscriber(int timeout_secs=5,  bool config_db=true);
 
     protected:
         /** internal singleton instance */

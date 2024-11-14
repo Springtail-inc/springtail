@@ -358,6 +358,62 @@ namespace pg_proxy {
         DatabaseInstancePtr _standby;
     };
 
+    // TODO: add class documentation
+    class DatabaseSchemaTableStore {
+    public:
+        DatabaseSchemaTableStore() = default;
+
+        void add_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                std::map<std::string, std::set<std::string>> empty_db;
+                _storage.insert(std::pair(db_id, empty_db));
+                db_it = _storage.find(db_id);
+            }
+            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                std::set<std::string> empty_schema;
+                db.insert(std::pair(db_schema, empty_schema));
+                schema_it = db.find(db_schema);
+            }
+            std::set<std::string> &schema = schema_it->second;
+            schema.insert(db_table);
+        }
+
+        void remove_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                return;
+            }
+            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                return;
+            }
+            std::set<std::string> &schema = schema_it->second;
+            schema.erase(db_table);
+        }
+
+        bool has_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                return false;
+            }
+            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                return false;
+            }
+            std::set<std::string> &schema = schema_it->second;
+            if (schema.contains(db_table)) {
+                return true;
+            }
+            return false;
+        }
+    private:
+        std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage;
+    };
 
 } // namespace springtail
 } // namespace pg_proxy

@@ -55,7 +55,9 @@ TEST(ProxyParser_Test, TestParser)
     springtail_init();
 
     for (int i = 0; i < tests.size(); i++) {
-        std::vector<Parser::StmtContextPtr> res = Parser::parse_query(std::get<0>(tests[i]));
+        std::vector<Parser::StmtContextPtr> res = Parser::parse_query(std::get<0>(tests[i]),  [](const std::string &schema, const std::string &table) {
+            return true;
+        });
 
         bool is_readable = true;
         std::string name;
