@@ -61,6 +61,8 @@ namespace springtail::gc {
         RedisQueue<pg_log_mgr::PgXactMsg>
             reader_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
                                      Properties::get_db_instance_id()));
+        RedisQueue<XidReady>
+            gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id()));
 
         // retrieve all of the threads for the daemon
         // note: we do this because there is a single GC daemon for both GC1 and GC2
@@ -82,6 +84,9 @@ namespace springtail::gc {
 
             // perform thread-type-specific cleanup
             if (parts[1] == THREAD_READER) {
+                // clear the queue of work to the Committer
+                gc_queue.clear();
+
                 // get the work item from the reader_queue
                 auto entry = reader_queue.work_item(thread_id);
                 if (entry) {
