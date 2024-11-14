@@ -229,6 +229,11 @@ namespace springtail {
                     : _extent(nullptr)
                 { }
 
+                // create empty extent
+                SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
+                   _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
+                }
+
                 // copy causes the use count to be incremented
                 SafeExtent(const SafeExtent &other) {
                     if (other._extent != nullptr) {
