@@ -495,6 +495,9 @@ namespace springtail::gc {
 
         // loop until we are asked to shutdown; on shutdown drain the backlog
         while (!_shutdown || !_backlog.empty()) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, worker_id);
+
             // a flag used to skip sending an entire XID at the committer
             bool skip_xid = false;
 
@@ -1105,11 +1108,19 @@ namespace springtail::gc {
 
         WriteCacheClient * const write_cache = WriteCacheClient::get_instance();
         while (true) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, worker_id);
+
             // wait for a work item
-            auto entry = _parser_queue->pop();
+            auto entry = _parser_queue->pop(60);
             if (entry == nullptr) {
-                // note: this only happens when the queue is shutdown
-                break;
+                // check if this is due to a queue shutdown
+                if (_parser_queue->is_shutdown()) {
+                    break;
+                }
+
+                // timed out, try again
+                continue;
             }
 
             // process the work item

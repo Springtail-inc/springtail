@@ -64,14 +64,22 @@ namespace springtail {
 
         /**
          * @brief Pop entry from queue, optionally waiting for entry
-         * @return std::shared_ptr<T> log queue entry
+         * @param seconds timeout in seconds
+         * @return std::shared_ptr<T> log queue entry, nullptr if no entry found either due to
+         *         timeout or shutdown
          */
-        Tptr pop()
+        Tptr pop(uint32_t seconds = 0)
         {
             std::unique_lock<std::mutex> write_lock{_mutex};
             while (_queue.empty() && !_shutdown) {
                 // wait on cv until not empty
-                _cv_pop.wait(write_lock);
+                if (seconds) {
+                    // wait for the requested number of seconds
+                    _cv_pop.wait_for(write_lock, std::chrono::seconds(seconds));
+                } else {
+                    // wait indefinitely
+                    _cv_pop.wait(write_lock);
+                }
             }
 
             if (_queue.empty()) {
