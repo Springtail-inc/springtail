@@ -22,7 +22,6 @@ from properties import Properties
 from component_factory import ComponentFactory
 from scheduler import Scheduler
 
-
 def check_properties(props: Properties) -> None:
     """
     Check the properties; check paths exist.

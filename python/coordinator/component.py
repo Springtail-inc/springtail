@@ -13,9 +13,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
 
-from common import (
-    run_command
-)
+from common import run_command
 
 class ComponentState(Enum):
     STOPPED = "stopped"

@@ -18,6 +18,7 @@ sys.path.append(os.path.join(project_root, 'shared'))
 # Now import the Properties class
 from properties import Properties
 
+from production import send_sns
 
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
@@ -155,7 +156,7 @@ class Scheduler:
         # value format: timestamp (epoch ms)
         timeouts: Dict[str, int] = {}
         for key, value in data.items():
-            print("Got timeout data: ", key, value)
+            self.logger.debug(f"Got timeout data: {key}:{value}")
             id, _ = key.split(':')
             if id not in self.components:
                 continue
@@ -214,6 +215,7 @@ class Scheduler:
                     sys.exit(1)
                     if not self.restart_all():
                         # XXX handle
+
                         self.logger.error("Failed to restart all components")
                         break
 

@@ -11,7 +11,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
 
-from utils import run_command
+from common import run_command
 
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp'
@@ -147,6 +147,6 @@ def send_sns(message: str) -> None:
     """
     topic_arn = os.environ.get('SNS_TOPIC_ARN')
     if not topic_arn:
-        raise ValueError("SNS_TOPIC_ARN environment variable not set")
+        return
 
     __send_sns_notification(topic_arn, message)

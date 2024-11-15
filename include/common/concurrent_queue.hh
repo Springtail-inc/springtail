@@ -76,6 +76,10 @@ namespace springtail {
                 if (seconds) {
                     // wait for the requested number of seconds
                     _cv_pop.wait_for(write_lock, std::chrono::seconds(seconds));
+                    if (_queue.empty() && !_shutdown) {
+                        // timeout
+                        return nullptr;
+                    }
                 } else {
                     // wait indefinitely
                     _cv_pop.wait(write_lock);
