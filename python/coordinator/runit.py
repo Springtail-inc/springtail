@@ -31,6 +31,7 @@ def parse_arguments():
     parser.add_argument('--isrunning', type=str, help='Is the component running <name>')
     parser.add_argument('--kill', type=str, help='Kill the component <name>')
     parser.add_argument('--test', action='store_true', help='Run tests <name>')
+    parser.add_argument('--stopall', action='store_true', help='Stop all components')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -151,6 +152,28 @@ if __name__ == "__main__":
     # Run tests
     if args.test:
         run_tests(factory)
+        sys.exit(0)
+
+    if args.stopall:
+        # Stop all components
+        gc_daemon = factory.create_gc_daemon()
+        if not gc_daemon.shutdown() and not gc_daemon.kill():
+            raise ValueError("Failed to stop gc_daemon")
+        sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
+        if not sys_tbl_mgr_daemon.shutdown() and not sys_tbl_mgr_daemon.kill():
+            raise ValueError("Failed to stop sys_tbl_mgr_daemon")
+        write_cache_daemon = factory.create_write_cache_daemon()
+        if not write_cache_daemon.shutdown() and not write_cache_daemon.kill():
+            raise ValueError("Failed to stop write_cache");
+        ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
+        if not ddl_daemon.shutdown() and not ddl_daemon.kill():
+            raise ValueError("Failed to stop ddl_daemon")
+        xid_mgr_daemon = factory.create_xid_mgr_daemon()
+        if not xid_mgr_daemon.shutdown() and not xid_mgr_daemon.kill():
+            raise ValueError("Failed to stop xid_mgr_daemon")
+        postgres = factory.create_postgres()
+        if not postgres.shutdown() and not postgres.kill():
+            raise ValueError("Failed to stop postgres")
         sys.exit(0)
 
     # Start/stop/kill components

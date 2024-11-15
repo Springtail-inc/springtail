@@ -37,8 +37,8 @@ namespace springtail::gc {
             coordinator->mark_alive(daemon_type, _worker_id);
 
             // figure out if there's an XID to process
-            // note: this is a blocking call that will timeout after 60s
-            auto result = _redis.pop(_worker_id, 60);
+            // note: this is a blocking call that will timeout after keep_alive secs
+            auto result = _redis.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
@@ -393,7 +393,7 @@ namespace springtail::gc {
             coordinator->mark_alive(daemon_type, worker_id);
 
             // wait for work on the queue
-            auto entry = _worker_queue.pop(60);
+            auto entry = _worker_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (entry == nullptr) {
                 // check if this is due to a queue shutdown
                 if (_worker_queue.is_shutdown()) {

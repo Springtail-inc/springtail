@@ -385,7 +385,7 @@ namespace springtail::gc {
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "db {} pg_xid {}", db_id, pg_xid);
         boost::unique_lock lock(_mutex);
-        
+
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
@@ -1112,7 +1112,7 @@ namespace springtail::gc {
             coordinator->mark_alive(daemon_type, worker_id);
 
             // wait for a work item
-            auto entry = _parser_queue->pop(60);
+            auto entry = _parser_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (entry == nullptr) {
                 // check if this is due to a queue shutdown
                 if (_parser_queue->is_shutdown()) {

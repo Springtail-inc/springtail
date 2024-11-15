@@ -161,6 +161,8 @@ namespace springtail::pg_log_mgr {
         // clear out Redis
         // GC queue
         _redis_queue.clear();
+        // GC oid queue
+        _redis_oid_set.clear();
         // Table sync queue
         _redis_sync_queue.clear();
 
@@ -641,12 +643,9 @@ namespace springtail::pg_log_mgr {
     {
         uint64_t xid = xact->springtail_xid;
 
-        // find the correct RedisSortedSet
-        RSSOidValuePtr oid_set = _get_oid_set(_db_id);
-
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            oid_set->add(PgRedisOidValue(oid, xid), xid);
+            _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC
@@ -666,16 +665,13 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_push_xacts_to_redis(const std::vector<PgTransactionPtr> &xacts)
     {
-        // find the correct RedisSortedSet
-        RSSOidValuePtr oid_set = _get_oid_set(_db_id);
-
         std::vector<std::string> msgs;
         for (auto &xact : xacts) {
             uint64_t xid = xact->springtail_xid;
 
             // go through the oid map and update redis
             for (auto &oid : xact->oids) {
-                oid_set->add(PgRedisOidValue(oid, xid), xid);
+                _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
             }
 
             PgXactMsg redis_xact(xact->begin_path, xact->commit_path,
@@ -695,28 +691,6 @@ namespace springtail::pg_log_mgr {
 
         // do an underlying batch/bulk push
         _redis_queue.push(msgs);
-    }
-
-    RSSOidValuePtr
-    PgLogMgr::_get_oid_set(uint64_t db_id)
-    {
-        std::unique_lock<std::mutex> lock(_oid_set_mutex);
-
-        auto itr = _oid_set.find(db_id);
-        if (itr != _oid_set.end()) {
-            return itr->second;
-        }
-
-        std::string key = fmt::format(redis::SET_PG_OID_XIDS,
-                                      Properties::get_db_instance_id(), db_id);
-
-        RSSOidValuePtr oid_set = std::make_shared<RSSOidValue>(key);
-        auto result = _oid_set.emplace(db_id, oid_set);
-        if (!result.second) {
-            throw Error("Failed to insert into oid set");
-        }
-
-        return oid_set;
     }
 
 } // namespace springtail::pg_log_mgr

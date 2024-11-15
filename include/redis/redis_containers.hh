@@ -290,10 +290,23 @@ namespace springtail {
             return result;
         }
 
+        /**
+         * @brief Remove items from set by score
+         * @param min minimum score (inclusive)
+         * @param max maximum score (inclusive)
+         */
         void remove_by_score(const uint64_t min, const uint64_t max=-1)
         {
             sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
             RedisMgr::get_instance()->get_client()->zremrangebyscore(_key, interval);
+        }
+
+        /**
+         * @brief Clear the set.
+         */
+        void clear()
+        {
+            RedisMgr::get_instance()->get_client()->del(_key);
         }
 
     private:

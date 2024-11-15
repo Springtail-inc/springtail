@@ -22,12 +22,13 @@ from properties import Properties
 class Scheduler:
     """Scheduler class to manage the lifecycle of components"""
 
-    def __init__(self, props: Properties, allowed_timeout_secs: int = 5):
+    def __init__(self, props: Properties, allowed_timeout_secs: int = 15):
         """
         Initialize a new scheduler
         Arguments:
             props -- the properties object
             allowed_timeout -- the allowed timeout for components in seconds
+                NOTE: see constants.hh for the default keep alive timeout
         """
         self.props = props
         self.redis = props.get_data_redis()
@@ -154,6 +155,7 @@ class Scheduler:
         # value format: timestamp (epoch ms)
         timeouts: Dict[str, int] = {}
         for key, value in data.items():
+            print("Got timeout data: ", key, value)
             id, _ = key.split(':')
             if id not in self.components:
                 continue
@@ -167,9 +169,10 @@ class Scheduler:
 
         # Check for timeouts
         min_time = time.time() * 1000 - self.allowed_timeout
+        self.logger.debug(f"Checking timeouts: now: {time.time() * 1000}, allowed: {self.allowed_timeout}, min_time: {min_time}")
         for id, timestamp in self.timeouts.items():
             if timestamp < min_time:
-                self.logger.error(f"Timeout for component: {id}: {self.components[id].name}")
+                self.logger.error(f"Timeout for component: {self.components[id].name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")
                 if id in self.components:  # this should always be true
                     return True
 
@@ -208,6 +211,7 @@ class Scheduler:
                 ):
                     # restart all components
                     self.logger.warning("Restarting all components")
+                    sys.exit(1)
                     if not self.restart_all():
                         # XXX handle
                         self.logger.error("Failed to restart all components")

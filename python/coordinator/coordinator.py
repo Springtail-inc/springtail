@@ -5,6 +5,8 @@ import logging
 import argparse
 import string
 import signal
+import boto3
+from typing import Optional
 from random import SystemRandom
 
 # Get the parent directory of the current script (i.e., the project root directory)
@@ -19,6 +21,7 @@ from properties import Properties
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
 from scheduler import Scheduler
+
 
 def check_properties(props: Properties) -> None:
     """
@@ -51,7 +54,6 @@ def parse_arguments():
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
     parser.add_argument('-s', '--service', type=str, required=False, help='Name of the service: ingestion, fdw, or proxy')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    parser.add_argument('--env', action='store_true', help='Use environment variables instead of config file')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -69,20 +71,20 @@ def gen_random_string(length: int) -> str:
     return ''.join(SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
-def setup_props(yaml_config: dict, env: bool) -> Properties:
+def setup_props(yaml_config: dict) -> Properties:
     """
     Load properties from the config file or environment variables.
     Arguments:
         yaml_config -- the YAML configuration
-        env -- use environment variables
     """
     # Load properties from config file if provided;
     # otherwise assume environment variables
     props = None
-    if env:
+    config_file = yaml_config.get('system_json_path')
+    if config_file is None:
+        # default to using environment variables
         props = Properties()
     else:
-        config_file = yaml_config.get('system_json_path')
         if not config_file or not os.path.exists(config_file):
             raise ValueError(f"System JSON file not found: {config_file}")
         props = Properties(config_file)
@@ -107,8 +109,8 @@ if __name__ == "__main__":
     with open(args.config_file, 'r') as f:
         yaml_config = yaml.safe_load(f)
 
-    # Load properties from the config file or environment variables
-    props = setup_props(yaml_config, args.env)
+    # Load properties from the config file
+    props = setup_props(yaml_config)
 
     # Configure logging
     log_path = props.get_log_path()
