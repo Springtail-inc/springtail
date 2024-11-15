@@ -9,6 +9,7 @@
 #include <common/properties.hh>
 #include <common/logging.hh>
 #include <common/redis.hh>
+#include <common/coordinator.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -252,7 +253,7 @@ namespace springtail::pg_log_mgr {
 
             // block on redis table sync queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
-            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
+            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (table_id_ptr == nullptr) {
                 continue; // timeout, check for shutdown
             }
@@ -447,7 +448,15 @@ namespace springtail::pg_log_mgr {
         PgCopyData data;
         uint64_t start_offset = logger->offset();
 
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
             // read data from pg replication connection (blocks)
             try {
                 _pg_conn.read_data(data);
@@ -505,9 +514,17 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_log_reader_thread()
     {
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
             // get log entry from queue
-            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop();
+            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
                 continue;
             }
@@ -558,8 +575,17 @@ namespace springtail::pg_log_mgr {
     {
         _create_xact_logger(); ///< logger to write out xid log
 
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(XACT_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
-            PgTransactionPtr xact = _xact_queue->pop();
+
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+            PgTransactionPtr xact = _xact_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (xact == nullptr) {
                 continue;
             }

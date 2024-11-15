@@ -31,7 +31,7 @@ def parse_arguments():
     parser.add_argument('--isrunning', type=str, help='Is the component running <name>')
     parser.add_argument('--kill', type=str, help='Kill the component <name>')
     parser.add_argument('--test', action='store_true', help='Run tests <name>')
-    parser.add_argument('--stopall', action='store_true', help='Stop all components')
+    parser.add_argument('--stopall', action='store_true', help='Stop all ingest components (except postgres)')
 
     # Parse the arguments and return them
     args = parser.parse_args()
@@ -171,9 +171,6 @@ if __name__ == "__main__":
         xid_mgr_daemon = factory.create_xid_mgr_daemon()
         if not xid_mgr_daemon.shutdown() and not xid_mgr_daemon.kill():
             raise ValueError("Failed to stop xid_mgr_daemon")
-        postgres = factory.create_postgres()
-        if not postgres.shutdown() and not postgres.kill():
-            raise ValueError("Failed to stop postgres")
         sys.exit(0)
 
     # Start/stop/kill components

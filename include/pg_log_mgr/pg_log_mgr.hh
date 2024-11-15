@@ -57,6 +57,11 @@ namespace springtail::pg_log_mgr {
         /** redis worker id for redis sync queue */
         static constexpr char const * const REDIS_WORKER_ID = "pg_log_mgr";
 
+        /** coordinator thread worker ids arg=db_id */
+        static constexpr char const * const WRITER_WORKER_ID = "writer_{}";
+        static constexpr char const * const READER_WORKER_ID = "reader_{}";
+        static constexpr char const * const XACT_WORKER_ID = "xact_{}";
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id

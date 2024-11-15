@@ -157,7 +157,7 @@ class Scheduler:
         timeouts: Dict[str, int] = {}
         for key, value in data.items():
             self.logger.debug(f"Got timeout data: {key}:{value}")
-            id, _ = key.split(':')
+            id = key.split(':')[0]
             if id not in self.components:
                 continue
             if id not in timeouts:
@@ -199,10 +199,24 @@ class Scheduler:
         """
         self.shutdown_event.set()
 
+    def __init_timeouts(self) -> None:
+        """
+        Initialize timeouts for all registered components, clear any existing timeouts from redis
+        """
+        keys = self.redis.hkeys(self.liveness_hash)
+        for key in keys:
+            id = key.split(':')[0]
+            if id in self.components:
+                self.redis.hdel(self.liveness_hash, key)
+
     def monitor_timeouts(self) -> None:
         """
         Monitor Redis queue for timeout events
         """
+        # Initialize timeouts for registered components
+        # This will clear any existing timeouts from Redis
+        self.__init_timeouts()
+
         while not self.shutdown_event.is_set():
             try:
                 if (
@@ -212,7 +226,10 @@ class Scheduler:
                 ):
                     # restart all components
                     self.logger.warning("Restarting all components")
-                    sys.exit(1)
+
+                    if self.logger.isEnabledFor(logging.DEBUG):
+                        sys.exit(1)
+
                     if not self.restart_all():
                         # XXX handle
 
