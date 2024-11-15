@@ -78,6 +78,21 @@ namespace springtail {
         void commit_ddl(uint64_t db_id, uint64_t xid);
 
         /**
+         * Used by gc::Committer (GC-2) to provide the list of index DDL statements to the FDWs.
+         * @param db_id The ID of the database instance we are updating.
+         * @param xid The XID at which these DDL statements were applied.
+         */
+        void commit_index_ddl(uint64_t db_id, uint64_t xid);
+
+        /**
+         * Used by the gc::Committer (GC-2) to abort incomplete XIDs that are in the pre-commit
+         * phase.
+         * @param db_id The ID of the database instance we are updating.
+         * @param xid The XID at which these DDL statements were applied.
+         */
+        void abort_index_ddl(uint64_t db_id, uint64_t xid);
+
+        /**
          * Used by the gc::Committer (GC-2) to perform a cleanup of the pre-commit DDLs.
          * @return A list of <db_id, xid> pairs in the pre-commit step.
          */

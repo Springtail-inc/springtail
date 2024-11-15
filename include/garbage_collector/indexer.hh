@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <utility>
+#include <redis/redis_ddl.hh>
 
 namespace springtail::gc {
 
@@ -31,19 +32,25 @@ namespace springtail::gc {
          * Build a secondary index.
          * @param job Defines parameters of the index.
          */
-        void build(IndexParams idx);
+        void build(std::vector<IndexParams> idxs);
 
         /**
          * Drop the index. 
          * @param db_id The ID of the database.
          * @param index_id The ID of the index to drop.
          */
-        void drop(uint64_t db_id, uint64_t index_id);
+        void drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t completed_xid);
+
+
+        /**
+         * This will wait for the index work completion for given db. 
+         * @param db_id The ID of the database.
+         */
+        void wait_for_completion(uint64_t db_id, uint64_t tid);
 
     private:
         void task(std::stop_token st);
 
-        void _build(std::stop_token st, IndexParams idx);
 
         // Key is used to identify work items.
         using Key = std::pair<uint64_t, // DB id
@@ -59,14 +66,21 @@ namespace springtail::gc {
             };
         };
 
+        void _build(std::stop_token st, const Key& key, const IndexParams& idx);
+        void _commit(const Key& key);
+
+        // this is to notify when an index modifiction is completed 
+        std::condition_variable _cv_done;
+
         // work state
         std::condition_variable_any _cv;
         std::mutex _m;
-        std::unordered_map<Key, std::optional<IndexParams>, Hash> _work_set;
+        std::unordered_map<Key, IndexParams, Hash> _work_set;
         std::queue<Key> _queue;
 
         // workers
         std::vector<std::jthread> _workers;
-    };
 
+        RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
+    };
 }

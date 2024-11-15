@@ -302,11 +302,13 @@ namespace springtail::gc {
             if (!index_ddls.empty()) {
                 // The DDLs will be commited to the FDWs after indexing is completed.
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+                std::vector<Indexer::IndexParams> idxs;
                 for (auto const& ddl: index_ddls) {
-                    _indexer->build({db_id, completed_xid, xid, ddl});
-                    //TODO: need to implement notification when the build is completed to notify FDW
+                    idxs.emplace_back(db_id, completed_xid, xid, ddl);
                 }
+                _indexer->build(idxs);
             }
+
 
             if (!table_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
@@ -437,6 +439,8 @@ namespace springtail::gc {
                 // timed out, try again
                 continue;
             }
+            _indexer->wait_for_completion(entry->table->db(), entry->table->id());
+
 
             if (entry->do_finalize) {
                 _process_finalize(entry->table, entry->xid);

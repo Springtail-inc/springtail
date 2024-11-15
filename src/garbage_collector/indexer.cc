@@ -2,6 +2,7 @@
 #include <mutex>
 #include <stop_token>
 #include <assert.h>
+#include <algorithm>
 #include <garbage_collector/indexer.hh>
 #include <common/logging.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
@@ -17,30 +18,54 @@ namespace springtail::gc {
         SPDLOG_INFO("Indexer created: {}", worker_count);
     }
 
-    void Indexer::build(IndexParams idx)
+    void Indexer::build(std::vector<IndexParams> idxs)
     {
-        std::scoped_lock g(_m);
-        Key key(idx._db_id, idx._ddl["id"]);
-        assert(_work_set.find(key) == _work_set.end());
-        _work_set[key] = std::move(idx);
-        // notify workers about new item
-        _queue.push(key);
-        _cv.notify_one();
+        {
+            std::scoped_lock g(_m);
+            for (auto const& idx: idxs) {
+                Key key(idx._db_id, idx._ddl["id"]);
+                assert(_work_set.find(key) == _work_set.end());
+                _work_set[key] = std::move(idx);
+                _queue.push(key);
+            }
+        }
+        // notify workers about new items
+        _cv.notify_all();
     }
 
-    void Indexer::drop(uint64_t db_id, uint64_t index_id)
+    void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t completed_xid)
     {
         std::scoped_lock g(_m);
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
-            _work_set[key] = {};
+            _work_set[key] = {db_id, xid, completed_xid };
             // notify workers about new item
             _queue.push(key);
             _cv.notify_one();
         } else {
-            // clear params, it will tell the worker to cancel the index build
-            it->second = {};
+            // clear DDL, it will tell the worker to cancel the index build
+            it->second._ddl = {};
+        }
+    }
+
+    void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
+    {
+        std::unique_lock g(_m);
+        auto find_work = [&]() {
+            auto it = std::find_if(_work_set.begin(), _work_set.end(),
+                    [&](auto const& v) { 
+                        if (v.first.first == db_id && !v.second._ddl.is_null()) {
+                            return v.second._ddl["table_id"] == tid;
+                        }
+                        return false;
+                    });
+            return it != _work_set.end();
+        };
+
+        // wait for the key {db, tid} to be removed from the working set
+        while( find_work()  ) {
+            _cv_done.wait(g, [&]{return !find_work();});
         }
     }
 
@@ -48,7 +73,7 @@ namespace springtail::gc {
     {
         while(!st.stop_requested()) {
             Key key;
-            std::optional<IndexParams> params;
+            IndexParams params;
 
             // get the next work item
             {
@@ -62,24 +87,69 @@ namespace springtail::gc {
                 params = _work_set[key];
             }
 
-            if (params) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, params->_ddl.dump());
-                _build(st, std::move(*params));
+            if (!params._ddl.is_null()) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, params._ddl.dump());
+                _build(st, key, params);
             } else {
 //TODO:  _drop(st);
-            }
-
-            {
-                std::unique_lock g(_m);
-                _work_set.erase(key);
             }
         }
         SPDLOG_INFO("Indexer thread joined");
     }
 
-    void Indexer::_build(std::stop_token st, IndexParams idx)
+    void Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
-//        auto tid = idx._ddl["table_id"];
- //       auto table = TableMgr::get_instance()->get_mutable_table(idx._db_id, tid, idx._completed_xid, idx._xid, true);
+        //TODO for each row
+        {
+            // TODO: ... insert the row index
+            //
+            if(!st.stop_requested()) {
+                // TODO:... clear partial index
+                // abort DDL
+                _redis_ddl.abort_index_ddl(key.first, idx._xid);
+                return;
+            }
+            // .... periodically check if the index was dropped while 
+            // we were building it
+            {
+                std::unique_lock g(_m);
+                // index drop requested while we'd been building it
+                auto const& params = _work_set[key];
+                if (params._ddl.is_null()) {
+                    // TODO: remove this index from precommitted DDL for this XID
+//                  _redis_ddl.abort_index_ddl(key.first, idx._xid, key.second);
+//                    _drop(st, key, params);
+                    return;
+                }
+            }
+        }
+        _commit(key);
+    }
+
+    void Indexer::_commit(const Key& key) 
+    {
+        uint64_t xid{};
+
+        {
+            std::unique_lock g(_m);
+            xid = _work_set[key]._xid;
+
+            _work_set.erase(key);
+
+            _cv_done.notify_one();
+
+
+            auto it = std::find_if(_work_set.begin(), _work_set.end(),
+                    [&](auto const& v) { 
+                        return v.first.first == key.first && v.second._xid == xid;
+                    });
+
+            if (it != _work_set.end()) {
+                return;
+            }
+        }
+
+        // TODO: uncomment after FDW support is added
+        //_redis_ddl.commit_index_ddl(key.first, xid);
     }
 }
