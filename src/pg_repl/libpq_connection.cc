@@ -187,6 +187,8 @@ namespace springtail {
             throw PgNotConnectedError();
         }
 
+        assert(_is_replication == false);
+
         // clear old result if there was one
         clear();
 
@@ -483,6 +485,7 @@ namespace springtail {
         }
 
         _connection = connection;
+        _is_replication = replication;
     }
 
     /**
@@ -532,6 +535,9 @@ namespace springtail {
         if (_connection == nullptr) {
             throw PgNotConnectedError();
         }
+
+        assert (_is_replication);
+
         return PQsocket(_connection);
     }
 
@@ -545,6 +551,8 @@ namespace springtail {
 
     int LibPqConnection::wait_until_readable(int timeout_sec)
     {
+        assert (_is_replication);
+
         fd_set readfds;
         struct timeval timeout;
         struct timeval *tv;
@@ -589,6 +597,8 @@ namespace springtail {
 
     int LibPqConnection::wait_until_writable(int timeout_sec)
     {
+        assert (_is_replication);
+
         fd_set writefds;
         struct timeval timeout;
         struct timeval *tv;
@@ -637,6 +647,8 @@ namespace springtail {
             throw PgNotConnectedError();
         }
 
+        assert (_is_replication);
+
         size_t off = 0;
 
         while (off < count) {
@@ -650,6 +662,7 @@ namespace springtail {
             }
 
             if (r == 0) {
+                // when using ssl, pqsecure_read will return 0 on SSL_ERROR_WANT_READ
                 // typically this would be eof, but this is complicated, see
                 // pqReadData() in https://doxygen.postgresql.org/fe-misc_8c_source.html
                 if (errno == EPIPE || errno == ECONNRESET || errno == ECONNABORTED ||
@@ -657,10 +670,6 @@ namespace springtail {
                     errno == ENETRESET || errno == ENETUNREACH || errno == ETIMEDOUT) {
                     errno = ECONNRESET;
                     return -1;
-                }
-                if (is_ssl()) {
-                    // if ssl, then eof is not an error
-                    return 0;
                 }
 
                 // poll to see if there is data (timeout of 0)
@@ -676,18 +685,22 @@ namespace springtail {
                     assert (rc == 0);
                     // rc == 0, no data available, return 0 if async;
                     // otherwise fall through and wait for data
-                    return 0;
+                    errno = EWOULDBLOCK;
+                    return -1;
                 }
             }
 
-            // if async, or error and error is not a would block or again, then return error
-            if (async || r < 0 || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
-                return r;
+            if (r < 0) {
+                // if async, or error and error is not a would block or again, then return error
+                if (async || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
+                    return r;
+                }
             }
 
             // not async, fail through; block until socket is readable
             r = wait_until_readable();
             if (r < 0) {
+                errno = ECONNRESET;
                 return r;
             }
         }
@@ -699,6 +712,8 @@ namespace springtail {
         if (_connection == nullptr) {
             throw PgNotConnectedError();
         }
+
+        assert (_is_replication);
 
         size_t off = 0;
 

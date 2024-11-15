@@ -301,6 +301,9 @@ namespace springtail {
         /** Indicates if connection is in a transaction or not */
         bool _in_transaction = false;
 
+        /** Is the connection for replication */
+        bool _is_replication = false;
+
         /** Copy buffer pointer */
         char *_buffer = nullptr;
 

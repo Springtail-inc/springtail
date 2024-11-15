@@ -103,9 +103,12 @@ namespace springtail::pg_log_mgr {
             if (num_xacts == 0) {
                 break;
             }
+
             for (auto &xact: committed_xacts) {
                 assert (xact->springtail_xid >= _next_xid);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
             }
+
             _push_xacts_to_redis(committed_xacts);
             last_xact = committed_xacts.back();
             committed_xacts.clear();
@@ -459,7 +462,17 @@ namespace springtail::pg_log_mgr {
 
             // read data from pg replication connection (blocks)
             try {
+                // wait for data from pg; true if data is available
+                if (!_pg_conn.wait_for_data(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                    continue;
+                }
+
+                // read data from pg, length will be 0 if no data (timeout)
                 _pg_conn.read_data(data);
+                if (data.length == 0) {
+                    continue;
+                }
+
             } catch (const PgIOShutdown &e) {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received shutdown signal");
                 break;
@@ -479,7 +492,7 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
                          data.length, data.msg_length, data.msg_offset);
 
-            if (data.length == 0 || !logger->log_data(data)) {
+            if (!logger->log_data(data)) {
                 // data has been consumed by keep alive or not full message
                 continue;
             }
