@@ -25,7 +25,7 @@ namespace springtail::gc {
             for (auto const& idx: idxs) {
                 Key key(idx._db_id, idx._ddl["id"]);
                 assert(_work_set.find(key) == _work_set.end());
-                _work_set[key] = std::move(idx);
+                _work_set[key] = idx;
                 _queue.push(key);
             }
         }
