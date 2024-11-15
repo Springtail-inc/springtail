@@ -170,7 +170,7 @@ class Scheduler:
 
         # Check for timeouts
         min_time = time.time() * 1000 - self.allowed_timeout
-        self.logger.debug(f"Checking timeouts: now: {time.time() * 1000}, allowed: {self.allowed_timeout}, min_time: {min_time}")
+        self.logger.debug(f"Checking timeouts: allowed: {self.allowed_timeout}, min_time: {min_time}")
         for id, timestamp in self.timeouts.items():
             if timestamp < min_time:
                 self.logger.error(f"Timeout for component: {self.components[id].name}, {timestamp} < {min_time} {time.time() * 1000 - timestamp}")

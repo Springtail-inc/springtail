@@ -401,6 +401,9 @@ namespace springtail::pg_log_mgr {
         // rollover xact logger
         _create_xact_logger();
 
+        // clear the log resync file in redis
+        RedisMgr::get_instance()->get_client()->del(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id));
+
         // set state to replay done if we are in replaying state
         // this unblocks the xact handler
         _internal_state.set(STATE_REPLAY_DONE);

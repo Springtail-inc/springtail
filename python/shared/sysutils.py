@@ -19,7 +19,7 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
     if not os.path.exists(pid_path):
         raise Exception(f"PID path not found: {pid_path}")
 
-    # for each .pid file in the pid_path run kill -9 on the pid in that file
+    # for each .pid file in the pid_path run kill -2 (SIGINT) on the pid in that file
     for file in os.listdir(pid_path):
         file = os.path.join(pid_path, file)
         if file.endswith(".pid"):
@@ -27,13 +27,21 @@ def stop_daemons(pid_path : str, daemons : List[tuple] = []) -> None:
             with open(file, 'r') as f:
                 pid = f.read()
                 try:
-                    run_command('kill', ['-9', pid])
+                    run_command('kill', ['-2', pid])
                 except Exception as e:
                     # most likely the process is already dead
                     pass
                 run_command('rm', [file])
 
-    # kill any lingering daemons
+    # kill any lingering daemons after waiting a bit
+    retry = 3
+    while (retry > 0):
+        (pids, _) = running_pids(daemons)
+        if pids and len(pids) == 0:
+            return
+        time.sleep(1)
+        retry = retry - 1
+
     kill_processes(daemons)
 
 

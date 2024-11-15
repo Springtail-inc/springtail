@@ -105,8 +105,8 @@ namespace springtail::redis {
 
     /**
      * Hash set of schema_xids per FDW
-     * hash key: <fdw_id>, value: <schema_xid>
      * args: <db_instance_id>
+     * hash key: <db_id>:<fdw_id>, value: <schema_xid>
      */
     static constexpr char HASH_DDL_FDW[] = "hash:ddl:fdw:{}";
 
@@ -159,6 +159,7 @@ namespace springtail::redis {
 
     /**
      * Pub/sub for notifying the proxy of a table change or addition
+     * args: <db_instance_id>
      * msg: <db_id>:<add|remove>:<schema>:<table>
      * see RedisDbTables::decode_pubsub_msg()
      */

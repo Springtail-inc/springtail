@@ -98,9 +98,10 @@ namespace springtail {
         /**
          * Used by the FDW to record the latest schema XID that it has applied.
          * @param fdw_id The ID of the FDW we are updating.
+         * @param db_id The ID of the database instance we are updating.
          * @param schema_xid The XID from the last get_next_ddls() call that was applied.
          */
-        void update_schema_xid(const std::string &fdw_id, uint64_t schema_xid);
+        void update_schema_xid(const std::string &fdw_id, uint64_t db_id, uint64_t schema_xid);
 
         /**
          * Used by the FDW to commit the record without updating the schema XID.
@@ -112,9 +113,10 @@ namespace springtail {
 
         /**
          * Used by the XidMgr to identify when it can remove XIDs from it's schema XID history.
+         * @param db_id The ID of the database instance we are fetching XIDs for.
          * @return The minimum schema XID applied across all of the FDWs.
          */
-        uint64_t min_schema_xid();
+        uint64_t min_schema_xid(uint64_t db_id);
 
     private:
         std::shared_ptr<RedisClient> _redis;
