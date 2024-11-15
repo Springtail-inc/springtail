@@ -624,19 +624,13 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            auto cache = StorageCache::get_instance();
-
-            // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
-            auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back( extent->key().second, extent );
+            auto extent = SafeExtent(_file, std::move(header));
+            _extents.emplace_back( extent.get_ref() );
 
             // insert the tuple into the extent
-            auto row = extent->append();
+            auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
-
-            // release back to the cache
-            cache->_data_cache->put(extent);
             return;
         }
 
@@ -688,19 +682,13 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            auto cache = StorageCache::get_instance();
-
-            // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
-            auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back(extent->key().second, extent);
+            auto extent = SafeExtent(_file, std::move(header));
+            _extents.emplace_back(extent.get_ref());
 
             // insert the tuple into the extent
-            auto row = extent->append();
+            auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
-
-            // release back to the cache
-            cache->_data_cache->put(extent);
             return;
         }
 
@@ -729,19 +717,14 @@ namespace springtail {
         // if the page is empty, create an empty extent to back it
         if (_extents.empty()) {
             // create an empty extent
-            auto cache = StorageCache::get_instance();
-
-            // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
-            auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back(extent->key().second, extent);
+            auto extent = SafeExtent(_file, std::move(header));
+            _extents.emplace_back(extent.get_ref());
 
             // insert the tuple into the extent
-            auto row = extent->append();
+            auto row = (*extent)->append();
             MutableTuple(schema->get_mutable_fields(), row).assign(tuple);
 
-            // release back to the cache
-            cache->_data_cache->put(extent);
             return true;
         }
 
