@@ -76,7 +76,7 @@ namespace springtail::pg_proxy {
             std::unique_lock lock(_db_mutex);
             _replicated_databases[dbname] = db_id;
 
-            // TODO: I think this is no longer needed
+            // TODO: I think this is no longer needed as the real initialization will happen somewhere else
             std::unique_lock db_state_lock(_db_state_mutex);
             _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
         }
@@ -177,9 +177,8 @@ namespace springtail::pg_proxy {
 
         UserMgrPtr _user_mgr;                ///< user manager object
 
-        // std::thread _pubsub_thread[2];         ///< redis publisher/subscriber threads one per redis database
-        PubSubThread _config_sub_thread;
-        PubSubThread _data_sub_thread;
+        PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
+        PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
         ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
 
         std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map

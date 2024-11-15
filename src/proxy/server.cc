@@ -561,13 +561,6 @@ namespace springtail::pg_proxy {
     }
 
     void ProxyServer::_init_db_states_subscriber() {
-        // subscribe to the state change channel
-        /*
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(state_change_channel, [this](const std::string &msg) {
-            _handle_db_state_change(msg);
-        });
-        */
         // refresh all database states
         std::shared_lock db_name_lock(_db_mutex);
         std::unique_lock db_state_lock(_db_state_mutex);
@@ -575,9 +568,6 @@ namespace springtail::pg_proxy {
             redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
             _replicated_database_states[db_id] = db_state;
         }
-        // need to unlock here otherwise it will unlock at the end of the function
-        // db_state_lock.unlock();
-        // db_name_lock.unlock();
     }
 
     void ProxyServer::_handle_db_table_change(const std::string &msg) {
@@ -601,14 +591,6 @@ namespace springtail::pg_proxy {
     }
 
     void ProxyServer::_init_db_tables_subscriber() {
-        // subscribe to the state change channel
-        /*
-        std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
-        _data_sub_thread.add_subscriber(db_table_change_channel, [this](const std::string &msg) {
-            _handle_db_table_change(msg);
-        });
-        */
-
         // get all schemas and tables from redis
         std::shared_lock db_name_lock(_db_mutex);
         std::unique_lock schema_tables_lock(_schema_tables_mutex);
@@ -620,8 +602,6 @@ namespace springtail::pg_proxy {
                 _schema_tables.add_item(db_id, schema, table);
             }
         }
-        // schema_tables_lock.unlock();
-        // db_name_lock.unlock();
     }
 
 } // namespace springtail::pg_proxy

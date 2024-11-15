@@ -87,6 +87,10 @@ namespace pg_proxy {
         };
         using StmtContextPtr = std::shared_ptr<StmtContext>;
 
+        /**
+         * @brief function typedef for verifying if the table exists in for the give schema
+         *
+         */
         using VerifyTableFn = std::function<bool (const std::string &, const std::string &)>;
         /** Parse the query into multiple statements */
         static std::vector<StmtContextPtr> parse_query(const std::string_view query, VerifyTableFn verify_table_fn);

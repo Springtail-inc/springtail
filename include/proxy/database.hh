@@ -358,11 +358,26 @@ namespace pg_proxy {
         DatabaseInstancePtr _standby;
     };
 
-    // TODO: add class documentation
+    /**
+     * @brief This class represents database tables storage. It maps database id to a collection of schemas.
+     *      Each database schema maps to a collection of tables.
+     *
+     */
     class DatabaseSchemaTableStore {
     public:
+        /**
+         * @brief Default constructor
+         *
+         */
         DatabaseSchemaTableStore() = default;
 
+        /**
+         * @brief Add item to storage
+         *
+         * @param db_id - database id
+         * @param db_schema - schema name
+         * @param db_table - table name
+         */
         void add_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
@@ -381,6 +396,13 @@ namespace pg_proxy {
             schema.insert(db_table);
         }
 
+        /**
+         * @brief Remove item from storage
+         *
+         * @param db_id - database id
+         * @param db_schema - schema name
+         * @param db_table - table name
+         */
         void remove_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
@@ -395,6 +417,15 @@ namespace pg_proxy {
             schema.erase(db_table);
         }
 
+        /**
+         * @brief Verify if an item is in storage
+         *
+         * @param db_id - database id
+         * @param db_schema - database name
+         * @param db_table - database table
+         * @return true - item found
+         * @return false - item is not found
+         */
         bool has_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
@@ -412,7 +443,7 @@ namespace pg_proxy {
             return false;
         }
     private:
-        std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage;
+        std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
     };
 
 } // namespace springtail
