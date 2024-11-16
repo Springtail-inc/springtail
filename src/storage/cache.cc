@@ -434,7 +434,7 @@ namespace springtail {
           _end_xid(end_xid)
     {
         for (auto offset : offsets) {
-            ExtentRef r{offset};
+            ExtentRef r{offset, true};
             // this will create weak_ptr references to clean cache
             auto e = r.make_safe_extent(file);
             // safe a reference to the cached extent
@@ -468,7 +468,7 @@ namespace springtail {
         // create an empty extent
         auto extent = cache->_data_cache->get_empty(_file, header);
 
-        _extents.emplace_back(extent->key().second, extent);
+        _extents.emplace_back(extent->cache_id(), false, extent);
 
         cache->_data_cache->put(extent);
 
@@ -629,7 +629,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back( extent->key().second, extent );
+            _extents.emplace_back(extent->cache_id(), false, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -693,7 +693,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back(extent->key().second, extent);
+            _extents.emplace_back(extent->cache_id(), false, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -734,7 +734,7 @@ namespace springtail {
             // XXX we should get some kind of RAII object to avoid losing the cache slot on a thrown exception
             ExtentHeader header(ExtentType(), _end_xid, schema->row_size());
             auto extent = cache->_data_cache->get_empty(_file, header);
-            _extents.emplace_back(extent->key().second, extent);
+            _extents.emplace_back(extent->cache_id(), false, extent);
 
             // insert the tuple into the extent
             auto row = extent->append();
@@ -914,10 +914,10 @@ namespace springtail {
             auto old_extent = ref.make_safe_extent(_file);
 
             SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}@{} (size: {}) to {}@{} (size: {})",
-                                (*old_extent)->key().second,
+                                (*old_extent)->extent_id(),
                                 (*old_extent)->header().xid,
                                 (*old_extent)->header().row_size,
-                                new_extent->key().second,
+                                new_extent->extent_id(),
                                 new_extent->header().xid,
                                 new_extent->header().row_size);
 
@@ -929,7 +929,7 @@ namespace springtail {
                 MutableTuple(target_fields, new_row).assign(source_tuple);
             }
 
-            new_extents.emplace_back(new_extent->key().second, new_extent);
+            new_extents.emplace_back(new_extent->cache_id(), false, new_extent);
 
             // release the new extent back to the cache
             cache->_data_cache->put(new_extent);
@@ -968,25 +968,38 @@ namespace springtail {
 
         std::vector<uint64_t> offsets;
         for (auto &ref : _extents) {
-            auto e = ref.make_safe_extent(_file);
-            if ((*e)->state() == CacheExtent::State::DIRTY) {
+            // note: we don't need to do anything to CLEAN extents here
+            if (!ref.is_clean()) {
+                auto &&e = ref.make_safe_extent(_file);
 
-                // update the extent header
-                (*e)->header() = header;
+                // bring DIRTY extents to MUTABLE
+                if ((*e)->state() == CacheExtent::State::DIRTY) {
+                    // update the extent header
+                    (*e)->header() = header;
 
-                // append the extent to the file
-                // XXX should do these asynchronously to get better parallelism when there are multiple extents
-                cache->_data_cache->flush(*e);
+                    // append the extent to the file
+                    // XXX should do these asynchronously to get better parallelism when there are multiple extents
+                    cache->_data_cache->flush(*e);
+                }
 
-                // return the clean extent back to the read cache
-                cache->_data_cache->reinsert(*e);
+                // bring MUTABLE extents to CLEAN
+                if ((*e)->state() == CacheExtent::State::MUTABLE) {
+                    // return the now MUTABLE extent back to the read cache
+                    cache->_data_cache->reinsert(*e);
+                }
 
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
-
+                // update the reference with the details of the new extent
                 ref = e.get_ref();
+                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
+            // extent should always be clean at this point
+            assert(ref.is_clean());
             offsets.push_back(ref.id());
+        }
+
+        for (auto &ref : _extents) {
+            assert(ref.is_clean());
         }
 
         return offsets;
@@ -996,24 +1009,52 @@ namespace springtail {
 
     StorageCache::CacheExtentPtr
     StorageCache::DataCache::get(const std::filesystem::path &file,
-                                 uint64_t extent_id)
-    {
-        // note: must get_empty() UNKNOWN extents
-        assert(extent_id != constant::UNKNOWN_EXTENT);
-
-        CacheKey key(file, extent_id);
-        boost::unique_lock lock(_mutex);
-
-        // call the internal get() helper
-        return _get_clean(key);
-    }
-
-    StorageCache::CacheExtentPtr
-    StorageCache::DataCache::get(uint64_t cache_id,
+                                 const ExtentRef &ref,
                                  bool mark_dirty)
     {
         boost::unique_lock lock(_mutex);
 
+        // check if the the reference is valid
+        if (ref.is_direct()) {
+            // get it via the direct pointer
+            return _use_direct(ref.lock_cached(), mark_dirty);
+        }
+
+        // note: from here we may invoke a disk IO if we have a cache miss
+
+        // if the ref is of a DIRTY/MUTABLE page
+        if (!ref.is_clean()) {
+            // retrieve it from the dirty cache
+            return _get(ref.id(), mark_dirty);
+        }
+
+        // if the ref is of a CLEAN page
+        if (mark_dirty) {
+            // we create a MUTABLE copy of it by calling extract()
+            return _extract(file, ref.id());
+        } else {
+            // we return the CLEAN copy of it
+            return _get(file, ref.id());
+        }
+    }
+
+
+    StorageCache::CacheExtentPtr
+    StorageCache::DataCache::_get(const std::filesystem::path &file,
+                                  uint64_t extent_id)
+    {
+        // note: must get_empty() UNKNOWN extents
+        assert(extent_id != constant::UNKNOWN_EXTENT);
+
+        // call the internal get() helper
+        CacheKey key(file, extent_id);
+        return _get_clean(key);
+    }
+
+    StorageCache::CacheExtentPtr
+    StorageCache::DataCache::_get(uint64_t cache_id,
+                                  bool mark_dirty)
+    {
         CacheExtentPtr extent = nullptr;
 
         // find the extent using the unique cache_id
@@ -1039,8 +1080,10 @@ namespace springtail {
                 ++(extent->_use_count);
 
                 // wait for the flush to complete and then return the extent
+                boost::unique_lock lock(_mutex, boost::adopt_lock);
                 auto cv = extent->_flush_cv;
                 cv->wait(lock);
+                lock.release();
 
                 return extent;
             }
@@ -1098,17 +1141,16 @@ namespace springtail {
     }
 
     StorageCache::CacheExtentPtr
-    StorageCache::DataCache::extract(const std::filesystem::path &file,
-                                     uint64_t extent_id)
+    StorageCache::DataCache::_extract(const std::filesystem::path &file,
+                                      uint64_t extent_id)
     {
         CacheKey key(file, extent_id);
-        boost::unique_lock lock(_mutex);
 
         // get the clean extent from the cache
         auto extent = _get_clean(key);
         assert(extent);
 
-        // check if the caller is the only user
+        // check if we are the only user
         if (extent->_use_count == 1) {
             // this is the only user, so we can simply convert the extent to DIRTY
             // note: no need to adjust the LRU queue since the extent cannot be on it
@@ -1158,7 +1200,6 @@ namespace springtail {
 
         // mark the extent CLEAN
         extent->_state = CacheExtent::State::CLEAN;
-        extent->_cache_id = 0;
 
         // move from the dirty cache to the clean cache
         _dirty_cache.erase(dirty_i);
@@ -1166,6 +1207,7 @@ namespace springtail {
 
         // clear the cache ID
         _cache_id_map.erase(extent->_cache_id);
+        extent->_cache_id = 0;
     }
 
     void
@@ -1184,6 +1226,7 @@ namespace springtail {
 
         // note: extent must be dirty for this to be a valid operation
         assert(extent->_state == CacheExtent::State::DIRTY);
+        assert(extent->_use_count == 1);
 
         // evict the extent from the cache
         _dirty_cache.erase(extent->_cache_id);
@@ -1228,8 +1271,8 @@ namespace springtail {
         _dirty_cache.insert({ second->_cache_id, second });
         _release(second);
 
-        return std::pair<ExtentRef, ExtentRef>({ first->key().second, first },
-                                               { second->key().second, second });
+        return std::pair<ExtentRef, ExtentRef>({ first->_cache_id, false, first },
+                                               { second->_cache_id, false, second });
     }
 
     StorageCache::CacheExtentPtr
@@ -1278,6 +1321,7 @@ namespace springtail {
             auto cv = extent->_flush_cv;
             cv->wait(lock);
 
+            // note: this doesn't unlock, just releases the adopt_lock
             lock.release();
             return;
         }
@@ -1347,7 +1391,13 @@ namespace springtail {
         // evict an extent to make space
         auto extent = _clean_lru.front();
         _clean_lru.pop_front();
-        _clean_cache.erase(extent->key());
+
+        if (extent->_state == CacheExtent::State::CLEAN) {
+            _clean_cache.erase(extent->key());
+        } else {
+            assert(extent->_state == CacheExtent::State::MUTABLE);
+            _dirty_cache.erase(extent->_cache_id);
+        }
     }
 
     void
@@ -1441,69 +1491,56 @@ namespace springtail {
         }
     }
 
-    StorageCache::SafeExtent
-    StorageCache::ExtentRef::make_safe_extent(const std::filesystem::path &file) const {
-        SafeExtent e{ file, *this, false };
-        auto ref_ext = lock_cached();
-        // make sure that the referenced extent doesn't change 
-        assert(ref_ext? ref_ext == *e: true);
-        return e;
-    }
-
-    StorageCache::SafeExtent
-    StorageCache::ExtentRef::make_dirty_safe_extent(const std::filesystem::path &file) {
-        SafeExtent e{ file, *this, true };
-        assert(*e);
-        _cached = *e;  //update cached extent
-        return e;
-    }
-
-    StorageCache::SafeExtent::SafeExtent(const std::filesystem::path &file,
-            const ExtentRef &ref,
-            bool mark_dirty)
-        : _extent(nullptr)
+    StorageCache::CacheExtentPtr
+    StorageCache::DataCache::_use_direct(const CacheExtentPtr& extent,
+                                         bool mark_dirty)
     {
-        bool was_cached = ref.is_cached();
-        _extent = ref.lock_cached();
-        if (_extent) {
-            assert(_extent->state() != CacheExtent::State::INVALID);
-            _extent = StorageCache::get_instance()->_data_cache->use_cached(_extent, mark_dirty);
-        } else {
-            if (was_cached) {
-                SPDLOG_INFO("Evicted extent: {}", ref.id());
-            }
-            // not in cache
-            if (!mark_dirty) {
-                _extent = StorageCache::get_instance()->_data_cache->get(file, ref.id());
-            } else {
-                _extent = StorageCache::get_instance()->_data_cache->extract(file, ref.id());
-            }
-        }
-        assert(_extent);
-    }
-
-    StorageCache::CacheExtentPtr  StorageCache::DataCache::use_cached(const CacheExtentPtr& extent, bool mark_dirty) {
-        boost::unique_lock lock(_mutex);
-
+        // if the extent is being flushed, must block until complete
         if (extent->_state == CacheExtent::State::FLUSHING) {
-            // wait for the flush to complete and then return the extent
             // mark ourselves as a user of the extent to prevent eviction post-flush()
             ++(extent->_use_count);
+
+            // wait for the flush to complete
+            boost::unique_lock lock(_mutex, boost::adopt_lock);
             auto cv = extent->_flush_cv;
             cv->wait(lock);
-            --(extent->_use_count);
+            lock.release();
+
+        } else {
+            // check if we are the only user of the extent
+            if (extent->_use_count == 0) {
+                // need to remove from the appropriate LRU list
+                if (extent->_state == CacheExtent::State::CLEAN ||
+                    extent->_state == CacheExtent::State::MUTABLE) {
+                    _clean_lru.erase(extent->_pos);
+                } else if (extent->_state == CacheExtent::State::DIRTY) {
+                    _dirty_lru.erase(extent->_pos);
+                }
+            }
+
+            // mark ourselves as a user of the extent
+            ++(extent->_use_count);
         }
 
-        if (mark_dirty && extent->state() != CacheExtent::State::DIRTY) {
-            assert(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
-            _make_extent_space();
-            auto new_extent = std::make_shared<CacheExtent>(*extent);
-            _gen_cache_id(new_extent);
-            _dirty_cache.try_emplace( new_extent->_cache_id, new_extent );
-            return new_extent;
+        // if we aren't asking for a dirty extent, or it's already dirty / mutable, we can return immediately
+        if (!mark_dirty ||
+            extent->state() == CacheExtent::State::DIRTY ||
+            extent->state() == CacheExtent::State::MUTABLE) {
+            return extent;
         }
 
-        ++extent->_use_count;
-        return extent;
+        // sanity check that the extent is not in the dirty cache
+        assert(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
+
+        // ensure there is space for the dirty copy of the extent
+        _make_extent_space();
+
+        // copy the extent and assign it a "cache ID"
+        auto new_extent = std::make_shared<CacheExtent>(*extent);
+        _gen_cache_id(new_extent);
+
+        // place it into the dirty cache
+        _dirty_cache.try_emplace( new_extent->_cache_id, new_extent );
+        return new_extent;
     }
 }

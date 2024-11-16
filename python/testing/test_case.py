@@ -96,9 +96,9 @@ class TestCase:
 
     def _raise_failure(self, error: str) -> None:
         """Called where there is an execution or verification failure."""
-        self._result = 'FAILURE'
+        self._result = 'FAILED'
         self._error = error
-        _raise_error(self, error)
+        raise Exception(error)
 
 
     def parse_file(self) -> None:
@@ -243,18 +243,31 @@ class TestCase:
         logging.debug(f'Load CSV {filename} into {table}')
 
         with open(filename, 'r') as f:
-            csv_reader = csv.reader(f)
+            f.readline() # skip the header
+            cursor.copy_from(f, table, sep=',', null='')
 
-            # read the header with the column names
-            header = next(csv_reader)
-            headers = ', '.join([f'"{h}"' for h in header])
-            placeholders = ', '.join(['%s'] * len(header))
+        # psycopg3
+        # with (cursor.copy(f"COPY {table} FROM STDIN DELIMITER ',' NULL '' FORMAT CSV") as copy,
+        #       open(filename, 'r') as f):
+        #     while data := f.read(BLOCK_SIZE):
+        #         copy.write(data)
+            
+        # copy_query = f"COPY {table} FROM '{filename}' DELIMITER ',' CSV HEADER;"
+        # cursor.execute(copy_query)
 
-            # XXX might be faster if we loaded more than one row at a time
-            #     could also consider using a COPY command
-            insert_query = f'INSERT INTO "{table}" ({headers}) VALUES ({placeholders});'
-            for row in csv_reader:
-                cursor.execute(insert_query, row)
+        # with open(filename, 'r') as f:
+        #     csv_reader = csv.reader(f)
+
+        #     # read the header with the column names
+        #     header = next(csv_reader)
+        #     headers = ', '.join([f'"{h}"' for h in header])
+        #     placeholders = ', '.join(['%s'] * len(header))
+
+        #     # XXX might be faster if we loaded more than one row at a time
+        #     #     could also consider using a COPY command
+        #     insert_query = f'INSERT INTO "{table}" ({headers}) VALUES ({placeholders});'
+        #     for row in csv_reader:
+        #         cursor.execute(insert_query, [ None if r == '' else r for r in row ])
 
 
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
@@ -424,12 +437,13 @@ class TestCase:
         logging.info(f'{self._name} -- Running setup()')
 
         # construct a connection for each transaction in the test
+        if len(self._txns) == 0:
+            self._txns.add(self._metadata['default_txn'])
+
         for txn in self._txns:
             logging.debug(f'Connecting to database for txn "{txn}"')
             self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
-            with self._connections[txn].cursor() as c:
-                self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
 
         # execute all of the setup commands
         if len(self._sections['setup']) > 0:
@@ -474,8 +488,6 @@ class TestCase:
             logging.debug(f'Connecting to database for txn "{txn}"')
             self._connections[txn] = springtail.connect_db_instance(self._props, self._primary_name)
             self._connections[txn].autocommit = self._metadata['autocommit']
-            with self._connections[txn].cursor() as c:
-                self._execute_sql(c, f'BEGIN; SET statement_timeout = {self._metadata["query_timeout"] * 1000}; COMMIT;', False)
 
         # connect to the replica database -- used to perform any 'sync' directives
         self._fdw = springtail.connect_fdw_instance(self._props, self._replica_name)

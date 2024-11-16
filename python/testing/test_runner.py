@@ -31,7 +31,8 @@ def gen_test_set(test_set: str,
 
 def gen_all_tests(test_folder: str,
                   config_file: str,
-                  build_dir: str) -> list[TestSet]:
+                  build_dir: str,
+                  test_dirs: list[str]) -> list[TestSet]:
     """Generate all test sets in the test folder.
 
     Args:
@@ -42,9 +43,12 @@ def gen_all_tests(test_folder: str,
     """
     logging.info(f"Running all test cases from folder: {test_folder}")
 
+    if test_dirs is None:
+        test_dirs = sorted(os.listdir(test_folder))
+
     # parse and prepare all of the test cases
     test_sets = []
-    for test_set in sorted(os.listdir(test_folder)):
+    for test_set in test_dirs:
         if not os.path.isfile(os.path.join(test_folder, test_set, '__config.sql')):
             print(f'Skipping test set {test_set} -- missing __config.sql')
             continue
@@ -193,6 +197,8 @@ if __name__ == "__main__":
     build_dir = yaml_config.get('build_dir')
     if not build_dir:
         raise ValueError('"build_dir" is missing in the YAML configuration')
+
+    default_test_sets = yaml_config.get('default_test_sets')
 
     # set the log level and format
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
