@@ -164,7 +164,6 @@ namespace springtail::pg_proxy {
         }
 
         bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
-            std::shared_lock lock(_schema_tables_mutex);
             return _schema_tables.has_item(db_id, schema, table);
 
         }
@@ -199,7 +198,7 @@ namespace springtail::pg_proxy {
         std::shared_mutex _db_state_mutex;   ///< shared mutex for read/write access to database state
         std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
 
-        std::shared_mutex _schema_tables_mutex;  ///< shared mutex lock for schema tables storage
+        // std::shared_mutex _schema_tables_mutex;  ///< shared mutex lock for schema tables storage
         DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
 
         bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary

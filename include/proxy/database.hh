@@ -379,20 +379,21 @@ namespace pg_proxy {
          * @param db_table - table name
          */
         void add_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_storage_mutex);
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
                 std::map<std::string, std::set<std::string>> empty_db;
                 _storage.insert(std::pair(db_id, empty_db));
                 db_it = _storage.find(db_id);
             }
-            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto &db = db_it->second;
             auto schema_it = db.find(db_schema);
             if (schema_it == db.end()) {
                 std::set<std::string> empty_schema;
                 db.insert(std::pair(db_schema, empty_schema));
                 schema_it = db.find(db_schema);
             }
-            std::set<std::string> &schema = schema_it->second;
+            auto &schema = schema_it->second;
             schema.insert(db_table);
         }
 
@@ -404,16 +405,17 @@ namespace pg_proxy {
          * @param db_table - table name
          */
         void remove_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_storage_mutex);
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
                 return;
             }
-            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto &db = db_it->second;
             auto schema_it = db.find(db_schema);
             if (schema_it == db.end()) {
                 return;
             }
-            std::set<std::string> &schema = schema_it->second;
+            auto &schema = schema_it->second;
             schema.erase(db_table);
         }
 
@@ -427,16 +429,17 @@ namespace pg_proxy {
          * @return false - item is not found
          */
         bool has_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::shared_lock storage_lock(_storage_mutex);
             auto db_it = _storage.find(db_id);
             if (db_it == _storage.end()) {
                 return false;
             }
-            std::map<std::string, std::set<std::string>> &db = db_it->second;
+            auto &db = db_it->second;
             auto schema_it = db.find(db_schema);
             if (schema_it == db.end()) {
                 return false;
             }
-            std::set<std::string> &schema = schema_it->second;
+            auto &schema = schema_it->second;
             if (schema.contains(db_table)) {
                 return true;
             }
@@ -444,6 +447,7 @@ namespace pg_proxy {
         }
     private:
         std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
+        std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
     };
 
 } // namespace springtail

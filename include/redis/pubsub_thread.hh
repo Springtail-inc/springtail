@@ -36,7 +36,7 @@ namespace springtail {
 
         /**
          * @brief Function for registering channel subscribers. Right now we can have only one
-         *          subscriber per channel. For now this function can only be called befor start
+         *          subscriber per channel. For now this function can only be called before start
          *          function.
          *
          * @param channel - channel name
@@ -44,6 +44,7 @@ namespace springtail {
          * @param consume_fn - consume callback
          */
         void add_subscriber(std::string &channel, SubscriberInitCBFn init_fn, SubscriberConsumeCBFn consume_fn) {
+            assert(!_is_up);
             _channels.insert(std::pair(channel, std::pair(init_fn, consume_fn)));
             SPDLOG_DEBUG("Added subscriber channel: {}", channel);
         }
@@ -66,7 +67,6 @@ namespace springtail {
          */
         void start() {
             _subscriber_thread = std::thread(&PubSubThread::_run, this);
-
         }
 
         /**

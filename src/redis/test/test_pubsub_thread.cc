@@ -12,8 +12,7 @@ namespace {
     class RedisPubSub_Test : public testing::TestWithParam<bool> {
     protected:
         void SetUp() override {
-            Properties::init();
-            init_logging();
+            springtail_init();
 
             // See if redis is enabled
             try {

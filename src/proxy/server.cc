@@ -553,9 +553,6 @@ namespace springtail::pg_proxy {
         uint64_t db_id;
         redis::db_state_change::DBState state;
         redis::db_state_change::parse_db_state_change(msg, db_id, state);
-        if (db_id != _db_instance_id) {
-            return;
-        }
         std::unique_lock db_state_lock(_db_state_mutex);
         _replicated_database_states[db_id] = state;
     }
@@ -577,10 +574,6 @@ namespace springtail::pg_proxy {
         std::string schema;
         std::string table;
         RedisDbTables::decode_pubsub_msg(msg, db_id, action, schema, table);
-        if (db_id != _db_instance_id) {
-            return;
-        }
-        std::unique_lock schema_tables_lock(_schema_tables_mutex);
         if (action == "add") {
             _schema_tables.add_item(db_id, schema, table);
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
@@ -593,7 +586,6 @@ namespace springtail::pg_proxy {
     void ProxyServer::_init_db_tables_subscriber() {
         // get all schemas and tables from redis
         std::shared_lock db_name_lock(_db_mutex);
-        std::unique_lock schema_tables_lock(_schema_tables_mutex);
         for (const auto &[db_name, db_id]: _replicated_databases) {
             std::vector<std::pair<std::string, std::string>> schema_table_pairs;
             RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
