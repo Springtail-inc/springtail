@@ -24,6 +24,7 @@ namespace springtail::gc {
             std::scoped_lock g(_m);
             for (auto const& idx: idxs) {
                 Key key(idx._db_id, idx._ddl["id"]);
+                // is it expected?
                 assert(_work_set.find(key) == _work_set.end());
                 _work_set[key] = idx;
                 _queue.push(key);
@@ -46,6 +47,9 @@ namespace springtail::gc {
             _cv.notify_one();
         } else {
             // clear DDL, it will tell the worker to cancel the index build
+            // TODO: abort redis DDL for this xid and index
+            // if we the index was dropped before the build is completed
+            // we don't notify FDW?
             it->second._ddl = {};
         }
     }
@@ -91,10 +95,10 @@ namespace springtail::gc {
             if (!params._ddl.is_null()) {
                 SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, params._ddl.dump());
                 _build(st, key, params);
+                _commit_build(key);
             } else {
 //TODO:  _drop(st);
             }
-            _commit(key);
         }
         SPDLOG_INFO("Indexer thread joined");
     }
@@ -136,19 +140,28 @@ namespace springtail::gc {
         return true;
     }
 
-    void Indexer::_commit(const Key& key) 
+    void Indexer::_commit_build(const Key& key) 
     {
         uint64_t xid{};
 
         {
             std::unique_lock g(_m);
-            xid = _work_set[key]._xid;
+
+            auto const& params = _work_set[key];
+            xid = params._xid;
 
             _check_work_state(key);
             _work_set.erase(key);
             _cv_done.notify_one();
 
-            // check if there are pending jobs for the giving xid
+            // index dropped
+            if (params._ddl.is_null()) {
+                // TODO: clear partial index
+                // TODO: cancel redis DDL
+                return;
+            }
+
+            // check if there are pending jobs for this xid
             auto it = std::find_if(_work_set.begin(), _work_set.end(),
                     [&](auto const& v) { 
                         return v.first.first == key.first && v.second._xid == xid;
