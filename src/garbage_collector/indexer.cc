@@ -39,10 +39,9 @@ namespace springtail::gc {
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
-            // this will clear the item ddl that is an indication
-            // to the worker thread that the index should be dropped
-            _work_set[key] = {db_id, xid, completed_xid };
-            // notify workers about new item
+            // note: the work item has _ddl.empty() == true
+            // it means to drop the index
+            _work_set[key] = {xid, completed_xid };
             _queue.push(key);
             _cv.notify_one();
         } else {
