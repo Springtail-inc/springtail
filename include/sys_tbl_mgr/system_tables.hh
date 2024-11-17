@@ -113,7 +113,6 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t TABLE_ID = 0;
             static constexpr uint32_t INDEX_ID = 1;
             static constexpr uint32_t XID = 2;
-            static constexpr uint32_t EXTENT_ID = 3;
 
             static const std::vector<SchemaColumn> SCHEMA;
             static const std::vector<std::string> KEY;

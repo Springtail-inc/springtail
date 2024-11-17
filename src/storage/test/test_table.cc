@@ -41,7 +41,7 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-            _secondary_keys = { std::vector<std::string>({"table_id"}) };
+            //_secondary_keys = { std::vector<std::string>({"table_id"}) };
 
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
@@ -182,7 +182,7 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
+        ASSERT_TRUE(table->index(0)->begin() == table->index(0)->end());
     }
 
     TEST_F(Table_Test, Inserts) {
@@ -190,7 +190,9 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT} };
+//        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -238,7 +240,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+        metadata.roots = {{0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}};
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows

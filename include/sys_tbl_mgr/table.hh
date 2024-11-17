@@ -32,6 +32,9 @@ namespace springtail {
         uint64_t snapshot_xid = 0;
     };
 
+    template<typename T>
+    std::vector<TableRoot> _init_table_roots(T &table, const TableMetadata& metadata);
+
     /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
      * information, performing scans, extent_id lookups, etc.
@@ -248,6 +251,7 @@ namespace springtail {
          * @return A BTree object of the requested index.
          */
         BTreePtr index(uint32_t idx) {
+            assert(idx == 0);
             if (idx == 0) {
                 return _primary_index;
             }
@@ -307,6 +311,8 @@ namespace springtail {
         FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
+                           ///
+        friend std::vector<TableRoot> _init_table_roots<Table>(Table &table, const TableMetadata& metadata);
     };
     typedef std::shared_ptr<Table> TablePtr;
 
@@ -555,6 +561,8 @@ namespace springtail {
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
+                      ///
+        friend std::vector<TableRoot> _init_table_roots<MutableTable>(MutableTable &table, const TableMetadata& metadata);
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
 

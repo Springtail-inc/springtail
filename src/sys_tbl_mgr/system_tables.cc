@@ -65,7 +65,6 @@ namespace springtail::sys_tbl {
         { "table_id", 1, SchemaType::UINT64, INT8OID, false },
         { "index_id", 2, SchemaType::UINT64, INT8OID, false },
         { "xid", 3, SchemaType::UINT64, INT8OID, false },
-        { constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, INT8OID, false }
     };
 
     const std::vector<std::string> TableRoots::Primary::KEY = {

@@ -704,15 +704,21 @@ namespace springtail::sys_tbl_mgr {
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
 
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid.xid);
-        auto rrow_i = roots_t->lower_bound(search_key);
 
         auto table_id_f = roots_t->extent_schema()->get_field("table_id");
         auto index_id_f = roots_t->extent_schema()->get_field("index_id");
         auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+        auto xid_f = roots_t->extent_schema()->get_field("xid");
 
-        for (auto rrow_i = roots_t->lower_bound(search_key); rrow_i != roots_t->end(); ++rrow_i) {
+        auto rrow_i = roots_t->inverse_lower_bound(search_key);
+        for (; rrow_i != roots_t->end(); ++rrow_i) {
             if (table_id_f->get_uint64(*rrow_i) != table_id) {
                 break;
+            }
+            auto record_xid = xid_f->get_uint64(*rrow_i);
+            if (xid.xid < record_xid) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table root {}:{}", table_id, xid.xid);
+                continue;
             }
             sys_tbl_mgr::RootInfo ri;
             ri.index_id = index_id_f->get_uint64(*rrow_i);
@@ -724,6 +730,7 @@ namespace springtail::sys_tbl_mgr {
             SPDLOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}",
                         table_id, xid.xid, xid.lsn,
                         search_key->to_string());
+            assert(false);
         }
 
         // retrieve the snapshot XID (use the primary index row)

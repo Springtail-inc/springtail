@@ -273,11 +273,11 @@ namespace {
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // "add data" to the table
-        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }, { 1, 15 }}});
+        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }}, {15}});
         _finalize();
 
         // add more data to the table
-        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 100 }, { 1, 30 }}});
+        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 100 }}, {30}});
         _finalize();
 
         // rename col2 => coltwo

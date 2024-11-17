@@ -10,8 +10,8 @@ namespace springtail {
 
     namespace {
         const static std::vector<SchemaColumn> ROOTS_SCHEMA = {
-            { 0, 0, "root", 0, SchemaType::UINT64, 0, true, false },
-            { 0, 0, "index_id", 0, SchemaType::UINT64, 0, true, false }
+            { "root", 1, SchemaType::UINT64, 20, true },
+            { "index_id", 2, SchemaType::UINT64, 20, false },
         };
 
         std::filesystem::path _get_table_dir(const std::filesystem::path &base,
@@ -23,7 +23,6 @@ namespace springtail {
             std::string table_dir = fmt::format("{}-{}", table_id, snapshot_xid);
             return base / db_dir / table_dir;
         }
-
 
     }
 
@@ -57,7 +56,7 @@ namespace springtail {
         _roots_root_f = _roots_schema->get_field("root");
         _roots_index_id_f = _roots_schema->get_field("index_id");
 
-        // handle if the roots were not provided
+                // handle if the roots were not provided
         auto roots = metadata.roots;
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
@@ -68,14 +67,19 @@ namespace springtail {
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
                     roots.push_back(
-                            {_roots_index_id_f->get_uint64(row), 
+                            {_roots_index_id_f->get_uint64(row),
                             _roots_root_f->get_uint64(row)});
                 }
+                // XXX is this the right thing to do?  forces the XID to the known XID of the roots
+                xid = extent->header().xid;
+            } else {
+                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
+                roots.push_back({constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT});
             }
         }
+        assert(!roots.empty());
 
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 0, SchemaType::UINT32, 0, false);
 
         ExtentSchemaPtr primary_schema;
         if (primary_key.empty()) {
@@ -85,7 +89,6 @@ namespace springtail {
         } else {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         }
-
 
         auto it = std::find_if(roots.begin(), roots.end(), [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
@@ -298,7 +301,6 @@ namespace springtail {
         _roots_root_f = _roots_schema->get_mutable_field("root");
         _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
 
-        // handle if the roots were not provided
         auto roots = metadata.roots;
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
@@ -312,9 +314,12 @@ namespace springtail {
                 }
             } else {
                 // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
-                roots.push_back({constant::INDEX_PRIMARY,constant::UNKNOWN_EXTENT});
+                roots.push_back({constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT});
             }
         }
+        assert(!roots.empty());
+
+
 
         // construct the primary index btree
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
@@ -623,10 +628,7 @@ namespace springtail {
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
-        for (auto& v: metadata.roots) {
-            if (v.index_id == constant::INDEX_PRIMARY)
-                v.extent_id = _primary_index->finalize();
-        }
+        metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
 
         // TODO: deal with secondary indexes
         metadata.stats = _stats;
@@ -638,7 +640,7 @@ namespace springtail {
         for (auto root : metadata.roots) {
             auto &&row = extent->append();
             _roots_root_f->set_uint64(row, root.extent_id);
-            _roots_index_id_f->set_uint64(row, root.extent_id);
+            _roots_index_id_f->set_uint64(row, root.index_id);
         }
         auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,
