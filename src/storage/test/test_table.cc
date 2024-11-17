@@ -1,3 +1,4 @@
+#include "sys_tbl_mgr/system_tables.hh"
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
@@ -71,7 +72,7 @@ namespace {
         uint64_t _db_id = 1;
 
         TablePtr
-        _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_table(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
@@ -83,7 +84,7 @@ namespace {
         }
 
         MutableTablePtr
-        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
@@ -162,7 +163,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
@@ -189,7 +190,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -237,7 +238,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -348,7 +349,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -711,7 +712,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows

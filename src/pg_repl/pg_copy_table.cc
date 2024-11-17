@@ -468,7 +468,12 @@ namespace springtail
             request.db_id = db_id;
             request.xid = xid.xid;
             request.table_id = table_oid;
-            request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+            for (auto const& [index, extent]: metadata.roots) {
+                sys_tbl_mgr::RootInfo ri;
+                ri.index_id = index;
+                ri.extent_id = extent;
+                request.roots.push_back(ri);
+            }
             request.stats.row_count = metadata.stats.row_count;
             request.snapshot_xid = metadata.snapshot_xid;
             auto &&update_json = common::thrift_to_json<sys_tbl_mgr::UpdateRootsRequest>(request);

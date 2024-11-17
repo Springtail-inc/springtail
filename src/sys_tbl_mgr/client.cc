@@ -273,7 +273,13 @@ namespace springtail::sys_tbl_mgr {
         request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
-        request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+        for (auto const& [index_id, extent_id]: metadata.roots) {
+            sys_tbl_mgr::RootInfo ri;
+            ri.index_id = index_id;
+            ri.extent_id = extent_id;
+            request.roots.push_back(ri);
+        }
+
         request.stats.row_count = metadata.stats.row_count;
         request.snapshot_xid = metadata.snapshot_xid;
 
@@ -318,8 +324,9 @@ namespace springtail::sys_tbl_mgr {
         c.client->get_roots(result, request);
 
         TableMetadata metadata;
-        metadata.roots.insert(metadata.roots.end(),
-                              result.roots.begin(), result.roots.end());
+        for (auto const &r: result.roots) {
+            metadata.roots.emplace_back(r.index_id, r.extent_id);
+        }
         metadata.stats.row_count = result.stats.row_count;
         metadata.snapshot_xid = result.snapshot_xid;
 

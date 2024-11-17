@@ -1,4 +1,5 @@
 #include "common/constants.hh"
+#include "thrift/sys_tbl_mgr/sys_tbl_mgr_types.h"
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 
 #include <sys_tbl_mgr/service.hh>
@@ -188,7 +189,10 @@ namespace springtail::sys_tbl_mgr {
 
         // add roots and stats entry -- may get overwritten later if data is added to the table
         auto roots_info = std::make_shared<GetRootsResponse>();
-        roots_info->roots.push_back(constant::UNKNOWN_EXTENT);
+        sys_tbl_mgr::RootInfo ri;
+        ri.index_id = constant::INDEX_PRIMARY;
+        ri.extent_id = constant::UNKNOWN_EXTENT;
+        roots_info->roots.push_back(ri);
         roots_info->stats.row_count = 0;
         roots_info->snapshot_xid = request.snapshot_xid;
 
@@ -700,30 +704,27 @@ namespace springtail::sys_tbl_mgr {
         auto roots_key_fields = roots_t->extent_schema()->get_sort_fields();
 
         auto search_key = sys_tbl::TableRoots::Primary::key_tuple(table_id, constant::INDEX_PRIMARY, xid.xid);
-        auto rrow_i = roots_t->inverse_lower_bound(search_key);
-
-        // need to confirm that the table ID and index ID match, but the XID may not match
-        if (rrow_i == roots_t->end()) {
-            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}", table_id, xid.xid, xid.lsn, search_key->to_string());
-            return roots_info;
-        }
+        auto rrow_i = roots_t->lower_bound(search_key);
 
         auto table_id_f = roots_t->extent_schema()->get_field("table_id");
         auto index_id_f = roots_t->extent_schema()->get_field("index_id");
-        if (table_id_f->get_uint64(*rrow_i) != table_id ||
-            index_id_f->get_uint64(*rrow_i) != constant::INDEX_PRIMARY) {
-            // no roots?  try to find it in the roots file by returning empty roots
-            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {} -- {},{}",
-                        table_id, xid.xid, xid.lsn,
-                        search_key->to_string(),
-                        table_id_f->get_uint64(*rrow_i), index_id_f->get_uint64(*rrow_i));
-            return roots_info;
+        auto eid_f = roots_t->extent_schema()->get_field("extent_id");
+
+        for (auto rrow_i = roots_t->lower_bound(search_key); rrow_i != roots_t->end(); ++rrow_i) {
+            if (table_id_f->get_uint64(*rrow_i) != table_id) {
+                break;
+            }
+            sys_tbl_mgr::RootInfo ri;
+            ri.index_id = index_id_f->get_uint64(*rrow_i);
+            ri.extent_id = eid_f->get_uint64(*rrow_i);
+            roots_info->roots.push_back(ri);
         }
 
-        // retrieve the root extent ID of the primary
-        const std::string &eid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::EXTENT_ID].name;
-        auto eid_f = roots_t->extent_schema()->get_field(eid);
-        roots_info->roots.push_back(eid_f->get_uint64(*rrow_i));
+        if (roots_info->roots.empty()) {
+            SPDLOG_WARN("Couldn't find table_roots entry for {}@{}:{} -- {}",
+                        table_id, xid.xid, xid.lsn,
+                        search_key->to_string());
+        }
 
         // retrieve the snapshot XID (use the primary index row)
         const std::string &sxid = sys_tbl::TableRoots::Data::SCHEMA[sys_tbl::TableRoots::Data::SNAPSHOT_XID].name;
@@ -766,14 +767,13 @@ namespace springtail::sys_tbl_mgr {
         // update the table_roots
         auto write_xid = _get_write_xid(db_id);
         auto table_roots_t = _get_mutable_system_table(db_id, sys_tbl::TableRoots::ID);
-        for (int index_id = 0; index_id < roots_info->roots.size(); ++index_id) {
-            uint64_t root = roots_info->roots[index_id];
-            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, index_id, xid.xid, root,
+        for (auto const& r: roots_info->roots) {
+            auto tuple = sys_tbl::TableRoots::Data::tuple(table_id, r.index_id, xid.xid, r.extent_id,
                                                           roots_info->snapshot_xid);
             table_roots_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Updated root {}@{}:{} {} - {}",
-                                table_id, xid.xid, xid.lsn, index_id, roots_info->roots[index_id]);
+                                table_id, xid.xid, xid.lsn, r.index_id, r.extent_id);
         }
 
         // update the table_stats

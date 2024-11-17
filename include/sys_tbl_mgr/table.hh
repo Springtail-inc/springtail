@@ -16,10 +16,18 @@ namespace springtail {
     };
 
     /**
+     * Structure to hold table roots.
+     */
+    struct TableRoot {
+        uint64_t index_id = 0;
+        uint64_t extent_id = 0;
+    };
+
+    /**
      * Structure to hold table metadata required to record a table snapshot.
      */
     struct TableMetadata {
-        std::vector<uint64_t> roots;
+        std::vector<TableRoot> roots;
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
@@ -296,6 +304,7 @@ namespace springtail {
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
+        FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
     };
@@ -540,6 +549,7 @@ namespace springtail {
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
+        MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.

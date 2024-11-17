@@ -55,6 +55,11 @@ struct TableStats {
     1: i64 row_count
 }
 
+struct RootInfo {
+    1: i64 index_id,
+    2: i64 extent_id,
+}
+
 struct IndexColumn {
     1: string name,
     2: i32 position,
@@ -92,7 +97,7 @@ struct UpdateRootsRequest {
     1: i64 db_id,
     2: i64 xid,
     3: i64 table_id,
-    4: list<i64> roots,
+    4: list<RootInfo> roots,
     5: TableStats stats,
     6: i64 snapshot_xid
 }
@@ -109,7 +114,7 @@ struct GetRootsRequest {
 }
 
 struct GetRootsResponse {
-    1: list<i64> roots,
+    1: list<RootInfo> roots,
     2: TableStats stats,
     3: i64 snapshot_xid
 }

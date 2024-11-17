@@ -1,3 +1,4 @@
+#include "common/constants.hh"
 #include <memory>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
@@ -54,9 +55,10 @@ namespace springtail {
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
         _roots_root_f = _roots_schema->get_field("root");
+        _roots_index_id_f = _roots_schema->get_field("index_id");
 
         // handle if the roots were not provided
-        std::vector<uint64_t> roots(metadata.roots);
+        auto roots = metadata.roots;
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
@@ -65,16 +67,9 @@ namespace springtail {
                 auto response = root_handle->read(0);
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
-                    roots.push_back(_roots_root_f->get_uint64(row));
-                }
-
-                // XXX is this the right thing to do?  forces the XID to the known XID of the roots
-                xid = extent->header().xid;
-            } else {
-                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
-                roots.push_back(constant::UNKNOWN_EXTENT);
-                for (auto secondary : secondary_keys) {
-                    roots.push_back(constant::UNKNOWN_EXTENT);
+                    roots.push_back(
+                            {_roots_index_id_f->get_uint64(row), 
+                            _roots_root_f->get_uint64(row)});
                 }
             }
         }
@@ -91,29 +86,20 @@ namespace springtail {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         }
 
+
+        auto it = std::find_if(roots.begin(), roots.end(), [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
+        assert(it != roots.end());
+
         _primary_index = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                  xid,
                                                  primary_schema,
-                                                 roots[0]);
+                                                 it->extent_id);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
 
-        for (int i = 0; i < secondary_keys.size(); i++) {
-            auto secondary_key = secondary_keys[i];
 
-            // add the additional secondary key columns
-            secondary_key.push_back(constant::INDEX_EID_FIELD);
-            secondary_key.push_back(constant::INDEX_RID_FIELD);
-
-            auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
-
-            auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, (i + 1)),
-                                                 xid,
-                                                 secondary_schema,
-                                                 roots[i + 1]);
-            _secondary_indexes.push_back(btree);
-        }
+        //TODO: deal with secondary indexes
     }
 
     bool
@@ -310,9 +296,10 @@ namespace springtail {
         // store the roots schema / field
         _roots_schema = std::make_shared<ExtentSchema>(ROOTS_SCHEMA);
         _roots_root_f = _roots_schema->get_mutable_field("root");
+        _roots_index_id_f = _roots_schema->get_mutable_field("index_id");
 
         // handle if the roots were not provided
-        std::vector<uint64_t> roots(metadata.roots);
+        auto roots = metadata.roots;
         if (roots.empty()) {
             if (std::filesystem::exists(_table_dir / constant::ROOTS_FILE)) {
                 // read the roots from the look-aside file
@@ -321,14 +308,11 @@ namespace springtail {
                 auto response = root_handle->read(0);
                 auto extent = std::make_shared<Extent>(response->data);
                 for (auto &row : *extent) {
-                    roots.push_back(_roots_root_f->get_uint64(row));
+                    roots.push_back({_roots_index_id_f->get_uint64(row), _roots_root_f->get_uint64(row)});
                 }
             } else {
                 // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
-                roots.push_back(constant::UNKNOWN_EXTENT);
-                for (auto secondary : secondary_keys) {
-                    roots.push_back(constant::UNKNOWN_EXTENT);
-                }
+                roots.push_back({constant::INDEX_PRIMARY,constant::UNKNOWN_EXTENT});
             }
         }
 
@@ -355,8 +339,14 @@ namespace springtail {
                                                             _target_xid);
         }
 
-        if (roots[0] != constant::UNKNOWN_EXTENT) {
-            _primary_index->init(roots[0]);
+
+
+        // find primary index
+        auto it = std::find_if(roots.begin(), roots.end(), [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
+        assert(it != roots.end());
+
+        if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            _primary_index->init(it->extent_id);
         } else {
             _primary_index->init_empty();
         }
@@ -364,32 +354,12 @@ namespace springtail {
         _primary_lookup = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
                                                   access_xid,
                                                   primary_schema,
-                                                  roots[0]);
+                                                  it->extent_id);
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        // construct the secondary index btrees
-        for (int i = 0; i < secondary_keys.size(); i++) {
-            int idx = i + 1;
 
-            auto secondary_key = secondary_keys[i];
-            secondary_key.push_back(constant::INDEX_EID_FIELD);
-            secondary_key.push_back(constant::INDEX_RID_FIELD);
-
-            auto secondary_schema = _schema->create_schema(secondary_keys[i], { extent_c, row_c }, secondary_key);
-
-            auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, idx),
-                                                        secondary_key, secondary_schema,
-                                                        _target_xid);
-
-            if (roots[idx] != constant::UNKNOWN_EXTENT) {
-                btree->init(roots[idx]);
-            } else {
-                btree->init_empty();
-            }
-
-            _secondary_indexes.push_back(btree);
-        }
+        // TODO: deal with secondary indexes
     }
 
     void
@@ -487,13 +457,10 @@ namespace springtail {
         // clear the indexes
         TableMetadata metadata;
         metadata.snapshot_xid = _snapshot_xid;
-        metadata.roots = { constant::UNKNOWN_EXTENT };
+        metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
         _primary_index->truncate();
 
-        for (auto secondary : _secondary_indexes) {
-            metadata.roots.push_back(constant::UNKNOWN_EXTENT);
-            secondary->truncate();
-        }
+        // TODO: deal with secondary indexes
 
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
@@ -656,10 +623,12 @@ namespace springtail {
 
         // now flush the indexes, capturing the roots
         TableMetadata metadata;
-        metadata.roots.push_back(_primary_index->finalize());
-        for (auto secondary : _secondary_indexes) {
-            metadata.roots.push_back(secondary->finalize());
+        for (auto& v: metadata.roots) {
+            if (v.index_id == constant::INDEX_PRIMARY)
+                v.extent_id = _primary_index->finalize();
         }
+
+        // TODO: deal with secondary indexes
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
 
@@ -668,7 +637,8 @@ namespace springtail {
         auto extent = std::make_shared<Extent>(ExtentType(), _target_xid, _roots_schema->row_size());
         for (auto root : metadata.roots) {
             auto &&row = extent->append();
-            _roots_root_f->set_uint64(row, root);
+            _roots_root_f->set_uint64(row, root.extent_id);
+            _roots_index_id_f->set_uint64(row, root.extent_id);
         }
         auto filename = fmt::format(constant::ROOTS_XID_FILE, _target_xid);
         auto root_handle = IOMgr::get_instance()->open(_table_dir / filename,

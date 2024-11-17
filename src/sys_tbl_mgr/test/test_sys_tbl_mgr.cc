@@ -206,7 +206,7 @@ namespace {
 
         metadata = _client->get_roots(_db, tid, 1);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
         schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
@@ -227,7 +227,7 @@ namespace {
         // verify system table correctness before finalize
         metadata = _client->get_roots(_db, tid, 1);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
         schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
@@ -256,7 +256,7 @@ namespace {
 
         metadata = _client->get_roots(_db, tid, 1);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], constant::UNKNOWN_EXTENT);
+        ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
         metadata = _client->get_roots(_db, tid, 2);
@@ -273,11 +273,11 @@ namespace {
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // "add data" to the table
-        _client->update_roots(_db, tid, _xid.xid, {{ 0 }, { 15 }});
+        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }, { 1, 15 }}});
         _finalize();
 
         // add more data to the table
-        _client->update_roots(_db, tid, _xid.xid, {{ 100 }, { 30 }});
+        _client->update_roots(_db, tid, _xid.xid, {{{ 0, 100 }, { 1, 30 }}});
         _finalize();
 
         // rename col2 => coltwo
@@ -320,7 +320,7 @@ namespace {
         // XID 1
         auto &&metadata = _client->get_roots(_db, tid, check_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], 0);
+        ASSERT_EQ(metadata.roots[0].index_id, 0);
         ASSERT_EQ(metadata.stats.row_count, 15);
 
         schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
@@ -333,7 +333,7 @@ namespace {
 
         metadata = _client->get_roots(_db, tid, check_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.roots[0].extent_id, 100);
         ASSERT_EQ(metadata.stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
@@ -346,7 +346,7 @@ namespace {
 
         metadata = _client->get_roots(_db, tid, check_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.roots[0].extent_id, 100);
         ASSERT_EQ(metadata.stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
@@ -359,7 +359,7 @@ namespace {
 
         metadata = _client->get_roots(_db, tid, check_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
-        ASSERT_EQ(metadata.roots[0], 100);
+        ASSERT_EQ(metadata.roots[0].extent_id, 100);
         ASSERT_EQ(metadata.stats.row_count, 30);
 
         schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
