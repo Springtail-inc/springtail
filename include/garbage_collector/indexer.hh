@@ -67,6 +67,8 @@ namespace springtail::gc {
         };
 
         void _build(std::stop_token st, const Key& key, const IndexParams& idx);
+        // returns false if cancelled
+        bool _check_work_state(const Key& key);
         void _commit(const Key& key);
 
         // this is to notify when an index modifiction is completed 

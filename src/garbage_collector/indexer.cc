@@ -39,6 +39,8 @@ namespace springtail::gc {
         Key key(db_id, index_id);
         auto it = _work_set.find(key);
         if (it == _work_set.end()) {
+            // this will clear the item ddl that is an indication
+            // to the worker thread that the index should be dropped
             _work_set[key] = {db_id, xid, completed_xid };
             // notify workers about new item
             _queue.push(key);
@@ -93,37 +95,46 @@ namespace springtail::gc {
             } else {
 //TODO:  _drop(st);
             }
+            _commit(key);
         }
         SPDLOG_INFO("Indexer thread joined");
     }
 
     void Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
+        auto db_id = key.first;
+        auto tid = idx._ddl["table_id"];
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._completed_xid, idx._xid, true);
+
         //TODO for each row
         {
-            // TODO: ... insert the row index
-            //
+            
             if(!st.stop_requested()) {
                 // TODO:... clear partial index
                 // abort DDL
-                _redis_ddl.abort_index_ddl(key.first, idx._xid);
+                _redis_ddl.abort_index_ddl(db_id, idx._xid);
                 return;
             }
+
+            // TODO: ... insert the row index
+
             // .... periodically check if the index was dropped while 
             // we were building it
-            {
-                std::unique_lock g(_m);
-                // index drop requested while we'd been building it
-                auto const& params = _work_set[key];
-                if (params._ddl.is_null()) {
-                    // TODO: remove this index from precommitted DDL for this XID
-//                  _redis_ddl.abort_index_ddl(key.first, idx._xid, key.second);
-//                    _drop(st, key, params);
-                    return;
-                }
+            if (!_check_work_state(key)) {
+                return;
             }
         }
-        _commit(key);
+    }
+
+    bool Indexer::_check_work_state(const Key& key) {
+        std::unique_lock g(_m);
+        auto const& params = _work_set[key];
+        // index drop requested while we've been building it
+        if (params._ddl.is_null()) {
+            // TODO:... clear partial index
+            return false;
+        }
+        return true;
     }
 
     void Indexer::_commit(const Key& key) 
@@ -134,11 +145,11 @@ namespace springtail::gc {
             std::unique_lock g(_m);
             xid = _work_set[key]._xid;
 
+            _check_work_state(key);
             _work_set.erase(key);
-
             _cv_done.notify_one();
 
-
+            // check if there are pending jobs for the giving xid
             auto it = std::find_if(_work_set.begin(), _work_set.end(),
                     [&](auto const& v) { 
                         return v.first.first == key.first && v.second._xid == xid;
