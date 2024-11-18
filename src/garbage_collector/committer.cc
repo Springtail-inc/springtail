@@ -33,9 +33,12 @@ namespace springtail::gc {
 
         // enter a loop polling for data from the write cache
         while (!_shutdown) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, _worker_id);
+
             // figure out if there's an XID to process
-            // note: this is a blocking call that will timeout after 60s
-            auto result = _redis.pop(_worker_id, 60);
+            // note: this is a blocking call that will timeout after keep_alive secs
+            auto result = _redis.pop(_worker_id, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (result == nullptr) {
                 continue; // got a timeout, try again
             }
@@ -386,11 +389,19 @@ namespace springtail::gc {
 
         // note: also wait on an empty queue to ensure it is drained before shutdown
         while (!_shutdown || !_worker_queue.empty()) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, worker_id);
+
             // wait for work on the queue
-            auto entry = _worker_queue.pop();
+            auto entry = _worker_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (entry == nullptr) {
-                // note: this should only happen when the queue is shutdown
-                break;
+                // check if this is due to a queue shutdown
+                if (_worker_queue.is_shutdown()) {
+                    break;
+                }
+
+                // timed out, try again
+                continue;
             }
 
             if (entry->do_finalize) {

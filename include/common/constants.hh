@@ -51,4 +51,7 @@ namespace springtail::constant {
     static constexpr std::string_view ROOTS_XID_FILE = "roots.{}";
     static constexpr std::string_view ROOTS_TMP_FILE = "roots.tmp";
 
+    /** Coordinator keep alive timeout seconds */
+    static constexpr uint32_t COORDINATOR_KEEP_ALIVE_TIMEOUT = 5;
+
 }

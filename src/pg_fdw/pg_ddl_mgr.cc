@@ -217,6 +217,8 @@ namespace springtail::pg_fdw {
         // close the connection
         conn->disconnect();
 
+        RedisDDL redis_ddl;
+
         // go through each db and create the foreign server, connect to each db
         for (const auto &[db_id, db_name] : dbs) {
 
@@ -280,6 +282,9 @@ namespace springtail::pg_fdw {
             // set the schema xid in the map
             _db_xid_map[db_id] = xid;
 
+            // update redis with the schema xid
+            redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+
             // close the connection
             conn->disconnect();
         }
@@ -288,8 +293,6 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_main_thread_fn()
     {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Background worker pid: {}, fdw_id: {}", ::getpid(), _fdw_id);
-
         // init redis ddl client after springtail_init()
         RedisDDL redis_ddl;
 
@@ -328,8 +331,8 @@ namespace springtail::pg_fdw {
                 }
 
                 // success, update schema XID if applied, otherwise they may be queued
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}", schema_xid);
-                redis_ddl.update_schema_xid(_fdw_id, schema_xid);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
+                redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
                 _db_xid_map[db_id] = schema_xid;
 
             } catch (Error &e) {

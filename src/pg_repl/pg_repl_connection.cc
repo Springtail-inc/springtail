@@ -11,6 +11,7 @@
 #include <fmt/core.h>
 
 #include <common/logging.hh>
+#include <common/constants.hh>
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/libpq_connection.hh>
@@ -60,7 +61,7 @@ namespace springtail
             throw PgAlreadyConnectedError();
         }
         _connection = std::make_unique<LibPqConnection>();
-        _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, true);
+        _connection->connect(_db_host, _db_name, _db_user, _db_pass, _db_port, false);
     }
 
 
@@ -215,7 +216,7 @@ namespace springtail
     bool
     PgReplConnection::_check_data_stream(int timeout_secs)
     {
-        int r = _connection->wait_until_readable(timeout_secs);
+        int r = _stream_connection->wait_until_readable(timeout_secs);
         if (r < 0) {
             throw PgIOError();
         }
@@ -225,7 +226,7 @@ namespace springtail
 
 
     bool
-    PgReplConnection::wait_for_data(int timeout_secs=READ_TIMEOUT_SEC)
+    PgReplConnection::wait_for_data(int timeout_secs=constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)
     {
 
         if (_started_streaming) {
@@ -262,14 +263,14 @@ namespace springtail
         sendint32(length + 4, &msg_header[1]);
 
         // send the header and then the operation
-        int r = _connection->write(msg_header, COPY_MSG_HDR_SIZE);
+        int r = _stream_connection->write(msg_header, COPY_MSG_HDR_SIZE);
         if (r != 5) {
             SPDLOG_ERROR("Failed to write copy data header: bytes={}", r);
             SPDLOG_ERROR("errno: {}", errno);
             throw PgIOError();
         }
 
-        r = _connection->write(buffer, length);
+        r = _stream_connection->write(buffer, length);
         if (r < length) {
             // error
             SPDLOG_ERROR("Failed to write copy data body: bytes={}", r);
@@ -285,8 +286,9 @@ namespace springtail
                                       bool async=true)
     {
         while (!_shutdown) {
-            int r = _connection->read(buffer, length, async);
-            if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            int r = _stream_connection->read(buffer, length, async);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Read {} bytes from connection (errno={})", r, errno);
+            if (r == -1 && (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)) {
                 r = wait_for_data();
                 if (r >= 0) {
                     // either data is now available or it isn't
@@ -513,27 +515,29 @@ namespace springtail
             throw PgNotStreamingError();
         }
 
-        do {
-            // see if we need to read the messsage header first
-            if (_copy_state == NEW_MSG) {
-                _read_copy_header();
-            }
+        // see if we need to read the messsage header first
+        if (_copy_state == NEW_MSG) {
+            _read_copy_header();
+        }
 
-            // read the header in, now read the data message (or continue reading it)
-            // skip if we need to read a new message
-            if (_copy_state == READ_COPY_HEADER ||
-                _copy_state == STREAMING) {
-                _read_copy_data();
-            }
+        // read the header in, now read the data message (or continue reading it)
+        // skip if we need to read a new message
+        if (_copy_state == READ_COPY_HEADER ||
+            _copy_state == STREAMING) {
+            _read_copy_data();
+        }
 
-            // if all data was consumed we go around again
-            // this shouldn't be the case, but being safe...
-            if (_copy_state == STREAMING && (_copy_buffer_length == 0)) {
-                _copy_state = NEW_MSG;
-            }
+        // if all data was consumed we go around again
+        // this shouldn't be the case, but being safe...
+        if (_copy_state == STREAMING && (_copy_buffer_length == 0)) {
+            _copy_state = NEW_MSG;
+        }
 
-        // see if we have to read a new message
-        } while (_copy_state == NEW_MSG);
+        if (_copy_state == NEW_MSG) {
+            // no data yet
+            dataOut.length = 0;
+            return;
+        }
 
         // if we got here we should be in the streaming state
 
