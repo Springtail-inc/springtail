@@ -417,6 +417,9 @@ namespace pg_proxy {
             }
             auto &schema = schema_it->second;
             schema.erase(db_table);
+            if (schema.empty()) {
+                db.erase(db_schema);
+            }
         }
 
         /**
