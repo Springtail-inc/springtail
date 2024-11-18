@@ -19,4 +19,10 @@ target_include_directories(test_redis PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_redis PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_redis)
 
+add_executable(test_pubsub_thread test/test_pubsub_thread.cc)
+target_include_directories(test_pubsub_thread PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_pubsub_thread PRIVATE springtail_common Boost::thread GTest::gtest_main)
+add_dsymutil_command(test_pubsub_thread)
+
 gtest_discover_tests(test_redis)
+gtest_discover_tests(test_pubsub_thread)

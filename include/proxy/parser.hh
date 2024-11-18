@@ -87,8 +87,13 @@ namespace pg_proxy {
         };
         using StmtContextPtr = std::shared_ptr<StmtContext>;
 
+        /**
+         * @brief function typedef for verifying if the table exists in for the give schema
+         *
+         */
+        using VerifyTableFn = std::function<bool (const std::string &, const std::string &)>;
         /** Parse the query into multiple statements */
-        static std::vector<StmtContextPtr> parse_query(const std::string_view query);
+        static std::vector<StmtContextPtr> parse_query(const std::string_view query, VerifyTableFn verify_table_fn);
 
         /** Debugging, dump the parse tree */
         static void dump_parse_tree(const std::string &query);
@@ -110,7 +115,7 @@ namespace pg_proxy {
         };
 
         /** Return true if query is read only */
-        static bool _is_query_readonly(const StmtContext &context);
+        static bool _is_query_readonly(const StmtContext &context, VerifyTableFn verify_table_fn);
 
         /** Iterate through the parse tree, moving to next node */
         static bool _node_walker(Node *node, void *ctx);
@@ -122,7 +127,7 @@ namespace pg_proxy {
         static bool _is_function_readonly_safe(const std::string &funcname);
 
         /** Checks if a table is safe for read-replica */
-        static bool _is_table_readonly_safe(const std::pair<std::string, std::string> &table);
+        static bool _is_table_readonly_safe(const std::pair<std::string, std::string> &table, VerifyTableFn verify_table_fn);
 
         /** Check to see if current parse node should be parsed (i.e., is the statement supported or not) */
         static bool _check_stmt(Node *node);

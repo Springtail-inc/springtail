@@ -358,6 +358,100 @@ namespace pg_proxy {
         DatabaseInstancePtr _standby;
     };
 
+    /**
+     * @brief This class represents database tables storage. It maps database id to a collection of schemas.
+     *      Each database schema maps to a collection of tables.
+     *
+     */
+    class DatabaseSchemaTableStore {
+    public:
+        /**
+         * @brief Default constructor
+         *
+         */
+        DatabaseSchemaTableStore() = default;
+
+        /**
+         * @brief Add item to storage
+         *
+         * @param db_id - database id
+         * @param db_schema - schema name
+         * @param db_table - table name
+         */
+        void add_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_storage_mutex);
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                std::map<std::string, std::set<std::string>> empty_db;
+                _storage.insert(std::pair(db_id, empty_db));
+                db_it = _storage.find(db_id);
+            }
+            auto &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                std::set<std::string> empty_schema;
+                db.insert(std::pair(db_schema, empty_schema));
+                schema_it = db.find(db_schema);
+            }
+            auto &schema = schema_it->second;
+            schema.insert(db_table);
+        }
+
+        /**
+         * @brief Remove item from storage
+         *
+         * @param db_id - database id
+         * @param db_schema - schema name
+         * @param db_table - table name
+         */
+        void remove_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_storage_mutex);
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                return;
+            }
+            auto &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                return;
+            }
+            auto &schema = schema_it->second;
+            schema.erase(db_table);
+            if (schema.empty()) {
+                db.erase(db_schema);
+            }
+        }
+
+        /**
+         * @brief Verify if an item is in storage
+         *
+         * @param db_id - database id
+         * @param db_schema - database name
+         * @param db_table - database table
+         * @return true - item found
+         * @return false - item is not found
+         */
+        bool has_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
+            std::shared_lock storage_lock(_storage_mutex);
+            auto db_it = _storage.find(db_id);
+            if (db_it == _storage.end()) {
+                return false;
+            }
+            auto &db = db_it->second;
+            auto schema_it = db.find(db_schema);
+            if (schema_it == db.end()) {
+                return false;
+            }
+            auto &schema = schema_it->second;
+            if (schema.contains(db_table)) {
+                return true;
+            }
+            return false;
+        }
+    private:
+        std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
+        std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
+    };
 
 } // namespace springtail
 } // namespace pg_proxy

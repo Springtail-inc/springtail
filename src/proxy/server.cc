@@ -28,7 +28,7 @@
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
 
-// #include <redis/db_state_change.hh>
+#include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy {
 
@@ -54,6 +54,8 @@ namespace springtail::pg_proxy {
                              LoggerPtr logger)
       : _id(arc4random()),
         _user_mgr(std::make_shared<UserMgr>()),
+        _config_sub_thread(1, true),
+        _data_sub_thread(1, false),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl),
         _shadow_mode(shadow_mode),
@@ -167,11 +169,23 @@ namespace springtail::pg_proxy {
         // add user for test db with scram
         add_user("test_scram", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
 
-        // initiate the pubsub thread
-        _pubsub_thread = std::thread(&ProxyServer::_pubsub_thread_run, this);
-
-        // TODO: we probably should not start accepting any of the client connections till we intialized
-        //  database states
+        // add subscribers to pubsub threads
+        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
+        _config_sub_thread.add_subscriber(state_change_channel,
+            [this]() {
+                this->_init_db_states_subscriber();
+            },
+            [this](const std::string &msg) {
+                _handle_db_state_change(msg);
+            });
+        std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
+        _data_sub_thread.add_subscriber(db_table_change_channel,
+            [this]() {
+                this->_init_db_tables_subscriber();
+            },
+            [this](const std::string &msg) {
+                _handle_db_table_change(msg);
+            });
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -386,6 +400,10 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::run()
     {
+        // start pubsub threads
+        _config_sub_thread.start();
+        _data_sub_thread.start();
+
         while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
@@ -480,7 +498,10 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
-        _pubsub_thread.join();
+        // _pubsub_thread[0].join();
+        // _pubsub_thread[1].join();
+        _config_sub_thread.shutdown();
+        _data_sub_thread.shutdown();
 
         // flush logger
         if (_logger) {
@@ -527,33 +548,16 @@ namespace springtail::pg_proxy {
         }
     }
 
-    void ProxyServer::_handle_db_state_change(const uint64_t db_id, const redis::db_state_change::DBState state) {
+    void ProxyServer::_handle_db_state_change(const std::string &msg) {
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
+        uint64_t db_id;
+        redis::db_state_change::DBState state;
+        redis::db_state_change::parse_db_state_change(msg, db_id, state);
         std::unique_lock db_state_lock(_db_state_mutex);
         _replicated_database_states[db_id] = state;
     }
 
-    void ProxyServer::_pubsub_thread_run() {
-        // create subscriber for redis pubsub, set timeout to 1 sec.
-        RedisMgr::SubscriberPtr subscriber = RedisMgr::get_instance()->get_subscriber(1);
-
-        // subscribe to the state change channel
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        subscriber->subscribe(state_change_channel);
-
-        subscriber->on_message([this, state_change_channel](const std::string &channel, const std::string &msg) {
-            if (channel != state_change_channel) {
-                return;
-            }
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change: {}", msg);
-            uint64_t db_id;
-            redis::db_state_change::DBState state;
-            redis::db_state_change::parse_db_state_change(msg, db_id, state);
-            if (db_id != _db_instance_id) {
-                return;
-            }
-            _handle_db_state_change(db_id, state);
-        });
-
+    void ProxyServer::_init_db_states_subscriber() {
         // refresh all database states
         std::shared_lock db_name_lock(_db_mutex);
         std::unique_lock db_state_lock(_db_state_mutex);
@@ -561,21 +565,35 @@ namespace springtail::pg_proxy {
             redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
             _replicated_database_states[db_id] = db_state;
         }
+    }
 
-        while (!_shutdown) {
-            try {
-                // consume from subscriber, timeout is set above
-                subscriber->consume();
-            } catch (const sw::redis::TimeoutError &e) {
-                // timeout, check for shutdown
-                continue;
-            } catch (const sw::redis::Error &e) {
-                SPDLOG_ERROR("Error consuming from redis: {}\n", e.what());
-                break;
+    void ProxyServer::_handle_db_table_change(const std::string &msg) {
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received DB table change: {}", msg);
+        uint64_t db_id;
+        std::string action;
+        std::string schema;
+        std::string table;
+        RedisDbTables::decode_pubsub_msg(msg, db_id, action, schema, table);
+        if (action == "add") {
+            _schema_tables.add_item(db_id, schema, table);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
+        } else if (action == "remove") {
+            _schema_tables.remove_item(db_id, schema, table);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
+        }
+    }
+
+    void ProxyServer::_init_db_tables_subscriber() {
+        // get all schemas and tables from redis
+        std::shared_lock db_name_lock(_db_mutex);
+        for (const auto &[db_name, db_id]: _replicated_databases) {
+            std::vector<std::pair<std::string, std::string>> schema_table_pairs;
+            RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
+            for (const auto &[schema, table]: schema_table_pairs) {
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Found schema: {}, table : {}", schema, table);
+                _schema_tables.add_item(db_id, schema, table);
             }
         }
-
-        subscriber->unsubscribe(state_change_channel);
-
     }
+
 } // namespace springtail::pg_proxy

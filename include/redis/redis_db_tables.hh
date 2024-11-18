@@ -81,6 +81,24 @@ namespace springtail {
             table = common::unescape_quoted_string(parts[3]);
         }
 
+        /**
+         * @brief Get the list of known database schema and table pairs
+         *
+         * @param instance_id - database instance id
+         * @param db_id - database id
+         * @param out - output schema:table values
+         */
+        static void get_tables(const uint64_t instance_id, const uint64_t db_id, std::vector<std::pair<std::string, std::string>> &out)
+        {
+            std::string key = fmt::format(redis::SET_DB_TABLES, instance_id, db_id);
+            std::vector<std::string> schema_table_pairs;
+            RedisMgr::get_instance()->get_client()->smembers(key, std::back_inserter(schema_table_pairs));
+            for (const auto &pair: schema_table_pairs) {
+                std::vector<std::string> parts;
+                common::split_quoted_string(':', pair, parts);
+                out.push_back(std::pair(common::unescape_quoted_string(parts[0]), common::unescape_quoted_string(parts[1])));
+            }
+        }
     private:
         // private constructor
         RedisDbTables() = delete;

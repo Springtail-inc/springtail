@@ -75,21 +75,26 @@ namespace springtail {
     }
 
     RedisMgr::SubscriberPtr
-    RedisMgr::get_subscriber(int timeoutsecs)
+    RedisMgr::get_subscriber(int timeoutsecs, bool config_db)
     {
+        sw::redis::ConnectionOptions connect_options;
+
         // get config db from redis
-        nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-        int config_db;
-        Json::get_to<int>(json, "config_db", config_db);
+        if (config_db) {
+            nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
+            int config_db;
+            Json::get_to<int>(json, "config_db", config_db);
+            connect_options.db = config_db;
+        } else {
+            connect_options.db = _connect_options.db;
+        }
 
         // create new redis connection for use with subscriber
         // copy the connection options, change the db to the config db
-        sw::redis::ConnectionOptions     connect_options;
         connect_options.host = _connect_options.host;
         connect_options.port = _connect_options.port;
         connect_options.user = _connect_options.user;
         connect_options.password = _connect_options.password;
-        connect_options.db = config_db;
         connect_options.keep_alive = _connect_options.keep_alive;
         connect_options.keep_alive_s = _connect_options.keep_alive_s;
         connect_options.resp = _connect_options.resp;
@@ -100,7 +105,6 @@ namespace springtail {
         auto redis = std::make_shared<sw::redis::Redis>(connect_options);
         return std::make_shared<sw::redis::Subscriber>(redis->subscriber());
     }
-
 }
 
 /* Example usage:

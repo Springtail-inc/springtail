@@ -793,7 +793,9 @@ namespace springtail::pg_proxy {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Parse: stmt={}, query={}", _id, stmt, query);
 
         // parse the query
-        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query);
+        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
+            return this->_server->is_table_replicated(this->_db_id, schema, table);
+        });
 
         // Create a query statement object
         QueryStmt::Type qs_type = _remap_parse_type(parse_contexts[0]);
@@ -1289,7 +1291,9 @@ namespace springtail::pg_proxy {
         // parse the query and determine if it is a read or write query
         bool is_read_safe = true;
         // first parse the query to determine the type of statement(s)
-        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query);
+        std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
+            return this->_server->is_table_replicated(this->_db_id, schema, table);
+        });
 
         // iterate through the parse contexts (one per query within multi-statement block)
         for (auto &context : parse_contexts) {
