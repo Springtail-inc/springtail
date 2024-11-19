@@ -54,16 +54,21 @@ namespace springtail::pg_proxy {
             return _user_mgr;
         }
 
+        // TODO: eventually remove this
         /** Add a user to the user manager -- trust authentication no password */
+        /*
         void add_user(const std::string &username) {
             _user_mgr->add_user(username);
         }
+        */
 
         /** Add a user to the user manager */
+        /*
         void add_user(const std::string &username,
                       const std::string &password, uint32_t salt=0) {
             _user_mgr->add_user(username, password, salt);
         }
+        */
 
         /**
          * @brief Add replicated database id and name the collection of replicated databases
@@ -79,6 +84,15 @@ namespace springtail::pg_proxy {
             // TODO: I think this is no longer needed as the real initialization will happen somewhere else
             std::unique_lock db_state_lock(_db_state_mutex);
             _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
+        }
+
+        std::optional<std::string> get_any_replicated_db_name() {
+            std::shared_lock lock(_db_mutex);
+            auto it = _replicated_databases.begin();
+            if (it != _replicated_databases.end()) {
+                return it->first;
+            }
+            return {};
         }
 
         /**

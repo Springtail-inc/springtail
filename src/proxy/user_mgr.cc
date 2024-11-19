@@ -1,20 +1,25 @@
 #include <memory>
 
+#include <common/properties.hh>
+#include <pg_repl/libpq_connection.hh>
+#include <proxy/server.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
+#include <proxy/exception.hh>
 
 namespace springtail {
 namespace pg_proxy {
 
+    static constexpr char USER_SELECT[] = "select username, password, databases from get_user_access()";
+
     User::User(UserMgrPtr user_mgr,
                const std::string &username,
-               const std::string &password,
-               uint32_t salt)
+               const std::string &password)
         : _user_mgr(user_mgr),
           _username(username),
           _password(password),
-          _salt(salt)
+          _salt(0)
     {
         if (_password.starts_with("SCRAM")) {
             _auth_type = SCRAM;
@@ -29,10 +34,14 @@ namespace pg_proxy {
             memset(_scram_keys->client_key, 0, SCRAM_KEY_LEN);
 
             free (saltp);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new SCRAM user user: {}, password: {}", _username, _password);
         } else if (_password.starts_with("md5")) {
+            get_random_bytes((uint8_t*)&_salt, 4);
             _auth_type = MD5;
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new MD5 user user: {}, password: {}, salt: {}", _username, _password, _salt);
         } else {
             _auth_type = TRUST;
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Created new TRUST user user: {}, password: {}", _username, _password);
         }
     }
 
@@ -74,6 +83,49 @@ namespace pg_proxy {
             memcpy(_scram_keys->server_key, server_key, 32);
             _scram_keys->server_key_set = true;
         }
+    }
+
+    void UserMgr::_run() {
+        _id = std::this_thread::get_id();
+        // connect to primary database
+        // TODO: change to keep connection around
+        while (!_shutdown) {
+            std::string host, user, password;
+            int port;
+            Properties::get_primary_db_config(host, port, user, password);
+
+            LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+            auto db_name = _proxy_server->get_any_replicated_db_name();
+            if (db_name.has_value()) {
+                LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
+            } else {
+                SPDLOG_ERROR("No replicated database name is found");
+                throw ProxyError("No replicated database name found");
+            }
+
+            conn->exec(USER_SELECT);
+            std::unique_lock lock(_mutex);
+            _user_db_access.clear();
+            for (int i = 0; i < conn->ntuples(); i++) {
+                std::string username = conn->get_string(i, 0);
+                std::string password = conn->get_string(i, 1);
+                std::string databases = conn->get_string(i, 2);
+                nlohmann::json db_names_json = nlohmann::json::parse(databases);
+                std::set<std::string> database_set;
+                assert(db_names_json.is_array());
+                for (auto &db_name: db_names_json) {
+                    assert(db_name.is_string());
+                    database_set.insert(db_name.get<std::string>());
+                }
+                _add_user(username, password, database_set);
+            }
+            lock.unlock();
+
+            conn->clear();
+            conn->disconnect();
+            sleep(_sleep_interval);
+        }
+
     }
 } // namespace pg_proxy
 } // namespace springtail

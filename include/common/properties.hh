@@ -103,6 +103,11 @@ namespace springtail {
         /** Helper to get primary db json for current db instance */
         static nlohmann::json get_primary_db_config();
 
+        // TODO: change all occurenced of get_primary_db_config() to use this new function
+        //  and move get_primary_db_config() to privat section
+        /** Helper to get host, port, user, and password for the primary database */
+        static void get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
+
         /** Helper to get db state */
         static std::string get_db_state(uint64_t db_id);
 

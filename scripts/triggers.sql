@@ -211,5 +211,65 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
    EXECUTE FUNCTION springtail_event_trigger_for_index_ddl();
 
 
+-- Select all users and their databases with access to springtail
+-- If springtail_user role exists, only users with that role are returned
+-- otherwise all users are returned
+CREATE OR REPLACE FUNCTION get_user_access()
+    RETURNS TABLE (username text, password text, databases text)
+    LANGUAGE plpgsql
+    SECURITY DEFINER AS $$
+DECLARE
+    user_record record;
+    db_record record;
+    db_list json;
+    has_springtail_role boolean;
+BEGIN
+    -- Check if springtail_user role exists
+    SELECT
+        EXISTS (
+            SELECT 1
+            FROM pg_roles
+            WHERE rolname = 'springtail_user'
+        )
+    INTO has_springtail_role;
+
+    -- If springtail_user role exists, only users with that role are returned
+    IF has_springtail_role THEN
+        RETURN QUERY SELECT
+            s.usename::text AS username,
+            s.passwd AS password,
+            json_agg(d.datname ORDER BY d.datname)::text AS databases
+        FROM pg_shadow s
+        JOIN pg_roles r ON s.usesysid = r.oid
+        CROSS JOIN pg_database d
+        WHERE (s.valuntil IS NULL OR s.valuntil > now())
+          AND s.passwd IS NOT NULL
+          AND r.rolcanlogin IS TRUE
+          AND has_database_privilege(s.usename, d.datname, 'CONNECT')
+          AND EXISTS ( SELECT 1
+            FROM pg_auth_members m
+            JOIN pg_roles r ON m.roleid = r.oid
+            WHERE m.member = s.usesysid
+            AND r.rolname = 'springtail_user' )
+        GROUP BY s.usename, s.passwd
+        ORDER BY s.usename;
+    ELSE
+        -- If springtail_user role does not exist, all users are returned
+        RETURN QUERY SELECT
+            s.usename::text AS username,
+            s.passwd AS password,
+            json_agg(d.datname ORDER BY d.datname)::text AS databases
+        FROM pg_shadow s
+        JOIN pg_roles r ON s.usesysid = r.oid
+        CROSS JOIN pg_database d
+        WHERE (s.valuntil IS NULL OR s.valuntil > now())
+          AND s.passwd IS NOT NULL
+          AND r.rolcanlogin IS TRUE
+          AND has_database_privilege(s.usename, d.datname, 'CONNECT')
+        GROUP BY s.usename, s.passwd
+        ORDER BY s.usename;
+    END IF;
+END;
+$$;
 
 

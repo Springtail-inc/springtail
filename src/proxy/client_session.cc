@@ -288,7 +288,7 @@ namespace springtail::pg_proxy {
         assert(c == '\0');
 
         // get user info and store it
-        _user = _server->get_user_mgr()->get_user(username);
+        _user = _server->get_user_mgr()->get_user(username, database);
         if (_user == nullptr) {
             SPDLOG_ERROR("User {} not found", username);
             _state = ERROR;

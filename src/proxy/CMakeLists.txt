@@ -17,6 +17,7 @@ set(PROXY_SOURCES
     parser.cc
     buffer_pool.cc
     history_cache.cc
+    ../pg_repl/libpq_connection.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
@@ -37,6 +38,7 @@ target_link_libraries(springtail_proxy
     PRIVATE OpenSSL::SSL
     PRIVATE OpenSSL::Crypto
     PRIVATE xxHash::xxhash
+    # PRIVATE springtail_pg
 )
 
 # test parser executable

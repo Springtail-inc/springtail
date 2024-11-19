@@ -387,6 +387,26 @@ namespace springtail {
         return json;
     }
 
+    // TODO: refactor all the placess where get_primary_db_config()  is called
+    void Properties::get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
+        auto primary_config = Properties::get_primary_db_config();
+
+        auto optional_host = Json::get<std::string>(primary_config, "host");
+        auto optional_port = Json::get<uint16_t>(primary_config, "port");
+        auto optional_user = Json::get<std::string>(primary_config, "user");
+        auto optional_password = Json::get<std::string>(primary_config, "user");
+
+        if (optional_host.has_value() && optional_port.has_value() && optional_user.has_value() && optional_password.has_value()) {
+            host = optional_host.value();
+            port = optional_port.value();
+            user = optional_user.value();
+            password = optional_password.value();
+        } else {
+            SPDLOG_ERROR("Could not find the value for primary database either host, port, user, or passwrot");
+            throw Error();
+        }
+    }
+
     nlohmann::json
     Properties::get_fdw_config(const std::string &fdw_id)
     {

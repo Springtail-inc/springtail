@@ -6,12 +6,14 @@
 #include <set>
 #include <shared_mutex>
 #include <mutex>
+#include <thread>
 
 #include <common/logging.hh>
 
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
+// #include <proxy/server.hh>
 
 namespace springtail {
 namespace pg_proxy {
@@ -61,6 +63,7 @@ namespace pg_proxy {
 
     class UserMgr;
     using UserMgrPtr = std::shared_ptr<UserMgr>;
+    using UserMgrConstPtr = std::shared_ptr<const UserMgr>;
 
     /**
      * @brief Identifies the user.
@@ -74,7 +77,7 @@ namespace pg_proxy {
          * @param username users name
          * @param database database name
          */
-        User(UserMgrPtr user_mgr,
+        User(UserMgrConstPtr user_mgr,
              const std::string &username)
             : _user_mgr(user_mgr),
               _auth_type(TRUST),
@@ -90,8 +93,7 @@ namespace pg_proxy {
          */
         User(UserMgrPtr user_mgr,
              const std::string &username,
-             const std::string &password,
-             uint32_t salt=0);
+             const std::string &password);
 
         /**
          * @brief Get the user login object containing creds of user
@@ -129,7 +131,7 @@ namespace pg_proxy {
             bool server_key_set=false;
         };
 
-        UserMgrPtr  _user_mgr; // XXX is this needed
+        UserMgrConstPtr  _user_mgr; // XXX is this needed
         AuthType    _auth_type;
 
         std::string _username;
@@ -144,24 +146,35 @@ namespace pg_proxy {
     };
     using UserPtr = std::shared_ptr<User>;
 
+    class ProxyServer;
+    using ProxyServerPtr = std::shared_ptr<ProxyServer>;
+
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
     class UserMgr : public std::enable_shared_from_this<UserMgr> {
     public:
-        UserMgr() {};
+        UserMgr(ProxyServerPtr proxy_server) : _proxy_server(proxy_server), _sleep_interval(5) {};
+
+        void start() {
+            _mgr_thread = std::thread(&UserMgr::_run, this);
+        }
 
         /**
          * @brief Lookup user by username and database name
          * @param username user's name
+         * @param database database name
          * @return UserPtr user or nullptr if not found
          */
-        UserPtr get_user(const std::string &username) const
+        UserPtr get_user(const std::string &username, const std::string &database) const
         {
+            UserPtr user = std::make_shared<User>(shared_from_this(), username);
             std::shared_lock lock(_mutex);
-            auto it = _user_map.find(username);
-            if (it != _user_map.end()) {
-                return it->second;
+            auto it = _user_db_access.find(user);
+            if (it != _user_db_access.end()) {
+                if (it->second.contains(database)) {
+                    return it->first;
+                }
             }
             return nullptr;
         }
@@ -172,25 +185,53 @@ namespace pg_proxy {
          * @param password password
          * @param salt     optional salt for md5
          */
+        /*
         void add_user(const std::string &username,
                       const std::string &password={},
-                      uint32_t salt=0)
+                      uint32_t salt=0,
+                      const std::set<std::string> &databases)
         {
             std::unique_lock lock(_mutex);
-            auto it = _user_map.find(username);
-            if (it == _user_map.end()) {
-                _user_map[username] = std::make_shared<User>(shared_from_this(),
-                                                             username,
-                                                             password, salt);
-            }
+            _add_user(username, password, databases);
+        }
+        */
+
+        void shutdown() {
+            SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
+            _shutdown = true;
+            _mgr_thread.join();
+            SPDLOG_DEBUG("Joined User Manager thread {}", _id);
+            _shutdown = true;
         }
 
     private:
+        struct CompareUserByName {
+            bool operator()(const UserPtr &lhs, const UserPtr &rhs) const {
+                return lhs->username() < rhs->username();
+            }
+        };
+
+        ProxyServerPtr _proxy_server;
         mutable std::shared_mutex _mutex;
 
-        /** user map from user to User object */
-        std::map<std::string, UserPtr> _user_map;
+        /** maps username to User object and user object to list of databases*/
+        std::map<UserPtr, std::set<std::string>, CompareUserByName> _user_db_access;
+
+        std::thread _mgr_thread;
+        std::thread::id _id;                    ///< user manager thread id
+        uint32_t _sleep_interval;               ///< sleep interval in seconds
+        std::atomic<bool> _shutdown;            ///< shudown flag
+
+        void _add_user(const std::string &username,
+                      const std::string &password,
+                      const std::set<std::string> &databases) {
+            UserPtr user = std::make_shared<User>(shared_from_this(),
+                                username, password);
+            _user_db_access[user] = databases;
+        }
+
+        void _run();
     };
-    using UserMgrPtr = std::shared_ptr<UserMgr>;
+    // using UserMgrPtr = std::shared_ptr<UserMgr>;
 } // namespace pg_proxy
 } // namespace springtail
