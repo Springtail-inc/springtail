@@ -98,7 +98,7 @@ namespace springtail {
     std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>>
     RedisDDL::get_precommit_index_ddl()
     {
-        std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>> ddlss;
+        std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>> ddls_list;
 
         // retrieve the pre-commit keys
         std::vector<std::string> hkeys;
@@ -119,10 +119,10 @@ namespace springtail {
             assert (value.has_value());
             auto ddls = nlohmann::json::parse(*value);
 
-            ddlss.emplace_back(db_id, xid, std::move(ddls));
+            ddls_list.emplace_back(db_id, xid, std::move(ddls));
         }
 
-        return ddlss;
+        return ddls_list;
     }
 
     void
