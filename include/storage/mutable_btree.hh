@@ -33,7 +33,7 @@ namespace springtail {
      * read-only BTree objects constructed against the same underlying file being used concurrently
      * with the MutableBTree.
      */
-    class MutableBTree : public std::enable_shared_from_this<MutableBTree> {
+    class MutableBTree {
     private:
         // forward declarations
         class Page;
@@ -145,7 +145,7 @@ namespace springtail {
         static const uint32_t MAX_EXTENT_SIZE = 64 * 1024;
 
         /** The maximum number of extents in an in-memory page before we automatically flush it to disk. */
-        static const uint32_t MAX_EXTENT_COUNT = 16;
+        static const uint32_t MAX_EXTENT_COUNT = 4;
 
         /**
          * The Page objects represent a virtual Extent, which may hold either a single Extent
@@ -170,7 +170,7 @@ namespace springtail {
 
         public:
             /** For constructing an empty root. */
-            Page(std::shared_ptr<MutableBTree> btree,
+            Page(MutableBTree *btree,
                  StoragePagePtr cache_page,
                  ExtentSchemaPtr schema)
                 : extent_id(constant::UNKNOWN_EXTENT),
@@ -185,7 +185,7 @@ namespace springtail {
                 _key_fields = _schema->get_mutable_fields(_schema->get_sort_keys());
             }
 
-            Page(std::shared_ptr<MutableBTree> btree,
+            Page(MutableBTree *btree,
                  uint64_t extent_id)
                 : extent_id(extent_id),
                   flushed(false),
@@ -193,7 +193,7 @@ namespace springtail {
                   _dirty(false)
             { }
 
-            Page(std::shared_ptr<MutableBTree> btree,
+            Page(MutableBTree *btree,
                  uint64_t extent_id,
                  ValueTuplePtr v,
                  StoragePagePtr cache_page,
@@ -415,7 +415,7 @@ namespace springtail {
 
 
         private:
-            std::shared_ptr<MutableBTree> _btree; ///< The btree this page is associated with.
+            MutableBTree *_btree; ///< The btree this page is associated with.
             bool _dirty; ///< Flag indicating if data has been modified since the last write.
             MutableFieldArrayPtr _key_fields; ///< The fields representing the key in the btree.
 

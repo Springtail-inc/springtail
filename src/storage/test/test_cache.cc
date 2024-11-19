@@ -16,7 +16,7 @@ namespace {
     class StorageCache_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -105,6 +105,7 @@ namespace {
                     extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
                     page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+                    cache->validate();
                 }
             }
 

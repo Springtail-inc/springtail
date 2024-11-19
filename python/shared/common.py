@@ -75,7 +75,9 @@ def running_pids(names : List[str]) -> tuple[List[Dict], List[str]]:
     not_running = []
     running_names = {}
     for proc in psutil.process_iter(['pid', 'name']):
-        if proc.info['name'] in names:
+        # SPR-317: Normally if we have an 'init' PID(1) that reaps zombies this we do not need the following.
+        #   But just in case, 'cause we cannot assume where & how we run the tests.
+        if proc.status() != psutil.STATUS_ZOMBIE and proc.info['name'] in names:
             pids.append({'name':proc.info['name'], 'pid':proc.info['pid']})
             running_names[proc.info['name']] = True
 

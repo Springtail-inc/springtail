@@ -279,6 +279,11 @@ namespace springtail {
                 _extent = other._extent;
             }
 
+            // create empty extent
+            SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
+                _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
+            }
+
             SafeExtent &operator=(const SafeExtent &other) {
                 if (_extent) {
                     StorageCache::get_instance()->_data_cache->put(_extent);
@@ -385,6 +390,11 @@ namespace springtail {
                   _next_cache_id(0)
             { }
 
+            void validate() {
+                assert(_dirty_cache.size() + _clean_cache.size() == _size);
+                assert(_dirty_lru.size() + _clean_lru.size() == _size);
+            }
+
             /**
              * Retrieves an extent from the cache.
              * @param file The name of the underlying data file.
@@ -445,16 +455,6 @@ namespace springtail {
 
         private:
             /**
-             * Retrieve an extent from the cache based on a file and extent ID.  Must be released
-             * back to the cache after use with put().  May block due to IO.
-             *
-             * @param file The file to read the extent from.
-             * @param extent_id The extent_id (offset) of the extent.
-             * @return A pointer to the extent.
-             */
-            CacheExtentPtr _get(const std::filesystem::path &file, uint64_t extent_id);
-
-            /**
              * Retrieve an extent from the cache based on a cache ID.  Cache IDs are generated when
              * an extent is extract()'d from the read cache for use in the write cache.  Must be
              * released back to the cache after use with put().  May block due to IO.
@@ -483,7 +483,7 @@ namespace springtail {
              * @param extent The extent to extract from the cache.
              * @return The extent that can be mutated by the write cache.
              */
-            CacheExtentPtr _extract(const std::filesystem::path &file, uint64_t extent_id);
+            CacheExtentPtr _extract(const CacheExtentPtr &extent);
 
             /**
              * Helper to retrieve an extent from the clean cache.  If the provided key is not
@@ -937,6 +937,12 @@ namespace springtail {
 
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
+
+            /** Flag indiciating if the page is currently being flushed. */
+            bool _is_flushing;
+
+            /** Condition variable to wait on for flushing to complete. */
+            boost::condition_variable _flush_cond;
         };
 
         using PagePtr = std::shared_ptr<Page>;
@@ -1075,6 +1081,14 @@ namespace springtail {
              */
             void drop_file(const std::filesystem::path &file);
 
+            void validate() {
+                uint32_t size = 0;
+                for (auto &entry : _cache) {
+                    size += entry.second.size();
+                }
+                assert(size == _lru.size());
+            }
+
         private:
             /**
              * Helper to return a page to the cache.
@@ -1151,11 +1165,11 @@ namespace springtail {
          * @return The retrieved Page object.
          */
         SafePagePtr get(const std::filesystem::path &file,
-                    uint64_t extent_id,
-                    uint64_t access_xid,
-                    uint64_t target_xid = constant::LATEST_XID,
-                    bool do_rollforward = false,
-                    SafePagePtr::FlushCb flush_cb={} );
+                        uint64_t extent_id,
+                        uint64_t access_xid,
+                        uint64_t target_xid = constant::LATEST_XID,
+                        bool do_rollforward = false,
+                        SafePagePtr::FlushCb flush_cb={} );
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages
@@ -1169,6 +1183,11 @@ namespace springtail {
          * support truncate.
          */
         void drop_for_truncate(const std::filesystem::path &file);
+
+        void validate() {
+            _data_cache->validate();
+            _page_cache->validate();
+        }
 
     private:
         // INTERNAL MEMBER VARIABLES

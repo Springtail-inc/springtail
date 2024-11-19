@@ -1,19 +1,24 @@
-name: PR Actions
+name: PR Actions (PR to Main)
 
 on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
   # By default, this workflow will be triggered when PR is opened or reopened or when the head
   # branch of the pull request is updated. You can also invoke this manually.
   # pull_request:
   workflow_dispatch:
 
+
 permissions:
   id-token: write
   contents: read
+  checks: write
 
 jobs:
   test:
     uses: ./.github/workflows/test.yml
     with:
-      builder_image_version_tag: ${{ vars.BUILDER_IMAGE_VERSION }}
+      builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
     secrets:
-      ecr_pw: ${{ secrets.ECR_PW }}
+      aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
+      aws_ecr_docker_password: "${{ secrets.DEV_SUPPORT_ECR_PW }}"
