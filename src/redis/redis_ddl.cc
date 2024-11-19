@@ -213,11 +213,12 @@ namespace springtail {
 
     void
     RedisDDL::update_schema_xid(const std::string &fdw_id,
+                                uint64_t db_id,
                                 uint64_t schema_xid)
     {
         // update the hash entry for the FDW with the latest schema XID
         std::string key = fmt::format(redis::HASH_DDL_FDW, Properties::get_db_instance_id());
-        _redis->hset(key, fdw_id, std::to_string(schema_xid));
+        _redis->hset(key, fmt::format("{}:{}", db_id, fdw_id), std::to_string(schema_xid));
 
         // commit the DDLs that we just applied now that the schema XID is stored in Redis
         std::string queue_key = fmt::format(redis::QUEUE_DDL_FDW, Properties::get_db_instance_id(), fdw_id);
@@ -226,13 +227,22 @@ namespace springtail {
     }
 
     uint64_t
-    RedisDDL::min_schema_xid()
+    RedisDDL::min_schema_xid(uint64_t db_id)
     {
         std::string key = fmt::format(redis::HASH_DDL_FDW, Properties::get_db_instance_id());
 
-        // retrieve the schema XID for all FDWs
+        // retrieve the schema XID for all FDWs for db_id
+        std::string match = fmt::format("{}:*", db_id);
         std::vector<std::string> values;
-        _redis->hvals(key, std::back_inserter(values));
+
+        // redis hscan hash_key match
+        auto cursor = 0;
+        while (true) {
+            cursor = _redis->hscan(key, cursor, match, 100, std::inserter(values, values.begin()));
+            if (cursor == 0) {
+                break;
+            }
+        }
 
         // find the minimium XID across the FDWs
         uint64_t min_xid = constant::LATEST_XID;

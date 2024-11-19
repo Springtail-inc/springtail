@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     sudo vim ca-certificates gpg emacs-nox gcc-14 g++-14 gdb \
     python3-pip python3-psycopg2 python3-psutil python3-redis \
     python3-requests python3-yaml python3-jinja2 python3-lxml \
+    python3-boto3 \
     && apt-get clean autoclean \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/{apt,cache,log,dpkg}

@@ -120,7 +120,7 @@ namespace springtail::sys_tbl_mgr {
                     true,
                     request.index.is_unique );
 
-            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
 
         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
@@ -237,7 +237,7 @@ namespace springtail::sys_tbl_mgr {
                     xid.lsn,
                     !primary_keys.empty(), // mark not existent if no keys
                     true );
-            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
         }
@@ -1214,7 +1214,7 @@ namespace springtail::sys_tbl_mgr {
             fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
             fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
-            indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
+            indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                               write_xid, constant::UNKNOWN_EXTENT);
         }
     }

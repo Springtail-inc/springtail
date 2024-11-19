@@ -9,6 +9,7 @@
 #include <common/properties.hh>
 #include <common/logging.hh>
 #include <common/redis.hh>
+#include <common/coordinator.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -50,6 +51,8 @@ namespace springtail::pg_log_mgr {
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
         _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", _next_xid-1);
 
         uint64_t lsn = INVALID_LSN;
         if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
@@ -100,6 +103,12 @@ namespace springtail::pg_log_mgr {
             if (num_xacts == 0) {
                 break;
             }
+
+            for (auto &xact: committed_xacts) {
+                assert (xact->springtail_xid >= _next_xid);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
+            }
+
             _push_xacts_to_redis(committed_xacts);
             last_xact = committed_xacts.back();
             committed_xacts.clear();
@@ -108,6 +117,7 @@ namespace springtail::pg_log_mgr {
         // update next xid if we find an xid higher than committed xid in the log
         uint64_t last_allocated_xid = xact_reader.get_max_sp_xid();
         if (last_allocated_xid > _next_xid) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", _next_xid, last_allocated_xid + 1);
             _next_xid = last_allocated_xid + 1;
         }
 
@@ -155,6 +165,8 @@ namespace springtail::pg_log_mgr {
         // clear out Redis
         // GC queue
         _redis_queue.clear();
+        // GC oid queue
+        _redis_oid_set.clear();
         // Table sync queue
         _redis_sync_queue.clear();
 
@@ -244,7 +256,7 @@ namespace springtail::pg_log_mgr {
 
             // block on redis table sync queue w/timeout for shutdown
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for table sync queue");
-            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, 1);
+            StringPtr table_id_ptr = _redis_sync_queue.pop(REDIS_WORKER_ID, constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (table_id_ptr == nullptr) {
                 continue; // timeout, check for shutdown
             }
@@ -389,6 +401,9 @@ namespace springtail::pg_log_mgr {
         // rollover xact logger
         _create_xact_logger();
 
+        // clear the log resync file in redis
+        RedisMgr::get_instance()->get_client()->del(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id));
+
         // set state to replay done if we are in replaying state
         // this unblocks the xact handler
         _internal_state.set(STATE_REPLAY_DONE);
@@ -439,10 +454,28 @@ namespace springtail::pg_log_mgr {
         PgCopyData data;
         uint64_t start_offset = logger->offset();
 
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(WRITER_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
             // read data from pg replication connection (blocks)
             try {
+                // wait for data from pg; true if data is available
+                if (!_pg_conn.wait_for_data(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT)) {
+                    continue;
+                }
+
+                // read data from pg, length will be 0 if no data (timeout)
                 _pg_conn.read_data(data);
+                if (data.length == 0) {
+                    continue;
+                }
+
             } catch (const PgIOShutdown &e) {
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received shutdown signal");
                 break;
@@ -462,7 +495,7 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recevied data: length={}, msg_length={}, msg_offset={}",
                          data.length, data.msg_length, data.msg_offset);
 
-            if (data.length == 0 || !logger->log_data(data)) {
+            if (!logger->log_data(data)) {
                 // data has been consumed by keep alive or not full message
                 continue;
             }
@@ -497,9 +530,17 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_log_reader_thread()
     {
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(READER_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
             // get log entry from queue
-            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop();
+            PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
                 continue;
             }
@@ -550,8 +591,17 @@ namespace springtail::pg_log_mgr {
     {
         _create_xact_logger(); ///< logger to write out xid log
 
+        auto coordinator = Coordinator::get_instance();
+        std::string coordinator_id = fmt::format(XACT_WORKER_ID, _db_id);
+
+        coordinator->register_thread(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
         while (!_shutdown) {
-            PgTransactionPtr xact = _xact_queue->pop();
+
+            // mark alive with coordinator
+            coordinator->mark_alive(Coordinator::DaemonType::LOG_MGR, coordinator_id);
+
+            PgTransactionPtr xact = _xact_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (xact == nullptr) {
                 continue;
             }
@@ -635,12 +685,9 @@ namespace springtail::pg_log_mgr {
     {
         uint64_t xid = xact->springtail_xid;
 
-        // find the correct RedisSortedSet
-        RSSOidValuePtr oid_set = _get_oid_set(_db_id);
-
         // go through the oid map and update redis
         for (auto &oid : xact->oids) {
-            oid_set->add(PgRedisOidValue(oid, xid), xid);
+            _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
         }
 
         // finally send notification to GC
@@ -660,16 +707,13 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_push_xacts_to_redis(const std::vector<PgTransactionPtr> &xacts)
     {
-        // find the correct RedisSortedSet
-        RSSOidValuePtr oid_set = _get_oid_set(_db_id);
-
         std::vector<std::string> msgs;
         for (auto &xact : xacts) {
             uint64_t xid = xact->springtail_xid;
 
             // go through the oid map and update redis
             for (auto &oid : xact->oids) {
-                oid_set->add(PgRedisOidValue(oid, xid), xid);
+                _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
             }
 
             PgXactMsg redis_xact(xact->begin_path, xact->commit_path,
@@ -689,28 +733,6 @@ namespace springtail::pg_log_mgr {
 
         // do an underlying batch/bulk push
         _redis_queue.push(msgs);
-    }
-
-    RSSOidValuePtr
-    PgLogMgr::_get_oid_set(uint64_t db_id)
-    {
-        std::unique_lock<std::mutex> lock(_oid_set_mutex);
-
-        auto itr = _oid_set.find(db_id);
-        if (itr != _oid_set.end()) {
-            return itr->second;
-        }
-
-        std::string key = fmt::format(redis::SET_PG_OID_XIDS,
-                                      Properties::get_db_instance_id(), db_id);
-
-        RSSOidValuePtr oid_set = std::make_shared<RSSOidValue>(key);
-        auto result = _oid_set.emplace(db_id, oid_set);
-        if (!result.second) {
-            throw Error("Failed to insert into oid set");
-        }
-
-        return oid_set;
     }
 
 } // namespace springtail::pg_log_mgr

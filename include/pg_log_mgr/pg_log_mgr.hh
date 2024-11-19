@@ -57,6 +57,11 @@ namespace springtail::pg_log_mgr {
         /** redis worker id for redis sync queue */
         static constexpr char const * const REDIS_WORKER_ID = "pg_log_mgr";
 
+        /** coordinator thread worker ids arg=db_id */
+        static constexpr char const * const WRITER_WORKER_ID = "writer_{}";
+        static constexpr char const * const READER_WORKER_ID = "reader_{}";
+        static constexpr char const * const XACT_WORKER_ID = "xact_{}";
+
         /**
          * @brief Construct a new Pg Log Mgr object
          * @param db_id db id
@@ -85,6 +90,7 @@ namespace springtail::pg_log_mgr {
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
+          _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -101,6 +107,7 @@ namespace springtail::pg_log_mgr {
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
+          _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -216,8 +223,7 @@ namespace springtail::pg_log_mgr {
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         /** Redis sorted set for oid to xid mapping */
-        std::mutex _oid_set_mutex;
-        std::map<uint64_t, RSSOidValuePtr> _oid_set;
+        RedisSortedSet<PgRedisOidValue> _redis_oid_set;
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
 
@@ -232,9 +238,6 @@ namespace springtail::pg_log_mgr {
 
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
-
-        /** get oid set for this db_id; create if it doesn't exist */
-        RSSOidValuePtr _get_oid_set(uint64_t db_id);
 
         /** Get next xid */
         uint64_t _get_next_xid() {

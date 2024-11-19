@@ -6,6 +6,7 @@
 #include <optional>
 #include <type_traits>
 #include <vector>
+#include <chrono>
 
 #include <fmt/core.h>
 
@@ -74,12 +75,12 @@ namespace springtail {
          * @param timeout_sec timeout in seconds (0=block forever)
          * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop(const std::string &worker_id, uint64_t timeout_sec=0)
+        std::shared_ptr<T> pop(const std::string &worker_id, uint32_t timeout_sec=0)
         {
             std::string worker_key = fmt::format("{}:{}", _key, worker_id);
 
             // remove from the main queue and move to the worker queue
-            auto &&res = _redis->brpoplpush(_key, worker_key, timeout_sec);
+            auto &&res = _redis->brpoplpush(_key, worker_key, std::chrono::seconds{timeout_sec});
             // note: blmove() not available yet in redis++
             // auto &&res = _redis->blmove(_key, worker_key, "RIGHT", "LEFT", timeout_sec);
             if (res) {
@@ -159,10 +160,10 @@ namespace springtail {
          * @param timeout_sec timeout in seconds (0=block forever)
          * @return A pointer to the value if a value was received, nullptr if timedout
          */
-        std::shared_ptr<T> pop_and_commit(uint64_t timeout_sec=0)
+        std::shared_ptr<T> pop_and_commit(uint32_t timeout_sec=0)
         {
             // returns an optional pair, no value if timeout first=key, second=value
-            auto &&res = _redis->brpop(_key, timeout_sec);
+            auto &&res = _redis->brpop(_key, std::chrono::seconds{timeout_sec});
             if (res) {
                 return std::make_shared<T>(res->second);
             }
@@ -290,10 +291,23 @@ namespace springtail {
             return result;
         }
 
+        /**
+         * @brief Remove items from set by score
+         * @param min minimum score (inclusive)
+         * @param max maximum score (inclusive)
+         */
         void remove_by_score(const uint64_t min, const uint64_t max=-1)
         {
             sw::redis::BoundedInterval<double> interval(min, max, sw::redis::BoundType::CLOSED);
             RedisMgr::get_instance()->get_client()->zremrangebyscore(_key, interval);
+        }
+
+        /**
+         * @brief Clear the set.
+         */
+        void clear()
+        {
+            RedisMgr::get_instance()->get_client()->del(_key);
         }
 
     private:

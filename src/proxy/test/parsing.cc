@@ -49,7 +49,9 @@ int main(void)
 
     for (int i = 0; i < tests.size(); i++) {
         std::cout << "\nQuery: " << tests[i] << std::endl;
-        std::vector<pg_proxy::Parser::StmtContextPtr> res = pg_proxy::Parser::parse_query(tests[i]);
+        std::vector<pg_proxy::Parser::StmtContextPtr> res = pg_proxy::Parser::parse_query(tests[i], [](const std::string &schema, const std::string &table) {
+            return true;
+        });
         pg_proxy::Parser::dump_parse_tree(tests[i]);
         for (auto &r : res) {
             std::cout << "IS: " << (r->is_read_safe ? "readable\n" : "NOT readable\n") << std::endl;

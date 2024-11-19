@@ -61,6 +61,8 @@ namespace springtail::gc {
         RedisQueue<pg_log_mgr::PgXactMsg>
             reader_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
                                      Properties::get_db_instance_id()));
+        RedisQueue<XidReady>
+            gc_queue(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id()));
 
         // retrieve all of the threads for the daemon
         // note: we do this because there is a single GC daemon for both GC1 and GC2
@@ -82,6 +84,9 @@ namespace springtail::gc {
 
             // perform thread-type-specific cleanup
             if (parts[1] == THREAD_READER) {
+                // clear the queue of work to the Committer
+                gc_queue.clear();
+
                 // get the work item from the reader_queue
                 auto entry = reader_queue.work_item(thread_id);
                 if (entry) {
@@ -380,7 +385,7 @@ namespace springtail::gc {
     {
         SPDLOG_DEBUG_MODULE(LOG_GC, "db {} pg_xid {}", db_id, pg_xid);
         boost::unique_lock lock(_mutex);
-        
+
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
@@ -490,6 +495,9 @@ namespace springtail::gc {
 
         // loop until we are asked to shutdown; on shutdown drain the backlog
         while (!_shutdown || !_backlog.empty()) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, worker_id);
+
             // a flag used to skip sending an entire XID at the committer
             bool skip_xid = false;
 
@@ -1100,11 +1108,19 @@ namespace springtail::gc {
 
         WriteCacheClient * const write_cache = WriteCacheClient::get_instance();
         while (true) {
+            // update the coordinator
+            coordinator->mark_alive(daemon_type, worker_id);
+
             // wait for a work item
-            auto entry = _parser_queue->pop();
+            auto entry = _parser_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (entry == nullptr) {
-                // note: this only happens when the queue is shutdown
-                break;
+                // check if this is due to a queue shutdown
+                if (_parser_queue->is_shutdown()) {
+                    break;
+                }
+
+                // timed out, try again
+                continue;
             }
 
             // process the work item
