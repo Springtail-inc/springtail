@@ -142,7 +142,7 @@ namespace springtail {
 
     private:
         /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */
-        static const uint32_t MAX_EXTENT_COUNT = 4;
+        static const uint32_t MAX_EXTENT_COUNT = 16;
 
         /**
          * The Page objects represent a virtual Extent, which may hold either a single Extent
