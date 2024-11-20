@@ -56,7 +56,7 @@ namespace springtail::gc {
     {
         std::unique_lock g(_m);
         auto find_work = [&]() {
-            auto it = std::find_if(_work_set.begin(), _work_set.end(),
+            auto it = std::ranges::find_if(_work_set,
                     [&](auto const& v) { 
                         if (v.first.first == db_id && !v.second._ddl.is_null()) {
                             return v.second._ddl["table_id"] == tid;
@@ -160,7 +160,7 @@ namespace springtail::gc {
             }
 
             // check if there are pending jobs for this xid
-            auto it = std::find_if(_work_set.begin(), _work_set.end(),
+            auto it = std::ranges::find_if(_work_set,
                     [&](auto const& v) { 
                         return v.first.first == key.first && v.second._xid == xid;
                     });

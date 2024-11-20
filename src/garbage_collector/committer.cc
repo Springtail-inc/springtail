@@ -274,28 +274,30 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
-            // retrieve any schema changes available in Redis
-            auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-            if (!ddls.is_null()) {
-                auto client = sys_tbl_mgr::Client::get_instance();
-
-                // finalize the system metadata
-                // Note: for create index ddls, we save the state
-                // in the system tables but don't notify FDW until
-                // the index is built
-                client->finalize(db_id, xid);
-            }
-
             nlohmann::json completed_ddls;
             nlohmann::json index_ddls;
 
-            for (auto const &ddl: ddls) {
-                const auto it = ddl.find("action");
-                if (it != ddl.end() && *it == "create_index") {
-                    // The index DDLs will be commited to the FDWs after indexing is completed.
-                    index_ddls.push_back(std::move(ddl));
-                } else {
-                    completed_ddls.push_back(ddl);
+            // retrieve any schema changes available in Redis
+            {
+                auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+                if (!ddls.is_null()) {
+                    auto client = sys_tbl_mgr::Client::get_instance();
+
+                    // finalize the system metadata
+                    // Note: for create index ddls, we save the state
+                    // in the system tables but don't notify FDW until
+                    // the index is built
+                    client->finalize(db_id, xid);
+                }
+
+                for (auto ddl: ddls) {
+                    const auto it = ddl.find("action");
+                    if (it != ddl.end() && *it == "create_index") {
+                        // The index DDLs will be commited to the FDWs after indexing is completed.
+                        index_ddls.push_back(std::move(ddl));
+                    } else {
+                        completed_ddls.push_back(std::move(ddl));
+                    }
                 }
             }
 

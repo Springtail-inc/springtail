@@ -90,7 +90,7 @@ namespace springtail {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         }
 
-        auto it = std::find_if(roots.begin(), roots.end(), [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
+        auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
         _primary_index = std::make_shared<BTree>(_table_dir / constant::INDEX_PRIMARY_FILE,
@@ -347,7 +347,7 @@ namespace springtail {
 
 
         // find primary index
-        auto it = std::find_if(roots.begin(), roots.end(), [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
+        auto it = std::ranges::find_if(roots, [](auto const &v) { return v.index_id == constant::INDEX_PRIMARY; });
         assert(it != roots.end());
 
         if (it->extent_id != constant::UNKNOWN_EXTENT) {
