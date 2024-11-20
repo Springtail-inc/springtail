@@ -17,7 +17,6 @@ set(PROXY_SOURCES
     parser.cc
     buffer_pool.cc
     history_cache.cc
-    ../pg_repl/libpq_connection.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
@@ -31,6 +30,7 @@ target_include_directories(springtail_proxy
 
 target_link_libraries(springtail_proxy
     PUBLIC springtail_common
+    PUBLIC springtail_pg
     PRIVATE ${libpg_query_BINARY_DIR}/libpg_query.a
     PRIVATE nlohmann_json::nlohmann_json
     PRIVATE fmt::fmt

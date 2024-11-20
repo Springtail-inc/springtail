@@ -505,16 +505,16 @@ static bool calculate_client_proof(ScramState *scram_state,
 		scram_state->SaltedPassword = (uint8_t*)malloc(SCRAM_KEY_LEN);
 		if (scram_state->SaltedPassword == NULL)
 			goto failed;
-		scram_SaltedPassword(prep_password,
+		scramSaltedPassword(prep_password,
 				     salt,
 				     saltlen,
 				     iterations,
 				     scram_state->SaltedPassword);
 
-		scram_ClientKey(scram_state->SaltedPassword, ClientKey);
+		scramClientKey(scram_state->SaltedPassword, ClientKey);
 	}
 
-	scram_H(ClientKey, SCRAM_KEY_LEN, StoredKey);
+	scramH(ClientKey, SCRAM_KEY_LEN, StoredKey);
 
 	scram_HMAC_init(&ctx, StoredKey, SCRAM_KEY_LEN);
 	scram_HMAC_update(&ctx,
@@ -549,7 +549,7 @@ bool verify_server_signature(ScramState *scram_state, const PgUser *user, const 
 	if (user->has_scram_keys)
 		memcpy(ServerKey, user->scram_ServerKey, SCRAM_KEY_LEN);
 	else
-		scram_ServerKey(scram_state->SaltedPassword, ServerKey);
+		scramServerKey(scram_state->SaltedPassword, ServerKey);
 
 	scram_HMAC_init(&ctx, ServerKey, SCRAM_KEY_LEN);
 	scram_HMAC_update(&ctx,
@@ -779,12 +779,12 @@ static bool build_adhoc_scram_secret(const char *plain_password, ScramState *scr
 	scram_state->salt[encoded_len] = '\0';
 
 	/* Calculate StoredKey and ServerKey */
-	scram_SaltedPassword(password, saltbuf, sizeof(saltbuf),
+	scramSaltedPassword(password, saltbuf, sizeof(saltbuf),
 			     scram_state->iterations,
 			     salted_password);
-	scram_ClientKey(salted_password, scram_state->StoredKey);
-	scram_H(scram_state->StoredKey, SCRAM_KEY_LEN, scram_state->StoredKey);
-	scram_ServerKey(salted_password, scram_state->ServerKey);
+	scramClientKey(salted_password, scram_state->StoredKey);
+	scramH(scram_state->StoredKey, SCRAM_KEY_LEN, scram_state->StoredKey);
+	scramServerKey(salted_password, scram_state->ServerKey);
 
 	free(prep_password);
 	return true;
@@ -1026,7 +1026,7 @@ bool verify_client_proof(ScramState *state, const char *ClientProof)
 		state->ClientKey[i] = ClientProof[i] ^ ClientSignature[i];
 
 	/* Hash it one more time, and compare with StoredKey */
-	scram_H(state->ClientKey, SCRAM_KEY_LEN, client_StoredKey);
+	scramH(state->ClientKey, SCRAM_KEY_LEN, client_StoredKey);
 
 	if (memcmp(client_StoredKey, state->StoredKey, SCRAM_KEY_LEN) != 0)
 		return false;
@@ -1078,8 +1078,8 @@ bool scram_verify_plain_password(
 		password = prep_password;
 
 	/* Compute Server Key based on the user-supplied plaintext password */
-	scram_SaltedPassword(password, salt, saltlen, iterations, salted_password);
-	scram_ServerKey(salted_password, computed_key);
+	scramSaltedPassword(password, salt, saltlen, iterations, salted_password);
+	scramServerKey(salted_password, computed_key);
 
 	/*
 	 * Compare the secret's Server Key with the one computed from the

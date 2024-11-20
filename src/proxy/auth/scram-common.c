@@ -96,7 +96,7 @@ scram_HMAC_final(uint8 *result, scram_HMAC_ctx *ctx)
  * The password should already be normalized by SASLprep.
  */
 void
-scram_SaltedPassword(const char *password,
+scramSaltedPassword(const char *password,
 					 const char *salt, int saltlen, int iterations,
 					 uint8 *result)
 {
@@ -139,7 +139,7 @@ scram_SaltedPassword(const char *password,
  * not included in the hash).
  */
 void
-scram_H(const uint8 *input, int len, uint8 *result)
+scramH(const uint8 *input, int len, uint8 *result)
 {
 	pg_sha256_ctx ctx;
 
@@ -152,7 +152,7 @@ scram_H(const uint8 *input, int len, uint8 *result)
  * Calculate ClientKey.
  */
 void
-scram_ClientKey(const uint8 *salted_password, uint8 *result)
+scramClientKey(const uint8 *salted_password, uint8 *result)
 {
 	scram_HMAC_ctx ctx;
 
@@ -165,7 +165,7 @@ scram_ClientKey(const uint8 *salted_password, uint8 *result)
  * Calculate ServerKey.
  */
 void
-scram_ServerKey(const uint8 *salted_password, uint8 *result)
+scramServerKey(const uint8 *salted_password, uint8 *result)
 {
 	scram_HMAC_ctx ctx;
 
@@ -184,7 +184,7 @@ scram_ServerKey(const uint8 *salted_password, uint8 *result)
  * palloc'd or malloc'd, so caller is responsible for freeing it.
  */
 char *
-scram_build_secret(const char *salt, int saltlen, int iterations,
+scramBuildSecret(const char *salt, int saltlen, int iterations,
 				   const char *password)
 {
 	uint8		salted_password[SCRAM_KEY_LEN];
@@ -202,12 +202,12 @@ scram_build_secret(const char *salt, int saltlen, int iterations,
 		iterations = SCRAM_DEFAULT_ITERATIONS;
 
 	/* Calculate StoredKey and ServerKey */
-	scram_SaltedPassword(password, salt, saltlen, iterations,
+	scramSaltedPassword(password, salt, saltlen, iterations,
 						 salted_password);
-	scram_ClientKey(salted_password, stored_key);
-	scram_H(stored_key, SCRAM_KEY_LEN, stored_key);
+	scramClientKey(salted_password, stored_key);
+	scramH(stored_key, SCRAM_KEY_LEN, stored_key);
 
-	scram_ServerKey(salted_password, server_key);
+	scramServerKey(salted_password, server_key);
 
 	/*----------
 	 * The format is:
