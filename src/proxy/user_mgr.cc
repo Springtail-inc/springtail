@@ -115,6 +115,7 @@ namespace pg_proxy {
             } catch (Error &e) {
                 SPDLOG_ERROR(fmt::format("Failed to excute the query; will try to reconnect"));
                 conn.disconnect();
+                sleep(_sleep_interval);
                 continue;
             }
             std::unique_lock lock(_mutex);

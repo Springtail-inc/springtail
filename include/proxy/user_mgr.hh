@@ -153,7 +153,7 @@ namespace pg_proxy {
      */
     class UserMgr : public std::enable_shared_from_this<UserMgr> {
     public:
-        UserMgr(ProxyServerPtr proxy_server) : _proxy_server(proxy_server), _sleep_interval(5) {};
+        UserMgr(ProxyServer *proxy_server) : _proxy_server(proxy_server), _sleep_interval(5) {};
 
         void start() {
             _mgr_thread = std::thread(&UserMgr::_run, this);
@@ -178,23 +178,6 @@ namespace pg_proxy {
             return nullptr;
         }
 
-        /**
-         * @brief Add new user to the user map
-         * @param username users name
-         * @param password password
-         * @param salt     optional salt for md5
-         */
-        /*
-        void add_user(const std::string &username,
-                      const std::string &password={},
-                      uint32_t salt=0,
-                      const std::set<std::string> &databases)
-        {
-            std::unique_lock lock(_mutex);
-            _add_user(username, password, databases);
-        }
-        */
-
         void shutdown() {
             SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
             _shutdown = true;
@@ -210,7 +193,7 @@ namespace pg_proxy {
             }
         };
 
-        ProxyServerPtr _proxy_server;
+        ProxyServer *_proxy_server;
         mutable std::shared_mutex _mutex;
 
         /** maps username to User object and user object to list of databases*/
@@ -221,6 +204,12 @@ namespace pg_proxy {
         uint32_t _sleep_interval;               ///< sleep interval in seconds
         std::atomic<bool> _shutdown;            ///< shudown flag
 
+        /**
+         * @brief Add new user to the user map
+         * @param username users name
+         * @param password password
+         * @param databases list databases accessible to this user
+         */
         void _add_user(const std::string &username,
                       const std::string &password,
                       const std::set<std::string> &databases) {

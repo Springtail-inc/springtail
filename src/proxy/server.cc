@@ -146,7 +146,7 @@ namespace springtail::pg_proxy {
             add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
 
-        _user_mgr = std::make_shared<UserMgr>(shared_from_this());
+        _user_mgr = std::make_shared<UserMgr>(this);
         _user_mgr->start();
 
         // add subscribers to pubsub threads
@@ -478,6 +478,7 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
+        _thread_pool.shutdown();
         _user_mgr->shutdown();
         _config_sub_thread.shutdown();
         _data_sub_thread.shutdown();
