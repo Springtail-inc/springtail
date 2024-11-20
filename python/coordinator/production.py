@@ -2,6 +2,7 @@ import boto3
 import logging
 import os
 import sys
+import time
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
 
@@ -11,11 +12,33 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
 
-from common import run_command
+from common import (
+    run_command,
+    makedir,
+    grep_file
+)
 
 S3_BIN_FOLDER = 'packages'
 S3_DOWNLOAD_PATH = '/tmp'
-S3_INSTALL_PATH = '/opt/'
+S3_INSTALL_PATH = '/opt/springtail'
+
+# NOTE: this should match the environment variables in common/environment.hh
+ENV_VARS = [
+    'REDIS_USER',
+    'REDIS_PASSWORD',
+    'REDIS_USER_DATABASE_ID',
+    'REDIS_CONFIG_DATABASE_ID',
+    'REDIS_PORT',
+    'ORGANIZATION_ID',
+    'ACCOUNT_ID',
+    'DATABASE_INSTANCE_ID',
+    'LUSTRE_DNS_NAME',
+    'LUSTRE_MOUNT_NAME',
+    'MOUNT_POINT',
+    'FDW_ID',
+    'REPLICATION_USER_PASSWORD',
+    'FDW_USER_PASSWORD'
+]
 
 def __download_s3_binaries (
     bucket: str,
@@ -127,6 +150,7 @@ def __send_sns_notification(
 def install_binaries() -> None:
     """
     Install the springtail binaries on the local system.
+    Current s3 bucket: s3://data-share.springtail.internal/packages/
     """
     # Download the springtail binaries
     s3_bucket = os.environ.get('S3_BUCKET')
@@ -138,8 +162,64 @@ def install_binaries() -> None:
     if not springtail_tgz:
         raise ValueError("Failed to download springtail binaries")
 
+    # Create the install directory if it doesn't exist
+    if not os.path.exists(S3_INSTALL_PATH):
+        makedir(S3_INSTALL_PATH)
+
     # Install the binaries
-    run_command('tar', ['-xzf', springtail_tgz, '-C', S3_INSTALL_PATH])
+    run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', S3_INSTALL_PATH])
+
+
+def install_pgfdw() -> None:
+    """
+    Install the postgres libraries on the local system for the FDW.
+    Should be done prior to starting the ddl mgr.
+    """
+    # Get the share and lib directories
+    share_dir = run_command('pg_config', ['--sharedir'])
+    lib_dir = run_command('pg_config', ['--pkglibdir'])
+
+    # copy the extension files to the share directory
+    logging.info(f"Copying extension files to the share directory: {share_dir}")
+    sp_sharedir = os.path.join(S3_INSTALL_PATH, 'share')
+    share_dir = os.path.join(share_dir.strip(), 'extension')
+
+    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw--1.0.sql')), share_dir])
+    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw.control')), share_dir])
+
+    # copy the shared library to the lib directory
+    logging.info(f"Copying shared library to the lib directory: {lib_dir}")
+    sp_libdir = os.path.join(S3_INSTALL_PATH, 'lib')
+    lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
+    run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
+
+    # Write a config file that can be used in Postgres to initialize Springtail
+    logging.info("Writing springtail configuration file")
+    sp_pgconf_dir = os.path.join(S3_INSTALL_PATH, 'springtail.conf')
+    with open(sp_pgconf_dir, 'w') as f:
+        for var in ENV_VARS:
+            value = os.environ.get(var)
+            if value:
+                f.write(f"{var}={value}\n")
+
+    # Update the postgres configuration file
+    # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+    logging.info("Updating postgres configuration file")
+    version_str = run_command('pg_config', ['--version']).strip()
+    version = version_str.split(' ')[1].split('.')[0]
+    config_file = f'/etc/postgresql/{version}/main/postgresql.conf'
+
+    if grep_file(config_file, ['springtail_fdw.config_file_path']):
+        run_command('sudo', ['sed', '-i', f'-e"s/springtail_fdw.config_file_path .*/springtail_fdw.config_file_path={sp_pgconf_dir}"', config_file])
+    else:
+        with open(config_file, 'a') as f:
+            f.write(f"springtail_fdw.config_file_path = {sp_pgconf_dir}\n")
+
+    # restart postgres
+    logging.info("Restarting postgres")
+    run_command('sudo', ['systemctl', 'restart', 'postgresql'])
+    time.sleep(5)
+
 
 def send_sns(message: str) -> None:
     """
