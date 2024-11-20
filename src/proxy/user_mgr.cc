@@ -87,29 +87,42 @@ namespace pg_proxy {
 
     void UserMgr::_run() {
         _id = std::this_thread::get_id();
-        // connect to primary database
-        // TODO: change to keep connection around
-        while (!_shutdown) {
-            std::string host, user, password;
-            int port;
-            Properties::get_primary_db_config(host, port, user, password);
 
-            LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
-            auto db_name = _proxy_server->get_any_replicated_db_name();
-            if (db_name.has_value()) {
-                LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
-            } else {
-                SPDLOG_ERROR("No replicated database name is found");
-                throw ProxyError("No replicated database name found");
+        springtail::LibPqConnection conn;
+        while (!_shutdown) {
+            while (!conn.is_connected()) {
+                try {
+                    // connect to primary database
+                    std::string host, user, password;
+                    int port;
+                    Properties::get_primary_db_config(host, port, user, password);
+
+                    auto db_name = _proxy_server->get_any_replicated_db_name();
+                    if (db_name.has_value()) {
+                        conn.connect(host, db_name.value(), user, password, port, false);
+                    } else {
+                        SPDLOG_ERROR("No replicated database name is found");
+                        throw ProxyError("No replicated database name found");
+                    }
+                } catch (Error &e) {
+                    SPDLOG_ERROR(fmt::format("Failed to connect to primary database; will retry in {} seconds", _sleep_interval));
+                    sleep(_sleep_interval);
+                }
             }
 
-            conn->exec(USER_SELECT);
+            try {
+                conn.exec(USER_SELECT);
+            } catch (Error &e) {
+                SPDLOG_ERROR(fmt::format("Failed to excute the query; will try to reconnect"));
+                conn.disconnect();
+                continue;
+            }
             std::unique_lock lock(_mutex);
             _user_db_access.clear();
-            for (int i = 0; i < conn->ntuples(); i++) {
-                std::string username = conn->get_string(i, 0);
-                std::string password = conn->get_string(i, 1);
-                std::string databases = conn->get_string(i, 2);
+            for (int i = 0; i < conn.ntuples(); i++) {
+                std::string username = conn.get_string(i, 0);
+                std::string password = conn.get_string(i, 1);
+                std::string databases = conn.get_string(i, 2);
                 nlohmann::json db_names_json = nlohmann::json::parse(databases);
                 std::set<std::string> database_set;
                 assert(db_names_json.is_array());
@@ -120,12 +133,12 @@ namespace pg_proxy {
                 _add_user(username, password, database_set);
             }
             lock.unlock();
+            conn.clear();
 
-            conn->clear();
-            conn->disconnect();
             sleep(_sleep_interval);
         }
 
+        conn.disconnect();
     }
 } // namespace pg_proxy
 } // namespace springtail

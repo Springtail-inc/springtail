@@ -35,11 +35,9 @@ namespace {
             nlohmann::json db_config = Properties::get_db_config(db_id);
             auto db_name = db_config["name"].get<std::string>();
 
-            auto p_db = Properties::get_primary_db_config();
-            auto host = p_db["host"].get<std::string>();
-            auto user = p_db["replication_user"].get<std::string>();
-            auto password = p_db["password"].get<std::string>();
-            auto port = p_db["port"].get<int>();
+            std::string host, user, password;
+            int port;
+            Properties::get_primary_db_config(host, port, user, password);
 
             std::string conn_cmd = fmt::format("psql postgresql://{}:{}@{}:{}/{} -f sample.sql", user, password, host, port, db_name);
             SPDLOG_INFO("Connecting to: {}", conn_cmd);

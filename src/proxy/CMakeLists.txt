@@ -38,7 +38,6 @@ target_link_libraries(springtail_proxy
     PRIVATE OpenSSL::SSL
     PRIVATE OpenSSL::Crypto
     PRIVATE xxHash::xxhash
-    # PRIVATE springtail_pg
 )
 
 # test parser executable

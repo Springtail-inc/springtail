@@ -13,7 +13,6 @@
 #include <proxy/connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
-// #include <proxy/server.hh>
 
 namespace springtail {
 namespace pg_proxy {

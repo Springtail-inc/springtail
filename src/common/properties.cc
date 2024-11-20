@@ -348,7 +348,7 @@ namespace springtail {
     }
 
     nlohmann::json
-    Properties::get_primary_db_config()
+    Properties::_get_primary_db_config()
     {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
@@ -387,14 +387,13 @@ namespace springtail {
         return json;
     }
 
-    // TODO: refactor all the placess where get_primary_db_config()  is called
     void Properties::get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
-        auto primary_config = Properties::get_primary_db_config();
+        auto primary_config = Properties::_get_primary_db_config();
 
         auto optional_host = Json::get<std::string>(primary_config, "host");
         auto optional_port = Json::get<uint16_t>(primary_config, "port");
-        auto optional_user = Json::get<std::string>(primary_config, "user");
-        auto optional_password = Json::get<std::string>(primary_config, "user");
+        auto optional_user = Json::get<std::string>(primary_config, "replication_user");
+        auto optional_password = Json::get<std::string>(primary_config, "password");
 
         if (optional_host.has_value() && optional_port.has_value() && optional_user.has_value() && optional_password.has_value()) {
             host = optional_host.value();
