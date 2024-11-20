@@ -17,6 +17,7 @@ namespace springtail {
         uint64_t size;
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
         Json::get_to<uint64_t>(json, "btree_cache_size", size, 512);
+        Json::get_to<uint64_t>(json, "max_extent_per_page", _max_extent_per_page, MAX_EXTENT_COUNT);
 
         _cache = std::make_shared<PageCache>(size);
           

@@ -141,10 +141,7 @@ namespace springtail {
         }
 
     private:
-        /** The maximum size of an extent before we split it in half. */
-        static const uint32_t MAX_EXTENT_SIZE = 64 * 1024;
-
-        /** The maximum number of extents in an in-memory page before we automatically flush it to disk. */
+        /** The default maximum number of extents in an in-memory page before we automatically flush it to disk. */
         static const uint32_t MAX_EXTENT_COUNT = 4;
 
         /**
@@ -379,7 +376,7 @@ namespace springtail {
              * Check if the page should be flushed based on the number of extents it contains.
              */
             bool check_flush() const {
-                return (_cache_page->extent_count() > MAX_EXTENT_COUNT);
+                return (_cache_page->extent_count() > _btree->_max_extent_per_page);
             }
 
             /**
@@ -449,6 +446,9 @@ namespace springtail {
 
         /** The target XID of the tree. */
         uint64_t _xid;
+
+        uint64_t _max_extent_size; ///< The maximum size of a single extent before splitting
+        uint64_t _max_extent_per_page; ///< The maximum number of extents in a page before flushing
 
         /**
          * A flag indicating if the target XID is finalized on disk or not.  Mutations are only

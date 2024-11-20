@@ -224,7 +224,7 @@ namespace springtail {
             // check if the page is currently flushing
             if (page->_is_flushing) {
                 // wait for the flushing to complete
-                page->_flush_cond.wait(lock);
+                page->_flush_cond.wait(lock, [&page](){ return !page->_is_flushing; });
             } else {
                 // mark the page as flushing
                 page->_is_flushing = true;
@@ -362,7 +362,7 @@ namespace springtail {
             // check if the page is currently flushing
             if (page->_is_flushing) {
                 // wait for the flushing to complete
-                page->_flush_cond.wait(lock);
+                page->_flush_cond.wait(lock, [&page](){ return !page->_is_flushing; });
             } else {
                 // mark the page as flushing
                 page->_is_flushing = true;
@@ -1104,7 +1104,7 @@ namespace springtail {
                 // wait for the flush to complete and then return the extent
                 boost::unique_lock lock(_mutex, boost::adopt_lock);
                 auto cv = extent->_flush_cv;
-                cv->wait(lock);
+                cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
                 lock.release();
 
                 return extent;
@@ -1337,7 +1337,7 @@ namespace springtail {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
 
             auto cv = extent->_flush_cv;
-            cv->wait(lock);
+            cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
 
             // note: this doesn't unlock, just releases the adopt_lock
             lock.release();
@@ -1459,7 +1459,7 @@ namespace springtail {
 
             // wait for the read to complete
             auto cv = io_i->second;
-            cv->wait(lock);
+            cv->wait(lock, [this, &key](){ return _io_map.find(key) == _io_map.end(); });
 
             // note: try to retrieve from the cache again
             lock.release();
@@ -1521,7 +1521,7 @@ namespace springtail {
             // wait for the flush to complete
             boost::unique_lock lock(_mutex, boost::adopt_lock);
             auto cv = extent->_flush_cv;
-            cv->wait(lock);
+            cv->wait(lock, [&extent](){ return extent->_state != CacheExtent::State::FLUSHING; });
             lock.release();
 
         } else {
