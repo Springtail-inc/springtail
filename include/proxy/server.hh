@@ -54,22 +54,6 @@ namespace springtail::pg_proxy {
             return _user_mgr;
         }
 
-        // TODO: eventually remove this
-        /** Add a user to the user manager -- trust authentication no password */
-        /*
-        void add_user(const std::string &username) {
-            _user_mgr->add_user(username);
-        }
-        */
-
-        /** Add a user to the user manager */
-        /*
-        void add_user(const std::string &username,
-                      const std::string &password, uint32_t salt=0) {
-            _user_mgr->add_user(username, password, salt);
-        }
-        */
-
         /**
          * @brief Add replicated database id and name the collection of replicated databases
          *          and setup initial state per database
@@ -86,6 +70,11 @@ namespace springtail::pg_proxy {
             _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
         }
 
+        /**
+         * @brief Get a name of an arbitrary replicated databasethe for running a user query in UserMgr
+         *
+         * @return std::optional<std::string> - name of a replicated database if found
+         */
         std::optional<std::string> get_any_replicated_db_name() {
             std::shared_lock lock(_db_mutex);
             auto it = _replicated_databases.begin();

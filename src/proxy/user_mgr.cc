@@ -11,7 +11,7 @@
 namespace springtail {
 namespace pg_proxy {
 
-    static constexpr char USER_SELECT[] = "select username, password, databases from get_user_access()";
+    static constexpr char USER_SELECT[] = "select username, password, databases from public.get_user_access()";
 
     User::User(UserMgrPtr user_mgr,
                const std::string &username,
@@ -105,7 +105,8 @@ namespace pg_proxy {
                         throw ProxyError("No replicated database name found");
                     }
                 } catch (Error &e) {
-                    SPDLOG_ERROR(fmt::format("Failed to connect to primary database; will retry in {} seconds", _sleep_interval));
+                    SPDLOG_ERROR("Failed to connect to primary database; will retry in {} seconds", _sleep_interval);
+                    SPDLOG_ERROR("error message: {}\n", conn.error_message());
                     sleep(_sleep_interval);
                 }
             }

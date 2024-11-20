@@ -178,6 +178,10 @@ namespace pg_proxy {
             return nullptr;
         }
 
+        /**
+         * @brief Shutdown function for stopping UserMgr thread
+         *
+         */
         void shutdown() {
             SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
             _shutdown = true;
@@ -187,19 +191,22 @@ namespace pg_proxy {
         }
 
     private:
+        /**
+         * @brief Comparison operator for ordering User objects by username inside the map container
+         *
+         */
         struct CompareUserByName {
             bool operator()(const UserPtr &lhs, const UserPtr &rhs) const {
                 return lhs->username() < rhs->username();
             }
         };
 
-        ProxyServer *_proxy_server;
-        mutable std::shared_mutex _mutex;
+        ProxyServer *_proxy_server;             ///< proxy server pointer for querying database name
+        mutable std::shared_mutex _mutex;       ///< mutex for storage access
 
-        /** maps username to User object and user object to list of databases*/
-        std::map<UserPtr, std::set<std::string>, CompareUserByName> _user_db_access;
+        std::map<UserPtr, std::set<std::string>, CompareUserByName> _user_db_access; ///< map of user objects to list of databases
 
-        std::thread _mgr_thread;
+        std::thread _mgr_thread;                ///< user manager execution thread
         std::thread::id _id;                    ///< user manager thread id
         uint32_t _sleep_interval;               ///< sleep interval in seconds
         std::atomic<bool> _shutdown;            ///< shudown flag
@@ -218,8 +225,11 @@ namespace pg_proxy {
             _user_db_access[user] = databases;
         }
 
+        /**
+         * @brief Function executed by UserMgr thread
+         *
+         */
         void _run();
     };
-    // using UserMgrPtr = std::shared_ptr<UserMgr>;
 } // namespace pg_proxy
 } // namespace springtail
