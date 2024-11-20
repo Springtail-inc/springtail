@@ -146,7 +146,9 @@ namespace springtail::pg_proxy {
             add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
 
-        _user_mgr = std::make_shared<UserMgr>(this);
+        _user_mgr = std::make_shared<UserMgr>([this] {
+            return this->get_any_replicated_db_name();
+        }, 5);
         _user_mgr->start();
 
         // add subscribers to pubsub threads

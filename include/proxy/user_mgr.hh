@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <map>
@@ -145,15 +146,14 @@ namespace pg_proxy {
     };
     using UserPtr = std::shared_ptr<User>;
 
-    class ProxyServer;
-    using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
     class UserMgr : public std::enable_shared_from_this<UserMgr> {
     public:
-        UserMgr(ProxyServer *proxy_server) : _proxy_server(proxy_server), _sleep_interval(5) {};
+        using GetReplicatedDatabaseFn = std::function<std::optional<std::string> ()>;
+        UserMgr(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) :
+            _get_db_fn(get_db_fn), _sleep_interval(sleep_interval) {};
 
         void start() {
             _mgr_thread = std::thread(&UserMgr::_run, this);
@@ -201,7 +201,7 @@ namespace pg_proxy {
             }
         };
 
-        ProxyServer *_proxy_server;             ///< proxy server pointer for querying database name
+        GetReplicatedDatabaseFn _get_db_fn;     ///< function for getting one of the replicated database names for creating connection to the database
         mutable std::shared_mutex _mutex;       ///< mutex for storage access
 
         std::map<UserPtr, std::set<std::string>, CompareUserByName> _user_db_access; ///< map of user objects to list of databases
