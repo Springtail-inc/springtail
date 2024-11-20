@@ -246,29 +246,6 @@ class TestCase:
             f.readline() # skip the header
             cursor.copy_from(f, table, sep=',', null='')
 
-        # psycopg3
-        # with (cursor.copy(f"COPY {table} FROM STDIN DELIMITER ',' NULL '' FORMAT CSV") as copy,
-        #       open(filename, 'r') as f):
-        #     while data := f.read(BLOCK_SIZE):
-        #         copy.write(data)
-            
-        # copy_query = f"COPY {table} FROM '{filename}' DELIMITER ',' CSV HEADER;"
-        # cursor.execute(copy_query)
-
-        # with open(filename, 'r') as f:
-        #     csv_reader = csv.reader(f)
-
-        #     # read the header with the column names
-        #     header = next(csv_reader)
-        #     headers = ', '.join([f'"{h}"' for h in header])
-        #     placeholders = ', '.join(['%s'] * len(header))
-
-        #     # XXX might be faster if we loaded more than one row at a time
-        #     #     could also consider using a COPY command
-        #     insert_query = f'INSERT INTO "{table}" ({headers}) VALUES ({placeholders});'
-        #     for row in csv_reader:
-        #         cursor.execute(insert_query, [ None if r == '' else r for r in row ])
-
 
     def _execute_sql(self, cursor: psycopg2.extensions.cursor, sql: str, do_fetch: bool) -> list:
         """Execute the provided SQL using the provided cursor."""
