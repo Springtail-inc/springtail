@@ -17,7 +17,7 @@ namespace {
     class BTree_Test : public testing::Test {
     protected:
         void SetUp() override {
-            springtail_init();
+            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -220,6 +220,11 @@ namespace {
         // now read the tree back and make sure there are the right number of entries and that they are in-order
         auto tree = std::make_shared<BTree>(_base_dir / "Insert10", xid, _schema, offset);
         _verify_names(tree, 10);
+
+        btree.reset();
+        tree.reset();
+
+        StorageCache::get_instance()->validate();
     }
 
     TEST_F(BTree_Test, InsertAll) {
@@ -416,6 +421,7 @@ namespace {
 
         // finalize the tree
         auto offset_2 = btree->finalize();
+        btree = nullptr;
 
         // now read the tree back and make sure there are the right number of entries and that they are in-order
 

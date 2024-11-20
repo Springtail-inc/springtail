@@ -52,7 +52,7 @@ namespace springtail::gc {
     public:
         LogParser(uint32_t reader_count,
                   uint32_t parser_count)
-            : _parser_queue(std::make_shared<ParserQueue>()),
+            : _parser_queue(std::make_shared<ParserQueue>(4096)),
               _reader(_parser_queue),
               _reader_threads(reader_count),
               _parser(_parser_queue),

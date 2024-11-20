@@ -139,6 +139,13 @@ namespace springtail {
                 return _cache_id;
             }
 
+            /**
+             * Returns the extent ID of the extent.
+             */
+            uint64_t extent_id() const {
+                return _extent_id;
+            }
+
             State state() const {
                 return _state;
             }
@@ -163,57 +170,92 @@ namespace springtail {
         class SafeExtent;
 
         /**
-         * Reference to an extent in the DataCache. Typically one would keep a set of ExtentRef elements
-         * to keep track of extents and call make_safe_extent/make_dirty_safe_extent
-         * to access the referenced extent.
+         * Reference to an extent in the DataCache. Typically one would keep a set of ExtentRef
+         * elements to keep track of extents and call make_safe_extent()/make_dirty_safe_extent() to
+         * access the referenced extent.
          */
         class ExtentRef {
-            public:
-                ExtentRef(uint64_t id, CacheExtentPtr cached) :
-                    _id{id} 
-                { 
-                    if (cached) {
-                        _cached = cached;
-                    }
+        public:
+            /**
+             * Constructor for an extent reference.  The ID may contain the extent ID for a CLEAN
+             * extent or the cache ID for a MUTABLE/DIRTY page.
+             */
+            ExtentRef(uint64_t id, bool clean, CacheExtentPtr cached = nullptr)
+                : _id{id},
+                  _clean{clean}
+            {
+                if (cached) {
+                    _cached = cached;
                 }
+            }
 
-                ExtentRef(uint64_t id) :
-                    _id{id} 
-                {}
+            /**
+             * Returns the extent ID or cache ID of the underlying extent.  DIRTY or MUTABLE extents
+             * will have the cache ID while CLEAN extents will have the extent ID.
+             */
+            uint64_t id() const {
+                return _id;
+            }
 
-                uint64_t id() const {
-                    if(_cached) {
-                        auto c = _cached->lock();
-                        if (c) {
-                            return c->key().second;
-                        }
-                    }
-                    return _id;
+            /**
+             * Returns true if the ID is the extent ID of a clean page.
+             */
+            bool is_clean() const {
+                return _clean;
+            }
+
+            /**
+             * Returns true if the reference contains a weak pointer to a cached extent.  Note that
+             * this pointer may not be valid anymore due to eviction.
+             */
+            bool is_direct() const {
+                return !_cached.expired();
+            }
+
+            /**
+             * Returns a valid shared_ptr to the extent object if the weak_ptr can be dereferenced.
+             */
+            CacheExtentPtr lock_cached() const {
+                if (!is_direct()) {
+                    return {};
                 }
+                return _cached.lock();
+            }
 
-                bool is_cached() const {
-                    return _cached.has_value();
-                }
+            /**
+             * Constructs a SafeExtent using this ExtentRef and the underlying data file.
+             */
+            SafeExtent make_safe_extent(const std::filesystem::path &file) const {
+                return SafeExtent{ file, *this, false };
+            }
 
-                CacheExtentPtr lock_cached() const {
-                    if (!is_cached()) {
-                        return {};
-                    }
-                    auto e = _cached->lock();
-                    if (!e) {
-                        _cached = {};
-                    }
-                    return _cached->lock();
-                }
+            /**
+             * Constructs a SafeExtent to an extent that can be safely mutated.  If the current
+             * extent is CLEAN then it will extract it from the cache, potentially copying it to a
+             * new MUTABLE extent.  In that case the underlying weak_ptr will be changed to point to
+             * the new extent.
+             */
+            SafeExtent make_dirty_safe_extent(const std::filesystem::path &file) {
+                SafeExtent e{ file, *this, true };
 
-                SafeExtent make_safe_extent(const std::filesystem::path &file) const;
+                _id = (*e)->cache_id(); // update the reference with the cache ID of the extent
+                _clean = false; // mark this reference as dirty so we know it holds a cache ID
+                _cached = *e; // update cached extent pointer since it may have changed
 
-                // This function may modify weak_ptr with a new extent
-                SafeExtent make_dirty_safe_extent(const std::filesystem::path &file);
+                return e;
+            }
 
-            private:
-                uint64_t _id;  //ID of the extent
-                mutable std::optional<std::weak_ptr<CacheExtent>> _cached;
+        private:
+            /** If CLEAN, the extent ID of the underlying extent.  Otherwise, the cache ID of the
+                extent. */
+            uint64_t _id;
+
+            /** If true, the _id is an extent ID.  If false, the _id is a cache ID. */
+            bool _clean;
+
+            /** Weak pointer to the extent in the DataCache.  May be expired() if the underlying
+                extent was evicted from the cache. */
+            mutable std::weak_ptr<CacheExtent> _cached;
         };
 
 
@@ -224,79 +266,88 @@ namespace springtail {
          * To get ExtentRef from SafeExtent use get_ref().
          **/
         class SafeExtent {
-            public:
-                SafeExtent()
-                    : _extent(nullptr)
-                { }
+        public:
+            SafeExtent()
+                : _extent(nullptr)
+            { }
 
-                // create empty extent
-                SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
-                   _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
+            // copy causes the use count to be incremented
+            SafeExtent(const SafeExtent &other) {
+                if (other._extent != nullptr) {
+                    StorageCache::get_instance()->_data_cache->use(other._extent);
                 }
+                _extent = other._extent;
+            }
 
-                // copy causes the use count to be incremented
-                SafeExtent(const SafeExtent &other) {
-                    if (other._extent != nullptr) {
-                        StorageCache::get_instance()->_data_cache->use(other._extent);
-                    }
-                    _extent = other._extent;
+            // create empty extent
+            SafeExtent(const std::filesystem::path &file, ExtentHeader hdr) {
+                _extent = StorageCache::get_instance()->_data_cache->get_empty(file, hdr);
+            }
+
+            SafeExtent &operator=(const SafeExtent &other) {
+                if (_extent) {
+                    StorageCache::get_instance()->_data_cache->put(_extent);
                 }
-                SafeExtent &operator=(const SafeExtent &other) {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
-                    _extent = other._extent;
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->use(other._extent);
-                    }
-                    return *this;
+                _extent = other._extent;
+                if (_extent) {
+                    StorageCache::get_instance()->_data_cache->use(other._extent);
                 }
+                return *this;
+            }
 
-                // move handling
-                SafeExtent(SafeExtent &&other) {
-                    _extent = other._extent;
-                    other._extent = nullptr;
+            // move handling
+            SafeExtent(SafeExtent &&other) {
+                _extent = other._extent;
+                other._extent = nullptr;
+            }
+
+            SafeExtent &operator=(SafeExtent &&other) {
+                if (_extent) {
+                    StorageCache::get_instance()->_data_cache->put(_extent);
                 }
+                _extent = other._extent;
+                other._extent = nullptr;
 
-                SafeExtent &operator=(SafeExtent &&other) {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
-                    _extent = other._extent;
-                    other._extent = nullptr;
+                return *this;
+            }
 
-                    return *this;
+            ~SafeExtent()
+            {
+                if (_extent) {
+                    StorageCache::get_instance()->_data_cache->put(_extent);
                 }
+            }
 
-                ~SafeExtent()
-                {
-                    if (_extent) {
-                        StorageCache::get_instance()->_data_cache->put(_extent);
-                    }
+            ExtentRef get_ref() const {
+                assert(_extent);
+                if (_extent->state() == CacheExtent::State::CLEAN) {
+                    return { _extent->extent_id(), true, _extent };
+                } else {
+                    return { _extent->cache_id(), false, _extent };
                 }
+            }
 
-                ExtentRef get_ref() const {
-                    assert(_extent);
-                    return {_extent->key().second, _extent};
-                }
+            CacheExtentPtr operator*() const {
+                return _extent;
+            }
 
-                CacheExtentPtr operator*() const {
-                    return _extent;
-                }
+            CacheExtentPtr *operator->() {
+                return &_extent;
+            }
 
-                CacheExtentPtr *operator->() {
-                    return &_extent;
-                }
+        protected:
+            friend ExtentRef;
 
-            protected:
-                friend ExtentRef;
+            SafeExtent(const std::filesystem::path &file,
+                       const ExtentRef &ref,
+                       bool mark_dirty)
+            {
+                _extent = StorageCache::get_instance()->_data_cache->get(file, ref, mark_dirty);
+                assert(_extent);
+            }
 
-                SafeExtent(const std::filesystem::path &file,
-                        const ExtentRef &ref,
-                        bool mark_dirty);
-
-            private:
-                CacheExtentPtr _extent;
+        private:
+            CacheExtentPtr _extent;
         };
 
         /**
@@ -315,12 +366,21 @@ namespace springtail {
          * A cache of Extent objects.  The DataCache constructs CacheExtent objects.  It maintains a
          * maximum number of in-memory extents, shared between clean and dirty pages.
          *
-         * Clean extents are kept in a lookup cache as well as stored on an LRU list for eviction
+         * CLEAN extents are kept in a lookup cache as well as stored on an LRU list for eviction
          * selection.
          *
-         * Dirty extents are also kept in a separate LRU list, but not in a lookup cache.  These extents
-         * are managed by the higher-level Page objects, and can only be found for use via the Page,
-         * but eviction selection is handled at this lower layer.
+         * DIRTY extents are also kept in a separate LRU list, and a separate lookup cache based on
+         * a unique "cache ID" used only for tracking purposes in-memory.  These extents are managed
+         * by the higher-level Page objects, and can only be found for use via the Page, but
+         * eviction selection is handled at this lower layer.  What this means is that DIRTY extents
+         * can be evicted from underneath a page, which is why the ExtentRef has to track both the
+         * cache ID and the direct pointer to the extent.  In most cases the cache ID isn't
+         * necessary, but it is required in the case of an eviction.
+         *
+         * There is also the concept of a MUTABLE extent, which is a copy of a CLEAN page that can
+         * be safely mutated, but has not been mutated yet.  It has a cache ID and is kept in the
+         * DIRTY extent lookup cache, but it is kept in the clean LRU list since it can be evicted
+         * without triggering IO.
          */
         class DataCache {
         public:
@@ -330,28 +390,20 @@ namespace springtail {
                   _next_cache_id(0)
             { }
 
-            /**
-             * Retrieve an extent from the cache based on a file and extent ID.  Must be released
-             * back to the cache after use with put().  May block due to IO.
-             *
-             * @param file The file to read the extent from.
-             * @param extent_id The extent_id (offset) of the extent.
-             * @return A pointer to the extent.
-             */
-            CacheExtentPtr get(const std::filesystem::path &file, uint64_t extent_id);
+            void validate() {
+                assert(_dirty_cache.size() + _clean_cache.size() == _size);
+                assert(_dirty_lru.size() + _clean_lru.size() == _size);
+            }
 
             /**
-             * Retrieve an extent from the cache based on a cache ID.  Cache IDs are generated when
-             * an extent is extract()'d from the read cache for use in the write cache.  Must be
-             * released back to the cache after use with put().  May block due to IO.
-             *
-             * @param cache_id The unique cache ID of the extent.
-             * @param mark_dirty Mark the extent as DIRTY while retrieving.
+             * Retrieves an extent from the cache.
+             * @param file The name of the underlying data file.
+             * @param ref An ExtentRef object that provides details about the specific extent.
+             * @param mark_dirty A flag indicating if the extent should be made available for mutation.
              * @return A pointer to the extent.
              */
-            CacheExtentPtr get(uint64_t cache_id, bool mark_dirty = false);
-
-            CacheExtentPtr use_cached(const CacheExtentPtr& extent, bool mark_dirty);
+            CacheExtentPtr get(const std::filesystem::path &file,
+                               const ExtentRef &ref, bool mark_dirty);
 
             /**
              * Increment the use count on a cache extent.
@@ -369,19 +421,9 @@ namespace springtail {
             void put(CacheExtentPtr extent);
 
             /**
-             * Removes an extent from the read cache for use by the write cache.  If the extent is
-             * in use by multiple callers, then a copy of the extent is returned to maintain thread
-             * safety, so you must always use the returned extent after this call.
-             *
-             * @param extent The extent to extract from the cache.
-             * @return The extent that can be mutated by the write cache.
-             */
-            CacheExtentPtr extract(const std::filesystem::path &file, uint64_t extent_id);
-
-            /**
              * Re-inserts a write cache extent back into the read cache.  Should be called once a
              * Page holding the Extent has been flush()'d to disk and no longer refereces the Extent
-             * object's cache_id.
+             * object's cache_id.  Returns the page to a CLEAN state from a MUTABLE state.
              *
              * @param extent The extent that should be returned to the clean cache.
              */
@@ -412,6 +454,37 @@ namespace springtail {
             CacheExtentPtr get_empty(const std::filesystem::path &file, const ExtentHeader &header);
 
         private:
+            /**
+             * Retrieve an extent from the cache based on a cache ID.  Cache IDs are generated when
+             * an extent is extract()'d from the read cache for use in the write cache.  Must be
+             * released back to the cache after use with put().  May block due to IO.
+             *
+             * @param cache_id The unique cache ID of the extent.
+             * @param mark_dirty Mark the extent as DIRTY while retrieving.
+             * @return A pointer to the extent.
+             */
+            CacheExtentPtr _get(uint64_t cache_id, bool mark_dirty = false);
+
+            /**
+             * Takes a direct pointer to a page and updates the internal cache structures to allow a
+             * caller to use the page.
+             * @param extent A pointer to the extent that we want access to.
+             * @param mark_dirty If true then the extent should be made available for mutations.
+             * @return A pointer to the extent.  Potentially a new extent if the provided extent had
+             *         to be copied to allow for mutations.
+             */
+            CacheExtentPtr _use_direct(const CacheExtentPtr& extent, bool mark_dirty);
+
+            /**
+             * Removes an extent from the read cache for use by the write cache.  If the extent is
+             * in use by multiple callers, then a copy of the extent is returned to maintain thread
+             * safety, so you must always use the returned extent after this call.
+             *
+             * @param extent The extent to extract from the cache.
+             * @return The extent that can be mutated by the write cache.
+             */
+            CacheExtentPtr _extract(const CacheExtentPtr &extent);
+
             /**
              * Helper to retrieve an extent from the clean cache.  If the provided key is not
              * cached, this function will retrieve the extent from disk.
@@ -864,6 +937,12 @@ namespace springtail {
 
             /** Position on the PageCache flush list.  Set to end() if not on the list. */
             std::list<std::shared_ptr<Page>>::iterator _flush_pos;
+
+            /** Flag indiciating if the page is currently being flushed. */
+            bool _is_flushing;
+
+            /** Condition variable to wait on for flushing to complete. */
+            boost::condition_variable _flush_cond;
         };
 
         using PagePtr = std::shared_ptr<Page>;
@@ -900,7 +979,7 @@ namespace springtail {
             }
 
             ~SafePagePtr() {
-				put();
+                put();
             }
 
             PagePtr::element_type* operator->() const {
@@ -1002,6 +1081,14 @@ namespace springtail {
              */
             void drop_file(const std::filesystem::path &file);
 
+            void validate() {
+                uint32_t size = 0;
+                for (auto &entry : _cache) {
+                    size += entry.second.size();
+                }
+                assert(size == _lru.size());
+            }
+
         private:
             /**
              * Helper to return a page to the cache.
@@ -1078,11 +1165,11 @@ namespace springtail {
          * @return The retrieved Page object.
          */
         SafePagePtr get(const std::filesystem::path &file,
-                    uint64_t extent_id,
-                    uint64_t access_xid,
-                    uint64_t target_xid = constant::LATEST_XID,
-                    bool do_rollforward = false,
-                    SafePagePtr::FlushCb flush_cb={} );
+                        uint64_t extent_id,
+                        uint64_t access_xid,
+                        uint64_t target_xid = constant::LATEST_XID,
+                        bool do_rollforward = false,
+                        SafePagePtr::FlushCb flush_cb={} );
 
         /**
          * Flush all of the pages associated with a given file to disk.  Waits for all of the pages
@@ -1096,6 +1183,11 @@ namespace springtail {
          * support truncate.
          */
         void drop_for_truncate(const std::filesystem::path &file);
+
+        void validate() {
+            _data_cache->validate();
+            _page_cache->validate();
+        }
 
     private:
         // INTERNAL MEMBER VARIABLES

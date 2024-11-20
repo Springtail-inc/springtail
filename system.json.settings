@@ -56,7 +56,11 @@
         }
     },
     "storage": {
-        "table_dir": "table"
+        "table_dir": "table",
+	"data_cache_size": 16384,
+	"page_cache_size": 16384,
+	"btree_cache_size": 512,
+	"max_extent_per_page": 16
     },
     "log_mgr": {
         "replication_log_path": "repl_logs",
