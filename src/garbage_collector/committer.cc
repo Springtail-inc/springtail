@@ -275,21 +275,8 @@ namespace springtail::gc {
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
             // retrieve any schema changes available in Redis
-            nlohmann::json index_ddls;
-            nlohmann::json table_ddls;
-            {
-                auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-                for (auto ddl: ddls) {
-                    const auto it = ddl.find("action");
-                    if (it != ddl.end() && *it == "create_index") {
-                        index_ddls.push_back(std::move(ddl));
-                    } else {
-                        table_ddls.push_back(std::move(ddl));
-                    }
-                }
-            }
-
-            if (!table_ddls.is_null() || !index_ddls.is_null()) {
+            auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            if (!ddls.is_null()) {
                 auto client = sys_tbl_mgr::Client::get_instance();
 
                 // finalize the system metadata
@@ -299,34 +286,43 @@ namespace springtail::gc {
                 client->finalize(db_id, xid);
             }
 
-            if (!index_ddls.empty()) {
-                // The DDLs will be commited to the FDWs after indexing is completed.
-                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-                std::vector<Indexer::IndexParams> idxs;
-                for (auto const& ddl: index_ddls) {
-                    idxs.emplace_back(db_id, completed_xid, xid, ddl);
+            nlohmann::json completed_ddls;
+            nlohmann::json index_ddls;
+
+            for (auto const &ddl: ddls) {
+                const auto it = ddl.find("action");
+                if (it != ddl.end() && *it == "create_index") {
+                    // The index DDLs will be commited to the FDWs after indexing is completed.
+                    index_ddls.push_back(std::move(ddl));
+                } else {
+                    completed_ddls.push_back(ddl);
                 }
-                _indexer->build(idxs);
             }
 
+            if (!index_ddls.is_null()) {
+                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+                for (auto const& ddl: index_ddls) {
+                    _indexer->build({db_id, completed_xid, xid, ddl});
+                }
+            }
 
-            if (!table_ddls.is_null()) {
+            if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, table_ddls);
+                _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !table_ddls.is_null());
+                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
-            } else if (!table_ddls.is_null()) {
+            } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
 
-            if (!table_ddls.is_null()) {
+            if (!completed_ddls.is_null()) {
                 // push completed DDL changes to the FDWs
                 _redis_ddl.commit_ddl(db_id, xid);
             }

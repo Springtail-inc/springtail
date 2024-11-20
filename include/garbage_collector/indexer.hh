@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <utility>
 #include <redis/redis_ddl.hh>
+#include <boost/functional/hash.hpp>
 
 namespace springtail::gc {
 
@@ -32,7 +33,7 @@ namespace springtail::gc {
          * Build a secondary index.
          * @param job Defines parameters of the index.
          */
-        void build(std::vector<IndexParams> idxs);
+        void build(IndexParams idx);
 
         /**
          * Drop the index. 
@@ -57,15 +58,6 @@ namespace springtail::gc {
             uint64_t // index ID
                 >;
 
-        struct Hash {
-            size_t operator()(const Key& key) const
-            { 
-                auto a = std::hash<Key::first_type>{}(key.first);
-                auto b = std::hash<Key::second_type>{}(key.second); 
-                return a ^ (b << 1); 
-            };
-        };
-
         void _build(std::stop_token st, const Key& key, const IndexParams& idx);
         // returns false if cancelled
         bool _check_work_state(const Key& key);
@@ -77,7 +69,7 @@ namespace springtail::gc {
         // work state
         std::condition_variable_any _cv;
         std::mutex _m;
-        std::unordered_map<Key, IndexParams, Hash> _work_set;
+        std::unordered_map<Key, IndexParams, boost::hash<Key>> _work_set;
         std::queue<Key> _queue;
 
         // workers

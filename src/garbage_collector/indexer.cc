@@ -18,17 +18,15 @@ namespace springtail::gc {
         SPDLOG_INFO("Indexer created: {}", worker_count);
     }
 
-    void Indexer::build(std::vector<IndexParams> idxs)
+    void Indexer::build(IndexParams idx)
     {
         {
             std::scoped_lock g(_m);
-            for (auto const& idx: idxs) {
-                Key key(idx._db_id, idx._ddl["id"]);
-                // is it expected?
-                assert(_work_set.find(key) == _work_set.end());
-                _work_set[key] = idx;
-                _queue.push(key);
-            }
+            Key key(idx._db_id, idx._ddl["id"]);
+            // is it expected?
+            assert(_work_set.find(key) == _work_set.end());
+            _work_set[key] = std::move(idx);
+            _queue.push(key);
         }
         // notify workers about new items
         _cv.notify_all();
