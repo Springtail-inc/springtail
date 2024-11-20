@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     # build the test sets
     if args.test_set is None:
-        tests = gen_all_tests(test_folder, system_json_path, build_dir)
+        tests = gen_all_tests(test_folder, system_json_path, build_dir, default_test_sets)
     else:
         if args.test_case is None:
             tests = gen_test_set(os.path.join(test_folder, args.test_set),
