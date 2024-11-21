@@ -217,7 +217,19 @@ namespace {
         }
         ASSERT_EQ(count, 5000);
 
-        // XXX verify the secondary index
+        // verify the secondary index
+        auto secondary = table->index(1);
+
+        count = 0;
+        uint64_t table_id = 0;
+        auto table_id_f = secondary->get_schema()->get_field("table_id");
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
+            ASSERT_LE(table_id, current);
+            table_id = current;
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
     }
 
     TEST_F(Table_Test, SingleXactMutations) {

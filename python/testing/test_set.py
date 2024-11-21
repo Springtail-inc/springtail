@@ -145,7 +145,7 @@ class TestSet:
 
             # if we should stop the tests, break the loop
             if test_failed and not shutdown_on_fail:
-                test_case.check_logs()
+                self._tests[test_file].check_logs()
                 break
 
             # try to perform cleanup
@@ -156,7 +156,7 @@ class TestSet:
 
             # check here if the test failed nad we need to check the logs
             if test_failed:
-                test_case.check_logs()
+                self._tests[test_file].check_logs()
                 break
 
         # if a test failed and we don't shutdown on failure, return immediately
