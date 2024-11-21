@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+import tempfile
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
 
@@ -193,27 +194,24 @@ def install_pgfdw() -> None:
     lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
     run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
 
-    # Write a config file that can be used in Postgres to initialize Springtail
-    logging.info("Writing springtail configuration file")
-    sp_pgconf_dir = os.path.join(S3_INSTALL_PATH, 'springtail.conf')
-    with open(sp_pgconf_dir, 'w') as f:
+    # Update the postgres configuration file
+    # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+    logging.info("Updating postgres environment file")
+    version_str = run_command('pg_config', ['--version']).strip()
+    version = version_str.split(' ')[1].split('.')[0]
+    env_file = f'/etc/postgresql/{version}/main/environment'
+
+    # Write the environment variables to a temporary file
+    with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
+        # Write data to the temporary file
         for var in ENV_VARS:
             value = os.environ.get(var)
             if value:
-                f.write(f"{var}={value}\n")
+                temp_file.write(f"{var} = '{value}'\n")
+        temp_file.flush()
 
-    # Update the postgres configuration file
-    # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
-    logging.info("Updating postgres configuration file")
-    version_str = run_command('pg_config', ['--version']).strip()
-    version = version_str.split(' ')[1].split('.')[0]
-    config_file = f'/etc/postgresql/{version}/main/postgresql.conf'
-
-    if grep_file(config_file, ['springtail_fdw.config_file_path']):
-        run_command('sudo', ['sed', '-i', f'-e"s/springtail_fdw.config_file_path .*/springtail_fdw.config_file_path={sp_pgconf_dir}"', config_file])
-    else:
-        with open(config_file, 'a') as f:
-            f.write(f"springtail_fdw.config_file_path = {sp_pgconf_dir}\n")
+        # Copy the contents of the temporary file to the environment file
+        run_command('sudo', ['cp', temp_file.name, env_file])
 
     # restart postgres
     logging.info("Restarting postgres")
