@@ -117,6 +117,7 @@ namespace pg_proxy {
         /** get username */
         const std::string &username() const { return _username; }
 
+        // TODO: not sure if we should keep the list of databases insidee the user object
         /** add database */
         void add_database(const std::string &name) {
             std::unique_lock lock(_db_mutex);

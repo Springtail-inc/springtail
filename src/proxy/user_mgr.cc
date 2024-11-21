@@ -96,7 +96,6 @@ namespace pg_proxy {
                     int port;
                     Properties::get_primary_db_config(host, port, user, password);
 
-                    // auto db_name = _proxy_server->get_any_replicated_db_name();
                     auto db_name = _get_db_fn();
                     if (db_name.has_value()) {
                         conn.connect(host, db_name.value(), user, password, port, false);

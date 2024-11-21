@@ -56,7 +56,23 @@ target_link_libraries(test_parser
 add_dsymutil_command(test_parser)
 gtest_discover_tests(test_parser)
 
-# test server daemon executable
+# test user manager executable
+add_executable(test_user_mgr test/test_user_mgr.cc)
+target_include_directories(test_parser
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src/postgres/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/vendor/include
+)
+target_link_libraries(test_user_mgr
+    PRIVATE springtail_proxy
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_user_mgr)
+gtest_discover_tests(test_user_mgr)
+
+# test parsing executable
 add_executable(parsing test/parsing.cc)
 target_include_directories(parsing
     PRIVATE ${CMAKE_SOURCE_DIR}/include
@@ -69,7 +85,7 @@ target_link_libraries(parsing
     PUBLIC springtail_proxy
 )
 
-# test server daemon executable
+# proxy server executable
 add_executable(proxy daemon.cc)
 target_include_directories(proxy
     PRIVATE ${CMAKE_SOURCE_DIR}/include
@@ -82,7 +98,7 @@ add_dsymutil_command(proxy)
 
 add_subdirectory(auth)
 
-# test server daemon executable
+# test logger executable
 add_executable(test_logger test/test_logger.cc)
 target_include_directories(test_logger
     PRIVATE ${CMAKE_SOURCE_DIR}/include
