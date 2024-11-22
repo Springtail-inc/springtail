@@ -73,7 +73,8 @@ struct IndexInfo {
     4: bool is_unique,
     5: i64 table_id,
     6: string table_name,
-    7: list<IndexColumn> columns
+    7: i8 state,
+    8: list<IndexColumn> columns
 }
 
 struct IndexRequest {
@@ -146,7 +147,8 @@ struct ColumnHistory {
 
 struct GetSchemaResponse {
     1: list<TableColumn> columns,
-    2: list<ColumnHistory> history
+    2: list<ColumnHistory> history,
+    3: list<IndexInfo> indexes
 }
 
 struct ExistsRequest {

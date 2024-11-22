@@ -73,7 +73,6 @@ namespace springtail::sys_tbl_mgr {
         ddl["index"] = request.index.name;
         ddl["id"] = request.index.id;
         ddl["is_unique"] = request.index.is_unique;
-        ddl["table_name"] = request.index.table_name;
         ddl["table_id"] = request.index.table_id;
         ddl["columns"] = nlohmann::json::array();
 
@@ -119,10 +118,10 @@ namespace springtail::sys_tbl_mgr {
                     request.index.id,
                     xid.xid,
                     xid.lsn,
-                    static_cast<sys_tbl::IndexNames::State>(request.state),
+                    static_cast<sys_tbl::IndexNames::State>(request.index.state),
                     request.index.is_unique );
 
-            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
 
         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
@@ -242,7 +241,7 @@ namespace springtail::sys_tbl_mgr {
                     xid.lsn,
                     sys_tbl::IndexNames::State::READY,
                     true );
-            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
         }
@@ -839,6 +838,8 @@ namespace springtail::sys_tbl_mgr {
             info->columns.push_back(entry.second);
         }
 
+        info->indexes = _read_schema_indexes(db_id, table_id, access_xid);
+
         // note: at this point we have the set of columns at the access_xid
         if (access_xid == target_xid) {
             return info;
@@ -863,6 +864,84 @@ namespace springtail::sys_tbl_mgr {
         }
 
         return info;
+    }
+
+    std::vector<IndexInfo> 
+    Service::_read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid)
+    {
+        std::vector<IndexInfo> indexes;
+
+        auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
+        auto names_schema = names_t->extent_schema();
+        auto names_fields = names_schema->get_fields();
+
+        auto indexes_t = _get_system_table(db_id, sys_tbl::Indexes::ID);
+        auto indexes_schema = indexes_t->extent_schema();
+        auto indexes_fields = indexes_schema->get_fields();
+
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(table_id, 0, 0, 0);
+
+        for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
+            auto &row = *names_i;
+            uint64_t tid = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+
+            if (tid != table_id) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
+                break;
+            }
+
+            XidLsn index_xid;
+            {
+                uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
+                uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row);
+                if (access_xid < index_xid) {
+                    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid, xid, lsn);
+                    continue;
+                }
+                index_xid = {xid, lsn};
+            }
+
+            IndexInfo info;
+            info.id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row);
+            info.state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(row);
+
+            if (static_cast<sys_tbl::IndexNames::State>(info.state) == sys_tbl::IndexNames::State::DELETED) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid, index_xid.lsn, info.id);
+                continue;
+            }
+
+            info.name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
+            info.schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
+            info.table_id = tid;
+            info.is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
+
+            auto index_key = sys_tbl::Indexes::Primary::key_tuple(table_id, info.id, index_xid.xid, index_xid.lsn, 0);
+            for (auto index_i = indexes_t->lower_bound(index_key); index_i != indexes_t->end(); ++index_i) {
+                auto &row = *index_i;
+                uint64_t tid = indexes_fields->at(sys_tbl::Indexes::Data::TABLE_ID)->get_uint64(row);
+                uint64_t index_id = indexes_fields->at(sys_tbl::Indexes::Data::INDEX_ID)->get_uint64(row);
+
+                if (tid != table_id || index_id != info.id) {
+                    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more indexes for table {} -- {}", table_id, tid);
+                    break;
+                }
+                // index_xid and xid's of index columns must match
+                uint64_t xid = indexes_fields->at(sys_tbl::Indexes::Data::XID)->get_uint64(row);
+                uint64_t lsn = indexes_fields->at(sys_tbl::Indexes::Data::LSN)->get_uint64(row);
+                if (index_xid != XidLsn(xid, lsn)) {
+                    break;
+                }
+
+                IndexColumn col;
+                col.position = indexes_fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row);
+                col.idx_position = indexes_fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row);
+                info.columns.push_back(std::move(col));
+            }
+
+            indexes.push_back(std::move(info));
+        }
+
+        return indexes;
     }
 
     std::map<uint32_t, TableColumn>
@@ -1234,7 +1313,7 @@ namespace springtail::sys_tbl_mgr {
             fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
             fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
-            indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
+            indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
                               write_xid, constant::UNKNOWN_EXTENT);
         }
     }

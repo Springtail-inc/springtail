@@ -386,6 +386,22 @@ namespace springtail::sys_tbl_mgr {
             metadata.history.push_back(value);
         }
 
+        for (auto const& idx: result.indexes) {
+            Index info;
+            info.id = idx.id;
+            info.name = idx.name;
+            info.schema = idx.schema;
+            info.state = idx.state;
+            info.table_id = idx.table_id;
+            info.is_unique = idx.is_unique;
+            for (auto const& col: idx.columns) {
+                info.columns.emplace_back(col.idx_position, col.position);
+            }
+            //sort by index position
+            std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
+            metadata.indexes.push_back(std::move(info));
+        }
+
         return metadata;
     }
 

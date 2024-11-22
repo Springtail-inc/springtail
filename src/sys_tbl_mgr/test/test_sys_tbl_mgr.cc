@@ -164,10 +164,28 @@ namespace {
 
         // create the table
         _create_table(tid, "x");
+        _finalize();
+        
+        auto &&schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+
+        // must have a primary index
+        ASSERT_EQ(schema_meta.indexes.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x");
 
         _finalize();
+        
+
+        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
+
+        // note: column positions start with 1
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].idx_position, 0);
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].position, 2);
+
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
     }
 
     // Tests table create / alter / drop
