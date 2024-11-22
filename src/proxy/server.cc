@@ -53,7 +53,6 @@ namespace springtail::pg_proxy {
                              bool enable_ssl,
                              LoggerPtr logger)
       : _id(arc4random()),
-        _user_mgr(nullptr),
         _config_sub_thread(1, true),
         _data_sub_thread(1, false),
         _thread_pool(thread_pool_size),
@@ -146,10 +145,9 @@ namespace springtail::pg_proxy {
             add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
 
-        _user_mgr = std::make_shared<UserMgr>([this] {
+       UserMgr::get_instance()->start([this] {
             return this->get_any_replicated_db_name();
         }, 5);
-        _user_mgr->start();
 
         // add subscribers to pubsub threads
         std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
@@ -481,7 +479,8 @@ namespace springtail::pg_proxy {
         }
 
         _thread_pool.shutdown();
-        _user_mgr->shutdown();
+        UserMgr::shutdown();
+        pg_proxy::UserMgr::get_instance()->wait_shutdown();
         _config_sub_thread.shutdown();
         _data_sub_thread.shutdown();
 

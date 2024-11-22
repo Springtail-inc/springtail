@@ -15,13 +15,14 @@ namespace {
 
     class UserMgr_Test : public testing::Test {
     protected:
-        void SetUp() override {
+        static void SetUpTestSuite() {
             springtail_init();
 
-            _user_mgr = std::make_shared<pg_proxy::UserMgr>([] {
+            pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
+            ASSERT_NE(user_mgr, nullptr);
+            user_mgr->start([] {
                 return std::optional<std::string>("springtail");
             }, _sleep_interval);
-            _user_mgr->start();
 
             std::string host, user, password;
             int port;
@@ -29,8 +30,10 @@ namespace {
             std::string db_name = "springtail";
             _db_conn.connect(host, db_name, user, password, port, false);
         }
-        void TearDown() override {
-            _user_mgr->shutdown();
+        static void TearDownTestSuite() {
+            // _user_mgr->shutdown();
+            pg_proxy::UserMgr::shutdown();
+            pg_proxy::UserMgr::get_instance()->wait_shutdown();
             _db_conn.disconnect();
         }
         void _add_user(const std::string &user, const std::string &password) {
@@ -46,59 +49,62 @@ namespace {
         void _remove_database(const std::string &database) {
             _db_conn.exec(fmt::format(DATABASE_REVOKE, database, "public"));
         }
-        pg_proxy::UserMgrPtr _user_mgr;
-        springtail::LibPqConnection _db_conn;
-        uint32_t _sleep_interval = 1;
+        static inline springtail::LibPqConnection _db_conn;
+        static inline uint32_t _sleep_interval = 1;
     };
 
     TEST_F(UserMgr_Test, TestAddUser) {
+        pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
         // add users
         _add_user("aaa", "aaa_password");
         _add_user("bbb", "bbb_password");
         sleep(2 * _sleep_interval);
 
         // verify access
-        pg_proxy::UserPtr user = _user_mgr->get_user("aaa", "springtail");
+        pg_proxy::UserPtr user = user_mgr->get_user("aaa", "springtail");
         ASSERT_NE(user, nullptr);
-        user = _user_mgr->get_user("bbb", "springtail");
+        user = user_mgr->get_user("bbb", "springtail");
         ASSERT_NE(user, nullptr);
 
         // remove users and verify access
         _remove_user("aaa");
         sleep(2 * _sleep_interval);
-        user = _user_mgr->get_user("aaa", "springtail");
+        user = user_mgr->get_user("aaa", "springtail");
         ASSERT_EQ(user, nullptr);
         _remove_user("bbb");
         sleep(2 * _sleep_interval);
-        user = _user_mgr->get_user("bbb", "springtail");
+        user = user_mgr->get_user("bbb", "springtail");
         ASSERT_EQ(user, nullptr);
     }
 
     TEST_F(UserMgr_Test, TestAddDatabase) {
+        pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
         std::string db_name = "template1";
 
         // add user and verify access
         _add_user("aaa", "aaa_password");
         sleep(2 * _sleep_interval);
-        pg_proxy::UserPtr user = _user_mgr->get_user("aaa", db_name);
+        pg_proxy::UserPtr user = user_mgr->get_user("aaa", db_name);
         ASSERT_NE(user, nullptr);
 
         // remove database and verify access
         _remove_database(db_name);
         sleep(2 * _sleep_interval);
-        user = _user_mgr->get_user("aaa", db_name);
+        user = user_mgr->get_user("aaa", db_name);
         ASSERT_EQ(user, nullptr);
 
         // add database back and verify access
         _add_database(db_name);
         sleep(2 * _sleep_interval);
-        user = _user_mgr->get_user("aaa", db_name);
+        user = user_mgr->get_user("aaa", db_name);
         ASSERT_NE(user, nullptr);
 
         // remove user and verify access
         _remove_user("aaa");
         sleep(2 * _sleep_interval);
-        user = _user_mgr->get_user("aaa", db_name);
+        user = user_mgr->get_user("aaa", db_name);
         ASSERT_EQ(user, nullptr);
     }
+
+    // TODO: add password change tests
 }

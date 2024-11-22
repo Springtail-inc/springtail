@@ -244,6 +244,7 @@ BEGIN
         CROSS JOIN pg_database d
         WHERE (s.valuntil IS NULL OR s.valuntil > now())
           AND s.passwd IS NOT NULL
+          AND (s.passwd ilike 'MD5%' OR s.passwd ilike 'SCRAM%')
           AND r.rolcanlogin IS TRUE
           AND has_database_privilege(s.usename, d.datname, 'CONNECT')
           AND EXISTS ( SELECT 1
@@ -264,6 +265,7 @@ BEGIN
         CROSS JOIN pg_database d
         WHERE (s.valuntil IS NULL OR s.valuntil > now())
           AND s.passwd IS NOT NULL
+          AND (s.passwd ilike 'MD5%' OR s.passwd ilike 'SCRAM%')
           AND r.rolcanlogin IS TRUE
           AND has_database_privilege(s.usename, d.datname, 'CONNECT')
         GROUP BY s.usename, s.passwd
