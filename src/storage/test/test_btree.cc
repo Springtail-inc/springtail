@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/environment.hh>
 #include <common/threaded_test.hh>
 
 #include <storage/csv_field.hh>
@@ -10,13 +11,34 @@
 using namespace springtail;
 
 namespace {
+    struct CacheSize {
+        uint64_t data_cache_size;
+        uint64_t page_cache_size;
+        uint64_t btree_cache_size;
+        uint64_t max_extent_per_page;
+    };
+
+    void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
+        // Customize the output here as needed
+        if (cacheSize.data_cache_size == 32) {
+            *os << "small_cache";
+        } else {
+            *os << "large_cache";
+        }
+    }
 
     /**
      * Framework for Basic BTree testing.
      */
-    class BTree_Test : public testing::Test {
+    class BTree_Test : public testing::TestWithParam<CacheSize> {
     protected:
         void SetUp() override {
+            // set the cache size from the parameters
+            CacheSize sizes = GetParam();
+            std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
+                                                sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
             springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
@@ -199,7 +221,7 @@ namespace {
         typedef std::shared_ptr<Request> RequestPtr;
     };
 
-    TEST_F(BTree_Test, Insert10) {
+    TEST_P(BTree_Test, Insert10) {
         uint64_t xid = 1;
 
         // get a mutable btree to perform inserts
@@ -227,7 +249,7 @@ namespace {
         StorageCache::get_instance()->validate();
     }
 
-    TEST_F(BTree_Test, InsertAll) {
+    TEST_P(BTree_Test, InsertAll) {
         // get a mutable btree to perform inserts
         auto btree = _create_mutable_btree(_base_dir / "InsertAll", 1);
 
@@ -242,7 +264,7 @@ namespace {
         _verify_names(tree, 5000);
     }
 
-    TEST_F(BTree_Test, Search) {
+    TEST_P(BTree_Test, Search) {
         // get a mutable btree to perform inserts
         auto btree = _create_mutable_btree(_base_dir / "Search", 1);
 
@@ -353,7 +375,7 @@ namespace {
         }
     }
 
-    TEST_F(BTree_Test, InsertAndRemove) {
+    TEST_P(BTree_Test, InsertAndRemove) {
         // get a mutable btree to perform inserts
         auto btree = _create_mutable_btree(_base_dir / "InsertAndRemove", 1);
 
@@ -395,7 +417,7 @@ namespace {
         _verify_names(tree, 2500);
     }
 
-    TEST_F(BTree_Test, InsertAndRemoveAll) {
+    TEST_P(BTree_Test, InsertAndRemoveAll) {
         // get a mutable btree to perform inserts
         auto btree = _create_mutable_btree(_base_dir / "InsertAndRemoveAll", 1);
 
@@ -434,7 +456,7 @@ namespace {
         _verify_names(tree, 0);
     }
 
-    TEST_F(BTree_Test, InsertMany) {
+    TEST_P(BTree_Test, InsertMany) {
         // get a mutable btree to perform inserts
         auto btree = _create_mutable_btree(_base_dir / "InsertMany", 1);
 
@@ -452,7 +474,7 @@ namespace {
         _verify_names(tree, 50000);
     }
 
-    TEST_F(BTree_Test, ThreadedInserts) {
+    TEST_P(BTree_Test, ThreadedInserts) {
         PhasedThreadTest<Request> tester;
 
         // get a mutable btree to perform inserts
@@ -492,7 +514,7 @@ namespace {
         tester.run(4);
     }
 
-    TEST_F(BTree_Test, ThreadedInsertAndRemove) {
+    TEST_P(BTree_Test, ThreadedInsertAndRemove) {
         PhasedThreadTest<Request> tester;
 
         std::filesystem::path filename = _base_dir / "ThreadedInsertAndRemove";
@@ -551,7 +573,7 @@ namespace {
         tester.run(4);
     }
 
-    TEST_F(BTree_Test, ThreadedInsertsTwoFiles) {
+    TEST_P(BTree_Test, ThreadedInsertsTwoFiles) {
         PhasedThreadTest<Request> tester;
 
         // get mutable btrees to perform inserts
@@ -593,4 +615,9 @@ namespace {
         // run the phases using 4 threads (just one phase here)
         tester.run(4);
     }
+
+    INSTANTIATE_TEST_CASE_P(BTree_Test,
+                            BTree_Test,
+                            ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
+                                              CacheSize{ 32, 32, 8, 4 }));
 }
