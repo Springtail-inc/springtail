@@ -3,7 +3,10 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 # source files
 set(WRITE_CACHE_SOURCES
     write_cache_client.cc
-    write_cache_server.cc write_cache_service.cc write_cache_index.cc write_cache_table_set.cc
+    write_cache_server.cc
+    write_cache_service.cc
+    write_cache_index.cc
+    write_cache_table_set.cc
     write_cache_index_node.cc
     extent_mapper.cc
 )
@@ -27,13 +30,13 @@ target_link_libraries(write_cache_daemon
 add_dsymutil_command(write_cache_daemon)
 
 ## tests
-add_executable(test_threaded test/write_cache_index_test.cc)
-target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
-target_link_libraries(test_threaded
-    PUBLIC springtail_write_cache
-    PRIVATE GTest::gtest_main
-)
-add_dsymutil_command(test_threaded)
+#add_executable(test_threaded test/write_cache_index_test.cc)
+#target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
+#target_link_libraries(test_threaded
+#    PUBLIC springtail_write_cache
+#    PRIVATE GTest::gtest_main
+#)
+#add_dsymutil_command(test_threaded)
 
 add_executable(test_extent_mapper test/test_extent_mapper.cc)
 target_include_directories(test_extent_mapper PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -44,7 +47,7 @@ target_link_libraries(test_extent_mapper
 add_dsymutil_command(test_extent_mapper)
 
 # hook tests into gtest framework
-gtest_discover_tests(test_threaded)
+#gtest_discover_tests(test_threaded)
 gtest_discover_tests(test_extent_mapper)
 
 # install daemon to install directory

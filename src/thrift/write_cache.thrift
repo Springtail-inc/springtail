@@ -1,146 +1,57 @@
 namespace cpp springtail.thrift.write_cache
 
-// table change operation type
-enum TableChangeOpType {
-    TRUNCATE_TABLE=1,
-    SCHEMA_CHANGE=2
-}
-
 // status code type
 enum StatusCode {
     SUCCESS=0,
     ERROR=1
 }
 
-enum RowOpType {
-    UPDATE=0,
-    INSERT=1,
-    DELETE=2
-}
-
-// row object -- sorted on <xid,xid_seq>
-// updates for same xid will overwrite
-struct Row {
+// Extent object
+struct Extent {
     1: i64 xid,
     2: i64 xid_seq,
-    3: RowOpType op,
-    4: binary primary_key,
-    5: optional binary data  // no data for deletes
+    3: binary data
 }
 
-// table change record
-struct TableChange {
+// get a list of extents for a springtail xid
+struct GetExtentsRequest {
     1: i64 db_id,
     2: i64 table_id,
     3: i64 xid,
-    4: i64 xid_seq,
-    5: TableChangeOpType op
-}
-
-struct AddTableChangeRequest {
-    1: i64 db_id,
-    2: TableChange change
-}
-
-// add a list of rows (or one)
-struct AddRowsRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 extent_id,
-    4: list<Row> rows
-}
-
-// get a list of rows between range start xid exclusive to end xid inclusive
-struct GetRowsRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 extent_id,
-    4: i64 start_xid,
-    5: i64 end_xid,
-    6: i64 cursor,
-    7: i32 count
-}
-
-struct GetRowsResponse {
-    1: i64 table_id,
-    2: i64 extent_id,
-    3: i64 cursor,
-    4: list<Row> rows
-}
-
-// list dirty extents between range start xid exclusive and end xid inclusive
-struct ListExtentsRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 start_xid,
-    4: i64 end_xid,
-    5: i64 cursor,
-    6: i32 count
-}
-
-// list of extents for a table_id; cursor is 0 if no more
-struct ListExtentsResponse {
-    1: i64 table_id,
-    2: i64 cursor,
-    3: list<i64> extent_ids;
-}
-
-struct ListTablesRequest {
-    1: i64 db_id,
-    2: i64 start_xid,
-    3: i64 end_xid,
     4: i64 cursor,
     5: i32 count
 }
 
-struct ListTablesResponse {
-    1: i64 cursor,
-    2: list<i64> table_ids;
+struct GetExtentsResponse {
+    1: i64 table_id,
+    2: i64 cursor,
+    3: list<Extent> extents
 }
 
-// remove an extent and its associated rows from cached
-// between start xid exclusive and end xid inclusive
+// list of tables for a db_id; cursor is 0 if no more
+struct ListTablesRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 cursor,
+    4: i32 count
+}
+
+struct ListTablesResponse {
+    1: i64 cursor,
+    2: list<i64> table_ids
+}
+
+// remove all extents for a table_id and springtail xid
 struct EvictTableRequest {
     1: i64 db_id,
     2: i64 table_id,
-    3: i64 start_xid,
-    4: i64 end_xid
+    3: i64 xid
 }
 
-// get list of tables changes between xid
-struct GetTableChangeRequest {
+// remove all data for a springtail xid
+struct EvictXidRequest {
     1: i64 db_id,
-    2: i64 table_id,
-    3: i64 start_xid,
-    4: i64 end_xid
-}
-
-struct GetTableChangeResponse {
-    1: i64 table_id,
-    2: list<TableChange> changes
-}
-
-// evict table changes between xid range
-struct EvictTableChangesRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 start_xid,
-    4: i64 end_xid
-}
-
-struct SetCleanFlagRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 extent_id,
-    4: i64 start_xid,
-    5: i64 end_xid
-}
-
-struct ResetCleanFlagRequest {
-    1: i64 db_id,
-    2: i64 table_id,
-    3: i64 start_xid,
-    4: i64 end_xid
+    2: i64 xid
 }
 
 // ExtentMapper request structures
@@ -196,16 +107,10 @@ struct Status {
 service ThriftWriteCache {
     // core write cache functions
     Status ping(),
-    Status add_rows(1: AddRowsRequest request),
-    ListExtentsResponse list_extents(1: ListExtentsRequest request),
-    GetRowsResponse get_rows(1: GetRowsRequest request),
-    Status evict_table(1: EvictTableRequest request),
-    Status add_table_change(1: AddTableChangeRequest change),
-    GetTableChangeResponse get_table_changes(1: GetTableChangeRequest request),
+    GetExtentsResponse get_extents(1: GetExtentsRequest request),
     ListTablesResponse list_tables(1: ListTablesRequest request),
-    Status evict_table_changes(1: EvictTableChangesRequest request),
-    Status set_clean_flag(1: SetCleanFlagRequest request),
-    Status reset_clean_flag(1: ResetCleanFlagRequest request),
+    Status evict_table(1: EvictTableRequest request),
+    Status evict_xid(1: EvictXidRequest request),
 
     // extent mapper functions
     Status add_mapping(1: AddMappingRequest request),
