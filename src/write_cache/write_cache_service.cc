@@ -42,7 +42,7 @@ namespace springtail {
     ThriftWriteCacheService::get_extents(thrift::write_cache::GetExtentsResponse& _return, const thrift::write_cache::GetExtentsRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
+        WriteCacheIndexPtr index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
 
@@ -70,7 +70,7 @@ namespace springtail {
                                          const thrift::write_cache::EvictTableRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
+        WriteCacheIndexPtr index = server->get_index(request.db_id);
 
         index->evict_table(request.table_id, request.xid);
 
@@ -82,7 +82,7 @@ namespace springtail {
                                        const thrift::write_cache::EvictXidRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
+        WriteCacheIndexPtr index = server->get_index(request.db_id);
 
         index->evict_xid(request.xid);
 
@@ -94,7 +94,7 @@ namespace springtail {
                                          const thrift::write_cache::ListTablesRequest& request)
     {
         WriteCacheServer *server = WriteCacheServer::get_instance();
-        std::shared_ptr<WriteCacheIndex> index = server->get_index(request.db_id);
+        WriteCacheIndexPtr index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
 
