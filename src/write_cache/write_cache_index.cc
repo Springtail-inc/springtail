@@ -42,21 +42,21 @@ namespace springtail
         std::vector<uint64_t> tids;
         uint32_t target_size = count;
         uint64_t start_offset = cursor;
-        uint64_t end_offset;
+        uint64_t partition_cursor;
         uint64_t new_cursor = 0;
 
         // iterate through partitions building a resultset of desired size
         for (auto &p: _partitions) {
-            p->get_tids(xid, count, start_offset, end_offset, tids);
+            p->get_tids(xid, count, start_offset, partition_cursor, tids);
 
             // update offsets for new partition
-            if (start_offset > end_offset) {
+            if (start_offset > partition_cursor) {
                 // if the provided cursor is further than the partition, update it
-                start_offset -= end_offset;
+                start_offset -= partition_cursor;
             } else {
                 start_offset = 0;
             }
-            new_cursor += end_offset;
+            new_cursor += partition_cursor;
 
             // see where we are
             count = target_size - tids.size();
@@ -77,8 +77,7 @@ namespace springtail
         WriteCacheTableSetPtr partition = _get_partition(tid);
         std::vector<WriteCacheIndexExtentPtr> extents;
         uint64_t start_offset = cursor;
-        uint64_t end_offset;
-        partition->get_extents(tid, xid, count, start_offset, end_offset, extents);
+        partition->get_extents(tid, xid, count, start_offset, cursor, extents);
         return extents;
     }
 

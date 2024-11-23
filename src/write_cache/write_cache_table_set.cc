@@ -39,21 +39,28 @@ namespace springtail
 
     int
     WriteCacheTableSet::get_tids(uint64_t xid, uint32_t count,
-                                 uint64_t start_offset, uint64_t &end_offset,
+                                 uint64_t start_offset, uint64_t &cursor,
                                  std::vector<uint64_t> &result)
     {
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for TIDS in XID: {}\n", xid);
 
         int result_cnt = 0;
-        end_offset = 0;
+        cursor = 0;
+
+        // lookup pg xid
+        std::optional<uint64_t> pg_xid = lookup_pgxid(xid);
+        if (!pg_xid.has_value()) {
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
+            return 0;
+        }
 
         // iterate through xids exclusive of start
-        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in xid: {}\n", xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in PG XID: {}\n", pg_xid.value());
 
         // fetch xid node for this xid and read lock it
-        WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
+        WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid.value());
         if (xid_node == nullptr) {
-            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "PG XID {} not found\n", pg_xid.value());
             return 0;
         }
 
@@ -61,7 +68,7 @@ namespace springtail
         std::shared_lock<std::shared_mutex> read_lock{xid_node->mutex};
         auto itr = xid_node->children.begin();
         while (itr != xid_node->children.end()) {
-            end_offset++;
+            cursor++;
 
             // check cursor offset, decr if above 0 and continue
             if (start_offset > 0) {
@@ -80,21 +87,28 @@ namespace springtail
 
     int
     WriteCacheTableSet::get_extents(uint64_t tid, uint64_t xid, uint32_t count,
-                                    uint64_t start_offset, uint64_t &end_offset,
+                                    uint64_t start_offset, uint64_t &cursor,
                                     std::vector<WriteCacheIndexExtentPtr> &result)
     {
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for extents for XID: {}, TID: {}\n", xid, tid);
 
         int result_cnt = 0;
-        end_offset = 0;
+        cursor = 0;
+
+        // lookup pg_xid
+        std::optional<uint64_t> pg_xid = lookup_pgxid(xid);
+        if (!pg_xid.has_value()) {
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
+            return 0;
+        }
 
         // iterate through xids exclusive of start
-        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in xid: {}\n", xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Finding tids in PG XID: {}\n", pg_xid.value());
 
         // fetch xid node for this xid
-        WriteCacheIndexNodePtr xid_node = _xid_root->find(xid);
+        WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid.value());
         if (xid_node == nullptr) {
-            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "PG XID {} not found\n", pg_xid.value());
             return 0;
         }
 
@@ -108,7 +122,7 @@ namespace springtail
         std::shared_lock<std::shared_mutex> read_lock{tid_node->mutex};
         auto itr = tid_node->children.begin();
         while (itr != tid_node->children.end()) {
-            end_offset++;
+            cursor++;
 
             // check cursor offset, decr if above 0 and continue
             if (start_offset > 0) {
@@ -167,6 +181,7 @@ namespace springtail
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", xid, pg_xid);
 
         // insert xid into xid map
+        // XXX should we check if there is an existing pg_xid with data and skip if not?
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);
         _xid_map[xid] = pg_xid;
     }
@@ -177,19 +192,15 @@ namespace springtail
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Evicting table: TID={} XID={}", tid, xid);
 
         // lookup xid in xid map
-        uint64_t pg_xid;
-        std::shared_lock<std::shared_mutex> lock(_xid_map_mutex);
-        auto itr = _xid_map.find(xid);
-        if (itr == _xid_map.end()) {
+        std::optional<uint64_t> pg_xid = lookup_pgxid(xid);
+        if (!pg_xid.has_value()) {
             SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
             return;
         }
-        pg_xid = itr->second;
-        lock.unlock();
 
-        drop_table(tid, pg_xid);
+        drop_table(tid, pg_xid.value());
 
-        // should we remove xid from xid map if no more tids?
+        // XXX should we remove xid from xid map if no more tids?
     }
 
     void
@@ -201,7 +212,7 @@ namespace springtail
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for PG XID: {}\n", pg_xid);
         WriteCacheIndexNodePtr xid_node = _xid_root->find(pg_xid);
         if (xid_node == nullptr) {
-            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", pg_xid);
+            SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "PG XID {} not found\n", pg_xid);
             return;
         }
 
@@ -231,5 +242,16 @@ namespace springtail
         for (auto x = node->children.begin(); x != node->children.end(); x++) {
             _dump(*x);
         }
+    }
+
+    std::optional<uint64_t>
+    WriteCacheTableSet::lookup_pgxid(uint64_t pg_xid)
+    {
+        std::shared_lock<std::shared_mutex> lock(_xid_map_mutex);
+        auto itr = _xid_map.find(pg_xid);
+        if (itr == _xid_map.end()) {
+            return std::nullopt;
+        }
+        return itr->second;
     }
 }

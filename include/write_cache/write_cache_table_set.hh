@@ -1,16 +1,13 @@
 #pragma once
 
-#include <set>
 #include <map>
 #include <string>
 #include <memory>
-#include <variant>
+#include <optional>
 #include <mutex>
 #include <shared_mutex>
 #include <cassert>
-#include <iostream>
-
-#include <fmt/core.h>
+#include <vector>
 
 #include <thrift/write_cache/ThriftWriteCache.h>
 #include <thrift/write_cache/write_cache_types.h>
@@ -64,12 +61,12 @@ namespace springtail {
          * @param xid springtail XID
          * @param count number of items to return; may be less
          * @param start_offset offset at which to start searching, may be larger then partitions set
-         * @param end_offset in/out; for the current partition the offset obtained populating the result set
+         * @param cursor out; set to the offset of the last table returned
          * @param result reference to result vector (thrift only supports int64, so that is what we use)
          * @return int number of elements added
          */
         int get_tids(uint64_t xid, uint32_t count, uint64_t start_offset,
-                     uint64_t &end_offset, std::vector<uint64_t> &result);
+                     uint64_t &cursor, std::vector<uint64_t> &result);
 
         /**
          * @brief Get a list of extents for a table at a given XID
@@ -77,12 +74,12 @@ namespace springtail {
          * @param xid springtail XID
          * @param count number of items to return
          * @param start_offset offset at which to start searching
-         * @param end_offset in/out; for the current partition the offset obtained populating the result set
+         * @param cursor out; set to the offset of the last extent returned
          * @param result reference to result vector
          * @return int number of elements added
          */
         int get_extents(uint64_t tid, uint64_t xid, uint32_t count,
-                        uint64_t start_offset, uint64_t &end_offset,
+                        uint64_t start_offset, uint64_t &cursor,
                         std::vector<WriteCacheIndexExtentPtr> &result);
 
         /**
@@ -118,6 +115,13 @@ namespace springtail {
          * @param node Root of tree to dump (called from public dump())
          */
         void _dump(WriteCacheIndexNodePtr node);
+
+        /**
+         * @brief Get mapping for a pg_xid
+         * @param pg_xid Postgres XID
+         * @return optional uint64_t springtail XID; none if not found
+         */
+            std::optional<uint64_t> lookup_pgxid(uint64_t pg_xid);
     };
     typedef std::shared_ptr<WriteCacheTableSet> WriteCacheTableSetPtr;
 }
