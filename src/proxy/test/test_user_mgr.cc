@@ -20,9 +20,10 @@ namespace {
 
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
             ASSERT_NE(user_mgr, nullptr);
-            user_mgr->start([] {
+            user_mgr->init([] {
                 return std::optional<std::string>("springtail");
             }, _sleep_interval);
+            user_mgr->start_thread();
 
             std::string host, user, password;
             int port;
@@ -31,9 +32,8 @@ namespace {
             _db_conn.connect(host, db_name, user, password, port, false);
         }
         static void TearDownTestSuite() {
-            // _user_mgr->shutdown();
+            pg_proxy::UserMgr::get_instance()->stop_thread();
             pg_proxy::UserMgr::shutdown();
-            pg_proxy::UserMgr::get_instance()->wait_shutdown();
             _db_conn.disconnect();
         }
         void _add_user(const std::string &user, const std::string &password) {

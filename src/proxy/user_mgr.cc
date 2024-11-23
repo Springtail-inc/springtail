@@ -92,7 +92,7 @@ namespace pg_proxy {
         }
     }
 
-    void UserMgr::_run() {
+    void UserMgr::_internal_run() {
         _id = std::this_thread::get_id();
 
         springtail::LibPqConnection conn;

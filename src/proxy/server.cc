@@ -145,9 +145,10 @@ namespace springtail::pg_proxy {
             add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
 
-       UserMgr::get_instance()->start([this] {
+       UserMgr::get_instance()->init([this] {
             return this->get_any_replicated_db_name();
         }, 5);
+        UserMgr::get_instance()->start_thread();
 
         // add subscribers to pubsub threads
         std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
@@ -479,8 +480,8 @@ namespace springtail::pg_proxy {
         }
 
         _thread_pool.shutdown();
+        pg_proxy::UserMgr::get_instance()->stop_thread();
         UserMgr::shutdown();
-        pg_proxy::UserMgr::get_instance()->wait_shutdown();
         _config_sub_thread.shutdown();
         _data_sub_thread.shutdown();
 

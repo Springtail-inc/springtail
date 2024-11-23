@@ -158,12 +158,11 @@ namespace pg_proxy {
      * @brief Cache of user credentials. Queries Redis for creds.
      */
     using GetReplicatedDatabaseFn = std::function<std::optional<std::string> ()>;
-    class UserMgr final : public Singleton<UserMgr, GetReplicatedDatabaseFn, uint32_t> {
+    class UserMgr final : public SingletonWithThread<UserMgr> {
     public:
-        virtual void start(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) {
+        void init(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) {
             _get_db_fn = get_db_fn;
             _sleep_interval = sleep_interval;
-            _mgr_thread = std::thread(&UserMgr::_run, this);
         }
 
         /**
@@ -190,14 +189,12 @@ namespace pg_proxy {
          * @brief Stop function for stopping UserMgr thread
          *
          */
-        virtual void _stop() override {
+        virtual void _internal_shutdown() override {
             SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
-            _mgr_thread.join();
-            SPDLOG_DEBUG("Joined User Manager thread {}", _id);
         }
 
     private:
-        friend class Singleton<UserMgr, GetReplicatedDatabaseFn, uint32_t>;
+        friend class SingletonWithThread<UserMgr>;
         UserMgr() {}
 
         /**
@@ -214,7 +211,6 @@ namespace pg_proxy {
         mutable std::shared_mutex _mutex;       ///< mutex for storage access
         std::set<UserPtr, CompareUserByName> _users; ///< collection of users
 
-        std::thread _mgr_thread;                ///< user manager execution thread
         std::thread::id _id;                    ///< user manager thread id
         uint32_t _sleep_interval;               ///< sleep interval in seconds
 
@@ -236,7 +232,7 @@ namespace pg_proxy {
          * @brief Function executed by UserMgr thread
          *
          */
-        void _run();
+        virtual void _internal_run() override;
 
         ~UserMgr() {}
     };
