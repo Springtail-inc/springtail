@@ -67,7 +67,7 @@ namespace springtail
         // iterate through children adding to result set
         std::shared_lock<std::shared_mutex> read_lock{xid_node->mutex};
         auto itr = xid_node->children.begin();
-        while (itr != xid_node->children.end()) {
+        while (itr != xid_node->children.end() && count > 0) {
             cursor++;
 
             // check cursor offset, decr if above 0 and continue
@@ -80,6 +80,7 @@ namespace springtail
             result.push_back((*itr)->id);
             result_cnt++;
             itr++;
+            count--;
         }
 
         return result_cnt;
@@ -121,7 +122,7 @@ namespace springtail
         // iterate through children adding to result set
         std::shared_lock<std::shared_mutex> read_lock{tid_node->mutex};
         auto itr = tid_node->children.begin();
-        while (itr != tid_node->children.end()) {
+        while (itr != tid_node->children.end() && count > 0) {
             cursor++;
 
             // check cursor offset, decr if above 0 and continue
@@ -134,6 +135,7 @@ namespace springtail
 
             result.push_back(std::make_shared<WriteCacheIndexExtent>(xid, (*itr)->id, (*itr)->data));
             itr++;
+            count--;
         }
 
         return result_cnt;

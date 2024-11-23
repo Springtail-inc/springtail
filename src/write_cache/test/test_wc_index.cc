@@ -154,7 +154,7 @@ protected:
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
         uint64_t lsn_start = 200;
-        uint64_t count = 5;
+        uint64_t count = 50;
 
         std::mutex mtx;
         std::vector<std::thread> threads;
@@ -172,14 +172,22 @@ protected:
         index->commit(pg_xid, xid);
 
         // Verify the data
+        std::vector<WriteCacheIndexExtentPtr> fetched_extents;
         uint64_t cursor = 0;
-        auto extents = index->get_extents(tid, xid, 4 * count, cursor);
-        ASSERT_EQ(extents.size(), 4 * count);
-        EXPECT_EQ(cursor, 4 * count);
+        while (true) {
+            auto extents = index->get_extents(tid, xid, 4, cursor);
+            if (extents.empty()) {
+                break;
+            }
+            EXPECT_LE(extents.size(), 4);
+            fetched_extents.insert(fetched_extents.end(), extents.begin(), extents.end());
+        }
+
+        ASSERT_EQ(fetched_extents.size(), 4 * count);
 
         for (uint64_t i = 0; i < 4 * count; ++i) {
-            EXPECT_EQ(extents[i]->xid, xid);
-            EXPECT_EQ(extents[i]->xid_seq, lsn_start + i);
+            EXPECT_EQ(fetched_extents[i]->xid, xid);
+            EXPECT_EQ(fetched_extents[i]->xid_seq, lsn_start + i);
         }
     }
 
@@ -209,6 +217,7 @@ protected:
             if (tids.empty()) {
                 break;
             }
+            EXPECT_LE(tids.size(), 3);
             fetched_tids.insert(fetched_tids.end(), tids.begin(), tids.end());
         }
 
