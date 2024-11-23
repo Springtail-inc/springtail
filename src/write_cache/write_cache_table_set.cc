@@ -25,7 +25,7 @@ namespace springtail
                                    uint64_t lsn,
                                    const ExtentPtr data)
     {
-        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: extent for TID: {}, PG XID: {}\n", tid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Inserting: extent for TID: {}, PG XID: {}, LSN: {}\n", tid, pg_xid, lsn);
 
         // find the xid node, if not exists, create a node with given ID and return it
         WriteCacheIndexNodePtr xid_node = _xid_root->findAdd(pg_xid, WriteCacheIndexNode::IndexType::XID);
@@ -178,7 +178,7 @@ namespace springtail
     void
     WriteCacheTableSet::commit(uint64_t pg_xid, uint64_t xid)
     {
-        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", xid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", pg_xid, xid);
 
         // insert xid into xid map
         // XXX should we check if there is an existing pg_xid with data and skip if not?

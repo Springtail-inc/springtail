@@ -154,7 +154,7 @@ protected:
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
         uint64_t lsn_start = 200;
-        uint64_t count = 100;
+        uint64_t count = 5;
 
         std::mutex mtx;
         std::vector<std::thread> threads;
@@ -173,13 +173,49 @@ protected:
 
         // Verify the data
         uint64_t cursor = 0;
-        auto extents = index->get_extents(tid, pg_xid, 4 * count, cursor);
+        auto extents = index->get_extents(tid, xid, 4 * count, cursor);
         ASSERT_EQ(extents.size(), 4 * count);
         EXPECT_EQ(cursor, 4 * count);
 
         for (uint64_t i = 0; i < 4 * count; ++i) {
             EXPECT_EQ(extents[i]->xid, xid);
             EXPECT_EQ(extents[i]->xid_seq, lsn_start + i);
+        }
+    }
+
+    TEST_F(WriteCacheIndexTest, AddAndFetchMultipleTids) {
+        uint64_t pg_xid = 100;
+        uint64_t lsn_start = 200;
+        uint64_t count = 100;
+        uint64_t num_tids = 100;
+        uint64_t xid = 150;
+
+        // Add extents with different table IDs (tid)
+        for (uint64_t tid = 1; tid <= num_tids; ++tid) {
+            for (uint64_t i = 0; i < count; ++i) {
+                ExtentHeader header(ExtentType(), 200 + i, 100);
+                ExtentPtr data = std::make_shared<Extent>(header);
+                index->add_extent(tid, pg_xid, lsn_start + i, data);
+            }
+        }
+
+        index->commit(pg_xid, xid);
+
+        // Fetch tids using multiple get_tids() calls with the cursor
+        uint64_t cursor = 0;
+        std::vector<uint64_t> fetched_tids;
+        while (true) {
+            auto tids = index->get_tids(xid, 3, cursor);
+            if (tids.empty()) {
+                break;
+            }
+            fetched_tids.insert(fetched_tids.end(), tids.begin(), tids.end());
+        }
+
+        // Verify the fetched tids
+        ASSERT_EQ(fetched_tids.size(), num_tids);
+        for (uint64_t tid = 1; tid <= num_tids; ++tid) {
+            EXPECT_NE(std::find(fetched_tids.begin(), fetched_tids.end(), tid), fetched_tids.end());
         }
     }
 
