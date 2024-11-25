@@ -154,7 +154,7 @@ namespace {
         pg_proxy::UserPtr user = user_mgr->get_user("aaa", db_name);
         ASSERT_NE(user, nullptr);
         std::string user_password = user->password();
-        ASSERT_TRUE(user_password.starts_with("md5"));
+        ASSERT_TRUE(user_password.starts_with(MD5_ENCRYPTION));
 
         // remove user and verify access
         _remove_user("aaa");
@@ -171,7 +171,7 @@ namespace {
         user = user_mgr->get_user("aaa", db_name);
         ASSERT_NE(user, nullptr);
         user_password = user->password();
-        ASSERT_TRUE(user_password.starts_with("SCRAM-SHA-256"));
+        ASSERT_TRUE(user_password.starts_with(SCRAM_ENCRYPTION));
 
         // remove user and verify access
         _remove_user("aaa");
