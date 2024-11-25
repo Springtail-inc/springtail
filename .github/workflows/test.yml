@@ -69,6 +69,8 @@ jobs:
             sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
           fi
           sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
+          # Create triggers
+          sudo -u postgres psql -d springtail -f /__w/springtail/springtail/scripts/triggers.sql
 
       - name: Run Unit Tests
         run: |
@@ -95,7 +97,6 @@ jobs:
           name: Unit Tests             # Name of the check run which will be created
           path: ./debug/unit-test-report.xml
           reporter: java-junit
-          badge-title: 'unit tests'
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed
