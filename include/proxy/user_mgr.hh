@@ -182,7 +182,7 @@ namespace pg_proxy {
          * @param get_db_fn - function for getting any available database name
          * @param sleep_interval - UserMgr thread sleep interval
          */
-        void init(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) {
+        void init(GetReplicatedDatabaseFn get_db_fn, const uint32_t sleep_interval) {
             _get_db_fn = get_db_fn;
             _sleep_interval = sleep_interval;
         }

@@ -66,7 +66,7 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Get a name of an arbitrary replicated databasethe for running a user query in UserMgr
+         * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
          *
          * @return std::optional<std::string> - name of a replicated database if found
          */
