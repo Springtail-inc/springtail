@@ -120,12 +120,23 @@ namespace pg_proxy {
             _connected_databases.insert(name);
         }
 
-        // TODO: add documanetation
+         /**
+         * @brief Set user list of databases
+         *
+         * @param databases
+         */
         void set_databases(const std::set<std::string> &databases) {
             std::unique_lock lock(_user_mutex);
             _connected_databases = databases;
         }
 
+        /**
+         * @brief Verify if the user is allowed to access database
+         *
+         * @param database - database name
+         * @return true - allowed
+         * @return false - not allowed
+         */
         bool find_database(const std::string &database) {
             std::shared_lock lock(_user_mutex);
             if (_connected_databases.contains(database)) {
@@ -134,6 +145,11 @@ namespace pg_proxy {
             return false;
         }
 
+        /**
+         * @brief Change user password
+         *
+         * @param password - password
+         */
         void set_password(const std::string &password);
     private:
         struct ScramKeys {
@@ -143,14 +159,14 @@ namespace pg_proxy {
             bool server_key_set=false;
         };
 
-        mutable std::shared_mutex _user_mutex;
-        std::shared_ptr<ScramKeys> _scram_keys;
-        std::set<std::string> _connected_databases;
+        mutable std::shared_mutex _user_mutex;          ///< mutex for user data access
+        std::shared_ptr<ScramKeys> _scram_keys;         ///< user scram keys
+        std::set<std::string> _connected_databases;     ///< connected databases
 
-        std::string _username;
-        std::string _password;
-        uint32_t    _salt;
-        AuthType    _auth_type;
+        std::string _username;                          ///< username
+        std::string _password;                          ///< password
+        uint32_t    _salt;                              ///< salt
+        AuthType    _auth_type;                         ///< authentication type
     };
     using UserPtr = std::shared_ptr<User>;
 
@@ -160,6 +176,12 @@ namespace pg_proxy {
     using GetReplicatedDatabaseFn = std::function<std::optional<std::string> ()>;
     class UserMgr final : public SingletonWithThread<UserMgr> {
     public:
+        /**
+         * @brief Initialize UserMgr object
+         *
+         * @param get_db_fn - function for getting any available database name
+         * @param sleep_interval - UserMgr thread sleep interval
+         */
         void init(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) {
             _get_db_fn = get_db_fn;
             _sleep_interval = sleep_interval;
@@ -194,8 +216,17 @@ namespace pg_proxy {
         }
 
     private:
-        friend class SingletonWithThread<UserMgr>;
+        friend class SingletonWithThread<UserMgr>;      ///< the base class should be friend
+        /**
+         * @brief Private constructor
+         *
+         */
         UserMgr() {}
+        /**
+         * @brief Private destructor
+         *
+         */
+        ~UserMgr() {}
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
@@ -234,7 +265,6 @@ namespace pg_proxy {
          */
         virtual void _internal_run() override;
 
-        ~UserMgr() {}
     };
 } // namespace pg_proxy
 } // namespace springtail

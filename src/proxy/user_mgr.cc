@@ -20,7 +20,6 @@ namespace pg_proxy {
     User::User(const std::string &username,
                const std::string &password)
         : _username(username),
-          _password(password),
           _salt(0)
     {
         set_password(password);
@@ -30,6 +29,7 @@ namespace pg_proxy {
 
     void User::set_password(const std::string &password) {
         std::unique_lock lock(_user_mutex);
+        _password = password;
         _salt = 0;
         if (_password.starts_with("SCRAM")) {
             _auth_type = SCRAM;
@@ -55,11 +55,11 @@ namespace pg_proxy {
     UserLoginPtr
     User::get_user_login() const
     {
+        std::shared_lock lock(_user_mutex);
         UserLoginPtr login = std::make_shared<UserLogin>(_auth_type, _password, _salt);
 
         // if scram type copy both the keys, although only serverkey may be set
         if (_auth_type == SCRAM) {
-            std::shared_lock lock(_user_mutex);
             memcpy(login->scram_state.ServerKey, _scram_keys->server_key, SCRAM_KEY_LEN);
             memcpy(login->scram_state.ClientKey, _scram_keys->client_key, SCRAM_KEY_LEN);
         }
