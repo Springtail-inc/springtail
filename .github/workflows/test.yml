@@ -61,6 +61,15 @@ jobs:
           ./clean.sh
           ./debug.sh -j 4
 
+      - name: Prepare DB for Unit Tests
+        run: |
+          service postgresql start
+          USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='springtail'")
+          if [ "$USER_EXISTS" != "1" ]; then
+            sudo -u postgres psql -c "CREATE USER springtail WITH PASSWORD 'springtail' SUPERUSER LOGIN" 
+          fi
+          sudo -u postgres psql -c "CREATE DATABASE springtail WITH OWNER springtail"
+
       - name: Run Unit Tests
         run: |
           cd python/testing
@@ -71,6 +80,13 @@ jobs:
           unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
+
+      - name: Cleanup Unit Test
+        if: success() || failure()      # run this step even if previous step failed
+        run: |
+          # Drop the springtail database 
+          sudo -u postgres psql -c "DROP DATABASE springtail"
+          service postgresql stop
 
       - name: Unit Test Report
         uses: dorny/test-reporter@v1
