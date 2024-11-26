@@ -2,6 +2,7 @@
 
 #include <common/common.hh>
 #include <pg_repl/libpq_connection.hh>
+#include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 
 using namespace springtail;
@@ -22,11 +23,11 @@ namespace {
         static void SetUpTestSuite() {
             springtail_init();
 
+            pg_proxy::DatabaseMgr::get_instance()->init();
+            pg_proxy::DatabaseMgr::get_instance()->start_pubsub();
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
             ASSERT_NE(user_mgr, nullptr);
-            user_mgr->init([] {
-                return std::optional<std::string>("springtail");
-            }, _sleep_interval);
+            user_mgr->init(_sleep_interval);
             user_mgr->start_thread();
 
             std::string host, user, password;
@@ -38,6 +39,7 @@ namespace {
         static void TearDownTestSuite() {
             pg_proxy::UserMgr::get_instance()->stop_thread();
             pg_proxy::UserMgr::shutdown();
+            pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
         }
         void _add_user(const std::string &user, const std::string &password) {

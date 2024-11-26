@@ -457,11 +457,25 @@ namespace pg_proxy {
         std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
     };
 
-    // TODO: document
+    /**
+     * @brief Singleton database manager class. Collects all configuration data from Properties and
+     *          redis instance.
+     *
+     */
     class DatabaseMgr final : public Singleton<DatabaseMgr> {
         friend class Singleton<DatabaseMgr>;
     public:
+        /**
+         * @brief Initialization function
+         *
+         */
         void init();
+
+        /**
+         * @brief This function starts subscriber threads for redis databas. This can't happen inside
+         *          init() function at the moment.
+         *
+         */
         void start_pubsub() {
             _config_sub_thread.start();
             _data_sub_thread.start();
@@ -508,6 +522,13 @@ namespace pg_proxy {
             return _replicated_databases[dbname];
         }
 
+        /**
+         * @brief Verifies if the database is in the running state.
+         *
+         * @param db_id - database id to verify
+         * @return true - database is in running state
+         * @return false - database is not in the running state
+         */
         bool is_database_ready(const uint64_t db_id) {
             std::shared_lock lock(_db_state_mutex);
             if (_replicated_database_states[db_id] == redis::db_state_change::DB_STATE_RUNNING) {
@@ -516,44 +537,86 @@ namespace pg_proxy {
             return false;
         }
 
-        /** Check if a database is replicated */
+        /**
+         * @brief Check if a database is replicated
+         *
+         * @param dbname - name of the database
+         * @return true - replicated
+         * @return false - not replicated
+         */
         bool is_database_replicated(const std::string &dbname) {
             std::shared_lock lock(_db_mutex);
             return _replicated_databases.contains(dbname);
         }
 
-        /** Get primary database instance */
+        /**
+         * @brief Get the primary database instance
+         *
+         * @return DatabaseInstancePtr
+         */
         DatabaseInstancePtr get_primary_instance() {
             return _primary_database.primary();
         }
 
-        /** Get replica database instance  -- use username/dbname as a hint */
+        /**
+         * @brief Get replica database instance  -- use username/dbname as a hint
+         *
+         * @param db_id - database id
+         * @param username - username
+         * @return DatabaseInstancePtr
+         */
         DatabaseInstancePtr get_replica_instance(const uint64_t db_id, const std::string &username) {
             return _replica_set.get_replica(db_id, username);
         }
 
-        /** Set primary db instance */
+        /**
+         * @brief Set the primary database instance
+         *
+         * @param instance_id - instance id
+         * @param instance - database instance
+         */
         void set_primary(uint64_t instance_id, DatabaseInstancePtr instance) {
             _db_instance_id = instance_id;
             _primary_database.set_primary(instance);
         }
 
-        /** Set the secondary db instance */
+        /**
+         * @brief Set the secondary database instance
+         *
+         * @param instance - database instance
+         */
         void set_standby(DatabaseInstancePtr instance) {
             _primary_database.set_standby(instance);
         }
 
-        /** Add replica instance */
+        /**
+         * @brief Add replica database instance
+         *
+         * @param instance - database instance
+         */
         void add_replica(DatabaseInstancePtr instance) {
             _replica_set.add_replica(instance);
         }
 
+        /**
+         * @brief Verify if the table is replicated for give database and schema
+         *
+         * @param db_id - database id
+         * @param schema - schema name
+         * @param table - table name
+         * @return true - table is replicated
+         * @return false - table is not replicated
+         */
         bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
             return _schema_tables.has_item(db_id, schema, table);
 
         }
 
     protected:
+        /**
+         * @brief Function called by Singleton base class to perform shutdown.
+         *
+         */
         void _internal_shutdown() override;
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
@@ -572,8 +635,17 @@ namespace pg_proxy {
 
         DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
 
+        /**
+         * @brief Construct a new Database Mgr object
+         *
+         */
         DatabaseMgr() : _config_sub_thread(1, true),
                         _data_sub_thread(1, false) {};
+
+        /**
+         * @brief Destroy the Database Mgr object
+         *
+         */
         ~DatabaseMgr() override = default;
 
         /**

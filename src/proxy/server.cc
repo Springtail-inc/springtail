@@ -117,11 +117,8 @@ namespace springtail::pg_proxy {
 
         SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
 
-       DatabaseMgr::get_instance()->init();
-       // TODO: fix this after merge with main
-       UserMgr::get_instance()->init([this] {
-            return DatabaseMgr::get_instance()->get_any_replicated_db_name();
-        }, 5);
+        DatabaseMgr::get_instance()->init();
+        UserMgr::get_instance()->init(5);
         UserMgr::get_instance()->start_thread();
     }
 
@@ -483,55 +480,5 @@ namespace springtail::pg_proxy {
             _waiting_sessions.insert(socket);
         }
     }
-
-    /*
-    void ProxyServer::_handle_db_state_change(const std::string &msg) {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBState state;
-        redis::db_state_change::parse_db_state_change(msg, db_id, state);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        _replicated_database_states[db_id] = state;
-    }
-
-    void ProxyServer::_init_db_states_subscriber() {
-        // refresh all database states
-        std::shared_lock db_name_lock(_db_mutex);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
-            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            _replicated_database_states[db_id] = db_state;
-        }
-    }
-
-    void ProxyServer::_handle_db_table_change(const std::string &msg) {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received DB table change: {}", msg);
-        uint64_t db_id;
-        std::string action;
-        std::string schema;
-        std::string table;
-        RedisDbTables::decode_pubsub_msg(msg, db_id, action, schema, table);
-        if (action == "add") {
-            _schema_tables.add_item(db_id, schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
-        } else if (action == "remove") {
-            _schema_tables.remove_item(db_id, schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
-        }
-    }
-
-    void ProxyServer::_init_db_tables_subscriber() {
-        // get all schemas and tables from redis
-        std::shared_lock db_name_lock(_db_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
-            std::vector<std::pair<std::string, std::string>> schema_table_pairs;
-            RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
-            for (const auto &[schema, table]: schema_table_pairs) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Found schema: {}, table : {}", schema, table);
-                _schema_tables.add_item(db_id, schema, table);
-            }
-        }
-    }
-    */
 
 } // namespace springtail::pg_proxy
