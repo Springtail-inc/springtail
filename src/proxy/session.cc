@@ -61,7 +61,7 @@ namespace springtail::pg_proxy {
           _instance(instance),
           _id(session_id++)
     {
-        _db_id = _server->get_database_id(_database);
+        _db_id = DatabaseMgr::get_instance()->get_database_id(_database);
     }
 
     void

@@ -16,19 +16,19 @@
 
 #include <fmt/core.h>
 
-#include <common/json.hh>
+// #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
-#include <proxy/exception.hh>
+// #include <proxy/exception.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
 
-#include <redis/redis_db_tables.hh>
+// #include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy {
 
@@ -53,8 +53,6 @@ namespace springtail::pg_proxy {
                              bool enable_ssl,
                              LoggerPtr logger)
       : _id(arc4random()),
-        _config_sub_thread(1, true),
-        _data_sub_thread(1, false),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl),
         _shadow_mode(shadow_mode),
@@ -117,56 +115,12 @@ namespace springtail::pg_proxy {
 
         SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
 
-        // add primary
-        uint64_t primary_instance_id = Properties::get_db_instance_id();
-        std::string host, user, password;
-        int port;
-        Properties::get_primary_db_config(host, port, user, password);
-        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host, port));
-
-        std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
-        for (const auto & fdw_id: fdw_id_list) {
-            nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
-            auto host = Json::get<std::string>(fdw_config, "host");
-            auto port = Json::get<uint16_t>(fdw_config, "port");
-            if (host.has_value() && port.has_value()) {
-                // add replica
-                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
-            } else {
-                SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
-                throw ProxyServerError();
-            }
-        }
-
-        // add replicated databases
-        std::map<uint64_t, std::string> db_list = Properties::get_databases();
-        for (const auto& db_pair: db_list) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database (id, name): ({}, {})", get<0>(db_pair), get<1>(db_pair));
-            add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
-        }
-
+       DatabaseMgr::get_instance()->init();
+       // TODO: fix this after merge with main
        UserMgr::get_instance()->init([this] {
-            return this->get_any_replicated_db_name();
+            return DatabaseMgr::get_instance()->get_any_replicated_db_name();
         }, 5);
         UserMgr::get_instance()->start_thread();
-
-        // add subscribers to pubsub threads
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(state_change_channel,
-            [this]() {
-                this->_init_db_states_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_state_change(msg);
-            });
-        std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
-        _data_sub_thread.add_subscriber(db_table_change_channel,
-            [this]() {
-                this->_init_db_tables_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_table_change(msg);
-            });
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -381,9 +335,8 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::run()
     {
-        // start pubsub threads
-        _config_sub_thread.start();
-        _data_sub_thread.start();
+        // start pubsub thread
+        DatabaseMgr::get_instance()->start_pubsub();
 
         while (!_shutdown) {
             // poll for readable sockets
@@ -482,8 +435,7 @@ namespace springtail::pg_proxy {
         _thread_pool.shutdown();
         pg_proxy::UserMgr::get_instance()->stop_thread();
         UserMgr::shutdown();
-        _config_sub_thread.shutdown();
-        _data_sub_thread.shutdown();
+        DatabaseMgr::shutdown();
 
         // flush logger
         if (_logger) {
@@ -530,6 +482,7 @@ namespace springtail::pg_proxy {
         }
     }
 
+    /*
     void ProxyServer::_handle_db_state_change(const std::string &msg) {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
         uint64_t db_id;
@@ -577,5 +530,6 @@ namespace springtail::pg_proxy {
             }
         }
     }
+    */
 
 } // namespace springtail::pg_proxy
