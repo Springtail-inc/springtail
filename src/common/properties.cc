@@ -401,7 +401,7 @@ namespace springtail {
             user = optional_user.value();
             password = optional_password.value();
         } else {
-            SPDLOG_ERROR("Could not find the value for primary database either host, port, user, or passwrot");
+            SPDLOG_ERROR("Could not find the value for primary database either host, port, user, or password");
             throw Error();
         }
     }

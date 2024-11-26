@@ -11,7 +11,7 @@ namespace springtail {
 namespace pg_proxy {
 
     static constexpr char USER_SELECT[] = "select username, password, databases from public.get_user_access()";
-    static std::vector<std::string> AUTH_TYPE_TO_STR = {
+    static const std::vector<std::string> AUTH_TYPE_TO_STR = {
         "TRUST",
         "MD5",
         "SCRAM"
@@ -121,7 +121,7 @@ namespace pg_proxy {
             try {
                 conn.exec(USER_SELECT);
             } catch (Error &e) {
-                SPDLOG_ERROR(fmt::format("Failed to excute the query; will try to reconnect"));
+                SPDLOG_ERROR(fmt::format("Error: {}. Failed to excute the query; will try to reconnect", e.what()));
                 conn.disconnect();
                 sleep(_sleep_interval);
                 continue;

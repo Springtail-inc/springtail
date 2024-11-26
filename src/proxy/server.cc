@@ -35,6 +35,8 @@ namespace springtail::pg_proxy {
     /** Default log level for the proxy server */
     LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
+    static constexpr uint32_t USER_MGR_SLEEP_INTERVAL = 5;
+
     /**
      * @brief Construct a new Proxy Server object.
      * The server handles the poll loop and accepts new connections.

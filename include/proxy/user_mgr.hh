@@ -182,7 +182,7 @@ namespace pg_proxy {
          * @param get_db_fn - function for getting any available database name
          * @param sleep_interval - UserMgr thread sleep interval
          */
-        void init(GetReplicatedDatabaseFn get_db_fn, uint32_t sleep_interval) {
+        void init(GetReplicatedDatabaseFn get_db_fn, const uint32_t sleep_interval) {
             _get_db_fn = get_db_fn;
             _sleep_interval = sleep_interval;
         }
@@ -211,7 +211,7 @@ namespace pg_proxy {
          * @brief Stop function for stopping UserMgr thread
          *
          */
-        virtual void _internal_shutdown() override {
+        void _internal_shutdown() override {
             SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
         }
 
@@ -221,12 +221,12 @@ namespace pg_proxy {
          * @brief Private constructor
          *
          */
-        UserMgr() {}
+        UserMgr() = default;
         /**
          * @brief Private destructor
          *
          */
-        ~UserMgr() {}
+        ~UserMgr() override = default;
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
@@ -263,7 +263,7 @@ namespace pg_proxy {
          * @brief Function executed by UserMgr thread
          *
          */
-        virtual void _internal_run() override;
+        void _internal_run() override;
 
     };
 } // namespace pg_proxy
