@@ -1093,8 +1093,6 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
-        // redis::db_state_change::DBState db_state = DatabaseMgr::get_instance()->get_database_state(_db_id);
-        // if (type == REPLICA && db_state != redis::db_state_change::DB_STATE_RUNNING) {
         if (type == REPLICA && DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
             type = PRIMARY;
         }

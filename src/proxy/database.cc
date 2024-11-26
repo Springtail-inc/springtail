@@ -87,7 +87,6 @@ namespace springtail::pg_proxy {
     {
         std::unique_lock lock(_mutex);
 
-        // uint64_t db_id = server->get_database_id(database);
         uint64_t db_id = DatabaseMgr::get_instance()->get_database_id(database);
 
         // try to get a free one first
