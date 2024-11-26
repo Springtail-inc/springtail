@@ -114,7 +114,7 @@ namespace springtail::sys_tbl_mgr {
     private:
         // delete copy constructor
         Client(const Client &) = delete;
-        void operator=(const Client &)   = delete;
+        void operator=(const Client &) = delete;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool
@@ -143,6 +143,11 @@ namespace springtail::sys_tbl_mgr {
             return c;
         }
 
+        /** Cache for Schema objects. */
+        Cache<SchemaKey, SchemaValue<Schema>> _schema_cache;
+
+        /** Cache for table metadata. */
+        Cache<SchemeKey, SchemaValue<TableMetadata>> _meta_cache;
     };
 
 } // namespace springtail

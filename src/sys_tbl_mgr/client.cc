@@ -306,21 +306,27 @@ namespace springtail::sys_tbl_mgr {
                       uint64_t table_id,
                       uint64_t xid)
     {
-        ThriftClient c = _get_client();
-        GetRootsResponse result;
+        MetadataKey key{db_id, table_id, xid};
 
-        GetRootsRequest request;
-        request.db_id = db_id;
-        request.xid = xid;
-        request.table_id = table_id;
+        auto metadata = _roots_cache.get(key, [&c](const MetadataKey &key) {
+            GetRootsRequest request;
+            request.db_id = key.db;
+            request.table_id = key.tid;
+            request.xid = key.xid;
 
-        c.client->get_roots(result, request);
+            GetRootsResponse result;
 
-        TableMetadata metadata;
-        metadata.roots.insert(metadata.roots.end(),
-                              result.roots.begin(), result.roots.end());
-        metadata.stats.row_count = result.stats.row_count;
-        metadata.snapshot_xid = result.snapshot_xid;
+            ThriftClient c = _get_client();
+            c.client->get_roots(result, request);
+
+            auto metadata = std::make_shared<TableMetadata>();
+            metadata->roots.insert(metadata->roots.end(),
+                                   result.roots.begin(), result.roots.end());
+            metadata->stats.row_count = result.stats.row_count;
+            metadata->snapshot_xid = result.snapshot_xid;
+
+            return metadata;
+        });
 
         return metadata;
     }
