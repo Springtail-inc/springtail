@@ -45,13 +45,13 @@ namespace springtail {
          * @brief Constructor of a new Singleton object can only be accessed by the derived class
          *
          */
-        Singleton() {}
+        Singleton() = default;
 
         /**
          * @brief Destructor of the Singleton object can only be accessed by the derived class
          *
          */
-        virtual ~Singleton() {}
+        virtual ~Singleton() = default;
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance
@@ -147,19 +147,19 @@ namespace springtail {
          * @return true
          * @return false
          */
-        bool _is_shutting_down() { return _shutting_down; }
+        bool _is_shutting_down() const { return _shutting_down; }
 
         /**
          * @brief Constructor of a new SingletonWithThread object can only be accessed by the derived class
          *
          */
-        SingletonWithThread() {}
+        SingletonWithThread() = default;
 
         /**
          * @brief Destructor of the Singleton object can only be accessed by the derived class
          *
          */
-        virtual ~SingletonWithThread() {}
+        virtual ~SingletonWithThread() = default;
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance

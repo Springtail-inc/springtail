@@ -7,15 +7,15 @@
 using namespace springtail;
 
 namespace {
-    static constexpr char USER_CREATE[] = "CREATE USER {} WITH LOGIN PASSWORD '{}'";
-    static constexpr char USER_DROP[] = "DROP USER {}";
-    static constexpr char USER_DROP_OWNED[] = "DROP OWNED BY {}";
-    static constexpr char DATABASE_GRANT[] = "GRANT CONNECT ON DATABASE {} TO {}";
-    static constexpr char DATABASE_REVOKE[] = "REVOKE CONNECT ON DATABASE {} FROM {}";
-    static constexpr char CHANGE_PASSWORD[] = "ALTER USER {} WITH PASSWORD '{}'";
-    static constexpr char CHANGE_ENCRYPTION[] = "SET PASSWORD_ENCRYPTION = '{}'";
-    static constexpr char MD5_ENCRYPTION[] = "md5";
-    static constexpr char SCRAM_ENCRYPTION[] = "SCRAM-SHA-256";
+    constexpr char USER_CREATE[] = "CREATE USER {} WITH LOGIN PASSWORD '{}'";
+    constexpr char USER_DROP[] = "DROP USER {}";
+    constexpr char USER_DROP_OWNED[] = "DROP OWNED BY {}";
+    constexpr char DATABASE_GRANT[] = "GRANT CONNECT ON DATABASE {} TO {}";
+    constexpr char DATABASE_REVOKE[] = "REVOKE CONNECT ON DATABASE {} FROM {}";
+    constexpr char CHANGE_PASSWORD[] = "ALTER USER {} WITH PASSWORD '{}'";
+    constexpr char CHANGE_ENCRYPTION[] = "SET PASSWORD_ENCRYPTION = '{}'";
+    constexpr char MD5_ENCRYPTION[] = "md5";
+    constexpr char SCRAM_ENCRYPTION[] = "SCRAM-SHA-256";
 
     class UserMgr_Test : public testing::Test {
     protected:

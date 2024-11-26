@@ -211,7 +211,7 @@ namespace pg_proxy {
          * @brief Stop function for stopping UserMgr thread
          *
          */
-        virtual void _internal_shutdown() override {
+        void _internal_shutdown() override {
             SPDLOG_DEBUG("Stopping User Manager thread {}", _id);
         }
 
@@ -221,12 +221,12 @@ namespace pg_proxy {
          * @brief Private constructor
          *
          */
-        UserMgr() {}
+        UserMgr() = default;
         /**
          * @brief Private destructor
          *
          */
-        ~UserMgr() {}
+        ~UserMgr() override = default;
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container
@@ -263,7 +263,7 @@ namespace pg_proxy {
          * @brief Function executed by UserMgr thread
          *
          */
-        virtual void _internal_run() override;
+        void _internal_run() override;
 
     };
 } // namespace pg_proxy
