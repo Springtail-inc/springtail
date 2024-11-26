@@ -16,19 +16,15 @@
 
 #include <fmt/core.h>
 
-// #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
-// #include <proxy/exception.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
-
-// #include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy {
 
