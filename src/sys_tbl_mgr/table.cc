@@ -100,9 +100,41 @@ namespace springtail {
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
+    }
 
+    std::vector<std::string> 
+    Table::get_column_names(const std::vector<uint32_t>& col_position)
+    {
+        std::vector<std::string> col_names;
+        auto column_order = _schema->column_order();
+        for (auto position: col_position) {
+            assert(position < column_order.size());
+            col_names.emplace_back(std::move(column_order[position]));
+        }
+        return col_names;
+    }
 
-        //TODO: deal with secondary indexes
+    MutableBTreePtr 
+    Table::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
+    {
+        // get the column names in the order they appear in the index
+        std::vector<std::string> col_names = get_column_names(index_columns);
+
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+
+        auto secondary_key = col_names;
+        secondary_key.push_back(constant::INDEX_EID_FIELD);
+        secondary_key.push_back(constant::INDEX_RID_FIELD);
+
+        auto secondary_schema = _schema->create_schema(col_names, { extent_c, row_c }, secondary_key);
+
+        auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                secondary_key, secondary_schema,
+                _xid);
+
+        btree->init_empty();
+        return btree;
     }
 
     bool

@@ -194,34 +194,24 @@ namespace springtail {
     }
 
     void
-    RedisDDL::commit_index_ddl(uint64_t db_id,
-                         uint64_t xid)
+    RedisDDL::commit_index_ddl(uint64_t db_id, uint64_t xid)
     {
         uint64_t db_instance_id = Properties::get_db_instance_id();
         std::string precommit_key = fmt::format(redis::HASH_DDL_INDEX_PRECOMMIT, db_instance_id);
 
         // get the pre-committed DDLs and figure out which ones we can commit based on the given XID
-        std::vector<std::string> commit_keys;
         std::vector<std::string> hkeys;
+        std::vector<std::string> commit_keys;
 
         _redis->hkeys(precommit_key, std::back_inserter(hkeys));
         for (const auto &key : hkeys) {
             std::vector<std::string> split;
             common::split_string(":", key, split);
-            if (stoull(split[0]) == db_id && stoull(split[1]) <= xid) {
+            if (stoull(split[0]) == db_id && stoull(split[1]) == xid) {
                 commit_keys.push_back(key);
             }
         }
-        //TODO: for debugging for now 
         assert(commit_keys.size() == 1);
-
-        // move from the pre-commit to the DDL queue of each FDW, all in a single transaction
-        for (const auto &key : commit_keys) {
-            auto ts = _redis->transaction(false, false);
-            auto r = ts.redis();
-            // NOTE: if the precommit_key hash could change, then we should do a watch here
-            auto &&value = r.hget(precommit_key, key);
-        }
 
         // move from the pre-commit to the DDL queue of each FDW, all in a single transaction
         for (const auto &key : commit_keys) {
@@ -232,6 +222,8 @@ namespace springtail {
             assert (value.has_value());
 
             // get the set of FDWs
+            // TODO: uncomment this when FDW support is added
+            /*
             std::vector<std::string> fdw_ids = Properties::get_fdw_ids();
 
             for (const std::string &fdw_id : fdw_ids) {
@@ -239,6 +231,7 @@ namespace springtail {
                 // note: this is equivalent to RedisQueue::push()
                 ts.lpush(fdw_key, *value);
             }
+            */
             ts.hdel(precommit_key, key).exec();
         }
     }

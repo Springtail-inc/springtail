@@ -104,6 +104,7 @@ namespace {
         msg.index = name;
         msg.is_unique = true;
         msg.table_oid = tid;
+        msg.oid = 1234;
 
         msg.columns.push_back({"col2", 2, 0});
         msg.columns.push_back({"col1", 1, 1});

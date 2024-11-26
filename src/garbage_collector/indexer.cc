@@ -1,4 +1,3 @@
-
 #include <mutex>
 #include <stop_token>
 #include <assert.h>
@@ -6,6 +5,7 @@
 #include <garbage_collector/indexer.hh>
 #include <common/logging.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/client.hh>
 
 namespace springtail::gc {
 
@@ -40,14 +40,11 @@ namespace springtail::gc {
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
             // it means to drop the index
-            _work_set[key] = {xid, completed_xid };
+            _work_set[key] = {xid, completed_xid, {}};
             _queue.push(key);
             _cv.notify_one();
         } else {
             // clear DDL, it will tell the worker to cancel the index build
-            // TODO: abort redis DDL for this xid and index
-            // if we the index was dropped before the build is completed
-            // we don't notify FDW?
             it->second._ddl = {};
         }
     }
@@ -91,9 +88,12 @@ namespace springtail::gc {
             }
 
             if (!params._ddl.is_null()) {
-                SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, params._ddl.dump());
-                _build(st, key, params);
-                _commit_build(key);
+                auto root = _build(st, key, params);
+                if (!_commit_build(key, params)) {
+                    root->truncate();
+                }
+                root->finalize();
+                //TODO: update the roots table
             } else {
 //TODO:  _drop(st);
             }
@@ -101,30 +101,57 @@ namespace springtail::gc {
         SPDLOG_INFO("Indexer thread joined");
     }
 
-    void Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
+    MutableBTreePtr Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
+        constexpr int CHECK_PERIOD = 100;
+
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
+
         auto db_id = key.first;
         auto tid = idx._ddl["table_id"];
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._completed_xid, idx._xid, true);
+        auto index_id = idx._ddl["id"];
 
-        //TODO for each row
-        {
-            
-            if(!st.stop_requested()) {
-                // TODO:... clear partial index
-                // abort DDL
-                _redis_ddl.abort_index_ddl(db_id, idx._xid);
-                return;
-            }
+        assert(idx._ddl["action"] == "create_index");
 
-            // TODO: ... insert the row index
-
-            // .... periodically check if the index was dropped while 
-            // we were building it
-            if (!_check_work_state(key)) {
-                return;
-            }
+        std::vector<uint32_t> idx_cols;
+        for (auto const& col: idx._ddl["columns"]) {
+            idx_cols.push_back(col["position"]);
         }
+
+        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
+
+        // create an index root
+        MutableBTreePtr root = table->create_index_root(index_id, idx_cols);
+        auto key_fields = table->extent_schema()->get_fields(table->get_column_names(idx_cols));
+
+        // additional fields in the root schema to keep extent and row ids
+        auto value_fields = std::make_shared<FieldArray>(2);
+        uint32_t row_id = 0;
+        uint64_t saved_extent_id = 0;
+
+        for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
+            if(st.stop_requested()) {
+                break;
+            }
+            if (row_id % CHECK_PERIOD == 0 && !_check_work_state(key)) {
+                break;
+            }
+            auto extent_id = row_i.extent_id();
+            if (saved_extent_id != extent_id) {
+                row_id = 0;
+                saved_extent_id = extent_id;
+            }
+
+            (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+
+            auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
+            root->insert(svalue);
+
+            ++row_id;
+        }
+        root->finalize();
+        return root;
     }
 
     bool Indexer::_check_work_state(const Key& key) {
@@ -132,45 +159,47 @@ namespace springtail::gc {
         auto const& params = _work_set[key];
         // index drop requested while we've been building it
         if (params._ddl.is_null()) {
-            // TODO:... clear partial index
             return false;
         }
         return true;
     }
 
-    void Indexer::_commit_build(const Key& key) 
+    bool Indexer::_commit_build(const Key& key, const IndexParams& idx) 
     {
-        uint64_t xid{};
+        IndexParams work_item;
 
+        bool redis_commit = false;
         {
             std::unique_lock g(_m);
 
-            auto const& params = _work_set[key];
-            xid = params._xid;
-
-            _check_work_state(key);
+            // fetch the latest state of the work item before we erase it
+            work_item = _work_set[key];
             _work_set.erase(key);
-            _cv_done.notify_one();
 
-            // index dropped
-            if (params._ddl.is_null()) {
-                // TODO: clear partial index
-                // TODO: cancel redis DDL
-                return;
-            }
-
-            // check if there are pending jobs for this xid
             auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) { 
-                        return v.first.first == key.first && v.second._xid == xid;
+                    [&](auto const& v) {
+                        return v.first.first == key.first && v.second._xid == idx._xid;
                     });
-
-            if (it != _work_set.end()) {
-                return;
+            if (it == _work_set.end()) {
+                redis_commit = true;
             }
+
+            _cv_done.notify_one();
         }
 
-        // TODO: uncomment after FDW support is added
-        //_redis_ddl.commit_index_ddl(key.first, xid);
+        if (redis_commit) {
+            _redis_ddl.commit_index_ddl(key.first, idx._xid);
+        } else {
+            //TODO: not sure if it's expected?
+            SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
+        }
+
+        if (work_item._ddl.is_null()) {
+            // we got drop index while building it, use the last XID
+            _redis_ddl.commit_index_ddl(key.first, work_item._xid);
+            return false;
+        }
+
+        return true;
     }
 }

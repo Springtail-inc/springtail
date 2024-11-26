@@ -304,7 +304,7 @@ namespace springtail::gc {
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
                 for (auto const& ddl: index_ddls) {
-                    _indexer->build({db_id, completed_xid, xid, ddl});
+                    _indexer->build({db_id, xid, completed_xid, ddl});
                 }
             }
 

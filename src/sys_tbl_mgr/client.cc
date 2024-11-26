@@ -228,7 +228,7 @@ namespace springtail::sys_tbl_mgr {
         DDLStatement result;
 
         auto &&request = _gen_index_request(db_id, xid, msg);
-        request.state=static_cast<int8_t>(state);
+        request.index.state=static_cast<int8_t>(state);
 
         c.client->create_index(result, request);
 

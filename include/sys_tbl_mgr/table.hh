@@ -129,6 +129,12 @@ namespace springtail {
              */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
+            /** This will return the current extent id of the iterator.
+            */
+            uint64_t extent_id() const {
+                return _page_i.extent_id();
+            }
+
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
@@ -213,6 +219,16 @@ namespace springtail {
         {
             return _id;
         }
+
+        /** Create a btree that can be used for indexes.
+         * @param index_id PG index ID.
+         * @param index_columns Positions of the index columns.
+         */
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+
+        /** This will convert column positions to column names based on the table schema
+         */
+        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
@@ -565,5 +581,6 @@ namespace springtail {
         friend std::vector<TableRoot> _init_table_roots<MutableTable>(MutableTable &table, const TableMetadata& metadata);
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
+
 
 }

@@ -909,6 +909,10 @@ namespace springtail::sys_tbl_mgr {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found deleted index {}@{}:{} - {}", tid, index_xid.xid, index_xid.lsn, info.id);
                 continue;
             }
+            if (static_cast<sys_tbl::IndexNames::State>(info.state) == sys_tbl::IndexNames::State::NOT_READY) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid, index_xid.xid, index_xid.lsn, info.id);
+                continue;
+            }
 
             info.name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
             info.schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);

@@ -9,6 +9,7 @@
 #include <utility>
 #include <redis/redis_ddl.hh>
 #include <boost/functional/hash.hpp>
+#include <storage/mutable_btree.hh>
 
 namespace springtail::gc {
 
@@ -58,10 +59,10 @@ namespace springtail::gc {
             uint64_t // index ID
                 >;
 
-        void _build(std::stop_token st, const Key& key, const IndexParams& idx);
+        MutableBTreePtr _build(std::stop_token st, const Key& key, const IndexParams& idx);
         // returns false if cancelled
         bool _check_work_state(const Key& key);
-        void _commit_build(const Key& key);
+        bool _commit_build(const Key& key, const IndexParams& idx);
 
         // this is to notify when an index modifiction is completed 
         std::condition_variable _cv_done;
