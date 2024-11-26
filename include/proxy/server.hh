@@ -36,6 +36,8 @@ namespace springtail::pg_proxy {
         /** Start server main loop */
         void run();
 
+        void cleanup();
+
         /** Signal server main loop to reset poll fd set */
         void signal(ProxyConnectionPtr connection);
 

@@ -111,11 +111,11 @@ namespace springtail::pg_proxy {
         // ignore SIGPIPE signals
         ::signal(SIGPIPE, SIG_IGN);
 
-        SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
-
         DatabaseMgr::get_instance()->init();
         UserMgr::get_instance()->init(5);
         UserMgr::get_instance()->start_thread();
+
+        SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -330,9 +330,6 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::run()
     {
-        // start pubsub thread
-        DatabaseMgr::get_instance()->start_pubsub();
-
         while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
@@ -410,7 +407,10 @@ namespace springtail::pg_proxy {
                 _thread_pool.queue(session);
             }
         }
+    }
 
+    void
+    ProxyServer::cleanup() {
         // do cleanup
         SPDLOG_INFO("Proxy server shutting down");
 
@@ -436,6 +436,7 @@ namespace springtail::pg_proxy {
         if (_logger) {
             _logger->flush();
         }
+        SPDLOG_INFO("Proxy server finished cleanup");
     }
 
     void

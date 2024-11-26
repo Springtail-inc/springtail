@@ -69,4 +69,6 @@ int main(int argc, char* argv[])
     server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, shadow_mode, enable_ssl, logger);
 
     server->run();
+
+    server->cleanup();
 }

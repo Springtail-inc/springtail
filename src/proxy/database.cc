@@ -221,6 +221,14 @@ namespace springtail::pg_proxy {
             [this](const std::string &msg) {
                 _handle_db_table_change(msg);
             });
+
+        // start redis subscriber threads
+        _config_sub_thread.start();
+        _data_sub_thread.start();
+
+        while(!_db_states_initialized || !_db_tables_initialized) {
+            sleep(1);
+        }
     }
 
     void DatabaseMgr::_handle_db_state_change(const std::string &msg) {
@@ -240,6 +248,7 @@ namespace springtail::pg_proxy {
             redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
             _replicated_database_states[db_id] = db_state;
         }
+        _db_states_initialized = true;
     }
 
     void DatabaseMgr::_handle_db_table_change(const std::string &msg) {
@@ -269,6 +278,7 @@ namespace springtail::pg_proxy {
                 _schema_tables.add_item(db_id, schema, table);
             }
         }
+        _db_tables_initialized = true;
     }
 
     void DatabaseMgr::_internal_shutdown() {

@@ -472,16 +472,6 @@ namespace pg_proxy {
         void init();
 
         /**
-         * @brief This function starts subscriber threads for redis databas. This can't happen inside
-         *          init() function at the moment.
-         *
-         */
-        void start_pubsub() {
-            _config_sub_thread.start();
-            _data_sub_thread.start();
-        }
-
-        /**
          * @brief Add replicated database id and name the collection of replicated databases
          *          and setup initial state per database
          *
@@ -491,10 +481,6 @@ namespace pg_proxy {
         void add_replicated_database(const uint64_t db_id, const std::string &dbname) {
             std::unique_lock lock(_db_mutex);
             _replicated_databases[dbname] = db_id;
-
-            // TODO: I think this is no longer needed as the real initialization will happen somewhere else
-            std::unique_lock db_state_lock(_db_state_mutex);
-            _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
         }
 
         /**
@@ -609,7 +595,6 @@ namespace pg_proxy {
          */
         bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
             return _schema_tables.has_item(db_id, schema, table);
-
         }
 
     protected:
@@ -620,6 +605,8 @@ namespace pg_proxy {
         void _internal_shutdown() override;
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
+        std::atomic<bool> _db_states_initialized = false;   ///< db states initialization flag
+        std::atomic<bool> _db_tables_initialized = false;   ///< db tables initialization flag
 
         PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
