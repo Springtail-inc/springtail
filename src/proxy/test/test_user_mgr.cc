@@ -24,7 +24,6 @@ namespace {
             springtail_init();
 
             pg_proxy::DatabaseMgr::get_instance()->init();
-            // pg_proxy::DatabaseMgr::get_instance()->start_pubsub();
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
             ASSERT_NE(user_mgr, nullptr);
             user_mgr->init(_sleep_interval);
