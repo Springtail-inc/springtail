@@ -35,7 +35,7 @@ namespace springtail {
                 return false;
             }
 
-            json[key].get_to(result);
+            _get_to_helper(json[key], result);
             return true;
         }
 
@@ -55,7 +55,7 @@ namespace springtail {
                 return false;
             }
 
-            json[key].get_to(result);
+            _get_to_helper(json[key], result);
             return true;
         }
 
@@ -96,6 +96,22 @@ namespace springtail {
             }
 
             return json[key];
+        }
+
+    private:
+        template<typename T> static inline void
+        _get_to_helper(const nlohmann::json &json, T &result) {
+            if constexpr(std::is_integral_v<T>) {
+                if (json.is_string()) {
+                    std::string val;
+                    json.get_to(val);
+                    result = std::stol(val);
+                } else {
+                    json.get_to(result);
+                }
+            } else {
+                json.get_to(result);
+            }
         }
     };
 }
