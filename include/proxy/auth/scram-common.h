@@ -63,13 +63,13 @@ extern void scram_HMAC_init(scram_HMAC_ctx *ctx, const uint8 *key, int keylen);
 extern void scram_HMAC_update(scram_HMAC_ctx *ctx, const char *str, int slen);
 extern void scram_HMAC_final(uint8 *result, scram_HMAC_ctx *ctx);
 
-extern void scram_SaltedPassword(const char *password, const char *salt,
+extern void scramSaltedPassword(const char *password, const char *salt,
 								 int saltlen, int iterations, uint8 *result);
-extern void scram_H(const uint8 *str, int len, uint8 *result);
-extern void scram_ClientKey(const uint8 *salted_password, uint8 *result);
-extern void scram_ServerKey(const uint8 *salted_password, uint8 *result);
+extern void scramH(const uint8 *str, int len, uint8 *result);
+extern void scramClientKey(const uint8 *salted_password, uint8 *result);
+extern void scramServerKey(const uint8 *salted_password, uint8 *result);
 
-extern char *scram_build_secret(const char *salt, int saltlen, int iterations,
+extern char *scramBuildSecret(const char *salt, int saltlen, int iterations,
 								const char *password);
 
 #ifdef __cplusplus

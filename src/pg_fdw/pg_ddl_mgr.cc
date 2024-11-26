@@ -351,15 +351,9 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_connect_primary(uint64_t db_id, const std::string &db_name)
     {
         // get db config and parse it
-        auto db_config = Properties::get_primary_db_config();
-
         std::string host, user, password;
         int port;
-
-        Json::get_to<std::string>(db_config, "host", host);
-        Json::get_to<int>(db_config, "port", port);
-        Json::get_to<std::string>(db_config, "replication_user", user);
-        Json::get_to<std::string>(db_config, "password", password);
+        Properties::get_primary_db_config(host, port, user, password);
 
         // use libpq to connect to the database
         LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();

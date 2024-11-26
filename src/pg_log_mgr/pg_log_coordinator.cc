@@ -60,11 +60,9 @@ namespace springtail::pg_log_mgr {
     PgLogCoordinator::add_database(uint64_t db_id)
     {
         // read instance config
-        nlohmann::json instance_config = Properties::get_primary_db_config();
-        std::string host = instance_config["host"];
-        int port = instance_config["port"];
-        std::string user_name = instance_config["replication_user"];
-        std::string password = instance_config["password"];
+        std::string host, user_name, password;
+        int port;
+        Properties::get_primary_db_config(host, port, user_name, password);
 
         // read log mgr config
         nlohmann::json log_mgr_config = Properties::get(Properties::LOG_MGR_CONFIG);

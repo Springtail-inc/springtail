@@ -614,16 +614,11 @@ namespace springtail
     {
         std::string host, user, password;
         int port;
+        Properties::get_primary_db_config(host, port, user, password);
 
         // get configuration for the database
         nlohmann::json db_config = Properties::get_db_config(db_id);
         Json::get_to<std::string>(db_config, "name", _db_name);
-
-        nlohmann::json primary_db = Properties::get_primary_db_config();
-        Json::get_to<std::string>(primary_db, "host", host);
-        Json::get_to<int>(primary_db, "port", port);
-        Json::get_to<std::string>(primary_db, "replication_user", user);
-        Json::get_to<std::string>(primary_db, "password", password);
 
         // connect to the database
         connect(host, user, password, port);
