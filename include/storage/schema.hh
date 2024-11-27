@@ -99,6 +99,7 @@ namespace springtail {
         std::vector<SchemaColumn> columns;
         std::vector<SchemaColumn> history;
     };
+    using SchemaMetadataPtr = std::shared_ptr<SchemaMetadata>;
 
     /**
      * The interface for schema objects.

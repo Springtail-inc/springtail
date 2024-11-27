@@ -118,12 +118,12 @@ namespace springtail::sys_tbl_mgr {
         }
 
         /**
-         * Re-inserts a cached value with the provided key using a new key.  This is used to update
-         * the range over which a key is valid.
+         * Checks for an entry that contains the key and re-indexes it with the key as the ending
+         * position for the entry.  Used to mark the "current" entry for a schema or root as ending
+         * at the given key.
          */
         void
-        reinsert(const KeyT &key,
-                 const KeyT &new_key)
+        reinsert(const KeyT &key)
         {
             std::unique_lock lock(_mutex);
 
@@ -136,7 +136,7 @@ namespace springtail::sys_tbl_mgr {
             }
 
             // insert the value using the new key
-            auto &&result = _lookup.try_emplace(new_key, entry_i->second);
+            auto &&result = _lookup.try_emplace(key, entry_i->second);
             if (!result.second) {
                 throw Error();
             }

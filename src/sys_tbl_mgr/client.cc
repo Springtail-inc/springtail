@@ -301,14 +301,14 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    TableMetadata
+    TableMetadataPtr
     Client::get_roots(uint64_t db_id,
                       uint64_t table_id,
                       uint64_t xid)
     {
         MetadataKey key{db_id, table_id, xid};
 
-        auto metadata = _roots_cache.get(key, [&c](const MetadataKey &key) {
+        auto entry = _roots_cache.get(key, [](const MetadataKey &key) {
             GetRootsRequest request;
             request.db_id = key.db;
             request.table_id = key.tid;
@@ -325,125 +325,139 @@ namespace springtail::sys_tbl_mgr {
             metadata->stats.row_count = result.stats.row_count;
             metadata->snapshot_xid = result.snapshot_xid;
 
-            return metadata;
+            return std::make_shared<MetadataValue>(result.xid, metadata);
         });
 
-        return metadata;
+        return entry->metadata;
     }
 
-    SchemaMetadata
+    SchemaMetadataPtr
     Client::get_schema(uint64_t db_id,
                        uint64_t table_id,
                        const XidLsn &xid)
     {
-        ThriftClient c = _get_client();
-        GetSchemaResponse result;
+        SchemaKey key{db_id, table_id, xid, xid};
 
-        GetSchemaRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
-        request.xid = xid.xid;
-        request.lsn = xid.lsn;
+        auto entry = _schema_cache.get(key, [](const SchemaKey &key) {
+            ThriftClient c = _get_client();
+            GetSchemaResponse result;
 
-        c.client->get_schema(result, request);
+            GetSchemaRequest request;
+            request.db_id = db_id;
+            request.table_id = table_id;
+            request.xid = xid.xid;
+            request.lsn = xid.lsn;
 
-        SchemaMetadata metadata;
-        for (auto column : result.columns) {
-            SchemaColumn value(column.name,
-                               column.position,
-                               static_cast<SchemaType>(column.type),
-                               column.pg_type,
-                               column.is_nullable);
-            if (column.__isset.pk_position) {
-                value.pkey_position = column.pk_position;
-            }
-            if (column.__isset.default_value) {
-                value.default_value = column.default_value;
-            }
+            c.client->get_schema(result, request);
 
-            metadata.columns.push_back(value);
-        }
+            auto metadata = std::make_shared<SchemaMetadata>();
+            for (auto column : result.columns) {
+                SchemaColumn value(column.name,
+                                   column.position,
+                                   static_cast<SchemaType>(column.type),
+                                   column.pg_type,
+                                   column.is_nullable);
+                if (column.__isset.pk_position) {
+                    value.pkey_position = column.pk_position;
+                }
+                if (column.__isset.default_value) {
+                    value.default_value = column.default_value;
+                }
 
-        for (auto history : result.history) {
-            SchemaColumn value(history.xid,
-                               history.lsn,
-                               history.column.name,
-                               history.column.position,
-                               static_cast<SchemaType>(history.column.type),
-                               history.column.pg_type,
-                               history.exists,
-                               history.column.is_nullable);
-            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-            if (history.column.__isset.pk_position) {
-                value.pkey_position = history.column.pk_position;
-            }
-            if (history.column.__isset.default_value) {
-                value.default_value = history.column.default_value;
+                metadata->columns.push_back(value);
             }
 
-            metadata.history.push_back(value);
-        }
+            for (auto history : result.history) {
+                SchemaColumn value(history.xid,
+                                   history.lsn,
+                                   history.column.name,
+                                   history.column.position,
+                                   static_cast<SchemaType>(history.column.type),
+                                   history.column.pg_type,
+                                   history.exists,
+                                   history.column.is_nullable);
+                value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+                if (history.column.__isset.pk_position) {
+                    value.pkey_position = history.column.pk_position;
+                }
+                if (history.column.__isset.default_value) {
+                    value.default_value = history.column.default_value;
+                }
 
-        return metadata;
+                metadata->history.push_back(value);
+            }
+
+            return std::make_shared<SchemaValue>(result.access_start,
+                                                 result.target_start,
+                                                 metadata);
+        });
+
+        return entry->metadata;
     }
 
-    SchemaMetadata
+    SchemaMetadataPtr
     Client::get_target_schema(uint64_t db_id,
                               uint64_t table_id,
                               const XidLsn &access_xid,
                               const XidLsn &target_xid)
     {
-        ThriftClient c = _get_client();
-        GetSchemaResponse result;
+        SchemaKey key{db_id, table_id, xid, xid};
 
-        GetTargetSchemaRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
-        request.access_xid = access_xid.xid;
-        request.access_lsn = access_xid.lsn;
-        request.target_xid = target_xid.xid;
-        request.target_lsn = target_xid.lsn;
+        auto entry = _schema_cache.get(key, [](const SchemaKey &key) {
+            ThriftClient c = _get_client();
+            GetSchemaResponse result;
 
-        c.client->get_target_schema(result, request);
+            GetTargetSchemaRequest request;
+            request.db_id = db_id;
+            request.table_id = table_id;
+            request.access_xid = access_xid.xid;
+            request.access_lsn = access_xid.lsn;
+            request.target_xid = target_xid.xid;
+            request.target_lsn = target_xid.lsn;
 
-        SchemaMetadata metadata;
-        for (auto column : result.columns) {
-            SchemaColumn value(column.name,
-                               column.position,
-                               static_cast<SchemaType>(column.type),
-                               column.pg_type,
-                               column.is_nullable);
-            if (column.__isset.pk_position) {
-                value.pkey_position = column.pk_position;
-            }
-            if (column.__isset.default_value) {
-                value.default_value = column.default_value;
-            }
+            c.client->get_target_schema(result, request);
 
-            metadata.columns.push_back(value);
-        }
+            auto metadata = std::make_shared<SchemaMetadata>();
+            for (auto column : result.columns) {
+                SchemaColumn value(column.name,
+                                   column.position,
+                                   static_cast<SchemaType>(column.type),
+                                   column.pg_type,
+                                   column.is_nullable);
+                if (column.__isset.pk_position) {
+                    value.pkey_position = column.pk_position;
+                }
+                if (column.__isset.default_value) {
+                    value.default_value = column.default_value;
+                }
 
-        for (auto history : result.history) {
-            SchemaColumn value(history.xid,
-                               history.lsn,
-                               history.column.name,
-                               history.column.position,
-                               static_cast<SchemaType>(history.column.type),
-                               history.column.pg_type,
-                               history.exists,
-                               history.column.is_nullable);
-            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-            if (history.column.__isset.pk_position) {
-                value.pkey_position = history.column.pk_position;
-            }
-            if (history.column.__isset.default_value) {
-                value.default_value = history.column.default_value;
+                metadata->columns.push_back(value);
             }
 
-            metadata.history.push_back(value);
-        }
+            for (auto history : result.history) {
+                SchemaColumn value(history.xid,
+                                   history.lsn,
+                                   history.column.name,
+                                   history.column.position,
+                                   static_cast<SchemaType>(history.column.type),
+                                   history.column.pg_type,
+                                   history.exists,
+                                   history.column.is_nullable);
+                value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+                if (history.column.__isset.pk_position) {
+                    value.pkey_position = history.column.pk_position;
+                }
+                if (history.column.__isset.default_value) {
+                    value.default_value = history.column.default_value;
+                }
 
-        return metadata;
+                metadata->history.push_back(value);
+            }
+
+            return metadata;
+        });
+
+        return entry->metadata;
     }
 
     bool
@@ -475,6 +489,14 @@ namespace springtail::sys_tbl_mgr {
         }
 
         return result.statement;
+    }
+
+    void
+    Client::invalidate_schema_cache(uint64_t db_id,
+                                    uint64_t table_id,
+                                    const XidLsn &xid)
+    {
+        _scheme_cache.reinsert({ db_id, table_id, xid });
     }
 
 } // namespace

@@ -23,6 +23,7 @@ namespace springtail {
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
+    using TableMetadataPtr = std::shared_ptr<TableMetadata>;
 
     /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
