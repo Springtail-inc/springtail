@@ -49,22 +49,6 @@ namespace springtail::pg_proxy {
         /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
         void shutdown_session(SessionPtr session);
 
-        /** Get the user mgr object */
-        UserMgrPtr get_user_mgr() {
-            return _user_mgr;
-        }
-
-        /** Add a user to the user manager -- trust authentication no password */
-        void add_user(const std::string &username) {
-            _user_mgr->add_user(username);
-        }
-
-        /** Add a user to the user manager */
-        void add_user(const std::string &username,
-                      const std::string &password, uint32_t salt=0) {
-            _user_mgr->add_user(username, password, salt);
-        }
-
         /**
          * @brief Add replicated database id and name the collection of replicated databases
          *          and setup initial state per database
@@ -79,6 +63,20 @@ namespace springtail::pg_proxy {
             // TODO: I think this is no longer needed as the real initialization will happen somewhere else
             std::unique_lock db_state_lock(_db_state_mutex);
             _replicated_database_states[db_id] = redis::db_state_change::DB_STATE_INITIALIZE;
+        }
+
+        /**
+         * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
+         *
+         * @return std::optional<std::string> - name of a replicated database if found
+         */
+        std::optional<std::string> get_any_replicated_db_name() {
+            std::shared_lock lock(_db_mutex);
+            auto it = _replicated_databases.begin();
+            if (it != _replicated_databases.end()) {
+                return it->first;
+            }
+            return {};
         }
 
         /**
@@ -174,8 +172,6 @@ namespace springtail::pg_proxy {
         uint32_t _id;  ///< unique id for this proxy server
         uint64_t _db_instance_id;           ///< primary database instance id
 
-        UserMgrPtr _user_mgr;                ///< user manager object
-
         PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
         ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
@@ -198,7 +194,6 @@ namespace springtail::pg_proxy {
         std::shared_mutex _db_state_mutex;   ///< shared mutex for read/write access to database state
         std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
 
-        // std::shared_mutex _schema_tables_mutex;  ///< shared mutex lock for schema tables storage
         DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
 
         bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
