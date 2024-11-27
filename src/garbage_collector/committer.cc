@@ -303,11 +303,11 @@ namespace springtail::gc {
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-                ++target_xid;
                 for (auto const& ddl: index_ddls) {
+                    ++target_xid;
                     _indexer->build({db_id, xid, target_xid, ddl});
+                    _indexer->wait_for_completion(db_id);
                 }
-                _indexer->wait_for_completion(db_id);
             }
 
             if (!completed_ddls.is_null()) {
