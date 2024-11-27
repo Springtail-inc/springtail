@@ -239,6 +239,26 @@ namespace springtail::sys_tbl_mgr {
         return result.statement;
     }
 
+    void
+    Client::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
+    {
+        ThriftClient c = _get_client();
+        Status result;
+
+        SetIndexStateRequest request;
+        _set_request_common(request, db_id, xid);
+
+        request.table_id = table_id;
+        request.index_id = index_id;
+        request.state = static_cast<uint8_t>(state);
+
+        c.client->set_index_state(result, request);
+
+        if (result.status != StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
     std::string 
     Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     {

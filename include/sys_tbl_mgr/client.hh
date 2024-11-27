@@ -54,6 +54,12 @@ namespace springtail::sys_tbl_mgr {
         std::string create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
 
         /**
+         * Update state of the index on the SysTblMgr. The index must exist with the same xid.
+         */
+        void set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
+
+
+        /**
          * Call drop_index() on the SysTblMgr.
          */
         std::string drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg);

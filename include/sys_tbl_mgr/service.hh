@@ -41,6 +41,9 @@ namespace springtail::sys_tbl_mgr {
         /** Drops an index within the system tables. */
         void drop_index(DDLStatement& _return, const DropIndexRequest &request) override;
 
+        /** Set the state of the index within the system tables. */
+        void set_index_state(Status& _return, const SetIndexStateRequest &request) override;
+
         /** Creates a table within the system tables. */
         void create_table(DDLStatement& _return, const TableRequest &request) override;
 
@@ -281,6 +284,10 @@ namespace springtail::sys_tbl_mgr {
          * Performs an update_roots() assuming that the correct locks are already held.
          */
         void _update_roots(const UpdateRootsRequest &request);
+
+        /** Performs an set_index_state() assuming that the correct locks are already held.
+         */
+        bool _set_index_state(const SetIndexStateRequest &request);
 
 
         /**

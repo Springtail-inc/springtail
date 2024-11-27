@@ -21,7 +21,7 @@ namespace springtail::gc {
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
-            uint64_t _completed_xid;
+            uint64_t _target_xid;
             nlohmann::json _ddl;
         };
 
@@ -41,14 +41,21 @@ namespace springtail::gc {
          * @param db_id The ID of the database.
          * @param index_id The ID of the index to drop.
          */
-        void drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t completed_xid);
+        void drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t target_xid);
 
+
+        /**
+         * This will wait for the index work completion for given db and table.
+         * @param db_id The ID of the database.
+         * @param tid The ID of the table.
+         */
+        void wait_for_completion(uint64_t db_id, uint64_t tid);
 
         /**
          * This will wait for the index work completion for given db. 
          * @param db_id The ID of the database.
          */
-        void wait_for_completion(uint64_t db_id, uint64_t tid);
+        void wait_for_completion(uint64_t db_id);
 
     private:
         void task(std::stop_token st);
@@ -62,7 +69,7 @@ namespace springtail::gc {
         MutableBTreePtr _build(std::stop_token st, const Key& key, const IndexParams& idx);
         // returns false if cancelled
         bool _check_work_state(const Key& key);
-        bool _commit_build(const Key& key, const IndexParams& idx);
+        void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx);
 
         // this is to notify when an index modifiction is completed 
         std::condition_variable _cv_done;

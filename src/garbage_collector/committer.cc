@@ -289,7 +289,6 @@ namespace springtail::gc {
                     // the index is built
                     client->finalize(db_id, xid);
                 }
-
                 for (auto ddl: ddls) {
                     const auto it = ddl.find("action");
                     if (it != ddl.end() && *it == "create_index") {
@@ -300,12 +299,15 @@ namespace springtail::gc {
                     }
                 }
             }
+            auto target_xid = xid;
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+                ++target_xid;
                 for (auto const& ddl: index_ddls) {
-                    _indexer->build({db_id, xid, completed_xid, ddl});
+                    _indexer->build({db_id, xid, target_xid, ddl});
                 }
+                _indexer->wait_for_completion(db_id);
             }
 
             if (!completed_ddls.is_null()) {
@@ -316,13 +318,13 @@ namespace springtail::gc {
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
-                _committed_xids[db_id] = xid;
+                _xid_mgr->commit_xid(db_id, target_xid, !completed_ddls.is_null());
+                _committed_xids[db_id] = target_xid;
             } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
-            _completed_xids[db_id] = xid;
+            _completed_xids[db_id] = target_xid;
 
             if (!completed_ddls.is_null()) {
                 // push completed DDL changes to the FDWs
@@ -437,9 +439,6 @@ namespace springtail::gc {
                 // timed out, try again
                 continue;
             }
-            _indexer->wait_for_completion(entry->table->db(), entry->table->id());
-
-
             if (entry->do_finalize) {
                 _process_finalize(entry->table, entry->xid);
             } else {

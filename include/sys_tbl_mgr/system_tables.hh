@@ -322,12 +322,12 @@ namespace springtail::sys_tbl {
         static constexpr uint32_t ID = 6;
 
         struct Data {
-            static constexpr uint32_t NAMESPACE = 0;
-            static constexpr uint32_t NAME = 1;
-            static constexpr uint32_t TABLE_ID = 2;
-            static constexpr uint32_t INDEX_ID = 3;
-            static constexpr uint32_t XID = 4;
-            static constexpr uint32_t LSN = 5;
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t INDEX_ID = 1;
+            static constexpr uint32_t XID = 2;
+            static constexpr uint32_t LSN = 3;
+            static constexpr uint32_t NAMESPACE = 4;
+            static constexpr uint32_t NAME = 5;
             static constexpr uint32_t STATE = 6;
             static constexpr uint32_t IS_UNIQUE = 7;
 

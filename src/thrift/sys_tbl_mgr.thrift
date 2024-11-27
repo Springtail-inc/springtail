@@ -84,6 +84,15 @@ struct IndexRequest {
     4: IndexInfo index,
 }
 
+struct SetIndexStateRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: i64 table_id,
+    5: i64 index_id,
+    6: i8 state,
+}
+
 struct DropIndexRequest {
     1: i64 db_id,
     2: i64 xid,
@@ -166,6 +175,9 @@ service Service {
 
     // drops an existing index at the given xid/lsn
     DDLStatement drop_index(1: DropIndexRequest request),
+
+    // set the index state at the given xid/lsn
+    Status set_index_state(1: SetIndexStateRequest request),
 
     // creates a new data table at the given xid/lsn
     DDLStatement create_table(1: TableRequest request),

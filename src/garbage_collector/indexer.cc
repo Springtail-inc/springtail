@@ -1,3 +1,4 @@
+#include "sys_tbl_mgr/system_tables.hh"
 #include <mutex>
 #include <stop_token>
 #include <assert.h>
@@ -32,7 +33,7 @@ namespace springtail::gc {
         _cv.notify_all();
     }
 
-    void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t completed_xid)
+    void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t target_xid)
     {
         std::scoped_lock g(_m);
         Key key(db_id, index_id);
@@ -40,7 +41,7 @@ namespace springtail::gc {
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
             // it means to drop the index
-            _work_set[key] = {xid, completed_xid, {}};
+            _work_set[key] = {xid, target_xid, {}};
             _queue.push(key);
             _cv.notify_one();
         } else {
@@ -49,9 +50,25 @@ namespace springtail::gc {
         }
     }
 
+    void Indexer::wait_for_completion(uint64_t db_id)
+    {
+        auto find_work = [&]() {
+            auto it = std::ranges::find_if(_work_set,
+                    [&](auto const& v) { 
+                        return v.first.first == db_id;
+                    });
+            return it != _work_set.end();
+        };
+
+        // wait for the key {db, tid} to be removed from the working set
+        std::unique_lock g(_m);
+        while( find_work()  ) {
+            _cv_done.wait(g, [&]{return !find_work();});
+        }
+    }
+
     void Indexer::wait_for_completion(uint64_t db_id, uint64_t tid)
     {
-        std::unique_lock g(_m);
         auto find_work = [&]() {
             auto it = std::ranges::find_if(_work_set,
                     [&](auto const& v) { 
@@ -64,6 +81,7 @@ namespace springtail::gc {
         };
 
         // wait for the key {db, tid} to be removed from the working set
+        std::unique_lock g(_m);
         while( find_work()  ) {
             _cv_done.wait(g, [&]{return !find_work();});
         }
@@ -89,11 +107,7 @@ namespace springtail::gc {
 
             if (!params._ddl.is_null()) {
                 auto root = _build(st, key, params);
-                if (!_commit_build(key, params)) {
-                    root->truncate();
-                }
-                root->finalize();
-                //TODO: update the roots table
+                _commit_build(root, key, params);
             } else {
 //TODO:  _drop(st);
             }
@@ -113,11 +127,11 @@ namespace springtail::gc {
 
         assert(idx._ddl["action"] == "create_index");
 
+        // index column positions
         std::vector<uint32_t> idx_cols;
         for (auto const& col: idx._ddl["columns"]) {
             idx_cols.push_back(col["position"]);
         }
-
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
 
         // create an index root
@@ -131,10 +145,11 @@ namespace springtail::gc {
 
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if(st.stop_requested()) {
-                break;
+                root->truncate();
+                return {};
             }
             if (row_id % CHECK_PERIOD == 0 && !_check_work_state(key)) {
-                break;
+                return root;
             }
             auto extent_id = row_i.extent_id();
             if (saved_extent_id != extent_id) {
@@ -145,12 +160,12 @@ namespace springtail::gc {
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
             (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
+            // insert key
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
             root->insert(svalue);
 
             ++row_id;
         }
-        root->finalize();
         return root;
     }
 
@@ -164,8 +179,20 @@ namespace springtail::gc {
         return true;
     }
 
-    bool Indexer::_commit_build(const Key& key, const IndexParams& idx) 
+    void Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx) 
     {
+        if (!root) {
+            //The build was cancelled as due to a shutdown.
+            //When the system restarts it will check the redis precommit hash
+            //and restart the build process.
+            return;
+        }
+
+        auto db_id = key.first;
+        auto index_id = key.second;
+        auto tid = idx._ddl["table_id"];
+        XidLsn xid{idx._xid};
+
         IndexParams work_item;
 
         bool redis_commit = false;
@@ -176,9 +203,10 @@ namespace springtail::gc {
             work_item = _work_set[key];
             _work_set.erase(key);
 
+            // if all work items with the give xid are completed, commit redis
             auto it = std::ranges::find_if(_work_set,
                     [&](auto const& v) {
-                        return v.first.first == key.first && v.second._xid == idx._xid;
+                        return v.first.first == db_id && v.second._xid == idx._xid;
                     });
             if (it == _work_set.end()) {
                 redis_commit = true;
@@ -187,19 +215,37 @@ namespace springtail::gc {
             _cv_done.notify_one();
         }
 
+        XidLsn target_xid{idx._target_xid, 0};
+        // update system tables: table roots and index state
+        sys_tbl::IndexNames::State state = sys_tbl::IndexNames::State::READY;
+        if (!work_item._ddl.is_null()) { // the index hasn't been dropped
+                                         // update index roots
+            auto extent_id = root->finalize();
+            auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
+            meta.roots.emplace_back(key.second, extent_id);
+            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, target_xid.xid, meta);
+        } else {
+            root->truncate();
+            state = sys_tbl::IndexNames::State::DELETED;
+        }
+        // set index state
+        sys_tbl_mgr::Client::get_instance()->set_index_state(
+                db_id, target_xid, tid, index_id, state);
+
+        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+
+        // notify redis tables
         if (redis_commit) {
             _redis_ddl.commit_index_ddl(key.first, idx._xid);
         } else {
-            //TODO: not sure if it's expected?
             SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
+            //TODO: not sure if it's expected?
+            assert(false);
         }
 
         if (work_item._ddl.is_null()) {
             // we got drop index while building it, use the last XID
             _redis_ddl.commit_index_ddl(key.first, work_item._xid);
-            return false;
         }
-
-        return true;
     }
 }

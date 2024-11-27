@@ -51,6 +51,7 @@ namespace {
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
         PgMsgIndex _create_index(uint64_t db_id, const std::string& name);
+        void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
         uint64_t _db = 1;
@@ -92,6 +93,12 @@ namespace {
         _client->finalize(_db, xid.xid);
     }
 
+    void SysTblMgr_Test::_set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
+    {
+        auto xid = _next_lsn();
+        _client->set_index_state(_db, xid, table_id, index_id, state);
+    }
+
     PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name) {
         auto xid = _next_lsn();
 
@@ -109,7 +116,7 @@ namespace {
         msg.columns.push_back({"col2", 2, 0});
         msg.columns.push_back({"col1", 1, 1});
 
-        _client->create_index(_db, xid, msg, sys_tbl::IndexNames::State::READY);
+        _client->create_index(_db, xid, msg, sys_tbl::IndexNames::State::NOT_READY);
 
         return msg;
     }
@@ -173,13 +180,12 @@ namespace {
         ASSERT_EQ(schema_meta.indexes.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x");
-
         _finalize();
-        
 
         schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.indexes.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
 
         // note: column positions start with 1
         ASSERT_EQ(schema_meta.indexes[1].columns[0].idx_position, 0);
@@ -187,6 +193,27 @@ namespace {
 
         ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
         ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
+
+        auto index_id = schema_meta.indexes[1].id;
+        ASSERT_EQ(index_id, 1234);
+
+        // change the index to the ready state
+        _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
+        _finalize();
+        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].idx_position, 0);
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].position, 2);
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
+
+        // delete the index
+        _set_index_state(tid, index_id, sys_tbl::IndexNames::State::DELETED);
+        _finalize();
+        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        ASSERT_EQ(schema_meta.indexes.size(), 1);
     }
 
     // Tests table create / alter / drop
