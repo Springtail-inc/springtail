@@ -38,6 +38,14 @@ add_dsymutil_command(write_cache_daemon)
 #)
 #add_dsymutil_command(test_threaded)
 
+add_executable(test_wc_index test/test_wc_index.cc)
+target_include_directories(test_wc_index PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_wc_index
+  PUBLIC springtail_write_cache
+  PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_wc_index)
+
 add_executable(test_extent_mapper test/test_extent_mapper.cc)
 target_include_directories(test_extent_mapper PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_extent_mapper
@@ -49,6 +57,7 @@ add_dsymutil_command(test_extent_mapper)
 # hook tests into gtest framework
 #gtest_discover_tests(test_threaded)
 gtest_discover_tests(test_extent_mapper)
+gtest_discover_tests(test_wc_index)
 
 # install daemon to install directory
 install(TARGETS write_cache_daemon RUNTIME DESTINATION bin/system)

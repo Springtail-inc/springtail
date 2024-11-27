@@ -100,7 +100,7 @@ namespace springtail {
         /** Dump entry as string for debugging */
         std::string dump() const
         {
-            return fmt::format("{}:{}\n", type_to_str(), id);
+            return fmt::format("{}:{}", type_to_str(), id);
         }
 
     private:
