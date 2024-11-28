@@ -280,34 +280,28 @@ namespace springtail::gc {
             // retrieve any schema changes available in Redis
             {
                 auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-                if (!ddls.is_null()) {
-                    auto client = sys_tbl_mgr::Client::get_instance();
-
-                    // finalize the system metadata
-                    // Note: for create index ddls, we save the state
-                    // in the system tables but don't notify FDW until
-                    // the index is built
-                    client->finalize(db_id, xid);
-                }
                 for (auto ddl: ddls) {
                     const auto it = ddl.find("action");
                     if (it != ddl.end() && *it == "create_index") {
-                        // The index DDLs will be commited to the FDWs after indexing is completed.
+                        // The index DDLs will be committed to the FDWs after indexing is completed.
                         index_ddls.push_back(std::move(ddl));
                     } else {
                         completed_ddls.push_back(std::move(ddl));
                     }
                 }
             }
-            auto target_xid = xid;
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
                 for (auto const& ddl: index_ddls) {
-                    ++target_xid;
-                    _indexer->build({db_id, xid, target_xid, ddl});
+                    _indexer->build({db_id, xid, ddl});
                     _indexer->wait_for_completion(db_id);
                 }
+            }
+
+            if (!index_ddls.is_null() || !completed_ddls.is_null()) {
+                // finalize the system metadata
+                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
             }
 
             if (!completed_ddls.is_null()) {
@@ -318,13 +312,13 @@ namespace springtail::gc {
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, target_xid, !completed_ddls.is_null());
-                _committed_xids[db_id] = target_xid;
+                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
+                _committed_xids[db_id] = xid;
             } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
-            _completed_xids[db_id] = target_xid;
+            _completed_xids[db_id] = xid;
 
             if (!completed_ddls.is_null()) {
                 // push completed DDL changes to the FDWs

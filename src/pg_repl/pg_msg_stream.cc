@@ -1060,6 +1060,7 @@ namespace springtail {
         } else {
             msg.xid = 0;
         }
+
         msg.flags = _recvint8();
         msg.lsn = _recvint64();
         _decode_string(msg.prefix_str);

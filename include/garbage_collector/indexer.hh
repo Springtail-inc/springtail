@@ -21,7 +21,6 @@ namespace springtail::gc {
         struct IndexParams {
             uint64_t _db_id;
             uint64_t _xid;
-            uint64_t _target_xid;
             nlohmann::json _ddl;
         };
 
@@ -41,7 +40,7 @@ namespace springtail::gc {
          * @param db_id The ID of the database.
          * @param index_id The ID of the index to drop.
          */
-        void drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t target_xid);
+        void drop(uint64_t db_id, uint64_t index_id, uint64_t xid);
 
 
         /**

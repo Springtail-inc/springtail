@@ -292,7 +292,7 @@ namespace springtail::sys_tbl_mgr {
                     true );
             index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
-            _write_index({write_xid, 0}, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
+            _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
         }
 
         return ddl;

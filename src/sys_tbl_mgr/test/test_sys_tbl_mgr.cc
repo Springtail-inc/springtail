@@ -178,6 +178,7 @@ namespace {
 
         // must have a primary index
         ASSERT_EQ(schema_meta.indexes.size(), 1);
+        ASSERT_EQ(schema_meta.indexes[0].columns.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x");
         _finalize();

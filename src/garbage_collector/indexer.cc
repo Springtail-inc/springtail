@@ -1,4 +1,3 @@
-#include "sys_tbl_mgr/system_tables.hh"
 #include <mutex>
 #include <stop_token>
 #include <assert.h>
@@ -33,7 +32,7 @@ namespace springtail::gc {
         _cv.notify_all();
     }
 
-    void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid, uint64_t target_xid)
+    void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid)
     {
         std::scoped_lock g(_m);
         Key key(db_id, index_id);
@@ -41,7 +40,7 @@ namespace springtail::gc {
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
             // it means to drop the index
-            _work_set[key] = {xid, target_xid, {}};
+            _work_set[key] = {xid, {}};
             _queue.push(key);
             _cv.notify_one();
         } else {
@@ -189,7 +188,6 @@ namespace springtail::gc {
         }
 
         auto db_id = key.first;
-        auto index_id = key.second;
         auto tid = idx._ddl["table_id"];
         XidLsn xid{idx._xid};
 
@@ -212,27 +210,18 @@ namespace springtail::gc {
                 redis_commit = true;
             }
 
-            _cv_done.notify_one();
-        }
+            //TODO: remove the assert and handle the case when the index was deleted while building
+            // (use set_index_sate(...sys_tbl::IndexNames::State::DELETED)).
+            // This case should never happen in the synchronized version
+            assert(!work_item._ddl.is_null());
 
-        XidLsn target_xid{idx._target_xid, 0};
-        // update system tables: table roots and index state
-        sys_tbl::IndexNames::State state = sys_tbl::IndexNames::State::READY;
-        if (!work_item._ddl.is_null()) { // the index hasn't been dropped
-                                         // update index roots
             auto extent_id = root->finalize();
             auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
             meta.roots.emplace_back(key.second, extent_id);
-            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, target_xid.xid, meta);
-        } else {
-            root->truncate();
-            state = sys_tbl::IndexNames::State::DELETED;
-        }
-        // set index state
-        sys_tbl_mgr::Client::get_instance()->set_index_state(
-                db_id, target_xid, tid, index_id, state);
+            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
 
-        sys_tbl_mgr::Client::get_instance()->finalize(db_id, target_xid.xid);
+            _cv_done.notify_one();
+        }
 
         // notify redis tables
         if (redis_commit) {

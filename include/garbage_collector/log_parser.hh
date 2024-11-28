@@ -499,7 +499,6 @@ namespace springtail::gc {
         private:
             ParserQueuePtr _parser_queue;
         };
-        using ParserPtr = std::shared_ptr<Parser>;
 
     private:
         /** The queue between the Reader objects and Parser objects. */
