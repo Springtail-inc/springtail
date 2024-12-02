@@ -1,3 +1,4 @@
+#include "common/constants.hh"
 #include <common/json.hh>
 #include <common/properties.hh>
 
@@ -6,6 +7,32 @@
 #include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
+
+    template<typename Table>
+    std::vector<Index>
+    _get_secondary_keys() {
+        std::vector<Index> keys;
+        Index idx;
+        idx.id = 1;
+        idx.table_id = sys_tbl::TableNames::ID;
+        idx.is_unique = false;
+        idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+
+        uint32_t idx_position = 0;
+        for (auto const& col: Table::Secondary::KEY) {
+            // find the 
+            auto it = std::ranges::find_if(Table::Data::SCHEMA, [&](auto const& v)
+                    {
+                    return col == v.name;
+                    }
+                    );
+            assert(it != Table::Data::SCHEMA.end());
+            idx.columns.emplace_back(idx_position, it->position);
+            ++idx_position;
+        }
+        keys.push_back(idx);
+        return keys;
+    }
 
     /* static member initialization must happen outside of class */
     TableMgr* TableMgr::_instance {nullptr};
@@ -60,8 +87,17 @@ namespace springtail {
         // construct the table and return it
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id,
                                                                    {xid, constant::MAX_LSN});
+
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+
+        // pass secondary indexes only
+        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
+        if (it != meta.indexes.end()) {
+            meta.indexes.erase(it);
+        }
+
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), std::vector<std::vector<std::string>>{},
+                                       schema->get_sort_keys(), meta.indexes,
                                        tbl_meta, schema);
     }
 
@@ -96,9 +132,16 @@ namespace springtail {
         XidLsn xid(target_xid);
         auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, table_id, xid);
 
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
+
+        // pass secondary indexes only
+        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
+        if (it != meta.indexes.end()) {
+            meta.indexes.erase(it);
+        }
+
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(),
-                                              std::vector<std::vector<std::string>>{},
+                                              _table_base, schema->get_sort_keys(), meta.indexes,
                                               tbl_meta, schema, for_gc);
     }
 
@@ -111,10 +154,11 @@ namespace springtail {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
+        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{snapshot_xid});
+
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
-                                              _table_base, schema->get_sort_keys(),
-                                              std::vector<std::vector<std::string>>{},
+                                              _table_base, schema->get_sort_keys(), meta.indexes,
                                               tbl_meta, schema, false);
     }
 
@@ -156,7 +200,7 @@ namespace springtail {
     {
         // initialize the system tables using the look-aside root files
         // XXX should we change this to use the table_roots and table_stats?
-        std::vector<std::vector<std::string>> secondary_keys;
+        std::vector<Index> secondary_keys;
 
         // construct generic table metadata for the system tables
         TableMetadata tbl_meta;
@@ -168,8 +212,7 @@ namespace springtail {
 
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
-            secondary_keys.push_back(sys_tbl::TableNames::Secondary::KEY);
-
+            secondary_keys = _get_secondary_keys<sys_tbl::TableNames>();
             return std::make_shared<Table>(db_id, table_id, xid, _table_base,
                                            sys_tbl::TableNames::Primary::KEY,
                                            secondary_keys, tbl_meta, schema);
@@ -220,7 +263,7 @@ namespace springtail {
                                         uint64_t target_xid)
     {
         // initialize the system tables using the look-aside root files
-        std::vector<std::vector<std::string>> secondary_keys;
+        std::vector<Index> secondary_keys;
 
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = 1;
@@ -230,38 +273,39 @@ namespace springtail {
 
         // XXX note that the table stats are currently broken for system tables... would need a way to bootstrap
 
+
         switch (table_id) {
         case (sys_tbl::TableNames::ID): {
-            secondary_keys.push_back(sys_tbl::TableNames::Secondary::KEY);
+            secondary_keys = _get_secondary_keys<sys_tbl::TableNames>();
 
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::TableNames::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::TableNames::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         case (sys_tbl::TableRoots::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::TableRoots::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::TableRoots::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         case (sys_tbl::Indexes::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::Indexes::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::Indexes::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         case (sys_tbl::Schemas::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::Schemas::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::Schemas::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         case (sys_tbl::TableStats::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::TableStats::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::TableStats::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         case (sys_tbl::IndexNames::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
-                                                  sys_tbl::IndexNames::Primary::KEY,
-                                                  secondary_keys, tbl_meta, schema);
+                                                  sys_tbl::IndexNames::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
         }
         default:
             SPDLOG_ERROR("Unable to find the requested system table: {}", table_id);

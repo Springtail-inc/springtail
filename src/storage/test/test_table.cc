@@ -1,3 +1,4 @@
+#include "common/constants.hh"
 #include <sys_tbl_mgr/system_tables.hh>
 #include <gtest/gtest.h>
 
@@ -63,7 +64,6 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-            //_secondary_keys = { std::vector<std::string>({"table_id"}) };
 
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
@@ -88,7 +88,6 @@ namespace {
         FieldArrayPtr _fields, _csv_fields;
 
         std::vector<std::string> _primary_keys;
-        std::vector<std::vector<std::string>> _secondary_keys;
 
         std::filesystem::path _base_dir;
         uint64_t _db_id = 1;
@@ -100,8 +99,24 @@ namespace {
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            std::vector<Index> keys;
+            for (auto const& v: roots) {
+                if (v.index_id == constant::INDEX_PRIMARY) {
+                    continue;
+                }
+                
+                Index idx;
+                idx.id = v.index_id;
+                idx.table_id = table_id;
+                idx.name="table_id";
+                idx.is_unique = false;
+                idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+                idx.columns.emplace_back(0, 1);
+                keys.push_back(idx);
+            }
+
             return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
-                                           _primary_keys, _secondary_keys,
+                                           _primary_keys, keys,
                                            tbl_meta, _schema);
         }
 
@@ -112,8 +127,24 @@ namespace {
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            std::vector<Index> keys;
+            for (auto const& v: roots) {
+                if (v.index_id == constant::INDEX_PRIMARY) {
+                    continue;
+                }
+                
+                Index idx;
+                idx.id = v.index_id;
+                idx.table_id = table_id;
+                idx.name="table_id";
+                idx.is_unique = false;
+                idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+                idx.columns.emplace_back(0, 1);
+                keys.push_back(idx);
+            }
+
             return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
-                                                  _primary_keys, _secondary_keys,
+                                                  _primary_keys, keys,
                                                   tbl_meta, _schema);
         }
 
@@ -242,7 +273,6 @@ namespace {
         ASSERT_EQ(count, 5000);
 
         // verify the secondary index
-        /*
         auto secondary = table->index(1);
 
         count = 0;
@@ -255,7 +285,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
-        */
     }
 
     TEST_P(Table_Test, SingleXactMutations) {
@@ -354,8 +383,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        //TODO: verify the secondary index
-        /*
         auto secondary = table->index(1);
 
         count = 0;
@@ -368,7 +395,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
-        */
     }
 
     TEST_P(Table_Test, MultiXactMutations) {
@@ -448,8 +474,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // TODO: verify the secondary index
-        /*
         auto secondary = table->index(1);
 
         count = 0;
@@ -462,7 +486,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000 - 10);
-        */
 
         // create a new mutable table with a later XID target
         ++target_xid;
@@ -535,8 +558,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // TODO: verify the secondary index
-        /*
         secondary = table->index(1);
 
         count = 0;
@@ -548,7 +569,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000 - 10);
-        */
 
         // create a new mutable table with a later XID target
         ++target_xid;
@@ -626,8 +646,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 10, upserted 10
 
-        //TODO: verify the secondary index
-        /*
         secondary = table->index(1);
 
         count = 0;
@@ -639,7 +657,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
-        */
 
         // create a new mutable table with a later XID target
         ++target_xid;
@@ -725,8 +742,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        //TODO: verify the secondary index
-        /* 
         secondary = table->index(1);
 
         count = 0;
@@ -738,7 +753,6 @@ namespace {
             ++count;
         }
         ASSERT_EQ(count, 5000);
-        */
     }
 
 
@@ -815,8 +829,6 @@ namespace {
             }
             ASSERT_EQ(count, 5000);
 
-            // TODO: verify the secondary index
-            /*
             auto secondary = table->index(1);
 
             count = 0;
@@ -829,7 +841,6 @@ namespace {
                 ++count;
             }
             ASSERT_EQ(count, 5000);
-            */
 
         });
 

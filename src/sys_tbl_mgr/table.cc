@@ -24,6 +24,19 @@ namespace springtail {
             return base / db_dir / table_dir;
         }
 
+        std::vector<std::string> 
+        _get_column_names(ExtentSchemaPtr schema, const std::vector<uint32_t>& col_position)
+        {
+            std::vector<std::string> col_names;
+            auto column_order = schema->column_order();
+            for (auto position: col_position) {
+                // the index positions start with one
+                assert(position <= column_order.size());
+                col_names.emplace_back(std::move(column_order[position-1]));
+            }
+            return col_names;
+        }
+
     }
 
     Table::Table(uint64_t db_id,
@@ -31,14 +44,13 @@ namespace springtail {
                  uint64_t xid,
                  const std::filesystem::path &table_base,
                  const std::vector<std::string> &primary_key,
-                 const std::vector<std::vector<std::string>> &secondary_keys,
+                 const std::vector<Index> &secondary,
                  const TableMetadata &metadata,
                  ExtentSchemaPtr schema)
         : _db_id(db_id),
           _id(table_id),
           _xid(xid),
           _primary_key(primary_key),
-          _secondary_keys(secondary_keys),
           _schema(schema),
           _stats(metadata.stats)
     {
@@ -79,6 +91,19 @@ namespace springtail {
         }
         assert(!roots.empty());
 
+        for (auto const& idx: secondary) {
+            if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
+                continue;
+            }
+            assert(idx.id != constant::INDEX_PRIMARY);
+
+            auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
+            if (it == roots.end()) {
+                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
+                roots.emplace_back(idx.id, constant::UNKNOWN_EXTENT);
+            }
+        }
+
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
 
         ExtentSchemaPtr primary_schema;
@@ -100,41 +125,37 @@ namespace springtail {
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
         _pkey_fields = primary_schema->get_fields();
+
+        // deal with secondary indexes
+        for (auto const& idx: secondary) {
+            if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
+                continue;
+            }
+            assert(idx.id != constant::INDEX_PRIMARY);
+
+            // work with the index
+            std::vector<uint32_t> idx_cols;
+            for (auto const &col: idx.columns) {
+                idx_cols.push_back(col.position);
+            }
+
+            if (!idx_cols.empty()) {
+                auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
+                assert(it != roots.end());
+
+                auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id);
+
+                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                _secondary_indexes[idx.id] = {btree, idx_cols};
+            }
+        }
+
     }
 
     std::vector<std::string> 
     Table::get_column_names(const std::vector<uint32_t>& col_position)
     {
-        std::vector<std::string> col_names;
-        auto column_order = _schema->column_order();
-        for (auto position: col_position) {
-            assert(position < column_order.size());
-            col_names.emplace_back(std::move(column_order[position]));
-        }
-        return col_names;
-    }
-
-    MutableBTreePtr 
-    Table::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
-    {
-        // get the column names in the order they appear in the index
-        std::vector<std::string> col_names = get_column_names(index_columns);
-
-        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
-
-        auto secondary_key = col_names;
-        secondary_key.push_back(constant::INDEX_EID_FIELD);
-        secondary_key.push_back(constant::INDEX_RID_FIELD);
-
-        auto secondary_schema = _schema->create_schema(col_names, { extent_c, row_c }, secondary_key);
-
-        auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
-                secondary_key, secondary_schema,
-                _xid);
-
-        btree->init_empty();
-        return btree;
+        return _get_column_names(_schema, col_position);
     }
 
     bool
@@ -299,6 +320,27 @@ namespace springtail {
         return StorageCache::get_instance()->get(_table_dir / constant::DATA_FILE, extent_id, _xid);
     }
 
+    BTreePtr 
+    Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
+    {
+        // get the column names in the order they appear in the index
+        std::vector<std::string> col_names = _get_column_names(_schema, index_columns);
+
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+
+        auto key = col_names;
+        key.push_back(constant::INDEX_EID_FIELD);
+        key.push_back(constant::INDEX_RID_FIELD);
+
+        auto index_schema = _schema->create_schema(col_names, { extent_c, row_c }, key);
+
+        auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                _xid, index_schema,
+                offset);
+        return btree;
+    }
+
 
     MutableTable::MutableTable(uint64_t db_id,
                                uint64_t table_id,
@@ -306,7 +348,7 @@ namespace springtail {
                                uint64_t target_xid,
                                const std::filesystem::path &table_base,
                                const std::vector<std::string> &primary_key,
-                               const std::vector<std::vector<std::string>> &secondary_keys,
+                               const std::vector<Index> &secondary,
                                const TableMetadata &metadata,
                                ExtentSchemaPtr schema,
                                bool for_gc)
@@ -316,7 +358,6 @@ namespace springtail {
       _target_xid(target_xid),
       _snapshot_xid(metadata.snapshot_xid),
       _primary_key(primary_key),
-      _secondary_keys(secondary_keys),
       _schema(schema),
       _stats(metadata.stats),
       _for_gc(for_gc)
@@ -351,7 +392,18 @@ namespace springtail {
         }
         assert(!roots.empty());
 
+        for (auto const& idx: secondary) {
+            if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
+                continue;
+            }
+            assert(idx.id != constant::INDEX_PRIMARY);
 
+            auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
+            if (it == roots.end()) {
+                // fill the root offsets with UNKNOWN_EXTENT to indicate an empty tree
+                roots.emplace_back(idx.id, constant::UNKNOWN_EXTENT);
+            }
+        }
 
         // construct the primary index btree
         SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
@@ -395,8 +447,33 @@ namespace springtail {
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
+        // deal with secondary indexes
+        for (auto const& idx: secondary) {
+            if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {
+                continue;
+            }
+            assert(idx.id != constant::INDEX_PRIMARY);
+            // work with the index
+            std::vector<uint32_t> idx_cols;
+            for (auto const &col: idx.columns) {
+                idx_cols.push_back(col.position);
+            }
+            if (!idx_cols.empty()) {
 
-        // TODO: deal with secondary indexes
+                auto btree = create_index_root(idx.id, idx_cols);
+
+                auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
+                assert(it != roots.end());
+
+                if (it->extent_id != constant::UNKNOWN_EXTENT) {
+                    btree->init(it->extent_id);
+                } else {
+                    btree->init_empty();
+                }
+                assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
+                _secondary_indexes[idx.id] = {btree, idx_cols};
+            }
+        }
     }
 
     void
@@ -497,7 +574,10 @@ namespace springtail {
         metadata.roots = {{ constant::INDEX_PRIMARY, constant::UNKNOWN_EXTENT }};
         _primary_index->truncate();
 
-        // TODO: deal with secondary indexes
+        for (auto& [index_id, idx]: _secondary_indexes) {
+            idx.first->truncate();
+            metadata.roots.emplace_back(index_id, constant::UNKNOWN_EXTENT);
+        }
 
         // update the roots and stats
         sys_tbl_mgr::Client::get_instance()->update_roots(_db_id, _id, _target_xid, metadata);
@@ -565,15 +645,14 @@ namespace springtail {
         for (auto &&row : *orig_page) {
             value_fields->at(1) = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-            for (int i = 0; i < _secondary_indexes.size(); ++i) {
-                auto &secondary = _secondary_indexes[i];
-                auto key_fields = _schema->get_fields(_secondary_keys[i]);
-
+            for (auto const& [index_id, idx]: _secondary_indexes) {
+                auto &secondary = idx.first;
+                auto keys = get_column_names(idx.second);
+                auto key_fields = _schema->get_fields(keys);
                 auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 secondary->remove(skey);
+                ++row_id;
             }
-
-            ++row_id;
         }
     }
 
@@ -627,17 +706,16 @@ namespace springtail {
             for (auto &row : *new_page) {
                 (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
 
-                for (int i = 0; i < _secondary_indexes.size(); ++i) {
-                    auto &secondary = _secondary_indexes[i];
-                    auto key_fields = _schema->get_fields(_secondary_keys[i]);
-
+                for (auto const& [index_id, idx]: _secondary_indexes) {
+                    auto &secondary = idx.first;
+                    auto keys = get_column_names(idx.second);
+                    auto key_fields = _schema->get_fields(keys);
                     auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                     // note: uncomment if you need to debug the entries being populated into the secondary indexes
                     // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
+                    ++row_id;
                 }
-
-                ++row_id;
             }
 
             SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
@@ -662,7 +740,10 @@ namespace springtail {
         TableMetadata metadata;
         metadata.roots.push_back({constant::INDEX_PRIMARY, _primary_index->finalize()});
 
-        // TODO: deal with secondary indexes
+        // now flush the indexes, capturing the roots
+        for (auto secondary : _secondary_indexes) {
+            metadata.roots.emplace_back(secondary.first, secondary.second.first->finalize());
+        }
         metadata.stats = _stats;
         metadata.snapshot_xid = _snapshot_xid;
 
@@ -689,6 +770,33 @@ namespace springtail {
                                 _table_dir / constant::ROOTS_FILE);
 
         return metadata;
+    }
+
+    std::vector<std::string> 
+    MutableTable::get_column_names(const std::vector<uint32_t>& col_position)
+    {
+        return _get_column_names(_schema, col_position);
+    }
+
+    MutableBTreePtr 
+    MutableTable::create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns)
+    {
+        // get the column names in the order they appear in the index
+        std::vector<std::string> col_names = _get_column_names(_schema, index_columns);
+
+        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
+        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+
+        auto key = col_names;
+        key.push_back(constant::INDEX_EID_FIELD);
+        key.push_back(constant::INDEX_RID_FIELD);
+
+        auto index_schema = _schema->create_schema(col_names, { extent_c, row_c }, key);
+
+        auto btree = std::make_shared<MutableBTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
+                key, index_schema,
+                _target_xid);
+        return btree;
     }
 
     void

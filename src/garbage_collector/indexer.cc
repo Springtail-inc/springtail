@@ -131,17 +131,23 @@ namespace springtail::gc {
         for (auto const& col: idx._ddl["columns"]) {
             idx_cols.push_back(col["position"]);
         }
-        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
 
-        // create an index root
-        MutableBTreePtr root = table->create_index_root(index_id, idx_cols);
-        auto key_fields = table->extent_schema()->get_fields(table->get_column_names(idx_cols));
+        MutableBTreePtr root;
+        std::shared_ptr<std::vector<FieldPtr>> key_fields;
+        {
+            auto table = TableMgr::get_instance()->get_mutable_table(db_id, tid, idx._xid, idx._xid);
+            // create an index root
+            root = table->create_index_root(index_id, idx_cols);
+            root->init_empty();
+            key_fields = table->schema()->get_fields(table->get_column_names(idx_cols));
+        }
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
         uint32_t row_id = 0;
         uint64_t saved_extent_id = 0;
 
+        auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
             if(st.stop_requested()) {
                 root->truncate();
@@ -211,14 +217,18 @@ namespace springtail::gc {
             }
 
             //TODO: remove the assert and handle the case when the index was deleted while building
-            // (use set_index_sate(...sys_tbl::IndexNames::State::DELETED)).
             // This case should never happen in the synchronized version
             assert(!work_item._ddl.is_null());
 
-            auto extent_id = root->finalize();
-            auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
-            meta.roots.emplace_back(key.second, extent_id);
-            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
+            if (!work_item._ddl.is_null()) {
+                auto extent_id = root->finalize();
+                auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
+                meta.roots.emplace_back(key.second, extent_id);
+                sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
+            } else{
+                root->truncate();
+                //TODO: (use set_index_sate(...sys_tbl::IndexNames::State::DELETED)).
+            }
 
             _cv_done.notify_one();
         }
