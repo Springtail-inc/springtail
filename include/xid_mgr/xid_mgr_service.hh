@@ -15,7 +15,7 @@ namespace springtail {
      *        from the .thrift file.  It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftXidMgrService : public thrift::xid_mgr::ThriftXidMgrIf, public Singleton<ThriftXidMgrService>
+    class ThriftXidMgrService final : public thrift::xid_mgr::ThriftXidMgrIf, public Singleton<ThriftXidMgrService>
     {
         friend class Singleton<ThriftXidMgrService>;
     public:
@@ -27,7 +27,7 @@ namespace springtail {
 
     private:
         ThriftXidMgrService() = default;
-        ~ThriftXidMgrService() {}
+        ~ThriftXidMgrService() = default;
     };
 
 

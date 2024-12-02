@@ -50,9 +50,6 @@ namespace springtail::xid_mgr {
          */
         uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
-        void set_shutting_down() { _shutting_down = true; }
-        bool is_shutting_down() { return _shutting_down; }
-
     protected:
         void _internal_shutdown() override;
 
@@ -65,7 +62,7 @@ namespace springtail::xid_mgr {
         /**
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
-         ~XidMgrServer() {}
+         ~XidMgrServer() = default;
 
         /** number of worker threads */
         int _worker_thread_count;
