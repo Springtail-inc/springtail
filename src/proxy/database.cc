@@ -3,6 +3,7 @@
 #include <memory>
 #include <format>
 
+#include <common/counter.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
@@ -87,10 +88,13 @@ namespace springtail::pg_proxy {
     {
         std::unique_lock lock(_mutex);
 
-        uint64_t db_id = DatabaseMgr::get_instance()->get_database_id(database);
+        auto db_id = DatabaseMgr::get_instance()->get_database_id(database);
+        if (!db_id.has_value()) {
+            return nullptr;
+        }
 
         // try to get a free one first
-        ServerSessionPtr session = _internal_get_session(db_id, user->username());
+        ServerSessionPtr session = _internal_get_session(db_id.value(), user->username());
         if (session != nullptr) {
             return session;
         }
@@ -110,11 +114,11 @@ namespace springtail::pg_proxy {
         // however before releasing the lock we need to reserve space for the new session in the pool
 
         // create a db pool if one doesn't exist
-        auto it = _sessions.find({db_id, user->username()});
+        auto it = _sessions.find({db_id.value(), user->username()});
         DatabasePoolPtr pool;
         if (it == _sessions.end()) {
             pool = std::make_shared<DatabasePool>();
-            _sessions[{db_id, user->username()}] = pool;
+            _sessions[{db_id.value(), user->username()}] = pool;
         } else {
             pool = it->second;
         }
@@ -175,7 +179,8 @@ namespace springtail::pg_proxy {
         return session;
     }
 
-    void DatabaseMgr::init() {
+    void DatabaseMgr::init()
+    {
         // add primary
         uint64_t primary_instance_id = Properties::get_db_instance_id();
         std::string host, user, password;
@@ -204,19 +209,23 @@ namespace springtail::pg_proxy {
             add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
 
+        Counter init_counter(2);
+
         // add subscribers to pubsub threads
         std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
         _config_sub_thread.add_subscriber(state_change_channel,
-            [this]() {
+            [this, &init_counter]() {
                 this->_init_db_states_subscriber();
+                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_db_state_change(msg);
             });
         std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
         _data_sub_thread.add_subscriber(db_table_change_channel,
-            [this]() {
+            [this, &init_counter]() {
                 this->_init_db_tables_subscriber();
+                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_db_table_change(msg);
@@ -226,12 +235,11 @@ namespace springtail::pg_proxy {
         _config_sub_thread.start();
         _data_sub_thread.start();
 
-        while(!_db_states_initialized || !_db_tables_initialized) {
-            sleep(1);
-        }
+        init_counter.wait();
     }
 
-    void DatabaseMgr::_handle_db_state_change(const std::string &msg) {
+    void DatabaseMgr::_handle_db_state_change(const std::string &msg)
+    {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
         uint64_t db_id;
         redis::db_state_change::DBState state;
@@ -240,7 +248,8 @@ namespace springtail::pg_proxy {
         _replicated_database_states[db_id] = state;
     }
 
-    void DatabaseMgr::_init_db_states_subscriber() {
+    void DatabaseMgr::_init_db_states_subscriber()
+    {
         // refresh all database states
         std::shared_lock db_name_lock(_db_mutex);
         std::unique_lock db_state_lock(_db_state_mutex);
@@ -248,10 +257,10 @@ namespace springtail::pg_proxy {
             redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
             _replicated_database_states[db_id] = db_state;
         }
-        _db_states_initialized = true;
     }
 
-    void DatabaseMgr::_handle_db_table_change(const std::string &msg) {
+    void DatabaseMgr::_handle_db_table_change(const std::string &msg)
+    {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received DB table change: {}", msg);
         uint64_t db_id;
         std::string action;
@@ -267,7 +276,8 @@ namespace springtail::pg_proxy {
         }
     }
 
-    void DatabaseMgr::_init_db_tables_subscriber() {
+    void DatabaseMgr::_init_db_tables_subscriber()
+    {
         // get all schemas and tables from redis
         std::shared_lock db_name_lock(_db_mutex);
         for (const auto &[db_name, db_id]: _replicated_databases) {
@@ -278,10 +288,10 @@ namespace springtail::pg_proxy {
                 _schema_tables.add_item(db_id, schema, table);
             }
         }
-        _db_tables_initialized = true;
     }
 
-    void DatabaseMgr::_internal_shutdown() {
+    void DatabaseMgr::_internal_shutdown()
+    {
         _config_sub_thread.shutdown();
         _data_sub_thread.shutdown();
     }

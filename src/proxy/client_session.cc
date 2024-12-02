@@ -295,7 +295,13 @@ namespace springtail::pg_proxy {
             return;
         }
         _database = database;
-        _db_id = DatabaseMgr::get_instance()->get_database_id(_database);
+        auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
+        if (!optional_db_id.has_value()) {
+            SPDLOG_ERROR("Database {} not found", _database);
+            _state = ERROR;
+            return;
+        }
+        _db_id = optional_db_id.value();
 
         // get login info for the user
         _login = _user->get_user_login();
@@ -1156,7 +1162,10 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            session = instance->allocate_session(_server, _user, _database);
+            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+                SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                return nullptr;
+            }
         }
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 

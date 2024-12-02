@@ -182,6 +182,7 @@ namespace pg_proxy {
          */
         void init(const uint32_t sleep_interval) {
             _sleep_interval = sleep_interval;
+            start_thread();
         }
 
         /**

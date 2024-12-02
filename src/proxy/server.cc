@@ -113,7 +113,6 @@ namespace springtail::pg_proxy {
 
         DatabaseMgr::get_instance()->init();
         UserMgr::get_instance()->init(5);
-        UserMgr::get_instance()->start_thread();
 
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }

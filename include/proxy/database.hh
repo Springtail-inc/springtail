@@ -503,7 +503,7 @@ namespace pg_proxy {
          * @param dbname - database name
          * @return uint64_t - database id
          */
-        uint64_t get_database_id(const std::string &dbname) {
+        std::optional<uint64_t> get_database_id(const std::string &dbname) {
             std::shared_lock lock(_db_mutex);
             return _replicated_databases[dbname];
         }
@@ -517,6 +517,9 @@ namespace pg_proxy {
          */
         bool is_database_ready(const uint64_t db_id) {
             std::shared_lock lock(_db_state_mutex);
+            if (!_replicated_database_states.contains(db_id)) {
+                return false;
+            }
             if (_replicated_database_states[db_id] == redis::db_state_change::DB_STATE_RUNNING) {
                 return true;
             }
@@ -605,8 +608,6 @@ namespace pg_proxy {
         void _internal_shutdown() override;
     private:
         uint64_t _db_instance_id;           ///< primary database instance id
-        std::atomic<bool> _db_states_initialized = false;   ///< db states initialization flag
-        std::atomic<bool> _db_tables_initialized = false;   ///< db tables initialization flag
 
         PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
         PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database

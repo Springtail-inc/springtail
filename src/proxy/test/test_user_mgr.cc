@@ -27,7 +27,6 @@ namespace {
             pg_proxy::UserMgr *user_mgr = pg_proxy::UserMgr::get_instance();
             ASSERT_NE(user_mgr, nullptr);
             user_mgr->init(_sleep_interval);
-            user_mgr->start_thread();
 
             std::string host, user, password;
             int port;
