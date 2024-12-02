@@ -1,4 +1,6 @@
 #include <common/constants.hh>
+#include <common/json.hh>
+#include <common/properties.hh>
 #include <storage/mutable_btree.hh>
 
 namespace springtail {
@@ -12,7 +14,12 @@ namespace springtail {
           _xid(xid),
           _finalized(true)
     {
-        _cache = std::make_shared<PageCache>();
+        uint64_t size;
+        nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
+        Json::get_to<uint64_t>(json, "btree_cache_size", size, 512);
+        Json::get_to<uint64_t>(json, "max_extent_per_page", _max_extent_per_page, MAX_EXTENT_COUNT);
+
+        _cache = std::make_shared<PageCache>(size);
           
         // initialize the schema information
         _init_schemas(schema, keys);
@@ -28,7 +35,7 @@ namespace springtail {
         auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
 
         // create an empty root
-        _root = std::make_shared<Page>(shared_from_this(), std::move(cache_page), _leaf_schema);
+        _root = std::make_shared<Page>(this, std::move(cache_page), _leaf_schema);
 
         // add the root to the cache
         // note: we do not release the root, leaving it's use-count in the local cache permanently at 1
@@ -46,7 +53,7 @@ namespace springtail {
         assert(_root == nullptr);
 
         // construct an empty page to populate
-        _root = std::make_shared<Page>(shared_from_this(), root_offset);
+        _root = std::make_shared<Page>(this, root_offset);
 
         // read the root
         _read_page_internal(_root);
@@ -639,7 +646,7 @@ namespace springtail {
         }
 
         // no page in the cache, so construct a page that we can populate
-        page = std::make_shared<Page>(shared_from_this(), extent_id);
+        page = std::make_shared<Page>(this, extent_id);
 
         // prevent others from using the page until the data is available
         // note: this will never block
@@ -864,7 +871,7 @@ namespace springtail {
             auto key = std::make_shared<MutableTuple>(_branch_keys, *(cache_page->last()));
             ValueTuplePtr value_key = std::make_shared<ValueTuple>(key);
 
-            new_root = std::make_shared<Page>(shared_from_this(), extent_id,
+            new_root = std::make_shared<Page>(this, extent_id,
                                               value_key, std::move(cache_page), _branch_schema);
 
             // note: we don't need to add these new pages as children because they are clean

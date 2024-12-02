@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
 
@@ -14,13 +15,34 @@
 using namespace springtail;
 
 namespace {
+    struct CacheSize {
+        uint64_t data_cache_size;
+        uint64_t page_cache_size;
+        uint64_t btree_cache_size;
+        uint64_t max_extent_per_page;
+    };
+
+    void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
+        // Customize the output here as needed
+        if (cacheSize.data_cache_size == 32) {
+            *os << "small_cache";
+        } else {
+            *os << "large_cache";
+        }
+    }
 
     /**
      * Framework for Table and MutableTable testing.
      */
-    class Table_Test : public testing::Test {
+    class Table_Test : public testing::TestWithParam<CacheSize> {
     protected:
         void SetUp() override {
+            // set the cache size from the parameters
+            CacheSize sizes = GetParam();
+            std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
+                                                sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
             springtail_init();
             _services.init(true);
 
@@ -157,7 +179,7 @@ namespace {
         typedef std::shared_ptr<Request> RequestPtr;
     };
 
-    TEST_F(Table_Test, CreateEmpty) {
+    TEST_P(Table_Test, CreateEmpty) {
         uint64_t access_xid = 1, target_xid = 1;
 
         // create a mutable table
@@ -184,7 +206,7 @@ namespace {
         ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
     }
 
-    TEST_F(Table_Test, Inserts) {
+    TEST_P(Table_Test, Inserts) {
         uint64_t access_xid = 1, target_xid = 2;
 
         // create a mutable table
@@ -217,10 +239,22 @@ namespace {
         }
         ASSERT_EQ(count, 5000);
 
-        // XXX verify the secondary index
+        // verify the secondary index
+        auto secondary = table->index(1);
+
+        count = 0;
+        uint64_t table_id = 0;
+        auto table_id_f = secondary->get_schema()->get_field("table_id");
+        for (auto row : *secondary) {
+            auto current = table_id_f->get_uint64(row);
+            ASSERT_LE(table_id, current);
+            table_id = current;
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
     }
 
-    TEST_F(Table_Test, SingleXactMutations) {
+    TEST_P(Table_Test, SingleXactMutations) {
         uint64_t access_xid = 2, target_xid = 3;
 
         // create a mutable table
@@ -331,7 +365,7 @@ namespace {
         ASSERT_EQ(count, 5000);
     }
 
-    TEST_F(Table_Test, MultiXactMutations) {
+    TEST_P(Table_Test, MultiXactMutations) {
         uint64_t access_xid = 3, target_xid = 4;
 
         // create a mutable table
@@ -694,7 +728,7 @@ namespace {
     }
 
 
-    TEST_F(Table_Test, MultiThreadMutations) {
+    TEST_P(Table_Test, MultiThreadMutations) {
         uint64_t access_xid = 8, target_xid = 9;
 
         // create a mutable table
@@ -787,4 +821,8 @@ namespace {
         tester.run(4);
     }
 
+    INSTANTIATE_TEST_CASE_P(Table_Test,
+                            Table_Test,
+                            ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
+                                              CacheSize{ 32, 32, 8, 4 }));
 }

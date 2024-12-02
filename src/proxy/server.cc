@@ -1,7 +1,7 @@
 #include <iostream>
 #include <thread>
-
 #include <sys/socket.h>
+
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -16,24 +16,22 @@
 
 #include <fmt/core.h>
 
-#include <common/json.hh>
 #include <common/logging.hh>
 #include <common/thread_pool.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 
 #include <proxy/client_session.hh>
-#include <proxy/exception.hh>
 #include <proxy/server.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
-
-#include <redis/redis_db_tables.hh>
 
 namespace springtail::pg_proxy {
 
     /** Default log level for the proxy server */
     LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
+
+    static constexpr uint32_t USER_MGR_SLEEP_INTERVAL = 5;
 
     /**
      * @brief Construct a new Proxy Server object.
@@ -53,9 +51,6 @@ namespace springtail::pg_proxy {
                              bool enable_ssl,
                              LoggerPtr logger)
       : _id(arc4random()),
-        _user_mgr(std::make_shared<UserMgr>()),
-        _config_sub_thread(1, true),
-        _data_sub_thread(1, false),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl),
         _shadow_mode(shadow_mode),
@@ -116,76 +111,10 @@ namespace springtail::pg_proxy {
         // ignore SIGPIPE signals
         ::signal(SIGPIPE, SIG_IGN);
 
-        SPDLOG_INFO("Proxy server listening on port={}", proxy_port);
+        DatabaseMgr::get_instance()->init();
+        UserMgr::get_instance()->init(5);
 
-        // add primary
-        nlohmann::json primary_config = Properties::get_primary_db_config();
-        uint64_t primary_instance_id = Properties::get_db_instance_id();
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Primary id: {}", primary_instance_id);
-        auto host = Json::get<std::string>(primary_config, "host");
-        auto port = Json::get<uint16_t>(primary_config, "port");
-        if (host.has_value() && port.has_value()) {
-            set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host.value(), port.value()));
-        } else {
-            SPDLOG_ERROR("Could not find the value for primary database either host or port");
-            throw ProxyServerError();
-        }
-
-        std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
-        for (const auto & fdw_id: fdw_id_list) {
-            nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
-            auto host = Json::get<std::string>(fdw_config, "host");
-            auto port = Json::get<uint16_t>(fdw_config, "port");
-            if (host.has_value() && port.has_value()) {
-                // add replica
-                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
-            } else {
-                SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
-                throw ProxyServerError();
-            }
-        }
-
-        // add replicated databases
-        std::map<uint64_t, std::string> db_list = Properties::get_databases();
-        for (const auto& db_pair: db_list) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database (id, name): ({}, {})", get<0>(db_pair), get<1>(db_pair));
-            add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
-        }
-
-        // add test user for test db with trust
-        add_user("test");
-
-        // add test user for test db with md5
-        std::string username = "test_md5";
-        std::string passwd = "test";
-        char md5[36]; // md5sum('pwd'+'user') = md5+digest
-        pg_md5_encrypt(passwd.c_str(), username.c_str(), strlen(username.c_str()), md5);
-        md5[35] = '\0'; // null terminate
-        uint32_t salt;
-        get_random_bytes((uint8_t*)&salt, 4);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Adding MD5 user: {}, md5: {}, salt: {}", username, md5, salt);
-        add_user("test_md5", md5, salt);
-
-        // add user for test db with scram
-        add_user("test_scram", "SCRAM-SHA-256$4096:tb3ZKGGBQOq0eocVNWBbrw==$JrwngrAnMVC0BDQqxK6bREhwqi+ngU6ShRUmswgASLI=:8yAuc+PJJZ1L62803po41jTWmZp5JGwquWQZm6SCvsg=");
-
-        // add subscribers to pubsub threads
-        std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(state_change_channel,
-            [this]() {
-                this->_init_db_states_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_state_change(msg);
-            });
-        std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
-        _data_sub_thread.add_subscriber(db_table_change_channel,
-            [this]() {
-                this->_init_db_tables_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_table_change(msg);
-            });
+        SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
 
     /** Callback to get more info about what is going on in SSL */
@@ -400,10 +329,6 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::run()
     {
-        // start pubsub threads
-        _config_sub_thread.start();
-        _data_sub_thread.start();
-
         while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
@@ -481,7 +406,10 @@ namespace springtail::pg_proxy {
                 _thread_pool.queue(session);
             }
         }
+    }
 
+    void
+    ProxyServer::cleanup() {
         // do cleanup
         SPDLOG_INFO("Proxy server shutting down");
 
@@ -498,15 +426,16 @@ namespace springtail::pg_proxy {
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 
-        // _pubsub_thread[0].join();
-        // _pubsub_thread[1].join();
-        _config_sub_thread.shutdown();
-        _data_sub_thread.shutdown();
+        _thread_pool.shutdown();
+        pg_proxy::UserMgr::get_instance()->stop_thread();
+        UserMgr::shutdown();
+        DatabaseMgr::shutdown();
 
         // flush logger
         if (_logger) {
             _logger->flush();
         }
+        SPDLOG_INFO("Proxy server finished cleanup");
     }
 
     void
@@ -545,54 +474,6 @@ namespace springtail::pg_proxy {
         _sessions.insert(std::make_pair(socket, session));
         if (waiting_session_insert) {
             _waiting_sessions.insert(socket);
-        }
-    }
-
-    void ProxyServer::_handle_db_state_change(const std::string &msg) {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBState state;
-        redis::db_state_change::parse_db_state_change(msg, db_id, state);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        _replicated_database_states[db_id] = state;
-    }
-
-    void ProxyServer::_init_db_states_subscriber() {
-        // refresh all database states
-        std::shared_lock db_name_lock(_db_mutex);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
-            redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            _replicated_database_states[db_id] = db_state;
-        }
-    }
-
-    void ProxyServer::_handle_db_table_change(const std::string &msg) {
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received DB table change: {}", msg);
-        uint64_t db_id;
-        std::string action;
-        std::string schema;
-        std::string table;
-        RedisDbTables::decode_pubsub_msg(msg, db_id, action, schema, table);
-        if (action == "add") {
-            _schema_tables.add_item(db_id, schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
-        } else if (action == "remove") {
-            _schema_tables.remove_item(db_id, schema, table);
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
-        }
-    }
-
-    void ProxyServer::_init_db_tables_subscriber() {
-        // get all schemas and tables from redis
-        std::shared_lock db_name_lock(_db_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
-            std::vector<std::pair<std::string, std::string>> schema_table_pairs;
-            RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
-            for (const auto &[schema, table]: schema_table_pairs) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Found schema: {}, table : {}", schema, table);
-                _schema_tables.add_item(db_id, schema, table);
-            }
         }
     }
 

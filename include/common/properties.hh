@@ -100,8 +100,8 @@ namespace springtail {
         /** Helper to get db config for given database */
         static nlohmann::json get_db_config(uint64_t db_id);
 
-        /** Helper to get primary db json for current db instance */
-        static nlohmann::json get_primary_db_config();
+        /** Helper to get host, port, user, and password for the primary database */
+        static void get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
 
         /** Helper to get db state */
         static std::string get_db_state(uint64_t db_id);
@@ -176,6 +176,9 @@ namespace springtail {
          * @brief Get the hostname for the ingestion instance machine
          */
         static std::string _get_ingestion_hostname();
+
+        /** Helper to get primary db json for current db instance */
+        static nlohmann::json _get_primary_db_config();
 
         // delete move constructor
         Properties(const Properties &)     = delete;

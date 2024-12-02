@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/environment.hh>
 
 #include <storage/cache.hh>
 #include <storage/csv_field.hh>
@@ -10,13 +11,35 @@
 using namespace springtail;
 
 namespace {
+    struct CacheSize {
+        uint64_t data_cache_size;
+        uint64_t page_cache_size;
+        uint64_t btree_cache_size;
+        uint64_t max_extent_per_page;
+    };
+
+    void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
+        // Customize the output here as needed
+        if (cacheSize.data_cache_size == 32) {
+            *os << "small_cache";
+        } else {
+            *os << "large_cache";
+        }
+    }
+
     /**
      * Framework for Extent testing.
      */
-    class StorageCache_Test : public testing::Test {
+    class StorageCache_Test : public testing::TestWithParam<CacheSize> {
     protected:
         void SetUp() override {
-            springtail_init();
+            // set the cache size from the parameters
+            CacheSize sizes = GetParam();
+            std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
+                                                sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
+            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ LOG_STORAGE);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -48,7 +71,7 @@ namespace {
         std::filesystem::path _base_dir;
     };
 
-    TEST_F(StorageCache_Test, Basic) {
+    TEST_P(StorageCache_Test, Basic) {
         auto cache = StorageCache::get_instance();
         std::filesystem::path file(_base_dir / "Basic");
         uint64_t xid = 1;
@@ -86,7 +109,7 @@ namespace {
         ASSERT_EQ(count, 5000);
     }
 
-    TEST_F(StorageCache_Test, Insert50K) {
+    TEST_P(StorageCache_Test, Insert50K) {
         auto cache = StorageCache::get_instance();
         std::filesystem::path file(_base_dir / "Insert50K");
         uint64_t xid = 1;
@@ -105,6 +128,7 @@ namespace {
                     extra->push_back(std::make_shared<ConstTypeField<int16_t>>(i));
 
                     page->insert(std::make_shared<KeyValueTuple>(_csv_fields, extra, r), _schema);
+                    cache->validate();
                 }
             }
 
@@ -129,4 +153,9 @@ namespace {
         }
         ASSERT_EQ(count, 50000);
     }
+
+    INSTANTIATE_TEST_CASE_P(StorageCache_Test,
+                            StorageCache_Test,
+                            ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
+                                              CacheSize{ 8, 8, 2, 4 }));
 }
