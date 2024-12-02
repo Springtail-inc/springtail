@@ -6,26 +6,6 @@
 
 namespace springtail {
 
-    ThriftXidMgrService *ThriftXidMgrService::_instance = nullptr;
-    std::once_flag ThriftXidMgrService::_init_flag;
-    std::once_flag ThriftXidMgrService::_shutdown_flag;
-
-    ThriftXidMgrService *
-    ThriftXidMgrService::_init() {
-        if (!_instance) {
-            _instance = new ThriftXidMgrService();
-        }
-        return _instance;
-    }
-
-    void
-    ThriftXidMgrService::_shutdown() {
-        if (_instance) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
     void
     ThriftXidMgrService::ping(thrift::xid_mgr::Status& _return)
     {

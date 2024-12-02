@@ -7,6 +7,7 @@
 #include <string>
 #include <filesystem>
 
+#include <common/singleton.hh>
 #include <thrift/server/TServer.h>
 
 #include <xid_mgr/xid_partition.hh>
@@ -18,40 +19,12 @@ namespace springtail::xid_mgr {
      * @brief This class represents a server for managing transaction IDs (XIDs).
      *        It provides functionality to allocate XID ranges, commit XIDs, and retrieve the latest committed XID.
      */
-    class XidMgrServer
+    class XidMgrServer final : public Singleton<XidMgrServer>
     {
+        friend class Singleton<XidMgrServer>;
     public:
 
-        // delete copy constructor
-        XidMgrServer(const XidMgrServer &)   = delete;
-        void operator=(const XidMgrServer &) = delete;
-
-        /**
-         * @brief Get the singleton write cache server instance object
-         * @return XidMgrServer *
-         */
-        static XidMgrServer *get_instance() {
-            std::call_once(_init_flag, &XidMgrServer::_init);
-            return _instance;
-        }
-        /**
-         * @brief Shutdown XID manager
-         */
-        static void shutdown() {
-            std::call_once(_shutdown_flag, &XidMgrServer::_shutdown);
-        }
-
-        /**
-         * @brief Startup server; does not return
-         */
-        static void startup() {
-            // start the server
-            auto server = get_instance();
-            server->_startup();
-
-            // after shutdown() we delete the instance
-            delete _instance;
-        }
+       void startup();
 
         // interfaces from thrift
 
@@ -77,6 +50,12 @@ namespace springtail::xid_mgr {
          */
         uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
+        void set_shutting_down() { _shutting_down = true; }
+        bool is_shutting_down() { return _shutting_down; }
+
+    protected:
+        void _internal_shutdown() override;
+
     private:
         /**
          * @brief Construct a new XidMgr object
@@ -87,24 +66,6 @@ namespace springtail::xid_mgr {
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
          ~XidMgrServer() {}
-
-        /** init from get_instance, called once */
-        static XidMgrServer *_init();
-
-        /** startup from startup(), called once */
-        void _startup();
-
-        /** shutdown from shutdown(), called once */
-        static void _shutdown();
-
-        /** Singleton write cache server instance */
-        static XidMgrServer *_instance;
-
-        /** init flag */
-        static std::once_flag _init_flag;
-
-        /** shutdown flag */
-        static std::once_flag _shutdown_flag;
 
         /** number of worker threads */
         int _worker_thread_count;
@@ -126,6 +87,8 @@ namespace springtail::xid_mgr {
         /** map of db_id to partitions */
         std::map<uint64_t, PartitionPtr> _partition_map;
 
+        std::atomic<bool> _shutting_down = false;
+
         /**
          * @brief Get a partition based on a db_id, optionally create it
          * @param db_id database id
@@ -138,9 +101,6 @@ namespace springtail::xid_mgr {
          * @brief Load partitions from base path
          */
         void _load_partitions();
-
-
-        void _internal_shutdown();
     };
 
 } // namespace springtail
