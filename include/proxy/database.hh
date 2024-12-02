@@ -12,9 +12,14 @@
 #include <climits>
 
 #include <common/logging.hh>
+#include <common/singleton.hh>
 
 #include <proxy/connection.hh>
 #include <proxy/server_session.hh>
+
+#include <redis/db_state_change.hh>
+#include <redis/redis_db_tables.hh>
+#include <redis/pubsub_thread.hh>
 
 namespace springtail {
 namespace pg_proxy {
@@ -180,7 +185,6 @@ namespace pg_proxy {
         ServerSessionPtr allocate_session(ProxyServerPtr server,
                                           UserPtr user,
                                           const std::string &dbname);
-
 
         /**
          * @brief Get total count of sessions associated with this instance.
@@ -453,5 +457,211 @@ namespace pg_proxy {
         std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
     };
 
-} // namespace springtail
+    /**
+     * @brief Singleton database manager class. Collects all configuration data from Properties and
+     *          redis instance.
+     *
+     */
+    class DatabaseMgr final : public Singleton<DatabaseMgr> {
+        friend class Singleton<DatabaseMgr>;
+    public:
+        /**
+         * @brief Initialization function
+         *
+         */
+        void init();
+
+        /**
+         * @brief Add replicated database id and name the collection of replicated databases
+         *          and setup initial state per database
+         *
+         * @param db_id - database id
+         * @param dbname - database name
+         */
+        void add_replicated_database(const uint64_t db_id, const std::string &dbname) {
+            std::unique_lock lock(_db_mutex);
+            _replicated_databases[dbname] = db_id;
+        }
+
+        /**
+         * @brief Get a name of an arbitrary replicated databasethe for running a user query in UserMgr
+         *
+         * @return std::optional<std::string> - name of a replicated database if found
+         */
+        std::optional<std::string> get_any_replicated_db_name() {
+            std::shared_lock lock(_db_mutex);
+            auto it = _replicated_databases.begin();
+            if (it != _replicated_databases.end()) {
+                return it->first;
+            }
+            return {};
+        }
+
+        /**
+         * @brief Get database id for given database name
+         *
+         * @param dbname - database name
+         * @return uint64_t - database id
+         */
+        std::optional<uint64_t> get_database_id(const std::string &dbname) {
+            std::shared_lock lock(_db_mutex);
+            return _replicated_databases[dbname];
+        }
+
+        /**
+         * @brief Verifies if the database is in the running state.
+         *
+         * @param db_id - database id to verify
+         * @return true - database is in running state
+         * @return false - database is not in the running state
+         */
+        bool is_database_ready(const uint64_t db_id) {
+            std::shared_lock lock(_db_state_mutex);
+            if (!_replicated_database_states.contains(db_id)) {
+                return false;
+            }
+            if (_replicated_database_states[db_id] == redis::db_state_change::DB_STATE_RUNNING) {
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Check if a database is replicated
+         *
+         * @param dbname - name of the database
+         * @return true - replicated
+         * @return false - not replicated
+         */
+        bool is_database_replicated(const std::string &dbname) {
+            std::shared_lock lock(_db_mutex);
+            return _replicated_databases.contains(dbname);
+        }
+
+        /**
+         * @brief Get the primary database instance
+         *
+         * @return DatabaseInstancePtr
+         */
+        DatabaseInstancePtr get_primary_instance() {
+            return _primary_database.primary();
+        }
+
+        /**
+         * @brief Get replica database instance  -- use username/dbname as a hint
+         *
+         * @param db_id - database id
+         * @param username - username
+         * @return DatabaseInstancePtr
+         */
+        DatabaseInstancePtr get_replica_instance(const uint64_t db_id, const std::string &username) {
+            return _replica_set.get_replica(db_id, username);
+        }
+
+        /**
+         * @brief Set the primary database instance
+         *
+         * @param instance_id - instance id
+         * @param instance - database instance
+         */
+        void set_primary(uint64_t instance_id, DatabaseInstancePtr instance) {
+            _db_instance_id = instance_id;
+            _primary_database.set_primary(instance);
+        }
+
+        /**
+         * @brief Set the secondary database instance
+         *
+         * @param instance - database instance
+         */
+        void set_standby(DatabaseInstancePtr instance) {
+            _primary_database.set_standby(instance);
+        }
+
+        /**
+         * @brief Add replica database instance
+         *
+         * @param instance - database instance
+         */
+        void add_replica(DatabaseInstancePtr instance) {
+            _replica_set.add_replica(instance);
+        }
+
+        /**
+         * @brief Verify if the table is replicated for give database and schema
+         *
+         * @param db_id - database id
+         * @param schema - schema name
+         * @param table - table name
+         * @return true - table is replicated
+         * @return false - table is not replicated
+         */
+        bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
+            return _schema_tables.has_item(db_id, schema, table);
+        }
+
+    protected:
+        /**
+         * @brief Function called by Singleton base class to perform shutdown.
+         *
+         */
+        void _internal_shutdown() override;
+    private:
+        uint64_t _db_instance_id;           ///< primary database instance id
+
+        PubSubThread _config_sub_thread;    ///< pubsub thread for redis config database
+        PubSubThread _data_sub_thread;      ///< pubsub thread for redis data database
+
+        DatabasePrimarySet _primary_database; ///< set of primary databases
+        DatabaseReplicaSet _replica_set;      ///< set of replica databases
+
+        std::shared_mutex _db_mutex;          ///< shared mutex for read/write access to the replicated databases map
+        std::map<std::string, uint64_t> _replicated_databases; ///< list of authorized databases with associated ids
+
+        std::shared_mutex _db_state_mutex;   ///< shared mutex for read/write access to database state
+        std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
+
+        DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
+
+        /**
+         * @brief Construct a new Database Mgr object
+         *
+         */
+        DatabaseMgr() : _config_sub_thread(1, true),
+                        _data_sub_thread(1, false) {};
+
+        /**
+         * @brief Destroy the Database Mgr object
+         *
+         */
+        ~DatabaseMgr() override = default;
+
+        /**
+         * @brief Database state change handling
+         *
+         * @param msg - message
+         */
+        void _handle_db_state_change(const std::string &msg);
+
+        /**
+         * @brief Database schema and table change handling
+         *
+         * @param msg - message
+         */
+        void _handle_db_table_change(const std::string &msg);
+
+        /**
+         * @brief Initialize pubsub thread for database state change
+         *
+         */
+        void _init_db_states_subscriber();
+
+        /**
+         * @brief Initialize pubsub thread for database tables subscriber
+         *
+         */
+        void _init_db_tables_subscriber();
+    };
+
 } // namespace pg_proxy
+} // namespace springtail

@@ -295,7 +295,13 @@ namespace springtail::pg_proxy {
             return;
         }
         _database = database;
-        _db_id = _server->get_database_id(_database);
+        auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
+        if (!optional_db_id.has_value()) {
+            SPDLOG_ERROR("Database {} not found", _database);
+            _state = ERROR;
+            return;
+        }
+        _db_id = optional_db_id.value();
 
         // get login info for the user
         _login = _user->get_user_login();
@@ -578,7 +584,7 @@ namespace springtail::pg_proxy {
     bool
     ClientSession::_primary_pool_exists()
     {
-        DatabaseInstancePtr primary = _server->get_primary_instance();
+        DatabaseInstancePtr primary = DatabaseMgr::get_instance()->get_primary_instance();
         assert (primary != nullptr);
         DatabasePoolPtr pool = primary->get_pool(_db_id, _user->username());
         if (pool == nullptr || pool->total_count() == 0) {
@@ -794,7 +800,7 @@ namespace springtail::pg_proxy {
 
         // parse the query
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return this->_server->is_table_replicated(this->_db_id, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // Create a query statement object
@@ -1093,8 +1099,7 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
-        redis::db_state_change::DBState db_state = _server->get_database_state(_db_id);
-        if (type == REPLICA && db_state != redis::db_state_change::DB_STATE_RUNNING) {
+        if (type == REPLICA && DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
             type = PRIMARY;
         }
 
@@ -1145,10 +1150,10 @@ namespace springtail::pg_proxy {
         DatabaseInstancePtr instance = nullptr;
         if (type == PRIMARY) {
             // get a primary session
-            instance = _server->get_primary_instance();
+            instance = DatabaseMgr::get_instance()->get_primary_instance();
         } else {
             // get a replica session
-            instance = _server->get_replica_instance(_db_id, _user->username());
+            instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
         }
         assert (instance != nullptr);
 
@@ -1157,7 +1162,10 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            session = instance->allocate_session(_server, _user, _database);
+            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+                SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                return nullptr;
+            }
         }
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 
@@ -1292,7 +1300,7 @@ namespace springtail::pg_proxy {
         bool is_read_safe = true;
         // first parse the query to determine the type of statement(s)
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return this->_server->is_table_replicated(this->_db_id, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // iterate through the parse contexts (one per query within multi-statement block)
