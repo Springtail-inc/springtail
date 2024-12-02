@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
     std::signal(SIGINT, handle_sigint);
 
     // start the server
-    xid_mgr::XidMgrServer::startup();
+    xid_mgr::XidMgrServer::get_instance()->startup();
 
     return 0;
 }

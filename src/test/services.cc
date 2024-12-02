@@ -38,7 +38,7 @@ namespace springtail::test {
             }
 
             _threads.push_back(std::thread([] {
-                xid_mgr::XidMgrServer::startup();
+                xid_mgr::XidMgrServer::get_instance()->startup();
             }));
         }
 
