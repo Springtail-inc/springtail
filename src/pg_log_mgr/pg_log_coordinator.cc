@@ -5,33 +5,10 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 
 namespace springtail::pg_log_mgr {
-    PgLogCoordinator* PgLogCoordinator::_instance {nullptr};
-
-    std::once_flag PgLogCoordinator::_init_flag;
-    std::once_flag PgLogCoordinator::_shutdown_flag;
-
-    PgLogCoordinator*
-    PgLogCoordinator::_init()
-    {
-        _instance = new PgLogCoordinator();
-        return _instance;
-    }
-
-    void
-    PgLogCoordinator::_shutdown()
-    {
-        // static method
-        if (_instance == nullptr) {
-            return;
-        }
-        _instance->_internal_shutdown();
-    }
 
     void
     PgLogCoordinator::_internal_shutdown()
     {
-        _shutting_down = true;
-
         std::unique_lock lock(_mutex);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
         for (auto &lm: _log_mgrs) {
@@ -39,21 +16,6 @@ namespace springtail::pg_log_mgr {
             lm.second->join();
         }
         lock.unlock();
-
-        _shutdown_complete = true;
-        _shutdown_cv.notify_all();
-    }
-
-    void
-    PgLogCoordinator::wait_shutdown()
-    {
-        std::unique_lock lock(_shutdown_mutex);
-        _shutdown_cv.wait(lock, [this] { return _shutdown_complete==true; });
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
     }
 
     void

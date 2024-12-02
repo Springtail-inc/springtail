@@ -14,7 +14,7 @@ namespace {
     {
         pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
         if (log_co != nullptr) {
-            log_co->shutdown();
+            log_co->notify_shutdown();
         }
     }
 }
@@ -58,6 +58,7 @@ int main(int argc, char *argv[])
     }
 
     log_co->wait_shutdown();
+    pg_log_mgr::PgLogCoordinator::shutdown();
 
     return 0;
 }
