@@ -8,35 +8,75 @@
 #include <common/counter.hh>
 #include <common/singleton.hh>
 
+#include <redis/pubsub_thread.hh>
+
 #include <pg_log_mgr/pg_log_mgr.hh>
 
 namespace springtail::pg_log_mgr {
 
     class PgLogCoordinator final : public Singleton<PgLogCoordinator> {
     public:
-
-        /** Add a database to the coordinator */
-        void add_database(uint64_t db_id);
-
-        /** Remove database */
-        void remove_database(uint64_t db_id);
-
         /** Wait for shutdown of dbs */
         void wait_shutdown() { _shutdown_counter.wait(); }
 
         /** Notify coordinator to shutdown */
         void notify_shutdown() { _shutdown_counter.decrement(); }
 
+        /**
+         * @brief Initialization function
+         *
+         */
+        void init();
+
     private:
         friend class Singleton<PgLogCoordinator>;
-        PgLogCoordinator() : _shutdown_counter(1) {}
+        PgLogCoordinator() : _shutdown_counter(1), _config_sub_thread(1, true) {}
         ~PgLogCoordinator() = default;
 
         Counter _shutdown_counter;
-        std::mutex _mutex;                            ///< mutex for _log_mgrs map
-        std::map<uint64_t, PgLogMgrPtr> _log_mgrs;    ///< map of db_id to log mgr
+        std::mutex _mutex;                              ///< mutex for _log_mgrs map
+        std::map<uint64_t, PgLogMgrPtr> _log_mgrs;      ///< map of db_id to log mgr
+        PubSubThread _config_sub_thread;                ///< pubsub thread for redis config database
+        std::string _repl_log;                          ///< common part of replication log path
+        std::string _trans_log;                         ///< common part of transcation log path
+        uint64_t _db_instance_id;                       ///< database instance id
+        std::string _host;                              ///< host name for connecting to database
+        std::string _user_name;                         ///< user name for connecting to database
+        std::string _password;                          ///< password for connecting to database
+        int _port;                                      ///< port for connecting to database
 
-        /** Internal instance shutdown */
+        /**
+         * @brief Function for performing shutdown that is called by Singleton
+         *
+         */
         void _internal_shutdown();
+
+        /**
+         * @brief Function for initialization of existing databases and starting a log manager instance
+         *      per database
+         *
+         */
+        void _init_db_change_subscriber();
+
+        /**
+         * @brief Function to processes database add and remove actions
+         *
+         * @param msg - message from redis
+         */
+        void _handle_db_changes(const std::string &msg);
+
+        /**
+         * @brief Add database and start its own log manager
+         *
+         * @param db_id - database id
+         */
+        void _add_database(uint64_t db_id);
+
+        /**
+         * @brief Remove database and stop appropriate log manager
+         *
+         * @param db_id - database id
+         */
+        void _remove_database(uint64_t db_id);
     };
 }
