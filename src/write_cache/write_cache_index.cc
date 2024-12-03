@@ -22,6 +22,14 @@ namespace springtail
     }
 
     void
+    WriteCacheIndex::commit(std::vector<uint64_t> pg_xids, uint64_t xid)
+    {
+        for (auto &p: _partitions) {
+            p->commit(pg_xids, xid);
+        }
+    }
+
+    void
     WriteCacheIndex::drop_table(uint64_t tid, uint64_t pg_xid)
     {
         WriteCacheTableSetPtr partition = _get_partition(tid);
@@ -33,6 +41,16 @@ namespace springtail
     {
         for (auto &p: _partitions) {
             p->abort(pg_xid);
+        }
+    }
+
+    void
+    WriteCacheIndex::abort(std::vector<uint64_t> pg_xids)
+    {
+        for (auto &p: _partitions) {
+            for (auto &pg_xid: pg_xids) {
+                p->abort(pg_xid);
+            }
         }
     }
 

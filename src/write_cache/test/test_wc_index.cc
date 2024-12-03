@@ -27,7 +27,8 @@ protected:
         WriteCacheIndexPtr index;
     };
 
-    TEST_F(WriteCacheIndexTest, AddExtent) {
+    TEST_F(WriteCacheIndexTest, AddExtent)
+    {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
@@ -47,7 +48,8 @@ protected:
         EXPECT_EQ(extents[0]->data, data);
     }
 
-    TEST_F(WriteCacheIndexTest, CommitAndGetTids) {
+    TEST_F(WriteCacheIndexTest, CommitAndGetTids)
+    {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
@@ -66,7 +68,8 @@ protected:
         EXPECT_EQ(tids[0], tid);
     }
 
-    TEST_F(WriteCacheIndexTest, DropTable) {
+    TEST_F(WriteCacheIndexTest, DropTable)
+    {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         ExtentHeader header(ExtentType(), pg_xid, 100);
@@ -80,7 +83,9 @@ protected:
         EXPECT_EQ(cursor, 0);
         EXPECT_TRUE(extents.empty());
     }
-    TEST_F(WriteCacheIndexTest, Abort) {
+
+    TEST_F(WriteCacheIndexTest, Abort)
+    {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         ExtentHeader header(ExtentType(), pg_xid, 100);
@@ -95,7 +100,8 @@ protected:
         EXPECT_TRUE(extents.empty());
     }
 
-    TEST_F(WriteCacheIndexTest, EvictTable) {
+    TEST_F(WriteCacheIndexTest, EvictTable)
+    {
         uint64_t tid = 1;
         uint64_t xid = 200;
         uint64_t pg_xid = 100;
@@ -116,7 +122,8 @@ protected:
         EXPECT_TRUE(extents.empty());
     }
 
-    TEST_F(WriteCacheIndexTest, EvictXid) {
+    TEST_F(WriteCacheIndexTest, EvictXid)
+    {
         uint64_t tid = 1;
         uint64_t xid = 200;
         uint64_t pg_xid = 100;
@@ -149,7 +156,8 @@ protected:
         }
     }
 
-    TEST_F(WriteCacheIndexTest, AddExtentParallel) {
+    TEST_F(WriteCacheIndexTest, AddExtentParallel)
+    {
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
@@ -191,7 +199,8 @@ protected:
         }
     }
 
-    TEST_F(WriteCacheIndexTest, AddAndFetchMultipleTids) {
+    TEST_F(WriteCacheIndexTest, AddAndFetchMultipleTids)
+    {
         uint64_t pg_xid = 100;
         uint64_t lsn_start = 200;
         uint64_t count = 100;
@@ -225,6 +234,81 @@ protected:
         ASSERT_EQ(fetched_tids.size(), num_tids);
         for (uint64_t tid = 1; tid <= num_tids; ++tid) {
             EXPECT_NE(std::find(fetched_tids.begin(), fetched_tids.end(), tid), fetched_tids.end());
+        }
+    }
+
+    TEST_F(WriteCacheIndexTest, MultiXidExtents)
+    {
+        // test multiple transactions w/multiple pg_xids
+        uint64_t tid = 1;
+        uint64_t pg_xid = 100;
+        uint64_t xid = 150;
+        uint64_t lsn = 200;
+        int xid_count = 7;
+        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentPtr data = std::make_shared<Extent>(header);
+
+        std::vector<uint64_t> pg_xids;
+        for (int i = 0; i < xid_count; i++) {
+            index->add_extent(tid, pg_xid + i, lsn+i, data);
+            pg_xids.push_back(pg_xid + i);
+        }
+
+        index->commit(pg_xids, xid);
+
+        uint64_t cursor = 0;
+        std::vector<WriteCacheIndexExtentPtr> fetched_extents;
+        while (true) {
+            auto extents = index->get_extents(tid, xid, 2, cursor);
+            if (extents.empty()) {
+                break;
+            }
+            EXPECT_LE(extents.size(), 2);
+            fetched_extents.insert(fetched_extents.end(), extents.begin(), extents.end());
+        }
+        ASSERT_EQ(fetched_extents.size(), xid_count);
+        EXPECT_EQ(cursor, xid_count);
+        for (int i = 0; i < xid_count; i++) {
+            EXPECT_EQ(fetched_extents[i]->xid, xid);
+            EXPECT_EQ(fetched_extents[i]->xid_seq, lsn+i);
+            EXPECT_EQ(fetched_extents[i]->data, data);
+        }
+    }
+
+    TEST_F(WriteCacheIndexTest, MultiXidTids)
+    {
+        // test multiple transactions w/multiple pg_xids
+        uint64_t tid = 1;
+        uint64_t pg_xid = 100;
+        uint64_t xid = 150;
+        uint64_t lsn = 200;
+        int xid_count = 7;
+        ExtentHeader header(ExtentType(), xid, 100);
+        ExtentPtr data = std::make_shared<Extent>(header);
+
+        std::vector<uint64_t> pg_xids;
+        for (int i = 0; i < xid_count; i++) {
+            index->add_extent(tid + i, pg_xid + i, lsn+i, data);
+            pg_xids.push_back(pg_xid + i);
+        }
+
+        index->commit(pg_xids, xid);
+
+        uint64_t cursor = 0;
+        std::set<uint64_t> fetched_tids;
+        while (true) {
+            auto tids = index->get_tids(xid, 2, cursor);
+            if (tids.empty()) {
+                break;
+            }
+            EXPECT_LE(tids.size(), 2);
+            fetched_tids.insert(tids.begin(), tids.end());
+        }
+        ASSERT_EQ(fetched_tids.size(), xid_count);
+        EXPECT_EQ(cursor, xid_count);
+        int i = 0;
+        for (auto f_tid : fetched_tids) {
+            EXPECT_EQ(f_tid, tid + (i++));
         }
     }
 
