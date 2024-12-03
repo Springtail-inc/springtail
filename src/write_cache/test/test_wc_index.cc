@@ -240,6 +240,7 @@ protected:
     TEST_F(WriteCacheIndexTest, MultiXidExtents)
     {
         // test multiple transactions w/multiple pg_xids
+        // fetching extents using cursor
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
@@ -278,6 +279,7 @@ protected:
     TEST_F(WriteCacheIndexTest, MultiXidTids)
     {
         // test multiple transactions w/multiple pg_xids
+        // fetching tids using cursor
         uint64_t tid = 1;
         uint64_t pg_xid = 100;
         uint64_t xid = 150;
