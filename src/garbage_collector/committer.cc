@@ -282,7 +282,8 @@ namespace springtail::gc {
                 auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
                 for (auto ddl: ddls) {
                     const auto it = ddl.find("action");
-                    if (it != ddl.end() && *it == "create_index") {
+                    if (it != ddl.end() && (*it == "create_index" ||
+                            *it == "delete_index")) {
                         // The index DDLs will be committed to the FDWs after indexing is completed.
                         index_ddls.push_back(std::move(ddl));
                     } else {
@@ -294,7 +295,14 @@ namespace springtail::gc {
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
                 for (auto const& ddl: index_ddls) {
-                    _indexer->build({db_id, xid, ddl});
+                    auto action = ddl["action"];
+                    if (action == "create_index") {
+                        _indexer->build({db_id, xid, ddl});
+                    } else if (action == "drop_index") {
+                        _indexer->drop(db_id, ddl["id"], xid);
+                    } else {
+                        assert(false);
+                    }
                     _indexer->wait_for_completion(db_id);
                 }
             }

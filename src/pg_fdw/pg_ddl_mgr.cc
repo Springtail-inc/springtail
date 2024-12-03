@@ -579,7 +579,13 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "create_index") {
+            // TODO: do something? 
             SPDLOG_ERROR("CREATE INDEX");
+            return "";
+        }
+        else if (action == "drop_index") {
+            // TODO: do something? 
+            SPDLOG_ERROR("DROP INDEX");
             return "";
         }
 

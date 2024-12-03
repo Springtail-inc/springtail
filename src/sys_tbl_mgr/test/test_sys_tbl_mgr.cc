@@ -50,7 +50,8 @@ namespace {
         PgMsgTable _create_table(uint64_t tid, const std::string &name);
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
-        PgMsgIndex _create_index(uint64_t db_id, const std::string& name);
+        PgMsgIndex _create_index(uint64_t tid, const std::string& name);
+        PgMsgDropIndex _drop_index(uint64_t index_id);
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
@@ -97,6 +98,22 @@ namespace {
     {
         auto xid = _next_lsn();
         _client->set_index_state(_db, xid, table_id, index_id, state);
+    }
+
+    PgMsgDropIndex SysTblMgr_Test::_drop_index(uint64_t index_id)
+    {
+        auto xid = _next_lsn();
+
+        PgMsgDropIndex msg;
+
+        msg.lsn = xid.lsn;
+        msg.xid = xid.xid;
+        msg.schema = "public";
+        msg.oid = index_id;
+
+        _client->drop_index(_db, xid, msg);
+
+        return msg;
     }
 
     PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name) {
@@ -166,7 +183,7 @@ namespace {
         _client->ping();
     }
 
-    // Tests table create / alter / drop
+    // Tests index create
     TEST_F(SysTblMgr_Test, CreateIndex) {
         uint64_t tid = 100000;
 
@@ -174,7 +191,7 @@ namespace {
         _create_table(tid, "x");
         _finalize();
         
-        auto &&schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        auto &&schema_meta = _client->get_schema(_db, tid, _xid);
 
         // must have a primary index
         ASSERT_EQ(schema_meta.indexes.size(), 1);
@@ -183,7 +200,7 @@ namespace {
         PgMsgIndex &&msg = _create_index(tid, "x");
         _finalize();
 
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, _xid);
         ASSERT_EQ(schema_meta.indexes.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
@@ -201,7 +218,7 @@ namespace {
         // change the index to the ready state
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
         _finalize();
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, _xid);
         ASSERT_EQ(schema_meta.indexes.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
@@ -213,9 +230,50 @@ namespace {
         // delete the index
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::DELETED);
         _finalize();
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, _xid);
         ASSERT_EQ(schema_meta.indexes.size(), 1);
     }
+
+    // Tests index drop
+    TEST_F(SysTblMgr_Test, DropIndex) {
+        uint64_t tid = 100000;
+
+        // create the table
+        _create_table(tid, "x");
+        _finalize();
+        
+        auto &&schema_meta = _client->get_schema(_db, tid, _xid);
+
+        // must have a primary index
+        ASSERT_EQ(schema_meta.indexes.size(), 1);
+        ASSERT_EQ(schema_meta.indexes[0].columns.size(), 1);
+
+        PgMsgIndex &&msg = _create_index(tid, "x");
+        _finalize();
+
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
+        ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
+
+        // note: column positions start with 1
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].idx_position, 0);
+        ASSERT_EQ(schema_meta.indexes[1].columns[0].position, 2);
+
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
+        ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
+
+        auto index_id = schema_meta.indexes[1].id;
+        ASSERT_EQ(index_id, 1234);
+
+        //drop index
+        _drop_index(1234);
+        _finalize();
+
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta.indexes.size(), 1);
+    }
+
 
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop) {

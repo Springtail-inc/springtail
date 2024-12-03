@@ -197,9 +197,66 @@ namespace springtail::sys_tbl_mgr {
     nlohmann::json
     Service::_drop_index(const DropIndexRequest &request)
     {
-        return {};
-    }
+        XidLsn xid(request.xid, request.lsn);
 
+        nlohmann::json ddl;
+        ddl["action"] = "drop_index";
+        ddl["schema"] = request.schema;
+        ddl["id"] = request.index_id;
+        ddl["name"] = request.name;
+
+        auto names_t = _get_system_table(request.db_id, sys_tbl::IndexNames::ID);
+        auto names_schema = names_t->extent_schema();
+        auto names_fields = names_schema->get_fields();
+
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, request.index_id, 0, 0);
+
+        uint64_t index_xid = 0;
+        uint64_t table_id = 0;
+        bool is_unique;
+        std::string name;
+        std::string schema;
+        bool found = false;
+
+        // find the last XID for this index
+        for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
+            auto &row = *names_i;
+            uint64_t index_id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row);
+
+            if (index_id < request.index_id) {
+                continue;
+            }
+            if (request.index_id != index_id) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No data found for index {} -- {}", request.db_id, index_id);
+                break;
+            }
+
+            index_xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
+            table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
+            name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
+            schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
+            found = true;
+        }
+
+        if (found) {
+            assert(request.xid > index_xid);
+
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", request.db_id, table_id, request.index_id);
+            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
+            auto tuple = sys_tbl::IndexNames::Data::tuple(schema,
+                    name,
+                    table_id,
+                    request.index_id,
+                    xid.xid,
+                    xid.lsn,
+                    sys_tbl::IndexNames::State::DELETED,
+                    is_unique );
+            index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+        }
+
+        return ddl;
+    }
 
     void
     Service::create_table(DDLStatement& _return,
@@ -943,11 +1000,11 @@ namespace springtail::sys_tbl_mgr {
             {
                 uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
                 uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row);
+                index_xid = {xid, lsn};
                 if (access_xid < index_xid) {
                     SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid, xid, lsn);
                     continue;
                 }
-                index_xid = {xid, lsn};
             }
 
             IndexInfo info;

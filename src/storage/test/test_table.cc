@@ -92,13 +92,9 @@ namespace {
         std::filesystem::path _base_dir;
         uint64_t _db_id = 1;
 
-        TablePtr
-        _create_table(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
+        // secondary keys
+        std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
         {
-            TableMetadata tbl_meta;
-            tbl_meta.roots = roots;
-            tbl_meta.snapshot_xid = 1;
-
             std::vector<Index> keys;
             for (auto const& v: roots) {
                 if (v.index_id == constant::INDEX_PRIMARY) {
@@ -114,6 +110,17 @@ namespace {
                 idx.columns.emplace_back(0, 1);
                 keys.push_back(idx);
             }
+            return keys;
+        }
+
+        TablePtr
+        _create_table(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
+        {
+            TableMetadata tbl_meta;
+            tbl_meta.roots = roots;
+            tbl_meta.snapshot_xid = 1;
+
+            auto keys = _make_keys(table_id, roots);
 
             return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
                                            _primary_keys, keys,
@@ -127,21 +134,7 @@ namespace {
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
-            std::vector<Index> keys;
-            for (auto const& v: roots) {
-                if (v.index_id == constant::INDEX_PRIMARY) {
-                    continue;
-                }
-                
-                Index idx;
-                idx.id = v.index_id;
-                idx.table_id = table_id;
-                idx.name="table_id";
-                idx.is_unique = false;
-                idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
-                idx.columns.emplace_back(0, 1);
-                keys.push_back(idx);
-            }
+            auto keys = _make_keys(table_id, roots);
 
             return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,

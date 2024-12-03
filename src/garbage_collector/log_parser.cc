@@ -879,10 +879,8 @@ namespace springtail::gc {
                                 XidLsn xid(state->entry.xid, state->lsn);
                                 auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_index(state->entry.db_id, xid, index_msg);
 
-                                // note: we don't notify the backlog until the entire XID is
-                                //       processed since there might be additional schema changes
-
-                                // no need to record the DDL statement for this change
+                                // Send the DDL statement to GC2
+                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
                             }
                         }
                         break;

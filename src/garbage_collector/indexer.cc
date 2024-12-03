@@ -108,7 +108,8 @@ namespace springtail::gc {
                 auto root = _build(st, key, params);
                 _commit_build(root, key, params);
             } else {
-//TODO:  _drop(st);
+                SPDLOG_INFO("Drop index {}, {}, {}", key.first, key.second, params._xid);
+                //TODO: implement drop index
             }
         }
         SPDLOG_INFO("Indexer thread joined");
@@ -207,7 +208,7 @@ namespace springtail::gc {
             work_item = _work_set[key];
             _work_set.erase(key);
 
-            // if all work items with the give xid are completed, commit redis
+            // if all work items with the given xid are completed, commit redis
             auto it = std::ranges::find_if(_work_set,
                     [&](auto const& v) {
                         return v.first.first == db_id && v.second._xid == idx._xid;
