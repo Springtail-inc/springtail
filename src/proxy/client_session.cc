@@ -25,12 +25,12 @@
 namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection,
-                                 ProxyServerPtr server,
-                                 bool shadow_mode)
+                                 ProxyServerPtr server)
 
         : Session(connection, server, CLIENT),
           _stmt_cache(STATEMENT_CACHE_SIZE),
-          _shadow_mode(shadow_mode)
+          _shadow_mode(server->mode() == ProxyServer::MODE::SHADOW),
+          _primary_mode(server->mode() == ProxyServer::MODE::PRIMARY)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
@@ -1058,6 +1058,11 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        if (_primary_mode) {
+            // send to primary session force to !readonly
+            is_readonly = false;
+        }
+
         // not in shadow mode or not readonly, send to single server
         if (!_shadow_mode || !is_readonly) {
             // select a server session and notify it of this message
@@ -1099,7 +1104,12 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
-        if (type == REPLICA && DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
+        if (_primary_mode) {
+            // force primary mode
+            type = PRIMARY;
+        }
+
+        if (type == REPLICA && !DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
             type = PRIMARY;
         }
 
@@ -1153,6 +1163,7 @@ namespace springtail::pg_proxy {
             instance = DatabaseMgr::get_instance()->get_primary_instance();
         } else {
             // get a replica session
+            assert (_primary_mode == false);
             instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
         }
         assert (instance != nullptr);
