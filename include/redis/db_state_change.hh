@@ -7,14 +7,14 @@
 
 namespace springtail {
     namespace redis::db_state_change {
-        /** Database state names that are used in reddis */
+        /** Database state names that are used in redis */
         static constexpr char const * const REDIS_STATE_STARTUP = "startup";
         static constexpr char const * const REDIS_STATE_INITIALIZE = "initialize";
         static constexpr char const * const REDIS_STATE_RUNNING = "running";
         static constexpr char const * const REDIS_STATE_SYNCING = "synchronizing";
         static constexpr char const * const REDIS_STATE_STOPPED = "stopped";
 
-        /** Database action names that are used in reddis */
+        /** Database action names that are used in redis */
         static constexpr char const * const REDIS_ACTION_ADD    = "db_add";
         static constexpr char const * const REDIS_ACTION_REMOVE = "db_remove";
 
