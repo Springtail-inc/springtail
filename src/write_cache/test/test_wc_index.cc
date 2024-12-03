@@ -14,8 +14,8 @@
 using namespace springtail;
 
 namespace {
-class WriteCacheIndexTest : public ::testing::Test {
-protected:
+    class WriteCacheIndexTest : public ::testing::Test {
+    protected:
         void SetUp() override {
             // Init springtail
             springtail_init();
