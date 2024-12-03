@@ -173,18 +173,16 @@ namespace pg_proxy {
     /**
      * @brief Cache of user credentials. Queries Redis for creds.
      */
-    using GetReplicatedDatabaseFn = std::function<std::optional<std::string> ()>;
     class UserMgr final : public SingletonWithThread<UserMgr> {
     public:
         /**
          * @brief Initialize UserMgr object
          *
-         * @param get_db_fn - function for getting any available database name
          * @param sleep_interval - UserMgr thread sleep interval
          */
-        void init(GetReplicatedDatabaseFn get_db_fn, const uint32_t sleep_interval) {
-            _get_db_fn = get_db_fn;
+        void init(const uint32_t sleep_interval) {
             _sleep_interval = sleep_interval;
+            start_thread();
         }
 
         /**
@@ -238,7 +236,6 @@ namespace pg_proxy {
             }
         };
 
-        GetReplicatedDatabaseFn _get_db_fn;     ///< function for getting one of the replicated database names for creating connection to the database
         mutable std::shared_mutex _mutex;       ///< mutex for storage access
         std::set<UserPtr, CompareUserByName> _users; ///< collection of users
 

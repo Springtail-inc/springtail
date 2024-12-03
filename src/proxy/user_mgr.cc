@@ -2,6 +2,7 @@
 
 #include <common/properties.hh>
 #include <pg_repl/libpq_connection.hh>
+#include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/scram.hh>
@@ -104,7 +105,7 @@ namespace pg_proxy {
                     int port;
                     Properties::get_primary_db_config(host, port, user, password);
 
-                    auto db_name = _get_db_fn();
+                    auto db_name = DatabaseMgr::get_instance()->get_any_replicated_db_name();
                     if (db_name.has_value()) {
                         conn.connect(host, db_name.value(), user, password, port, false);
                     } else {

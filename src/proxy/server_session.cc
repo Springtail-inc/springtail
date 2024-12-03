@@ -926,7 +926,7 @@ namespace springtail::pg_proxy {
     {
         if (instance == nullptr) {
             assert (type == Session::Type::PRIMARY);
-            instance = server->get_primary_instance();
+            instance = DatabaseMgr::get_instance()->get_primary_instance();
         }
 
         auto connection = instance->create_connection();
