@@ -11,6 +11,9 @@ namespace springtail::pg_log_mgr {
     void
     PgLogCoordinator::_internal_shutdown()
     {
+        // shutdown redis pubsub thread
+        _config_sub_thread.shutdown();
+
         // shut down all log managers
         std::unique_lock lock(_mutex);
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Shutting down {} log mgrs", _log_mgrs.size());
@@ -19,9 +22,6 @@ namespace springtail::pg_log_mgr {
             lm.second->join();
         }
         lock.unlock();
-
-        // shutdown redis pubsub thread
-        _config_sub_thread.shutdown();
     }
 
     void
@@ -66,9 +66,6 @@ namespace springtail::pg_log_mgr {
     {
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Adding database {}", db_id);
 
-        // acquire lock
-        std::unique_lock lock(_mutex);
-
         if (_log_mgrs.contains(db_id)) {
             return;
         }
@@ -81,6 +78,9 @@ namespace springtail::pg_log_mgr {
         std::string db_name = db_config["name"];
         std::string pub_name = db_config["publication_name"];
         std::string slot_name = db_config["replication_slot"];
+
+        // acquire lock
+        std::unique_lock lock(_mutex);
 
         // create log mgr
         PgLogMgrPtr log_mgr = std::make_shared<PgLogMgr>(db_id, repl_log_path, xact_log_path, _host, db_name, _user_name, _password, pub_name, slot_name, _port);

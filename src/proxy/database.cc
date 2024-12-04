@@ -326,7 +326,6 @@ namespace springtail::pg_proxy {
         for (const auto& db_pair: db_list) {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database (id, name): ({}, {})", get<0>(db_pair), get<1>(db_pair));
             _replicated_databases[std::get<1>(db_pair)] = std::get<0>(db_pair);
-            // add_replicated_database(std::get<0>(db_pair), std::get<1>(db_pair));
         }
     }
 
