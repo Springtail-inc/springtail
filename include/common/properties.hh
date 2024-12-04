@@ -127,6 +127,13 @@ namespace springtail {
         /** Helper to get write cache hostname */
         static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
 
+        /** Change file override flag for testing */
+        static void set_properties_file_override_flag(bool flag) {
+            if (_instance != nullptr) {
+                _instance->_properties_file_override = flag;
+            }
+        }
+
     private:
         /** static _instance singleton */
         static Properties *_instance;

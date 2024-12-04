@@ -452,6 +452,17 @@ namespace pg_proxy {
             }
             return false;
         }
+
+        /**
+         * @brief Remove all database tables and schemas
+         *
+         * @param db_id - database id
+         */
+        void remove_database(uint64_t db_id) {
+            std::unique_lock storage_lock(_storage_mutex);
+            _storage.erase(db_id);
+        }
+
     private:
         std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
         std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
@@ -472,19 +483,7 @@ namespace pg_proxy {
         void init();
 
         /**
-         * @brief Add replicated database id and name the collection of replicated databases
-         *          and setup initial state per database
-         *
-         * @param db_id - database id
-         * @param dbname - database name
-         */
-        void add_replicated_database(const uint64_t db_id, const std::string &dbname) {
-            std::unique_lock lock(_db_mutex);
-            _replicated_databases[dbname] = db_id;
-        }
-
-        /**
-         * @brief Get a name of an arbitrary replicated databasethe for running a user query in UserMgr
+         * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
          *
          * @return std::optional<std::string> - name of a replicated database if found
          */
@@ -504,8 +503,12 @@ namespace pg_proxy {
          * @return uint64_t - database id
          */
         std::optional<uint64_t> get_database_id(const std::string &dbname) {
+            std::optional<uint64_t> ret;
             std::shared_lock lock(_db_mutex);
-            return _replicated_databases[dbname];
+            if (_replicated_databases.contains(dbname)) {
+                ret = _replicated_databases[dbname];
+            }
+            return ret;
         }
 
         /**
@@ -651,6 +654,13 @@ namespace pg_proxy {
         void _handle_db_table_change(const std::string &msg);
 
         /**
+         * @brief Replicated database change handling
+         *
+         * @param msg - message
+         */
+        void _handle_replicated_dbs_change(const std::string &msg);
+
+        /**
          * @brief Initialize pubsub thread for database state change
          *
          */
@@ -661,6 +671,26 @@ namespace pg_proxy {
          *
          */
         void _init_db_tables_subscriber();
+
+        /**
+         * @brief Initialize pubsub thread for adding and removing databases
+         *
+         */
+        void _init_replicated_dbs_subscriber();
+
+        /**
+         * @brief add replicated database
+         *
+         * @param db_id - database id
+         */
+        void _add_replicated_database(uint64_t db_id);
+
+        /**
+         * @brief remove replicated database
+         *
+         * @param db_id - database id
+         */
+        void _remove_replicated_database(uint64_t db_id);
     };
 
 } // namespace pg_proxy
