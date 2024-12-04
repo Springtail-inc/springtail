@@ -303,8 +303,8 @@ namespace springtail::gc {
                     } else {
                         assert(false);
                     }
-                    _indexer->wait_for_completion(db_id);
                 }
+                _indexer->wait_for_completion(db_id);
             }
 
             if (!completed_ddls.is_null()) {

@@ -140,6 +140,8 @@ namespace springtail::gc {
                     });
             if (it == _work_set.end()) {
                 redis_commit = true;
+            } else {
+                SPDLOG_INFO("Pending items found {}, {}, {}", db_id, index_id, idx._xid);
             }
 
             assert(work_item._ddl.is_null());
@@ -164,24 +166,22 @@ namespace springtail::gc {
         root->truncate();
         root->finalize();
 
+        // it will be committed when all DDL's for this XID are processed
         if (redis_commit) {
             sys_tbl_mgr::Client::get_instance()->finalize(db_id, work_item._xid);
             _redis_ddl.commit_index_ddl(db_id, idx._xid);
-        } else {
-            SPDLOG_INFO("Pending items found {}, {}, {}", db_id, index_id, idx._xid);
-            assert(false);
         }
+        SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
 
     MutableBTreePtr Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
     {
-        constexpr int CHECK_PERIOD = 100;
+        constexpr int DROP_CHECK_PERIOD = 1000;
 
         SPDLOG_DEBUG_MODULE(LOG_GC, "Build index: {}:{} - {}", key.first, key.second, idx._ddl.dump());
 
-        auto db_id = key.first;
+        auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
-        auto index_id = idx._ddl["id"];
 
         assert(idx._ddl["action"] == "create_index");
 
@@ -203,8 +203,7 @@ namespace springtail::gc {
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
-        uint32_t row_id = 0;
-        uint64_t saved_extent_id = 0;
+        uint64_t row_id = 0;
 
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
@@ -212,17 +211,14 @@ namespace springtail::gc {
                 root->truncate();
                 return {};
             }
-            if (row_id % CHECK_PERIOD == 0 && !_check_work_state(key)) {
+            // check if the index was dropped
+            if (row_id % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
                 return root;
             }
             auto extent_id = row_i.extent_id();
-            if (saved_extent_id != extent_id) {
-                row_id = 0;
-                saved_extent_id = extent_id;
-            }
 
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(row_id);
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(static_cast<uint32_t>(row_id));
 
             // insert key
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
@@ -230,17 +226,18 @@ namespace springtail::gc {
 
             ++row_id;
         }
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_id);
         return root;
     }
 
-    bool Indexer::_check_work_state(const Key& key) {
+    bool Indexer::_was_dropped(const Key& key) {
         std::unique_lock g(_m);
         auto const& params = _work_set[key];
         // index drop requested while we've been building it
         if (params._ddl.is_null()) {
-            return false;
+            return true;
         }
-        return true;
+        return false;
     }
 
     void Indexer::_commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx) 
@@ -273,41 +270,30 @@ namespace springtail::gc {
                     });
             if (it == _work_set.end()) {
                 redis_commit = true;
-            }
-
-            //TODO: remove the assert and handle the case when the index was deleted while building
-            // This case should never happen in the synchronized version
-            assert(!work_item._ddl.is_null());
-
-            if (!work_item._ddl.is_null()) {
-                auto extent_id = root->finalize();
-                auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
-                meta.roots.emplace_back(key.second, extent_id);
-                sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
-            } else{
-                root->truncate();
-                //TODO: (use set_index_sate(...sys_tbl::IndexNames::State::DELETED)).
-                //this should be addressed when we support parallel processing
+            } else {
+                SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
             }
 
             _cv_done.notify_one();
         }
 
-        // notify redis tables
+        if (!work_item._ddl.is_null()) {
+            auto extent_id = root->finalize();
+            auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
+            meta.roots.emplace_back(key.second, extent_id);
+            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
+        } else{
+            // the index was deleted while we were building it
+            root->truncate();
+            //TODO: figure out out how to change the index state here to DELETED
+            // note: another state has been waiting to be finalized.
+            // Somehow we need to rollback.
+        }
+
+        // it will be committed when all DDL's for this XID are processed
         if (redis_commit) {
             sys_tbl_mgr::Client::get_instance()->finalize(key.first, work_item._xid);
             _redis_ddl.commit_index_ddl(key.first, idx._xid);
-        } else {
-            SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
-            //TODO: not sure if it's expected?
-            assert(false);
-        }
-
-        if (work_item._ddl.is_null()) {
-            assert(!redis_commit);
-            // we got drop index while building it, abort both redis ddls
-            _redis_ddl.abort_index_ddl(key.first, work_item._xid);
-            _redis_ddl.abort_index_ddl(key.first, idx._xid);
         }
     }
 }

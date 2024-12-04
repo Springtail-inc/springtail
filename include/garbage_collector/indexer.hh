@@ -69,8 +69,7 @@ namespace springtail::gc {
 
         void _drop(std::stop_token st, const Key& key, const IndexParams& idx);
 
-        // returns false if cancelled
-        bool _check_work_state(const Key& key);
+        bool _was_dropped(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx);
 
         // this is to notify when an index modifiction is completed 
