@@ -341,11 +341,13 @@ namespace springtail::pg_proxy {
         const std::string &db_name = iter->second;
         std::unique_lock db_name_lock(_db_mutex);
         _replicated_databases.insert(std::pair(db_name, db_id));
+        db_name_lock.unlock();
 
         // update database states
-        std::unique_lock db_state_lock(_db_state_mutex);
         redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
+        std::unique_lock db_state_lock(_db_state_mutex);
         _replicated_database_states[db_id] = db_state;
+        db_state_lock.unlock();
 
         // update database schemas and tables
         std::vector<std::pair<std::string, std::string>> schema_table_pairs;
@@ -371,10 +373,12 @@ namespace springtail::pg_proxy {
             return;
         }
         _replicated_databases.erase(db_name.value());
+        db_name_lock.unlock();
 
         // remove database from database states
         std::unique_lock db_state_lock(_db_state_mutex);
         _replicated_database_states.erase(db_id);
+        db_state_lock.unlock();
 
         // remove database from the schema and tables storage
         _schema_tables.remove_database(db_id);
