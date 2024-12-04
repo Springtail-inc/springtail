@@ -1,5 +1,7 @@
 #include "common/constants.hh"
 #include "thrift/sys_tbl_mgr/sys_tbl_mgr_types.h"
+#include <limits>
+#include <stdexcept>
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 
 #include <sys_tbl_mgr/service.hh>
@@ -60,6 +62,20 @@ namespace springtail::sys_tbl_mgr {
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
+    }
+
+    IndexInfo 
+    Service::_get_index_info(const GetIndexInfoRequest &request)
+    {
+        XidLsn xid(request.xid, request.lsn);
+        auto info = _find_index(request.db_id, request.index_id, xid);
+        if (!info) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
+                            request.db_id, request.xid, request.index_id);
+            throw std::runtime_error("Index not found");
+        }
+
+        return info->first;
     }
 
     bool
@@ -124,6 +140,17 @@ namespace springtail::sys_tbl_mgr {
         } else {
             _return.__set_status(StatusCode::ERROR);
         }
+    }
+
+    void 
+    Service::get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request)
+    {
+        SPDLOG_INFO("got get_index_info()");
+
+        // acquire a shared lock to ensure no one is doing a finalize
+        boost::shared_lock lock(_read_mutex);
+
+        _return = _get_index_info(request);
     }
 
     nlohmann::json
@@ -194,6 +221,67 @@ namespace springtail::sys_tbl_mgr {
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
+    std::optional<std::pair<IndexInfo, XidLsn>> 
+    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid)
+    {
+        auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
+        auto names_schema = names_t->extent_schema();
+        auto names_fields = names_schema->get_fields();
+
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
+
+        XidLsn index_xid;
+        uint64_t table_id = 0;
+        bool is_unique;
+        std::string name;
+        std::string schema;
+        uint8_t state;
+        bool found = false;
+
+        // find the last XID for this index
+        for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
+            auto &row = *names_i;
+            uint64_t id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row);
+
+            if (id < index_id) {
+                continue;
+            }
+            if (index_id != id) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No data found for index {} -- {}", db_id, index_id);
+                break;
+            }
+
+            {
+                uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
+                uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row);
+                index_xid = {xid, lsn};
+                if (access_xid < index_xid) {
+                    continue;
+                }
+            }
+
+            table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
+            name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
+            schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
+            state = names_fields->at(sys_tbl::IndexNames::Data::STATE)->get_uint8(row);
+            found = true;
+        }
+
+        if (!found) {
+            return {};
+        }
+
+        IndexInfo info;
+        info.id = index_id;
+        info.schema = schema;
+        info.name = name;
+        info.is_unique = is_unique;
+        info.table_id = table_id;
+        info.state = state;
+        return {{info, index_xid}};
+    }
+
     nlohmann::json
     Service::_drop_index(const DropIndexRequest &request)
     {
@@ -211,49 +299,28 @@ namespace springtail::sys_tbl_mgr {
 
         auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, request.index_id, 0, 0);
 
-        uint64_t index_xid = 0;
-        uint64_t table_id = 0;
-        bool is_unique;
-        std::string name;
-        std::string schema;
-        bool found = false;
+        //find the last record for the index id
+        auto info = _find_index(request.db_id, request.index_id, {std::numeric_limits<decltype(request.xid)>::max(), 0});
 
-        // find the last XID for this index
-        for (auto names_i = names_t->lower_bound(search_key); names_i != names_t->end(); ++names_i) {
-            auto &row = *names_i;
-            uint64_t index_id = names_fields->at(sys_tbl::IndexNames::Data::INDEX_ID)->get_uint64(row);
-
-            if (index_id < request.index_id) {
-                continue;
-            }
-            if (request.index_id != index_id) {
-                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No data found for index {} -- {}", request.db_id, index_id);
-                break;
-            }
-
-            index_xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
-            table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
-            is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
-            name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
-            schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
-            found = true;
+        if (!info) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}",
+                            request.db_id, request.xid, request.index_id);
+            return ddl;
         }
 
-        if (found) {
-            assert(request.xid > index_xid);
+        assert(xid > info->second);
 
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", request.db_id, table_id, request.index_id);
-            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
-            auto tuple = sys_tbl::IndexNames::Data::tuple(schema,
-                    name,
-                    table_id,
-                    request.index_id,
-                    xid.xid,
-                    xid.lsn,
-                    sys_tbl::IndexNames::State::DELETED,
-                    is_unique );
-            index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
-        }
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", request.db_id, info->first.table_id, request.index_id);
+        auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
+        auto tuple = sys_tbl::IndexNames::Data::tuple(info->first.schema,
+                info->first.name,
+                info->first.table_id,
+                request.index_id,
+                xid.xid,
+                xid.lsn,
+                sys_tbl::IndexNames::State::DELETED,
+                info->first.is_unique );
+        index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
 
         return ddl;
     }
@@ -264,7 +331,7 @@ namespace springtail::sys_tbl_mgr {
     {
         SPDLOG_INFO("got create_table()");
 
-        // acquire a shared lock to ensure no one is doing a finalize
+        // acquire a shared lock to ensure no one is doing a inalize
         boost::shared_lock lock(_write_mutex);
 
         // perform the CREATE TABLE
@@ -560,6 +627,11 @@ namespace springtail::sys_tbl_mgr {
         std::map<uint64_t, TableMetadata> md_map;
         for (const auto &entry : _write[request.db_id]) {
             md_map[entry.first] = entry.second->finalize();
+        }
+        if (md_map.empty()) {
+            SPDLOG_INFO("Nothing to finalize: {}@{} >= {}",
+                    request.db_id, request.xid, write_xid);
+            return;
         }
 
         // block all read access while we swap access roots

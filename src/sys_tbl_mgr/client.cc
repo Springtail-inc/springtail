@@ -259,6 +259,23 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
+
+    IndexInfo 
+    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid)
+    {
+        ThriftClient c = _get_client();
+        IndexInfo result;
+
+        GetIndexInfoRequest request;
+        _set_request_common(request, db_id, xid);
+        request.index_id = index_id;
+
+        c.client->get_index_info(result, request);
+
+        return result;
+    }
+
+
     std::string 
     Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     {

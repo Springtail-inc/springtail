@@ -283,7 +283,7 @@ namespace springtail::gc {
                 for (auto ddl: ddls) {
                     const auto it = ddl.find("action");
                     if (it != ddl.end() && (*it == "create_index" ||
-                            *it == "delete_index")) {
+                            *it == "drop_index")) {
                         // The index DDLs will be committed to the FDWs after indexing is completed.
                         index_ddls.push_back(std::move(ddl));
                     } else {
@@ -307,7 +307,7 @@ namespace springtail::gc {
                 }
             }
 
-            if (!index_ddls.is_null() || !completed_ddls.is_null()) {
+            if (!completed_ddls.is_null()) {
                 // finalize the system metadata
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
             }

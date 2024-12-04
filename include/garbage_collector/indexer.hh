@@ -66,6 +66,9 @@ namespace springtail::gc {
                 >;
 
         MutableBTreePtr _build(std::stop_token st, const Key& key, const IndexParams& idx);
+
+        void _drop(std::stop_token st, const Key& key, const IndexParams& idx);
+
         // returns false if cancelled
         bool _check_work_state(const Key& key);
         void _commit_build(MutableBTreePtr root, const Key& key, const IndexParams& idx);

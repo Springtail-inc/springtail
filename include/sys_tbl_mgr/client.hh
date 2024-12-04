@@ -58,6 +58,11 @@ namespace springtail::sys_tbl_mgr {
          */
         void set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
+        /**
+         * Call get_index_info() on the SysTblMgr.
+         */
+        IndexInfo get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid);
+
 
         /**
          * Call drop_index() on the SysTblMgr.

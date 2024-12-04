@@ -215,6 +215,9 @@ namespace {
         auto index_id = schema_meta.indexes[1].id;
         ASSERT_EQ(index_id, 1234);
 
+        auto info = _client->get_index_info(_db, 1234, _xid);
+        ASSERT_EQ(info.id, 1234);
+
         // change the index to the ready state
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
         _finalize();

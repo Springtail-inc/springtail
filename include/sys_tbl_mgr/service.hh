@@ -44,6 +44,9 @@ namespace springtail::sys_tbl_mgr {
         /** Set the state of the index within the system tables. */
         void set_index_state(Status& _return, const SetIndexStateRequest &request) override;
 
+        /** Get the index info. */
+        void get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request) override;
+
         /** Creates a table within the system tables. */
         void create_table(DDLStatement& _return, const TableRequest &request) override;
 
@@ -289,6 +292,13 @@ namespace springtail::sys_tbl_mgr {
          */
         bool _set_index_state(const SetIndexStateRequest &request);
 
+        /** Performs an get_index_info() assuming that the correct locks are already held.
+         */
+        IndexInfo _get_index_info(const GetIndexInfoRequest &request);
+
+        /** This doesn't return information about index columns
+         */
+        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id, const XidLsn& xid);
 
         /**
          * Retrieve the current read XID for a db.

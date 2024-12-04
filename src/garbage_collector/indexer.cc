@@ -40,7 +40,7 @@ namespace springtail::gc {
         if (it == _work_set.end()) {
             // note: the work item has _ddl.empty() == true
             // it means to drop the index
-            _work_set[key] = {xid, {}};
+            _work_set[key] = {db_id, xid, {}};
             _queue.push(key);
             _cv.notify_one();
         } else {
@@ -108,11 +108,69 @@ namespace springtail::gc {
                 auto root = _build(st, key, params);
                 _commit_build(root, key, params);
             } else {
-                SPDLOG_INFO("Drop index {}, {}, {}", key.first, key.second, params._xid);
-                //TODO: implement drop index
+                _drop(st, key, params);
             }
         }
         SPDLOG_INFO("Indexer thread joined");
+    }
+
+    void Indexer::_drop(std::stop_token st, const Key& key, const IndexParams& idx)
+    {
+        assert(idx._ddl.is_null());
+
+        auto [db_id, index_id] = key;
+        SPDLOG_INFO("Drop index {}, {}, {}", db_id, index_id, idx._xid);
+
+        auto client = sys_tbl_mgr::Client::get_instance();
+
+        IndexParams work_item;
+        bool redis_commit = false;
+
+        {
+            std::unique_lock g(_m);
+
+            // fetch the latest state of the work item before we erase it
+            work_item = _work_set[key];
+            _work_set.erase(key);
+
+            // if all work items with the given xid are completed, commit redis
+            auto it = std::ranges::find_if(_work_set,
+                    [&](auto const& v) {
+                        return v.first.first == db_id && v.second._xid == idx._xid;
+                    });
+            if (it == _work_set.end()) {
+                redis_commit = true;
+            }
+
+            assert(work_item._ddl.is_null());
+        }
+
+        XidLsn xid{idx._xid};
+        sys_tbl_mgr::IndexInfo info = client->get_index_info(db_id, index_id, xid);
+        SPDLOG_INFO("Drop index table id: {}", info.table_id);
+
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
+        auto root = table->index(index_id);
+        assert(root);
+
+        TableMetadata meta = client->get_roots(db_id, info.table_id, idx._xid);
+        auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {
+                    return index_id == v.index_id;
+                });
+        assert(it != meta.roots.end());
+        meta.roots.erase(it);
+        client->update_roots(db_id, info.table_id, idx._xid, meta);
+
+        root->truncate();
+        root->finalize();
+
+        if (redis_commit) {
+            sys_tbl_mgr::Client::get_instance()->finalize(db_id, work_item._xid);
+            _redis_ddl.commit_index_ddl(db_id, idx._xid);
+        } else {
+            SPDLOG_INFO("Pending items found {}, {}, {}", db_id, index_id, idx._xid);
+            assert(false);
+        }
     }
 
     MutableBTreePtr Indexer::_build(std::stop_token st, const Key& key, const IndexParams& idx)
@@ -229,6 +287,7 @@ namespace springtail::gc {
             } else{
                 root->truncate();
                 //TODO: (use set_index_sate(...sys_tbl::IndexNames::State::DELETED)).
+                //this should be addressed when we support parallel processing
             }
 
             _cv_done.notify_one();
@@ -236,6 +295,7 @@ namespace springtail::gc {
 
         // notify redis tables
         if (redis_commit) {
+            sys_tbl_mgr::Client::get_instance()->finalize(key.first, work_item._xid);
             _redis_ddl.commit_index_ddl(key.first, idx._xid);
         } else {
             SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
@@ -244,8 +304,10 @@ namespace springtail::gc {
         }
 
         if (work_item._ddl.is_null()) {
-            // we got drop index while building it, use the last XID
-            _redis_ddl.commit_index_ddl(key.first, work_item._xid);
+            assert(!redis_commit);
+            // we got drop index while building it, abort both redis ddls
+            _redis_ddl.abort_index_ddl(key.first, work_item._xid);
+            _redis_ddl.abort_index_ddl(key.first, idx._xid);
         }
     }
 }

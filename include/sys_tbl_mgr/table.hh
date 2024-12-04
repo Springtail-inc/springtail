@@ -254,14 +254,14 @@ namespace springtail {
 
         /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
-         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @param id The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
          */
-        BTreePtr index(uint32_t idx) {
-            if (idx == 0) {
+        BTreePtr index(uint32_t id) {
+            if (id == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx].first;
+            return _secondary_indexes[id].first;
         }
 
         /**
@@ -450,6 +450,18 @@ namespace springtail {
          * @param index_columns Positions of the index columns.
          */
         MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+
+        /**
+         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @return A BTree object of the requested index.
+         */
+        MutableBTreePtr index(uint32_t id) {
+            if (id == 0) {
+                return _primary_index;
+            }
+            return _secondary_indexes[id].first;
+        }
 
         /** This will convert column positions to column names based on the table schema
          */
