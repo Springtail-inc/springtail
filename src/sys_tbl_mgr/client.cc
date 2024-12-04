@@ -150,8 +150,8 @@ namespace springtail::sys_tbl_mgr {
         request.index.table_id = msg.table_oid;
         for (const auto &col : msg.columns) {
             IndexColumn column;
-            column.name = col.column_name;
             column.position = col.position;
+            column.name = col.name;
             column.idx_position = col.idx_position;
             request.index.columns.push_back(column);
         }

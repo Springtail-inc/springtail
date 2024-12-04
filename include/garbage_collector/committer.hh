@@ -62,6 +62,8 @@ namespace springtail::gc {
         constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
+        void _create_indexer();
+
         /**
          * The structure that defines a worker job.
          */

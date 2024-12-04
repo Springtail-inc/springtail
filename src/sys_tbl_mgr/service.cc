@@ -180,6 +180,7 @@ namespace springtail::sys_tbl_mgr {
             nlohmann::json column_json;
             column_json["idx_position"] = column.idx_position;
             column_json["position"] = column.position;
+            column_json["name"] = column.name;
 
             ddl["columns"].push_back(column_json);
         }

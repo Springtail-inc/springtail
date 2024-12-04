@@ -240,7 +240,7 @@ namespace springtail::gc {
             return;
         }
 
-        auto db_id = key.first;
+        auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
         XidLsn xid{idx._xid};
 
@@ -254,18 +254,19 @@ namespace springtail::gc {
             _work_set.erase(key);
             _cv_done.notify_one();
         }
-
+        auto client = sys_tbl_mgr::Client::get_instance();
         if (!work_item._ddl.is_null()) {
             auto extent_id = root->finalize();
-            auto&& meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, idx._xid);
+            auto&& meta = client->get_roots(db_id, tid, idx._xid);
             meta.roots.emplace_back(key.second, extent_id);
-            sys_tbl_mgr::Client::get_instance()->update_roots(db_id, tid, idx._xid, meta);
+            client->update_roots(db_id, tid, idx._xid, meta);
         } else{
             // the index was deleted while we were building it
             root->truncate();
-            //TODO: figure out out how to change the index state here to DELETED
-            // note: another state has been waiting to be finalized.
-            // Somehow we need to rollback.
+            //TODO: figure out out how to change the index state here to DELETED with the same XID
+            assert(work_item._xid > idx._xid);
+            XidLsn xid{work_item._xid};
+            client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
     }
 }

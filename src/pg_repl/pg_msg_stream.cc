@@ -894,7 +894,7 @@ namespace springtail {
         for (const auto &el: cols.items()) {
             PgMsgSchemaIndexColumn col;
             const auto& v  = el.value();
-            v["name"].get_to(col.column_name);
+            v["name"].get_to(col.name);
             v["position"].get_to(col.position);
             v["idx_position"].get_to(col.idx_position);
             msg.columns.push_back(col);
