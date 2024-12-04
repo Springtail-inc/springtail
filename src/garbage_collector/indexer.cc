@@ -23,13 +23,13 @@ namespace springtail::gc {
         {
             std::scoped_lock g(_m);
             Key key(idx._db_id, idx._ddl["id"]);
-            // is it expected?
+            // I don't think PG will issue two creates with the same index ID.
             assert(_work_set.find(key) == _work_set.end());
             _work_set[key] = std::move(idx);
             _queue.push(key);
         }
         // notify workers about new items
-        _cv.notify_all();
+        _cv.notify_one();
     }
 
     void Indexer::drop(uint64_t db_id, uint64_t index_id, uint64_t xid)
@@ -44,6 +44,14 @@ namespace springtail::gc {
             _queue.push(key);
             _cv.notify_one();
         } else {
+            // TODO: we catch the case when the index is dropped in the middle b/c
+            // the case isn't fully supported. The main problem is with managing
+            // XID (finalize) updates.
+            // The issues with XID will need to be resolved anyway for supporting 
+            // asynchronous index updates.
+            // Basically it would assert here if a single XID action contains
+            // DDL's to create an index with index_id=1234.
+            assert(false);
             // clear DDL, it will tell the worker to cancel the index build
             it->second._ddl = {};
         }
@@ -124,27 +132,15 @@ namespace springtail::gc {
         auto client = sys_tbl_mgr::Client::get_instance();
 
         IndexParams work_item;
-        bool redis_commit = false;
-
         {
             std::unique_lock g(_m);
 
             // fetch the latest state of the work item before we erase it
             work_item = _work_set[key];
-            _work_set.erase(key);
-
-            // if all work items with the given xid are completed, commit redis
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) {
-                        return v.first.first == db_id && v.second._xid == idx._xid;
-                    });
-            if (it == _work_set.end()) {
-                redis_commit = true;
-            } else {
-                SPDLOG_INFO("Pending items found {}, {}, {}", db_id, index_id, idx._xid);
-            }
-
             assert(work_item._ddl.is_null());
+
+            _work_set.erase(key);
+            _cv_done.notify_one();
         }
 
         XidLsn xid{idx._xid};
@@ -166,11 +162,6 @@ namespace springtail::gc {
         root->truncate();
         root->finalize();
 
-        // it will be committed when all DDL's for this XID are processed
-        if (redis_commit) {
-            sys_tbl_mgr::Client::get_instance()->finalize(db_id, work_item._xid);
-            _redis_ddl.commit_index_ddl(db_id, idx._xid);
-        }
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
 
@@ -255,25 +246,12 @@ namespace springtail::gc {
 
         IndexParams work_item;
 
-        bool redis_commit = false;
         {
             std::unique_lock g(_m);
 
             // fetch the latest state of the work item before we erase it
             work_item = _work_set[key];
             _work_set.erase(key);
-
-            // if all work items with the given xid are completed, commit redis
-            auto it = std::ranges::find_if(_work_set,
-                    [&](auto const& v) {
-                        return v.first.first == db_id && v.second._xid == idx._xid;
-                    });
-            if (it == _work_set.end()) {
-                redis_commit = true;
-            } else {
-                SPDLOG_INFO("Pending items found {}, {}, {}", key.first, key.second, idx._xid);
-            }
-
             _cv_done.notify_one();
         }
 
@@ -288,12 +266,6 @@ namespace springtail::gc {
             //TODO: figure out out how to change the index state here to DELETED
             // note: another state has been waiting to be finalized.
             // Somehow we need to rollback.
-        }
-
-        // it will be committed when all DDL's for this XID are processed
-        if (redis_commit) {
-            sys_tbl_mgr::Client::get_instance()->finalize(key.first, work_item._xid);
-            _redis_ddl.commit_index_ddl(key.first, idx._xid);
         }
     }
 }

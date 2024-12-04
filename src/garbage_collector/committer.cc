@@ -305,11 +305,13 @@ namespace springtail::gc {
                     }
                 }
                 _indexer->wait_for_completion(db_id);
-            }
-
-            if (!completed_ddls.is_null()) {
-                // finalize the system metadata
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                _redis_ddl.commit_index_ddl(db_id, xid);
+            } else {
+                if (!completed_ddls.is_null()) {
+                    // finalize the system metadata
+                    sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                }
             }
 
             if (!completed_ddls.is_null()) {
