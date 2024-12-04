@@ -71,7 +71,7 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            std::string msg = fmt::format("db_add:{}", db_id);
+            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_ADD, db_id);
             ts.publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
 
             // hset instance_state:1234 2 running
@@ -120,7 +120,7 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            std::string msg = fmt::format("db_remove:{}", db_id);
+            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_REMOVE, db_id);
             ts.publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
 
             // hdel instance_state:1234 2
