@@ -1,5 +1,8 @@
 #include <filesystem>
 #include <string>
+#include <atomic>
+#include <iostream>
+#include <optional>
 
 #include <common/common.hh>
 #include <common/exception.hh>
@@ -9,6 +12,10 @@
 namespace springtail {
 
     namespace {
+
+        // flag to prevent init from being called multiple times
+        static std::atomic_flag init_lock = ATOMIC_FLAG_INIT;
+
         void
         daemonize(const std::string &pid_file)
         {
@@ -58,6 +65,12 @@ namespace springtail {
                          const std::optional<std::string> &daemon_pid,
                          const std::optional<uint32_t> &logging_mask)
     {
+        // prevent multiple calls to init
+        if (init_lock.test_and_set()) {
+            std::cerr << "Warning: springtail_init called multiple times" << std::endl;
+            return;
+        }
+
         // initialize the backtrace signal handling
         init_exception();
 
