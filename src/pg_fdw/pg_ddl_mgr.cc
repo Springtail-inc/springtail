@@ -187,8 +187,6 @@ namespace springtail::pg_fdw {
         // close the connection
         conn->disconnect();
 
-        // RedisDDL redis_ddl;
-
         // go through each db and create the foreign server, connect to each db
         for (const auto &[db_id, db_name] : dbs) {
             _create_schemas(conn, db_id, db_name);
