@@ -107,6 +107,12 @@ namespace springtail::sys_tbl_mgr {
 
 
     protected:
+        /** Singleton write cache client instance */
+        static Client *_instance;
+
+        /** Mutex protecting _instance in get_instance() */
+        static std::mutex _instance_mutex;
+
         /**
          * @brief Construct a new Write Cache Client object
          */

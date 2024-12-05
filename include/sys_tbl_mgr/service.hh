@@ -316,6 +316,8 @@ namespace springtail::sys_tbl_mgr {
         void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
+        static Service *_instance; ///< static instance (singleton)
+        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;

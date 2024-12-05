@@ -324,6 +324,11 @@ namespace springtail::gc {
                 }
             }
 
+            if (!completed_ddls.is_null()) {
+                // pre-commit the DDLs to be applied to the FDWs
+                _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
+            }
+
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID

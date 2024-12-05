@@ -23,12 +23,20 @@
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
+     /* static initialization must happen outside of class */
+    Client* Client::_instance {nullptr};
+    std::mutex Client::_instance_mutex;
 
     Client *
     Client::get_instance()
     {
-        static Client c;
-        return &c;
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance == nullptr) {
+            _instance = new Client();
+        }
+
+        return _instance;
     }
 
     Client::Client()
@@ -67,7 +75,12 @@ namespace springtail::sys_tbl_mgr {
     void
     Client::shutdown()
     {
-        get_instance()->~Client();
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
+
+        if (_instance != nullptr) {
+            delete _instance;
+            _instance = nullptr;
+        }
     }
 
     // exposed client service interface below
