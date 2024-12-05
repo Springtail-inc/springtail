@@ -1,12 +1,15 @@
 #include <nlohmann/json.hpp>
 #include <libpq-fe.h>
 
+#include <common/counter.hh>
 #include <common/redis.hh>
+#include <common/redis_types.hh>
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
 
+#include <redis/db_state_change.hh>
 #include <redis/redis_ddl.hh>
 
 #include <pg_repl/exception.hh>
@@ -36,6 +39,12 @@ namespace springtail::pg_fdw {
         "  GRANT USAGE ON SCHEMA {} TO {} "
         "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
         "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
+
+    static constexpr char DROP_DATABASE[] =
+        "DROP DATABASE IF EXISTS {} WITH (FORCE)";
+
+    static constexpr char VERIFY_DB_EXISTS[] =
+        "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
     void
     PgDDLMgr::init(const std::string &fdw_id,
@@ -82,8 +91,20 @@ namespace springtail::pg_fdw {
         SPDLOG_DEBUG("FDW ID: {}, Host: {}, Port: {}, Username: {}, FDW Username: {}",
                      _fdw_id, _hostname, _port, _username, fdw_username);
 
-        // initialize the fdw, setup fdw server, import foreign schemas, etc
-        _init_fdw(fdw_username, fdw_password);
+        // add subscribers to pubsub threads
+        uint64_t _db_instance_id = Properties::get_db_instance_id();
+        std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
+        _config_sub_thread.add_subscriber(db_change_channel,
+            [this, &username, &password]() {
+                // initialize the fdw, setup fdw server, import foreign schemas, etc
+                _init_fdw(username, password);
+            },
+            [this](const std::string &msg) {
+                _handle_replicated_dbs_change(msg);
+            });
+
+        // start redis subscriber threads
+        _config_sub_thread.start();
 
         // start the main thread
         start_thread();
@@ -141,6 +162,8 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_init_fdw(const std::string &username, const std::string &password)
     {
+        std::unique_lock db_name_lock(_db_mutex);
+
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
@@ -158,97 +181,17 @@ namespace springtail::pg_fdw {
 
         // go through each db and drop/create the database on the fdw
         for (const auto &[db_id, db_name] : dbs) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
-
-            // drop and create database on fdw
-            std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
-            std::string drop_db = fmt::format("DROP DATABASE IF EXISTS {}", prefixed_name);
-            std::string create_db = fmt::format("CREATE DATABASE {}", prefixed_name);
-
-            conn->exec(drop_db);
-            conn->clear();
-
-            conn->exec(create_db);
-            conn->clear();
-
-            // grant connect to the fdw user
-            conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
-            conn->clear();
+            _create_database(conn, db_id, db_name);
         }
 
         // close the connection
         conn->disconnect();
 
-        RedisDDL redis_ddl;
+        // RedisDDL redis_ddl;
 
         // go through each db and create the foreign server, connect to each db
         for (const auto &[db_id, db_name] : dbs) {
-
-            // get schemas, parse include, fetch from primary db if necessary
-            auto &&schemas = _get_schemas(db_id, db_name);
-
-            uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
-
-            // connect to the database on the fdw
-            conn = _connect_fdw(db_id, _db_prefix + db_name);
-
-            std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
-
-            // drop and create the fdw extension
-            conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
-            conn->clear();
-
-            conn->exec(fmt::format("CREATE EXTENSION {} WITH SCHEMA PUBLIC", SPRINGTAIL_FDW_EXTENSION));
-            conn->clear();
-
-            // drop and create the foreign server
-            conn->exec(fmt::format("DROP SERVER IF EXISTS {}", SPRINGTAIL_FDW_SERVER_NAME));
-            conn->clear();
-
-            conn->exec(fmt::format("CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id '{}', db_id '{}', db_name '{}', schema_xid '{}')",
-                                   SPRINGTAIL_FDW_SERVER_NAME, SPRINGTAIL_FDW_EXTENSION, _fdw_id, db_id, prefixed_name, xid));
-            conn->clear();
-
-            for (const auto &schema: schemas) {
-                // create schema if not exists
-                std::string escaped_schema = conn->escape_identifier(schema);
-                conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
-                conn->clear();
-
-                // import foreign schema
-                conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
-                                       escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
-                                       escaped_schema));
-                conn->clear();
-
-                // grant usage and select on all tables and sequences to the fdw user
-                conn->exec(fmt::format("GRANT USAGE ON SCHEMA {} TO {}", escaped_schema, _fdw_username));
-                conn->clear();
-                conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
-                conn->clear();
-                conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
-                conn->clear();
-
-                _db_schemas[db_id].insert(schema);
-            }
-
-            // import catalog schema
-            std::string escaped_schema = conn->escape_identifier(SPRINGTAIL_FDW_CATALOG_SCHEMA);
-            conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
-            conn->clear();
-            conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
-                                   escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
-                                   escaped_schema));
-            conn->clear();
-
-            // set the schema xid in the map
-            _db_xid_map[db_id] = xid;
-
-            // update redis with the schema xid
-            redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
-
-            // close the connection
-            conn->disconnect();
+            _create_schemas(conn, db_id, db_name);
         }
     }
 
@@ -275,12 +218,14 @@ namespace springtail::pg_fdw {
 
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Applying DDLs for db_id: {}, schema_xid: {}", db_id, schema_xid);
 
+                std::shared_lock db_lock(_db_mutex);
                 if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                     SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                 db_id, _db_xid_map[db_id], schema_xid);
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
                 }
+                db_lock.unlock();
 
                 // apply the DDL statements
                 bool status = _update_schemas(redis_ddl, db_id, schema_xid, ddls);
@@ -295,6 +240,7 @@ namespace springtail::pg_fdw {
                 // success, update schema XID if applied, otherwise they may be queued
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Updating redis ddl @ schema XID: {}, db_id: {}", schema_xid, db_id);
                 redis_ddl.update_schema_xid(_fdw_id, db_id, schema_xid);
+                std::unique_lock db_lock_unique(_db_mutex);
                 _db_xid_map[db_id] = schema_xid;
 
             } catch (Error &e) {
@@ -384,9 +330,11 @@ namespace springtail::pg_fdw {
             // find the difference between the schemas in the db and the schemas in the DDL
             // these will be added as new schemas
             std::set<std::string> new_schemas;
+            std::shared_lock db_lock(_db_mutex);
             std::set_difference(schemas.begin(), schemas.end(),
                                 _db_schemas[db_id].begin(), _db_schemas[db_id].end(),
                                 std::inserter(new_schemas, new_schemas.begin()));
+            db_lock.unlock();
 
             // execute the set of statements
             _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
@@ -431,7 +379,9 @@ namespace springtail::pg_fdw {
         conn->end_transaction();
 
         // add the new schemas to the set after commit
+        std::unique_lock db_lock(_db_mutex);
         _db_schemas[db_id].insert(schemas.begin(), schemas.end());
+        db_lock.unlock();
     }
 
     std::string
@@ -644,6 +594,171 @@ namespace springtail::pg_fdw {
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Generated SQL: {}", create);
 
         return create;
+    }
+
+    void
+    PgDDLMgr::_create_database(LibPqConnectionPtr conn,
+                     const uint64_t db_id,
+                     const std::string &db_name)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating DB ID: {}, DB Name: {}", db_id, db_name);
+
+        // drop and create database on fdw
+        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+        std::string drop_db = fmt::format("DROP DATABASE IF EXISTS {}", prefixed_name);
+        std::string create_db = fmt::format("CREATE DATABASE {}", prefixed_name);
+
+        conn->exec(drop_db);
+        conn->clear();
+
+        conn->exec(create_db);
+        conn->clear();
+
+        // grant connect to the fdw user
+        conn->exec(fmt::format("GRANT CONNECT ON DATABASE {} TO {}", prefixed_name, _fdw_username));
+        conn->clear();
+    }
+
+    void
+    PgDDLMgr::_create_schemas(LibPqConnectionPtr conn,
+                    const uint64_t db_id,
+                    const std::string &db_name)
+    {
+
+        RedisDDL redis_ddl;
+
+        // get schemas, parse include, fetch from primary db if necessary
+        auto &&schemas = _get_schemas(db_id, db_name);
+
+        uint64_t xid = XidMgrClient::get_instance()->get_committed_xid(db_id, 0);
+
+        // connect to the database on the fdw
+        conn = _connect_fdw(db_id, _db_prefix + db_name);
+
+        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+
+        // drop and create the fdw extension
+        conn->exec(fmt::format("DROP EXTENSION IF EXISTS {} CASCADE", SPRINGTAIL_FDW_EXTENSION));
+        conn->clear();
+
+        conn->exec(fmt::format("CREATE EXTENSION {} WITH SCHEMA PUBLIC", SPRINGTAIL_FDW_EXTENSION));
+        conn->clear();
+
+        // drop and create the foreign server
+        conn->exec(fmt::format("DROP SERVER IF EXISTS {}", SPRINGTAIL_FDW_SERVER_NAME));
+        conn->clear();
+
+        conn->exec(fmt::format("CREATE SERVER {} FOREIGN DATA WRAPPER {} OPTIONS (id '{}', db_id '{}', db_name '{}', schema_xid '{}')",
+                                SPRINGTAIL_FDW_SERVER_NAME, SPRINGTAIL_FDW_EXTENSION, _fdw_id, db_id, prefixed_name, xid));
+        conn->clear();
+
+        for (const auto &schema: schemas) {
+            // create schema if not exists
+            std::string escaped_schema = conn->escape_identifier(schema);
+            conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
+            conn->clear();
+
+            // import foreign schema
+            conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
+                                    escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
+                                    escaped_schema));
+            conn->clear();
+
+            // grant usage and select on all tables and sequences to the fdw user
+            conn->exec(fmt::format("GRANT USAGE ON SCHEMA {} TO {}", escaped_schema, _fdw_username));
+            conn->clear();
+            conn->exec(fmt::format("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
+            conn->clear();
+            conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
+            conn->clear();
+
+            _db_schemas[db_id].insert(schema);
+        }
+        // import catalog schema
+        std::string escaped_schema = conn->escape_identifier(SPRINGTAIL_FDW_CATALOG_SCHEMA);
+        conn->exec(fmt::format("CREATE SCHEMA IF NOT EXISTS {}", escaped_schema));
+        conn->clear();
+        conn->exec(fmt::format("IMPORT FOREIGN SCHEMA {} FROM SERVER {} INTO {}",
+                                escaped_schema, SPRINGTAIL_FDW_SERVER_NAME,
+                                escaped_schema));
+        conn->clear();
+
+        // set the schema xid in the map
+        _db_xid_map[db_id] = xid;
+
+        // update redis with the schema xid
+        redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
+
+        // close the connection
+        conn->disconnect();
+    }
+
+    void
+    PgDDLMgr::_add_replicated_database(uint64_t db_id)
+    {
+        nlohmann::json db_config = Properties::get_db_config(db_id);
+        std::string db_name = db_config["name"];
+
+        // acquire lock
+        std::unique_lock lock(_db_mutex);
+        if (_db_xid_map.contains(db_id)) {
+            return;
+        }
+
+        // verify that the database does not exit before trying to add it
+        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
+        std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
+        conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
+        if (conn->ntuples() > 0) {
+            conn->disconnect();
+            return;
+        }
+        conn->clear();
+
+        // add database
+        _create_database(conn, db_id, db_name);
+        conn->disconnect();
+
+        _create_schemas(conn, db_id, db_name);
+    }
+
+    void
+    PgDDLMgr::_remove_replicated_database(uint64_t db_id)
+    {
+        std::unique_lock lock(_db_mutex);
+        if (!_db_xid_map.contains(db_id)) {
+            return;
+        }
+
+        nlohmann::json db_config = Properties::get_db_config(db_id);
+        std::string db_name = db_config["name"];
+
+        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
+        std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
+        std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
+        conn->exec(drop_db);
+        conn->disconnect();
+        _db_xid_map.erase(db_id);
+        _db_schemas.erase(db_id);
+    }
+
+    void
+    PgDDLMgr::_handle_replicated_dbs_change(const std::string &msg)
+    {
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Handling DB Change Action message: {}", msg);
+        uint64_t db_id;
+        redis::db_state_change::DBAction action;
+        redis::db_state_change::parse_db_action(msg, db_id, action);
+        switch (action) {
+            case redis::db_state_change::DB_ACTION_ADD:
+                _add_replicated_database(db_id);
+                break;
+            case redis::db_state_change::DB_ACTION_REMOVE:
+                _remove_replicated_database(db_id);
+                break;
+            default:
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Unsupported action: {}", redis::db_state_change::db_action_to_name[action]);
+        }
     }
 
 } // namespace springtail::pg_fdw

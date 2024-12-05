@@ -13,6 +13,7 @@
 #include <common/singleton.hh>
 
 #include <redis/redis_ddl.hh>
+#include <redis/pubsub_thread.hh>
 
 #include <pg_repl/libpq_connection.hh>
 
@@ -48,6 +49,7 @@ namespace springtail::pg_fdw {
 
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
+        PubSubThread _config_sub_thread;           ///< pubsub thread for redis config database
 
         std::string _fdw_id;                       ///< FDW ID
 
@@ -56,8 +58,10 @@ namespace springtail::pg_fdw {
         std::string _password;                     ///< password
         std::string _db_prefix;                    ///< db prefix, may be empty
         std::string _fdw_username;                 ///< FDW username
+        uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 
+        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map and _db_schemas maps
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
 
         std::map<uint64_t, std::set<std::string>> _db_schemas;  ///< map of db id to set of schemas
@@ -65,8 +69,10 @@ namespace springtail::pg_fdw {
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
         /** Private constructor */
-        PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE) {};
-        ~PgDDLMgr() = default;
+        PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE), _config_sub_thread(1, true) {};
+        ~PgDDLMgr() {
+            _config_sub_thread.shutdown();
+        }
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
@@ -160,6 +166,53 @@ namespace springtail::pg_fdw {
                            uint64_t tid,
                            std::vector<std::tuple<std::string, std::string, bool>> &columns);
 
+        /**
+         * @brief Function for creating a replicated database
+         *
+         * @param conn - connection object
+         * @param db_id - database id
+         * @param db_name - database name
+         */
+        void
+        _create_database(LibPqConnectionPtr conn,
+                         const uint64_t db_id,
+                         const std::string &db_name);
+
+        /**
+         * @brief Function for creating a replicated database schemas
+         *
+         * @param conn - connection object
+         * @param db_id - database id
+         * @param db_name - database name
+         */
+        void
+        _create_schemas(LibPqConnectionPtr conn,
+                        const uint64_t db_id,
+                        const std::string &db_name);
+
+        /**
+         * @brief Function for adding a new replicated database
+         *
+         * @param db_id - databese id
+         */
+        void
+        _add_replicated_database(uint64_t db_id);
+
+        /**
+         * @brief Function for removing an existing replicated database
+         *
+         * @param db_id - databese id
+         */
+        void
+        _remove_replicated_database(uint64_t db_id);
+
+        /**
+         * @brief Function for handling database change notifications from redis
+         *
+         * @param msg - message
+         */
+        void
+        _handle_replicated_dbs_change(const std::string &msg);
 
     };
 }
