@@ -49,7 +49,7 @@
     "sys_tbl_mgr": {
         "server" : {
             "port" : 55053,
-            "worker_threads": 8
+            "worker_threads": 16
         },
         "client": {
             "connections": 8

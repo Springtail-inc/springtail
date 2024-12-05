@@ -14,31 +14,19 @@
 
 
 namespace springtail::sys_tbl_mgr {
-    /* static member initialization must happen outside of class */
-    Service* Service::_instance {nullptr};
-    boost::mutex Service::_instance_mutex;
 
     Service *
     Service::get_instance()
     {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new Service();
-        }
-
-        return _instance;
+        static Service s;
+        return &s;
     }
 
     void
     Service::shutdown()
     {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+        // probably not needed
+        get_instance()->~Service();
     }
 
     void

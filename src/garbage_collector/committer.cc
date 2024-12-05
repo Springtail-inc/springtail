@@ -319,12 +319,9 @@ namespace springtail::gc {
                 if (!completed_ddls.is_null()) {
                     // finalize the system metadata
                     sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                    // pre-commit the DDLs to be applied to the FDWs
+                    _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
                 }
-            }
-
-            if (!completed_ddls.is_null()) {
-                // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
@@ -441,7 +438,7 @@ namespace springtail::gc {
                     if (db_id1 == db_id2) {
                         return xid1 < xid2;
                     }
-                    return db_id1 < db_id1;
+                    return db_id1 < db_id2;
                 });
 
         for (auto [db_id, xid, ddls] : precommit) {

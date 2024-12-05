@@ -317,9 +317,6 @@ namespace springtail::sys_tbl_mgr {
 
         // VARIABLES
 
-        static Service *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;
 

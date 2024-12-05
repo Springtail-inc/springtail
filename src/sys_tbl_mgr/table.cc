@@ -142,14 +142,11 @@ namespace springtail {
             if (!idx_cols.empty()) {
                 auto it = std::ranges::find_if(roots, [&](auto const &v) { return v.index_id == idx.id; });
                 assert(it != roots.end());
-
                 auto btree =  _create_index_root(idx.id, idx_cols, it->extent_id);
-
                 assert(_secondary_indexes.find(idx.id) == _secondary_indexes.end());
                 _secondary_indexes[idx.id] = {btree, idx_cols};
             }
         }
-
     }
 
     std::vector<std::string> 

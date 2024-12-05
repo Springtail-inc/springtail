@@ -254,14 +254,14 @@ namespace springtail {
 
         /**
          * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
-         * @param id The id of the index to retrieve.  Note that 0 is the primary index.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
          */
-        BTreePtr index(uint32_t id) {
-            if (id == 0) {
+        BTreePtr index(uint32_t idx) {
+            if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[id].first;
+            return _secondary_indexes[idx].first;
         }
 
         /**
@@ -456,11 +456,11 @@ namespace springtail {
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
          */
-        MutableBTreePtr index(uint32_t id) {
-            if (id == 0) {
+        MutableBTreePtr index(uint32_t idx) {
+            if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[id].first;
+            return _secondary_indexes[idx].first;
         }
 
         /** This will convert column positions to column names based on the table schema
