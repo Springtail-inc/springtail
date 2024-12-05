@@ -19,6 +19,7 @@
 namespace springtail {
 namespace pg_proxy {
 
+    /** Auth type, if this changes, change string mapping in user_mgr.cc */
     enum AuthType : int8_t {
         TRUST=0,
         MD5=1,

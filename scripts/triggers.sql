@@ -214,7 +214,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
 -- Select all users and their databases with access to springtail
 -- If springtail_user role exists, only users with that role are returned
 -- otherwise all users are returned
-CREATE OR REPLACE FUNCTION get_user_access()
+CREATE OR REPLACE FUNCTION springtail_get_user_access()
     RETURNS TABLE (username text, password text, databases text)
     LANGUAGE plpgsql
     SECURITY DEFINER AS $$
