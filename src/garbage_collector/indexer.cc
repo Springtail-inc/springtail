@@ -145,6 +145,13 @@ namespace springtail::gc {
 
         XidLsn xid{idx._xid};
         sys_tbl_mgr::IndexInfo info = client->get_index_info(db_id, index_id, xid);
+        if (info.id == 0) {
+            //TODO: it seems like PG generates DROP INDEX with table ids, need
+            //to investigate it more.
+            SPDLOG_INFO("The index is not valid: {}", index_id);
+            return;
+        }
+
         SPDLOG_INFO("Drop index table id: {}", info.table_id);
 
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);

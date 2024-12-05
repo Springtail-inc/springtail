@@ -72,7 +72,9 @@ namespace springtail::sys_tbl_mgr {
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
                             request.db_id, request.xid, request.index_id);
-            throw std::runtime_error("Index not found");
+            IndexInfo dummy;
+            dummy.id = 0;
+            return dummy;
         }
 
         return info->first;
