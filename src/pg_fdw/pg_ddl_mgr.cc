@@ -37,13 +37,8 @@ namespace springtail::pg_fdw {
         "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
         "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
 
-    // static vars for singleton
-    PgDDLMgr* PgDDLMgr::_instance {nullptr};
-    std::once_flag PgDDLMgr::_init_flag;
-    std::once_flag PgDDLMgr::_shutdown_flag;
-
     void
-    PgDDLMgr::startup(const std::string &fdw_id,
+    PgDDLMgr::init(const std::string &fdw_id,
                       const std::string &username,
                       const std::string &password,
                       const std::optional<std::string> &hostname)
@@ -91,40 +86,7 @@ namespace springtail::pg_fdw {
         _init_fdw(fdw_username, fdw_password);
 
         // start the main thread
-        _main_thread = std::thread(&PgDDLMgr::_main_thread_fn, this);
-    }
-
-    void
-    PgDDLMgr::_init() {
-        _instance = new PgDDLMgr();
-    }
-
-    void
-    PgDDLMgr::_shutdown()
-    {
-        // static method
-        if (_instance == nullptr) {
-            return;
-        }
-        _instance->_internal_shutdown();
-    }
-
-    void
-    PgDDLMgr::_internal_shutdown()
-    {
-        _shutting_down = true;
-    }
-
-    void
-    PgDDLMgr::wait_shutdown()
-    {
-        // join the main thread
-        _main_thread.join();
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+        start_thread();
     }
 
     std::set<std::string>
@@ -291,7 +253,7 @@ namespace springtail::pg_fdw {
     }
 
     void
-    PgDDLMgr::_main_thread_fn()
+    PgDDLMgr::_internal_run()
     {
         // init redis ddl client after springtail_init()
         RedisDDL redis_ddl;
@@ -299,7 +261,7 @@ namespace springtail::pg_fdw {
         // move any pending DDLs to the active queue
         redis_ddl.abort_fdw(_fdw_id);
 
-        while (!_shutting_down) {
+        while (!_is_shutting_down()) {
             try {
                 // blocking redis call to get next set of DDL statements
                 // XXX we could potentially parallelize updates to different db IDs

@@ -10,6 +10,7 @@
 
 #include <common/properties.hh>
 #include <common/object_cache.hh>
+#include <common/singleton.hh>
 
 #include <redis/redis_ddl.hh>
 
@@ -27,32 +28,11 @@ namespace springtail::pg_fdw {
      * @brief DDL Mgr, applies changes from Redis queue
      * to the FDW tables
      */
-    class PgDDLMgr {
+    class PgDDLMgr final : public SingletonWithThread<PgDDLMgr> {
+        friend class SingletonWithThread<PgDDLMgr>;
     public:
         /** Max number of connections to cache */
         static constexpr int MAX_CONNECTION_CACHE_SIZE = 10;
-
-        /** Get DDL Mgr instance */
-        static PgDDLMgr* get_instance() {
-            std::call_once(_init_flag, _init);
-            return _instance;
-        }
-
-        // delete copy constructor
-        PgDDLMgr(const PgDDLMgr&) = delete;
-        PgDDLMgr& operator=(const PgDDLMgr&) = delete;
-
-        // delete move constructor
-        PgDDLMgr(PgDDLMgr&&) = delete;
-        PgDDLMgr& operator=(PgDDLMgr&&) = delete;
-
-        /**
-         * Shutdown singleton -- initiates shutdown
-         * must call wait_shutdown() to complete
-         */
-        static void shutdown() {
-            std::call_once(_shutdown_flag, _shutdown);
-        }
 
         /**
          * Start the main thread
@@ -61,24 +41,12 @@ namespace springtail::pg_fdw {
          * @param password password for ddl mgr
          * @param hostname optional hostname for connection
          */
-        void startup(const std::string &fdw_id,
+        void init(const std::string &fdw_id,
                      const std::string &username,
                      const std::string &password,
                      const std::optional<std::string> &hostname = std::nullopt);
 
-        /**
-         * @brief Wait for shutdown of the singleton
-         */
-        void wait_shutdown();
-
     private:
-        static PgDDLMgr* _instance;                ///< singleton instance
-        static std::once_flag _init_flag;          ///< initialization flag
-        static std::once_flag _shutdown_flag;      ///< shutdown flag
-
-        std::atomic<bool> _shutting_down {false};  ///< shutdown flag, set in shutdown()
-        std::thread _main_thread;                  ///< main thread
-
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
 
         std::string _fdw_id;                       ///< FDW ID
@@ -98,15 +66,7 @@ namespace springtail::pg_fdw {
 
         /** Private constructor */
         PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE) {};
-
-        /** Initialize singleton */
-        static void _init();
-
-        /** Shutdown the singleton */
-        static void _shutdown();
-
-        /** Internal instance shutdown */
-        void _internal_shutdown();
+        ~PgDDLMgr() = default;
 
         /** Initialize the FDW */
         void _init_fdw(const std::string &username, const std::string &password);
@@ -114,7 +74,7 @@ namespace springtail::pg_fdw {
         /**
          * Main thread entry point; loops checking redis for DDL changes
          */
-        void _main_thread_fn();
+        void _internal_run() override;
 
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(uint64_t db_id, const std::string &db_name);
