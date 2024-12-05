@@ -67,7 +67,7 @@ namespace springtail {
     {
         // prevent multiple calls to init
         if (init_lock.test_and_set()) {
-            std::cerr << "Warning: springtail_init called multiple times" << std::endl;
+            SPDLOG_WARN("Warning: springtail_init called multiple times");
             return;
         }
 
