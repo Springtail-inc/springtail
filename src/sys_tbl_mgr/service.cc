@@ -217,8 +217,17 @@ namespace springtail::sys_tbl_mgr {
         // acquire a shared lock to ensure no one is doing a finalize
         boost::shared_lock lock(_write_mutex);
 
+
+        nlohmann::json ddl;
+        ddl["action"] = "drop_index";
+        ddl["schema"] = request.schema;
+        ddl["id"] = request.index_id;
+        ddl["name"] = request.name;
+
+        XidLsn xid(request.xid, request.lsn);
+
         // perform the CREATE INDEX
-        auto &&ddl = _drop_index(request);
+        _drop_index(xid, request.db_id, request.index_id);
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
@@ -285,47 +294,37 @@ namespace springtail::sys_tbl_mgr {
         return {{info, index_xid}};
     }
 
-    nlohmann::json
-    Service::_drop_index(const DropIndexRequest &request)
+    void
+    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id)
     {
-        XidLsn xid(request.xid, request.lsn);
-
-        nlohmann::json ddl;
-        ddl["action"] = "drop_index";
-        ddl["schema"] = request.schema;
-        ddl["id"] = request.index_id;
-        ddl["name"] = request.name;
-
-        auto names_t = _get_system_table(request.db_id, sys_tbl::IndexNames::ID);
+        auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, request.index_id, 0, 0);
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
 
         //find the last record for the index id
-        auto info = _find_index(request.db_id, request.index_id, {std::numeric_limits<decltype(request.xid)>::max(), 0});
+        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0});
 
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}",
-                            request.db_id, request.xid, request.index_id);
-            return ddl;
+                            db_id, xid.xid, index_id);
+            return;
         }
 
         assert(xid > info->second);
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", request.db_id, info->first.table_id, request.index_id);
-        auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, info->first.table_id, index_id);
+        auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
         auto tuple = sys_tbl::IndexNames::Data::tuple(info->first.schema,
                 info->first.name,
                 info->first.table_id,
-                request.index_id,
+                index_id,
                 xid.xid,
                 xid.lsn,
                 sys_tbl::IndexNames::State::DELETED,
                 info->first.is_unique );
         index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
-
-        return ddl;
     }
 
     void
@@ -509,6 +508,16 @@ namespace springtail::sys_tbl_mgr {
         ddl["schema"] = request.schema;
         ddl["table"] = request.name;
 
+        XidLsn xid(request.xid, request.lsn);
+
+        // drop indexes
+        
+        auto indexes = _read_schema_indexes(request.db_id, request.table_id, xid);
+
+        for (auto const& idx: indexes) {
+            _drop_index(xid, request.db_id, idx.id); 
+        }
+
         // mark the table as dropped in the table_names
         auto table_info = std::make_shared<TableInfo>(request.table_id,
                                                       request.xid,
@@ -519,7 +528,6 @@ namespace springtail::sys_tbl_mgr {
         _set_table_info(request.db_id, table_info);
 
         // get the schema prior to this change
-        XidLsn xid(request.xid, request.lsn);
         auto info = _get_schema_info(request.db_id, request.table_id, xid, xid);
 
         // remove all of the schema columns

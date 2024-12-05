@@ -271,7 +271,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Performs a drop_index() assuming that the correct locks are already held.
          */
-        nlohmann::json _drop_index(const DropIndexRequest &request);
+        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id);
 
         /**
          * Performs a create_table() assuming that the correct locks are already held.

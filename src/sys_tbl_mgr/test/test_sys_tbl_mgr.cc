@@ -381,6 +381,7 @@ namespace {
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // "add data" to the table
+        _create_index(tid, "x");
         _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }}, {15}});
         _finalize();
 
@@ -422,7 +423,7 @@ namespace {
         // verify the data at each step
 
         // XID 0
-        auto &&schema_meta = _client->get_schema(_db, tid, { check_xid - 1, constant::MAX_LSN });
+        auto&& schema_meta = _client->get_schema(_db, tid, { check_xid - 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
         // XID 1
@@ -435,6 +436,7 @@ namespace {
         ASSERT_EQ(schema_meta.columns.size(), 2);
         ASSERT_EQ(schema_meta.columns[0].name, "col1");
         ASSERT_EQ(schema_meta.columns[1].name, "col2");
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
 
         // XID 2
         ++check_xid;
@@ -448,6 +450,7 @@ namespace {
         ASSERT_EQ(schema_meta.columns.size(), 2);
         ASSERT_EQ(schema_meta.columns[0].name, "col1");
         ASSERT_EQ(schema_meta.columns[1].name, "col2");
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
 
         // XID 3
         ++check_xid;
@@ -461,6 +464,7 @@ namespace {
         ASSERT_EQ(schema_meta.columns.size(), 2);
         ASSERT_EQ(schema_meta.columns[0].name, "col1");
         ASSERT_EQ(schema_meta.columns[1].name, "coltwo");
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
 
         // XID 4
         ++check_xid;
@@ -475,6 +479,7 @@ namespace {
         ASSERT_EQ(schema_meta.columns[0].name, "col1");
         ASSERT_EQ(schema_meta.columns[1].name, "coltwo");
         ASSERT_EQ(schema_meta.columns[2].name, "col3");
+        ASSERT_EQ(schema_meta.indexes.size(), 2);
 
         // XID 5
         ++check_xid;
@@ -485,6 +490,7 @@ namespace {
 
         schema_meta = _client->get_schema(_db, tid, { check_xid, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
+        ASSERT_EQ(schema_meta.indexes.size(), 0);
 
         // verify the virtual schema creation at various combinations of access and target XID
         XidLsn access_xid(check_xid - 4);
