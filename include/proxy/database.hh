@@ -464,8 +464,9 @@ namespace pg_proxy {
         }
 
     private:
-        // _storage is a mapping from database id to schema, where schema is in its turn is a mapping
-        // from schema name to a set of table names that belong to this schema
+        /** _storage is a mapping from database id to schema, where schema is in its turn is a mapping
+         *  from schema name to a set of table names that belong to this schema
+         */
         std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
         std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
     };
