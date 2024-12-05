@@ -44,21 +44,16 @@ namespace springtail::pg_log_mgr {
         // get instance id
         _db_instance_id = Properties::get_db_instance_id();
 
-        Counter init_counter(1);
-
         std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
         _config_sub_thread.add_subscriber(db_change_channel,
-            [this, &init_counter]() {
+            [this]() {
                 this->_init_db_change_subscriber();
-                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_db_changes(msg);
             });
 
          _config_sub_thread.start();
-
-         init_counter.wait();
    }
 
     void

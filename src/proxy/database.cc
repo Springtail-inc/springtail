@@ -202,14 +202,11 @@ namespace springtail::pg_proxy {
             }
         }
 
-        Counter init_counter(2);
-
         // add subscribers to pubsub threads
         std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
         _config_sub_thread.add_subscriber(db_change_channel,
-            [this, &init_counter]() {
+            [this]() {
                 this->_init_replicated_dbs_subscriber();
-                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_replicated_dbs_change(msg);
@@ -217,9 +214,8 @@ namespace springtail::pg_proxy {
 
         std::string state_change_channel = fmt::format(redis::PUBSUB_DB_STATE_CHANGES, _db_instance_id);
         _config_sub_thread.add_subscriber(state_change_channel,
-            [this, &init_counter]() {
+            [this]() {
                 this->_init_db_states_subscriber();
-                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_db_state_change(msg);
@@ -227,9 +223,8 @@ namespace springtail::pg_proxy {
 
         std::string db_table_change_channel = fmt::format(redis::PUBSUB_DB_TABLE_CHANGES, _db_instance_id);
         _data_sub_thread.add_subscriber(db_table_change_channel,
-            [this, &init_counter]() {
+            [this]() {
                 this->_init_db_tables_subscriber();
-                init_counter.decrement();
             },
             [this](const std::string &msg) {
                 _handle_db_table_change(msg);
@@ -237,12 +232,7 @@ namespace springtail::pg_proxy {
 
         // start redis subscriber threads
         _config_sub_thread.start();
-        init_counter.wait();
-        init_counter.increment();
-
         _data_sub_thread.start();
-
-        init_counter.wait();
     }
 
     void DatabaseMgr::_handle_db_state_change(const std::string &msg)
