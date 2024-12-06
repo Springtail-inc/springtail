@@ -24,7 +24,10 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            PgFdwMgr::fdw_init(); // calls springtail_init
+            // call springtail_init() here to avoid call in fdw_init()
+            springtail_init();
+
+            PgFdwMgr::fdw_init();
             _services.init(true);
 
             _columns = {
