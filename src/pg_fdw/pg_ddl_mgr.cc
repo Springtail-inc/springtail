@@ -92,7 +92,7 @@ namespace springtail::pg_fdw {
                      _fdw_id, _hostname, _port, _username, fdw_username);
 
         // add subscribers to pubsub threads
-        uint64_t _db_instance_id = Properties::get_db_instance_id();
+        _db_instance_id = Properties::get_db_instance_id();
         std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
         _config_sub_thread.add_subscriber(db_change_channel,
             [this, &username, &password]() {
