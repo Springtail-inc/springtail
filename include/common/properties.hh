@@ -144,9 +144,6 @@ namespace springtail {
         /** json containing parsed settings file */
         nlohmann::json _json;
 
-        /** properties file override env is set */
-        bool _properties_file_override = false;
-
         /**
          * @brief Construct a new Properties object
          */
@@ -166,6 +163,12 @@ namespace springtail {
          * @brief Create redis client from config for config db
          */
         void _create_redis_client();
+
+        /**
+         * @brief Load redis config from file
+         * @param config_file path to config file
+         */
+        void _load_redis(const std::string &config_file);
 
         /**
          * @brief Get config redis client
