@@ -220,6 +220,7 @@ namespace springtail::pg_fdw {
                 if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                     SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                 db_id, _db_xid_map[db_id], schema_xid);
+                    // unlocking here because continue will send it to the start of the while loop
                     db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
