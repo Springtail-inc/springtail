@@ -179,7 +179,8 @@ namespace springtail::pg_proxy {
         return session;
     }
 
-    void DatabaseMgr::init()
+    void
+    DatabaseMgr::init()
     {
         // add primary
         uint64_t primary_instance_id = Properties::get_db_instance_id();
@@ -235,24 +236,28 @@ namespace springtail::pg_proxy {
         _data_sub_thread.start();
     }
 
-    void DatabaseMgr::_handle_db_state_change(const std::string &msg)
+    void
+    DatabaseMgr::_handle_db_state_change(const std::string &msg)
     {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Received state change: {}", msg);
         uint64_t db_id;
         redis::db_state_change::DBState state;
         redis::db_state_change::parse_db_state_change(msg, db_id, state);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        _replicated_database_states[db_id] = state;
+        std::shared_lock db_lock(_db_mutex);
+        auto iter = _db_id_rep_dbs.find(db_id);
+        if (iter == _db_id_rep_dbs.end()) {
+            return;
+        }
+        iter->second->set_state(state);
     }
 
     void DatabaseMgr::_init_db_states_subscriber()
     {
         // refresh all database states
-        std::shared_lock db_name_lock(_db_mutex);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
+        std::shared_lock db_lock(_db_mutex);
+        for (const auto &[db_id, db_object]: _db_id_rep_dbs) {
             redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-            _replicated_database_states[db_id] = db_state;
+            db_object->set_state(db_state);
         }
     }
 
@@ -265,35 +270,40 @@ namespace springtail::pg_proxy {
         std::string table;
         RedisDbTables::decode_pubsub_msg(msg, db_id, action, schema, table);
 
-        std::shared_lock db_states_lock(_db_state_mutex);
-        if (!_replicated_database_states.contains(db_id)) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database {} is not known", db_id);
+        std::shared_lock db_lock(_db_mutex);
+        auto iter = _db_id_rep_dbs.find(db_id);
+        if (iter == _db_id_rep_dbs.end()) {
             return;
         }
         if (action == "add") {
-            _schema_tables.add_item(db_id, schema, table);
+            iter->second->add_schema_table(schema, table);
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added schema: {}, table: {} to database {}", schema, table, db_id);
         } else if (action == "remove") {
-            _schema_tables.remove_item(db_id, schema, table);
+            iter->second->remove_schema_table(schema, table);
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Removed schema: {}, table: {} from database {}", schema, table, db_id);
+        } else {
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Unsupported action: {}", action);
         }
     }
 
-    void DatabaseMgr::_init_db_tables_subscriber()
+    void
+    DatabaseMgr::_init_db_tables_subscriber()
     {
         // get all schemas and tables from redis
-        std::shared_lock db_name_lock(_db_mutex);
-        for (const auto &[db_name, db_id]: _replicated_databases) {
+        std::shared_lock db_lock(_db_mutex);
+        for (const auto &[db_id, db_object]: _db_id_rep_dbs) {
             std::vector<std::pair<std::string, std::string>> schema_table_pairs;
             RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
             for (const auto &[schema, table]: schema_table_pairs) {
                 SPDLOG_DEBUG_MODULE(LOG_PROXY, "Found schema: {}, table : {}", schema, table);
-                _schema_tables.add_item(db_id, schema, table);
+                db_object->add_schema_table(schema, table);
             }
         }
     }
 
-    void DatabaseMgr::_handle_replicated_dbs_change(const std::string &msg) {
+    void
+    DatabaseMgr::_handle_replicated_dbs_change(const std::string &msg)
+    {
         SPDLOG_DEBUG_MODULE(LOG_PROXY, "Handling DB Change Action message: {}", msg);
         uint64_t db_id;
         redis::db_state_change::DBAction action;
@@ -310,16 +320,22 @@ namespace springtail::pg_proxy {
         }
     }
 
-    void DatabaseMgr::_init_replicated_dbs_subscriber() {
-        std::unique_lock db_name_lock(_db_mutex);
+    void
+    DatabaseMgr::_init_replicated_dbs_subscriber()
+    {
         std::map<uint64_t, std::string> db_list = Properties::get_databases();
-        for (const auto& db_pair: db_list) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database (id, name): ({}, {})", get<0>(db_pair), get<1>(db_pair));
-            _replicated_databases[std::get<1>(db_pair)] = std::get<0>(db_pair);
+        std::unique_lock db_lock(_db_mutex);
+        for (const auto& [db_id, db_name]: db_list) {
+            DatabaseObjectPtr db_object = std::make_shared<DatabaseObject>(db_id, db_name);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+            _db_name_rep_dbs.insert(std::pair<std::string, DatabaseObjectPtr>(db_name, db_object));
+            _db_id_rep_dbs.insert(std::pair<uint64_t, DatabaseObjectPtr>(db_id, db_object));
         }
     }
 
-    void DatabaseMgr::_add_replicated_database(uint64_t db_id) {
+    void
+    DatabaseMgr::_add_replicated_database(uint64_t db_id)
+    {
         // look at the properties to find the database config
         std::map<uint64_t, std::string> db_list = Properties::get_databases();
         auto iter = db_list.find(db_id);
@@ -327,54 +343,45 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        // update replicated database map
+        // create new database object
         const std::string &db_name = iter->second;
-        std::unique_lock db_name_lock(_db_mutex);
-        _replicated_databases.insert(std::pair(db_name, db_id));
-        db_name_lock.unlock();
+        DatabaseObjectPtr db_object = std::make_shared<DatabaseObject>(db_id, db_name);
 
-        // update database states
+        // set database state
         redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-        std::unique_lock db_state_lock(_db_state_mutex);
-        _replicated_database_states[db_id] = db_state;
-        db_state_lock.unlock();
+        db_object->set_state(db_state);
+
+        // update replicated database maps
+        std::unique_lock db_lock(_db_mutex);
+        _db_name_rep_dbs.insert(std::pair<std::string, DatabaseObjectPtr>(db_name, db_object));
+        _db_id_rep_dbs.insert(std::pair<uint64_t, DatabaseObjectPtr>(db_id, db_object));
+        db_lock.unlock();
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
 
         // update database schemas and tables
         std::vector<std::pair<std::string, std::string>> schema_table_pairs;
         RedisDbTables::get_tables(_db_instance_id, db_id, schema_table_pairs);
         for (const auto &[schema, table]: schema_table_pairs) {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Found schema: {}, table : {}", schema, table);
-            _schema_tables.add_item(db_id, schema, table);
+            db_object->add_schema_table(schema, table);
+            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Database: {}; added schema: {}, table : {}", db_id, schema, table);
         }
     }
 
-    void DatabaseMgr::_remove_replicated_database(uint64_t db_id) {
-        std::optional<std::string> db_name;
-
-        // remove database from replicated databases
-        std::unique_lock db_name_lock(_db_mutex);
-        for (const auto &[stored_db_name, stored_db_id]: _replicated_databases) {
-            if (stored_db_id == db_id) {
-                db_name = stored_db_name;
-                break;
-            }
-        }
-        if (!db_name.has_value()) {
+    void
+    DatabaseMgr::_remove_replicated_database(uint64_t db_id)
+    {
+        std::unique_lock db_lock(_db_mutex);
+        auto iter = _db_id_rep_dbs.find(db_id);
+        if (iter == _db_id_rep_dbs.end()) {
             return;
         }
-        _replicated_databases.erase(db_name.value());
-        db_name_lock.unlock();
+        std::string db_name = iter->second->get_db_name();
+        _db_id_rep_dbs.erase(db_id);
+        _db_name_rep_dbs.erase(db_name);
+   }
 
-        // remove database from database states
-        std::unique_lock db_state_lock(_db_state_mutex);
-        _replicated_database_states.erase(db_id);
-        db_state_lock.unlock();
-
-        // remove database from the schema and tables storage
-        _schema_tables.remove_database(db_id);
-    }
-
-    void DatabaseMgr::_internal_shutdown()
+    void
+    DatabaseMgr::_internal_shutdown()
     {
         _config_sub_thread.shutdown();
         _data_sub_thread.shutdown();

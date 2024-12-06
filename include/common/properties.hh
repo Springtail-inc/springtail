@@ -127,13 +127,6 @@ namespace springtail {
         /** Helper to get write cache hostname */
         static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
 
-        /** Change file override flag for testing */
-        static void set_properties_file_override_flag(bool flag) {
-            if (_instance != nullptr) {
-                _instance->_properties_file_override = flag;
-            }
-        }
-
     private:
         /** static _instance singleton */
         static Properties *_instance;
@@ -143,9 +136,6 @@ namespace springtail {
 
         /** json containing parsed settings file */
         nlohmann::json _json;
-
-        /** properties file override env is set */
-        bool _properties_file_override = false;
 
         /**
          * @brief Construct a new Properties object
@@ -166,6 +156,12 @@ namespace springtail {
          * @brief Create redis client from config for config db
          */
         void _create_redis_client();
+
+        /**
+         * @brief Load redis config from file
+         * @param config_file path to config file
+         */
+        void _load_redis(const std::string &config_file);
 
         /**
          * @brief Get config redis client
