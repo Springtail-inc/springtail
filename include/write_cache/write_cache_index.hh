@@ -48,6 +48,13 @@ namespace springtail {
         void commit(uint64_t pg_xid, uint64_t xid);
 
         /**
+         * @brief Add a mapping from springtail XID to Postgres XID
+         * @param pg_xids Postgres XID
+         * @param xid springtail XID
+         */
+        void commit(std::vector<uint64_t> pg_xids, uint64_t xid);
+
+        /**
          * @brief Drop a table from the index
          * @param tid table ID
          * @param pg_xid Postgres XID
@@ -59,6 +66,12 @@ namespace springtail {
          * @param pg_xid Postgres XID
          */
         void abort(uint64_t pg_xid);
+
+        /**
+         * @brief Drop all data for a given XID
+         * @param pg_xids Postgres XIDs
+         */
+        void abort(std::vector<uint64_t> pg_xids);
 
         //// Thrift interface
 

@@ -48,10 +48,22 @@ namespace springtail {
         /**
          * @brief Commit a transaction, add mapping from springtail XID to Postgres XID
          * @param db_id database ID
-         * @param pg_xid Postgres XID
          * @param xid Springtail XID
+         * @param pg_xid Postgres XIDs
          */
-        static void commit(uint64_t db_id, uint64_t pg_xid, uint64_t xid)
+        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            index->commit(pg_xids, xid);
+        }
+
+        /**
+         * @brief Commit a transaction, add mapping from springtail XID to Postgres XID
+         * @param db_id database ID
+         * @param xid Springtail XID
+         * @param pg_xid Postgres XIDs
+         */
+        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->commit(pg_xid, xid);
@@ -66,6 +78,17 @@ namespace springtail {
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
             index->abort(pg_xid);
+        }
+
+        /**
+         * @brief Abort a transaction, remove all data for a given Postgres XID
+         * @param db_id database ID
+         * @param pg_xids Postgres XID
+         */
+        static void abort(uint64_t db_id, std::vector<uint64_t> pg_xids)
+        {
+            WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
+            index->abort(pg_xids);
         }
     };
 } // namespace springtail
