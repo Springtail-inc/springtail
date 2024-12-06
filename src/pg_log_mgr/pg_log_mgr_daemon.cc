@@ -14,7 +14,7 @@ namespace {
     {
         pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
         if (log_co != nullptr) {
-            log_co->shutdown();
+            log_co->notify_shutdown();
         }
     }
 }
@@ -50,14 +50,10 @@ int main(int argc, char *argv[])
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
 
-    // get the set of db ids for this instance
-    std::map<uint64_t, std::string> db_ids = Properties::get_databases();
-    for (auto &db: db_ids) {
-        uint64_t db_id = db.first;
-        log_co->add_database(db_id);
-    }
+    log_co->init();
 
     log_co->wait_shutdown();
+    pg_log_mgr::PgLogCoordinator::shutdown();
 
     return 0;
 }
