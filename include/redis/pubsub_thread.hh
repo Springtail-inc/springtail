@@ -4,6 +4,7 @@
 #include <thread>
 #include <ostream>
 
+#include <common/counter.hh>
 #include <common/logging.hh>
 #include <common/redis.hh>
 
@@ -19,7 +20,7 @@ namespace springtail {
          *                  true - use config db
          *                  false - use data db
          */
-        PubSubThread(int timeout, bool config_db) {
+        PubSubThread(int timeout, bool config_db) : _subscriber_counter(0) {
             _subscriber = RedisMgr::get_instance()->get_subscriber(timeout, config_db);
         }
 
@@ -46,6 +47,7 @@ namespace springtail {
         void add_subscriber(std::string &channel, SubscriberInitCBFn init_fn, SubscriberConsumeCBFn consume_fn) {
             assert(!_is_up);
             _channels.insert(std::pair(channel, std::pair(init_fn, consume_fn)));
+            _subscriber_counter.increment();
             SPDLOG_DEBUG("Added subscriber channel: {}", channel);
         }
 
@@ -67,6 +69,7 @@ namespace springtail {
          */
         void start() {
             _subscriber_thread = std::thread(&PubSubThread::_run, this);
+            _subscriber_counter.wait();
         }
 
         /**
@@ -85,6 +88,7 @@ namespace springtail {
         RedisMgr::SubscriberPtr _subscriber;    ///< redis subscriber object
         std::thread _subscriber_thread;         ///< subscriber thread
         std::thread::id _id;                    ///< subscriber thread id
+        Counter _subscriber_counter;            ///< total number of subscriber
 
         /**
          * @brief Setup function is run inside the subscriber thread right after it starts and before it executes
@@ -108,6 +112,7 @@ namespace springtail {
                     consume_fn(msg);
                 });
                 init_fn();
+                _subscriber_counter.decrement();
             }
             _is_up = true;
         };
