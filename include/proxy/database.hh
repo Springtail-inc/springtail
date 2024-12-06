@@ -459,8 +459,7 @@ namespace pg_proxy {
          *
          * @return uint64_t - database id
          */
-        uint64_t get_db_id() {
-            std::shared_lock storage_lock(_db_mutex);
+        uint64_t get_db_id() const {
             return _db_id;
         }
 
@@ -469,8 +468,7 @@ namespace pg_proxy {
          *
          * @return std::string - database name
          */
-        std::string get_db_name() {
-            std::shared_lock storage_lock(_db_mutex);
+        std::string get_db_name() const {
             return _db_name;
         }
     private:

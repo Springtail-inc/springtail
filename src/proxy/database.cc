@@ -353,18 +353,20 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        // update replicated database map
+        // create new database object
         const std::string &db_name = iter->second;
-        std::unique_lock db_lock(_db_mutex);
         DatabaseObjectPtr db_object = std::make_shared<DatabaseObject>(db_id, db_name);
-        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
+
+        // set database state
+        redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
+        db_object->set_state(db_state);
+
+        // update replicated database maps
+        std::unique_lock db_lock(_db_mutex);
         _db_name_rep_dbs.insert(std::pair<std::string, DatabaseObjectPtr>(db_name, db_object));
         _db_id_rep_dbs.insert(std::pair<uint64_t, DatabaseObjectPtr>(db_id, db_object));
         db_lock.unlock();
-
-        // update database states
-        redis::db_state_change::DBState db_state = redis::db_state_change::get_db_state(db_id);
-        db_object->set_state(db_state);
+        SPDLOG_DEBUG_MODULE(LOG_PROXY, "Added database (id, name): ({}, {})", db_id, db_name);
 
         // update database schemas and tables
         std::vector<std::pair<std::string, std::string>> schema_table_pairs;
