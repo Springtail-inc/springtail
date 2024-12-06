@@ -220,6 +220,7 @@ namespace springtail::pg_fdw {
                 if (_db_xid_map.contains(db_id) && _db_xid_map[db_id] >= schema_xid) {
                     SPDLOG_WARN("Schema XID has already been applied: db_id={}, current={}, new={}",
                                 db_id, _db_xid_map[db_id], schema_xid);
+                    db_lock.unlock();
                     redis_ddl.commit_fdw_no_update(_fdw_id);
                     continue;
                 }
@@ -669,8 +670,6 @@ namespace springtail::pg_fdw {
             conn->clear();
             conn->exec(fmt::format("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}", escaped_schema, _fdw_username));
             conn->clear();
-
-            _db_schemas[db_id].insert(schema);
         }
         // import catalog schema
         std::string escaped_schema = conn->escape_identifier(SPRINGTAIL_FDW_CATALOG_SCHEMA);
@@ -681,8 +680,14 @@ namespace springtail::pg_fdw {
                                 escaped_schema));
         conn->clear();
 
+        std::unique_lock db_lock(_db_mutex);
+        // add all schemas to _db_schema
+        for (const auto &schema: schemas) {
+            _db_schemas[db_id].insert(schema);
+        }
         // set the schema xid in the map
         _db_xid_map[db_id] = xid;
+        db_lock.unlock();
 
         // update redis with the schema xid
         redis_ddl.update_schema_xid(_fdw_id, db_id, xid);
@@ -698,12 +703,13 @@ namespace springtail::pg_fdw {
         std::string db_name = db_config["name"];
 
         // acquire lock
-        std::unique_lock lock(_db_mutex);
+        std::shared_lock shared_lock(_db_mutex);
         if (_db_xid_map.contains(db_id)) {
             return;
         }
+        shared_lock.unlock();
 
-        // verify that the database does not exit before trying to add it
+        // verify that the database does not exist before trying to add it
         LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
         std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
         conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
@@ -723,19 +729,25 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_remove_replicated_database(uint64_t db_id)
     {
-        std::unique_lock lock(_db_mutex);
+        std::shared_lock shared_lock(_db_mutex);
         if (!_db_xid_map.contains(db_id)) {
             return;
         }
+        shared_lock.unlock();
 
+        // read db_config to get database name
         nlohmann::json db_config = Properties::get_db_config(db_id);
         std::string db_name = db_config["name"];
 
+        // drop database
         LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec(drop_db);
         conn->disconnect();
+
+        // remove it from internal storage
+        std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
         _db_schemas.erase(db_id);
     }
