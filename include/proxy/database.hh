@@ -364,7 +364,6 @@ namespace pg_proxy {
 
     /**
      * @brief Database Object class for storing all the information pertaining to a replicated database
-     *
      */
     class DatabaseObject {
     public:
@@ -377,7 +376,7 @@ namespace pg_proxy {
         DatabaseObject(uint64_t db_id, const std::string &db_name) : _db_name(db_name), _db_id(db_id) {}
 
         /**
-         * @brief Add shema and table
+         * @brief Add schema and table
          *
          * @param db_schema - schema
          * @param db_table - table
