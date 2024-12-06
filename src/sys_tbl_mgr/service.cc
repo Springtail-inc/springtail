@@ -33,6 +33,7 @@ namespace springtail::sys_tbl_mgr {
     void
     Service::shutdown()
     {
+        assert(0);
         boost::unique_lock lock(_instance_mutex);
 
         if (_instance != nullptr) {
@@ -109,7 +110,7 @@ namespace springtail::sys_tbl_mgr {
                 index_info.is_unique );
 
         // update the index state
-        index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+        index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
 
         // no need to carry the columns for deleted indexes
         if (request.state == static_cast<uint8_t>(sys_tbl::IndexNames::State::DELETED)) {
@@ -200,7 +201,7 @@ namespace springtail::sys_tbl_mgr {
                     static_cast<sys_tbl::IndexNames::State>(request.index.state),
                     request.index.is_unique );
 
-            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
 
         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
@@ -324,7 +325,7 @@ namespace springtail::sys_tbl_mgr {
                 xid.lsn,
                 sys_tbl::IndexNames::State::DELETED,
                 info->first.is_unique );
-        index_names_t->insert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+        index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
     }
 
     void
@@ -416,7 +417,7 @@ namespace springtail::sys_tbl_mgr {
                     xid.lsn,
                     sys_tbl::IndexNames::State::READY,
                     true );
-            index_names_t->insert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
             _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
         }
@@ -1520,7 +1521,7 @@ namespace springtail::sys_tbl_mgr {
             fields->at(sys_tbl::Indexes::Data::POSITION) = std::make_shared<ConstTypeField<uint32_t>>(entry.first);
             fields->at(sys_tbl::Indexes::Data::COLUMN_ID) = std::make_shared<ConstTypeField<uint32_t>>(entry.second);
 
-            indexes_t->insert(std::make_shared<FieldTuple>(fields, nullptr),
+            indexes_t->upsert(std::make_shared<FieldTuple>(fields, nullptr),
                               write_xid, constant::UNKNOWN_EXTENT);
         }
     }
