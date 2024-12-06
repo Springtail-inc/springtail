@@ -40,8 +40,6 @@ namespace {
             pool_opt.connection_lifetime = std::chrono::seconds(0);
 
             _config_client = std::make_shared<RedisClient>(con_opt, pool_opt);
-
-            Properties::set_properties_file_override_flag(false);
         }
         static void TearDownTestSuite()
         {
