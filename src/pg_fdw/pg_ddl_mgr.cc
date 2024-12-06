@@ -162,8 +162,6 @@ namespace springtail::pg_fdw {
     void
     PgDDLMgr::_init_fdw(const std::string &username, const std::string &password)
     {
-        std::unique_lock db_name_lock(_db_mutex);
-
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
