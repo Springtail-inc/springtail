@@ -8,8 +8,9 @@
 using namespace springtail;
 
 namespace {
+    constexpr char USER_EXISTS[] = "SELECT 1 FROM pg_roles WHERE rolname = '{}'";
     constexpr char USER_CREATE[] = "CREATE USER {} WITH LOGIN PASSWORD '{}'";
-    constexpr char USER_DROP[] = "DROP USER {}";
+    constexpr char USER_DROP[] = "DROP USER IF EXISTS {}";
     constexpr char USER_DROP_OWNED[] = "DROP OWNED BY {}";
     constexpr char DATABASE_GRANT[] = "GRANT CONNECT ON DATABASE {} TO {}";
     constexpr char DATABASE_REVOKE[] = "REVOKE CONNECT ON DATABASE {} FROM {}";
@@ -20,7 +21,8 @@ namespace {
 
     class UserMgr_Test : public testing::Test {
     protected:
-        static void SetUpTestSuite() {
+        static void SetUpTestSuite()
+        {
             springtail_init();
 
             pg_proxy::DatabaseMgr::get_instance()->init();
@@ -34,31 +36,55 @@ namespace {
             std::string db_name = "springtail";
             _db_conn.connect(host, db_name, user, password, port, false);
         }
-        static void TearDownTestSuite() {
+
+        static void TearDownTestSuite()
+        {
             pg_proxy::UserMgr::get_instance()->stop_thread();
             pg_proxy::UserMgr::shutdown();
             pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
         }
+
+        void SetUp() override
+        {
+            TearDown();
+        }
+
+        void TearDown() override
+        {
+            _remove_user("aaa");
+            _remove_user("bbb");
+        }
+
         void _add_user(const std::string &user, const std::string &password) {
             _db_conn.exec(fmt::format(USER_CREATE, user, password));
         }
+
         void _remove_user(const std::string &user) {
+            _db_conn.exec(fmt::format(USER_EXISTS, user));
+            if (_db_conn.ntuples() == 0) {
+                return;
+            }
             _db_conn.exec(fmt::format(USER_DROP_OWNED, user));
             _db_conn.exec(fmt::format(USER_DROP, user));
         }
+
         void _add_database(const std::string &database) {
             _db_conn.exec(fmt::format(DATABASE_GRANT, database, "public"));
         }
+
         void _remove_database(const std::string &database) {
             _db_conn.exec(fmt::format(DATABASE_REVOKE, database, "public"));
         }
+
         void _change_user_password(const std::string &user, const std::string &password) {
             _db_conn.exec(fmt::format(CHANGE_PASSWORD, user, password));
         }
+
         void _change_encryption(const std::string &encryption) {
             _db_conn.exec(fmt::format(CHANGE_ENCRYPTION, encryption));
         }
+
         static inline springtail::LibPqConnection _db_conn;
         static inline uint32_t _sleep_interval = 1;
     };
