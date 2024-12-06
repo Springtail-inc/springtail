@@ -641,19 +641,17 @@ namespace pg_proxy {
         DatabaseReplicaSet _replica_set;      ///< set of replica databases
 
         std::map<std::string, DatabaseObjectPtr> _db_name_rep_dbs;  ///< map of database names to database object
-        std::map<u_int64_t, DatabaseObjectPtr> _db_id_rep_dbs;      ///< map of database ids to database object
+        std::map<uint64_t, DatabaseObjectPtr> _db_id_rep_dbs;       ///< map of database ids to database object
         std::shared_mutex _db_mutex;          ///< shared mutex for read/write access to the replicated databases map
 
         /**
          * @brief Construct a new Database Mgr object
-         *
          */
         DatabaseMgr() : _config_sub_thread(1, true),
                         _data_sub_thread(1, false) {};
 
         /**
          * @brief Destroy the Database Mgr object
-         *
          */
         ~DatabaseMgr() override = default;
 
@@ -686,13 +684,11 @@ namespace pg_proxy {
 
         /**
          * @brief Initialize pubsub thread for database tables subscriber
-         *
          */
         void _init_db_tables_subscriber();
 
         /**
          * @brief Initialize pubsub thread for adding and removing databases
-         *
          */
         void _init_replicated_dbs_subscriber();
 
