@@ -126,6 +126,11 @@ class PostgresComponent(Component):
         if res:
             if drop:
                 self.logger.debug(f"User {user} already exists, dropping")
+                # reassign ownership of all objects owned by the user
+                run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"REASSIGN OWNED BY {user} TO postgres"])
+                # this will drop everything the user owns in the current db, should be ok in FDW
+                run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"DROP OWNED BY {user}"])
+                # then drop the user
                 run_command('sudo', ['-u', 'postgres', 'psql', '-c', f"DROP USER {user}"])
             else:
                 self.logger.debug(f"User {user} already exists")
