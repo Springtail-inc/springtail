@@ -282,36 +282,12 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
-            nlohmann::json completed_ddls;
-            nlohmann::json index_ddls;
-
-            // retrieve any schema changes available in Redis
-            {
-                auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
-                for (auto ddl: ddls) {
-                    const auto it = ddl.find("action");
-                    if (it != ddl.end() && (*it == "create_index" ||
-                            *it == "drop_index")) {
-                        // The index DDLs will be committed to the FDWs after indexing is completed.
-                        index_ddls.push_back(std::move(ddl));
-                    } else {
-                        completed_ddls.push_back(std::move(ddl));
-                    }
-                }
-            }
+            nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
             if (!index_ddls.is_null()) {
                 _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
-                for (auto const& ddl: index_ddls) {
-                    auto action = ddl["action"];
-                    if (action == "create_index") {
-                        _indexer->build({db_id, xid, ddl});
-                    } else if (action == "drop_index") {
-                        _indexer->drop(db_id, ddl["id"], xid);
-                    } else {
-                        assert(false);
-                    }
-                }
+                _indexer->process_ddls(db_id, xid, index_ddls);
                 _indexer->wait_for_completion(db_id);
                 sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
                 _redis_ddl.commit_index_ddl(db_id, xid);
@@ -319,8 +295,6 @@ namespace springtail::gc {
                 if (!completed_ddls.is_null()) {
                     // finalize the system metadata
                     sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
-                    // pre-commit the DDLs to be applied to the FDWs
-                    _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
                 }
             }
 

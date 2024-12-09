@@ -857,7 +857,7 @@ namespace springtail::gc {
                                         index_msg, sys_tbl::IndexNames::State::READY);
 
                                 // Send the DDL statement to GC2
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                _redis_ddl.add_index_ddl(state->entry.db_id, xid.xid, ddl_stmt);
                             }
                         }
                         break;
@@ -880,7 +880,7 @@ namespace springtail::gc {
                                 auto &&ddl_stmt = sys_tbl_mgr::Client::get_instance()->drop_index(state->entry.db_id, xid, index_msg);
 
                                 // Send the DDL statement to GC2
-                                _redis_ddl.add_ddl(state->entry.db_id, xid.xid, ddl_stmt);
+                                _redis_ddl.add_index_ddl(state->entry.db_id, xid.xid, ddl_stmt);
                             }
                         }
                         break;

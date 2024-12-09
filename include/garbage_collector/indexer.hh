@@ -29,6 +29,8 @@ namespace springtail::gc {
         Indexer(const Indexer&) = delete;
         Indexer& operator=(const Indexer&) = delete;
 
+        void process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls);
+
         /**
          * Build a secondary index.
          * @param job Defines parameters of the index.

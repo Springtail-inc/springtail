@@ -92,6 +92,12 @@ namespace springtail::redis {
     static constexpr char QUEUE_DDL_XID[] = "queue:ddl:xid:{}:{}:{}";
 
     /**
+     * Queue of DDL index operations for a given XID coming out of the GC1 LogParser
+     * args: <db_instance_id>, <db_id>, <xid>
+     */
+    static constexpr char QUEUE_INDEX_DDL_XID[] = "queue:index:ddl:xid:{}:{}:{}";
+
+    /**
      * HASH of pre-commit DDL operations.  Stored with a key of "db_id:xid"
      * args: <db_instance_id>
      */

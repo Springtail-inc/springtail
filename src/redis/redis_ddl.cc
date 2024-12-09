@@ -11,9 +11,31 @@
 namespace {
     using namespace springtail;
 
+    template<const char* queue>
+    nlohmann::json  _get_ddls(
+            RedisClient& redis,
+            uint64_t db_id,
+            uint64_t xid
+            ) 
+    {
+        std::string ddl_key = fmt::format(queue,
+                Properties::get_db_instance_id(), db_id, xid);
+
+        // retrieve the list of DDL operations for this XID
+        std::vector<std::string> values;
+        redis.lrange(ddl_key, 0, -1, std::back_inserter(values));
+
+        nlohmann::json ddls;
+        for (std::string &value : values) {
+            ddls.push_back(nlohmann::json::parse(value));
+        }
+
+        return ddls;
+    }
+
     // pass hash_set as a template parameter
     // becuase fmt::format() expects a constexpr
-    template<const char* hash_set>
+    template<const char* queue, const char* hash_set>
     void _precommit(
             RedisClient& redis,
             uint64_t db_id,
@@ -30,7 +52,7 @@ namespace {
         std::string precommit_key = fmt::format(hash_set,
                                                 Properties::get_db_instance_id());
         std::string hkey = fmt::format("{}:{}", db_id, xid);
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
+        std::string ddl_key = fmt::format(queue,
                                           Properties::get_db_instance_id(), db_id, xid);
 
         // construct the DDL value and place it into the pre-commit hash in a single transaction
@@ -54,24 +76,32 @@ namespace springtail {
         _redis->rpush(key, ddl);
     }
 
+    void
+    RedisDDL::add_index_ddl(uint64_t db_id,
+                      uint64_t xid,
+                      const std::string &ddl)
+    {
+        std::string key = fmt::format(redis::QUEUE_INDEX_DDL_XID,
+                                      Properties::get_db_instance_id(), db_id, xid);
+
+        // RPUSH ddl_queue:xid ddl
+        _redis->rpush(key, ddl);
+    }
+
+    nlohmann::json
+    RedisDDL::get_index_ddls_xid(uint64_t db_id,
+                           uint64_t xid)
+    {
+        return _get_ddls<redis::QUEUE_INDEX_DDL_XID>(*_redis, db_id, xid);
+    }
+
     nlohmann::json
     RedisDDL::get_ddls_xid(uint64_t db_id,
                            uint64_t xid)
     {
-        std::string ddl_key = fmt::format(redis::QUEUE_DDL_XID,
-                                          Properties::get_db_instance_id(), db_id, xid);
-
-        // retrieve the list of DDL operations for this XID
-        std::vector<std::string> values;
-        _redis->lrange(ddl_key, 0, -1, std::back_inserter(values));
-
-        nlohmann::json ddls;
-        for (std::string &value : values) {
-            ddls.push_back(nlohmann::json::parse(value));
-        }
-
-        return ddls;
+        return _get_ddls<redis::QUEUE_DDL_XID>(*_redis, db_id, xid);
     }
+
 
     void
     RedisDDL::clear_ddls_xid(uint64_t db_id,
@@ -87,12 +117,12 @@ namespace springtail {
                             uint64_t xid,
                             nlohmann::json ddls)
     {
-        _precommit<redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
+        _precommit<redis::QUEUE_DDL_XID, redis::HASH_DDL_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
     void RedisDDL::precommit_index_ddl(uint64_t db_id, uint64_t xid, nlohmann::json ddls) 
     {
-        _precommit<redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
+        _precommit<redis::QUEUE_INDEX_DDL_XID, redis::HASH_DDL_INDEX_PRECOMMIT>(*_redis, db_id, xid, ddls);
     }
 
     std::vector<std::tuple<uint64_t, uint64_t, nlohmann::json>>

@@ -18,6 +18,20 @@ namespace springtail::gc {
         SPDLOG_INFO("Indexer created: {}", worker_count);
     }
 
+    void Indexer::process_ddls(uint64_t db_id, uint64_t xid, nlohmann::json const& ddls)
+    {
+        for (auto const& ddl: ddls) {
+            auto action = ddl["action"];
+            if (action == "create_index") {
+                build({db_id, xid, ddl});
+            } else if (action == "drop_index") {
+                drop(db_id, ddl["id"], xid);
+            } else {
+                assert(false);
+            }
+        }
+    }
+
     void Indexer::build(IndexParams idx)
     {
         {

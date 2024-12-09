@@ -35,12 +35,27 @@ namespace springtail {
         void add_ddl(uint64_t db_id, uint64_t xid, const std::string &ddl);
 
         /**
+         * Used by gc::LogParser (GC-1) to record DDL statements against the XID.
+         * @param xid The XID at which this DDL statement needs to be applied.
+         * @param ddl A JSON representation of the DDL statement.
+         */
+        void add_index_ddl(uint64_t db_id, uint64_t xid, const std::string &ddl);
+
+        /**
          * Used by gc::Committer (GC-2) to retrieve the set of DDL statements recorded against the
          * XID we are about to commit.
          * @param xid The XID we are about to commit.
          * @return A JSON array containing the ordered set of DDLs to apply at each FDW.
          */
         nlohmann::json get_ddls_xid(uint64_t db_id, uint64_t xid);
+
+        /**
+         * Used by gc::Committer (GC-2) to retrieve the set of DDL statements recorded against the
+         * XID we are about to commit.
+         * @param xid The XID we are about to commit.
+         * @return A JSON array containing the ordered set of DDLs to apply at each FDW.
+         */
+        nlohmann::json get_index_ddls_xid(uint64_t db_id, uint64_t xid);
 
         /**
          * Used by gc::LogParser (GC-1) to clear DDL statements it recorded against a given XID.
