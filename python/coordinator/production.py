@@ -2,6 +2,8 @@ import boto3
 import logging
 import os
 import sys
+import time
+import tempfile
 from typing import Optional, Dict, Any
 from botocore.exceptions import ClientError
 
@@ -11,17 +13,38 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Add the /shared directory to the Python path
 sys.path.append(os.path.join(project_root, 'shared'))
 
-from common import run_command
+from common import (
+    run_command,
+    makedir,
+    grep_file
+)
 
 S3_BIN_FOLDER = 'packages'
-S3_DOWNLOAD_PATH = '/tmp'
-S3_INSTALL_PATH = '/opt/'
+S3_DOWNLOAD_PATH = '/tmp/'
+
+# NOTE: this should match the environment variables in common/environment.hh
+ENV_VARS = [
+    'REDIS_USER',
+    'REDIS_PASSWORD',
+    'REDIS_USER_DATABASE_ID',
+    'REDIS_CONFIG_DATABASE_ID',
+    'REDIS_PORT',
+    'ORGANIZATION_ID',
+    'ACCOUNT_ID',
+    'DATABASE_INSTANCE_ID',
+    'LUSTRE_DNS_NAME',
+    'LUSTRE_MOUNT_NAME',
+    'MOUNT_POINT',
+    'FDW_ID',
+    'REPLICATION_USER_PASSWORD',
+    'FDW_USER_PASSWORD'
+]
 
 def __download_s3_binaries (
     bucket: str,
     folder: str,
     local_path: str,
-    prefix: str = 'springtail_'
+    prefix: str = 'springtail-'
 ) -> Optional[str]:
     """
     Get the latest springtail binaries file from S3 based on filename timestamp.
@@ -40,23 +63,20 @@ def __download_s3_binaries (
 
     try:
         # List objects with the given prefix
-        prefix = f"{folder}/" if folder else ""
+        prefix = f"{folder}/{prefix}" if folder else "{prefix}"
         response = s3.list_objects_v2(
             Bucket=bucket,
             Prefix=prefix
         )
 
-        if 'Contents' not in response:
+        if 'Contents' not in response or not response['Contents']:
+            logger.warning(f"No objects found in {bucket}/{prefix}")
             return None
 
-        # Filter for springtail backup files and sort by timestamp in filename
-        files = [
-            obj['Key'] for obj in response['Contents']
-            if obj['Key'].startswith('springtail_')
-        ]
+        files = [obj['Key'] for obj in response['Contents']]
 
-        if not files:
-            return None
+        logger.debug(f"Found {len(response['Contents'])} objects in {prefix}")
+        logger.debug(f"Objects: {files}")
 
         # Sort by the YYYYMMDD portion of filename
         latest_file = sorted(
@@ -65,17 +85,24 @@ def __download_s3_binaries (
             reverse=True
         )[0]
 
-        # download the file
-        s3.download_file(bucket, latest_file, local_path)
+        logger.debug(f"Latest springtail file: {latest_file}")
 
-        return os.path.join(local_path, latest_file)
+        # download the file
+        filename = os.path.join(local_path, os.path.basename(latest_file))
+        s3.download_file(bucket, latest_file, filename)
+
+        return filename
 
     except ClientError as e:
         error_code = e.response['Error']['Code']
-        logger.error(f"Failed to get latest springtail file: {error_code}")
+        logging.error(f"Failed to get latest springtail file: {error_code}")
+        print(f"Failed to get latest springtail file: {error_code}")
+        sys.exit(1)
         return None
     except Exception as e:
-        logger.error(f"Failed to get latest springtail file: {str(e)}")
+        logging.error(f"Failed to get latest springtail file: {str(e)}")
+        print(f"Failed todd get latest springtail file: {str(e)}")
+        sys.exit(1)
         return None
 
 
@@ -124,22 +151,80 @@ def __send_sns_notification(
         return None
 
 
-def install_binaries() -> None:
+def install_binaries(install_path : str) -> None:
     """
     Install the springtail binaries on the local system.
+    Current s3 bucket: s3://data-share.springtail.internal/packages/
     """
     # Download the springtail binaries
-    s3_bucket = os.environ.get('S3_BUCKET')
+    s3_bucket = os.environ.get('S3_BUCKET',"data-share.springtail.internal")
     if not s3_bucket:
         raise ValueError("S3_BUCKET environment variable not set")
+
+    logging.info(f"Downloading springtail binaries from {s3_bucket}/{S3_BIN_FOLDER} to {S3_DOWNLOAD_PATH}")
 
     springtail_tgz = __download_s3_binaries(s3_bucket, S3_BIN_FOLDER, S3_DOWNLOAD_PATH)
 
     if not springtail_tgz:
         raise ValueError("Failed to download springtail binaries")
 
+    # Create the install directory if it doesn't exist
+    if not os.path.exists(install_path):
+        makedir(install_path)
+
     # Install the binaries
-    run_command('tar', ['-xzf', springtail_tgz, '-C', S3_INSTALL_PATH])
+    run_command('sudo', ['tar', 'xzf', springtail_tgz, '-C', install_path])
+
+    logging.info(f"Springtail binaries installed to {install_path}")
+
+
+def install_pgfdw(install_path : str) -> None:
+    """
+    Install the postgres libraries on the local system for the FDW.
+    Should be done prior to starting the ddl mgr.
+    """
+    # Get the share and lib directories
+    share_dir = run_command('pg_config', ['--sharedir'])
+    lib_dir = run_command('pg_config', ['--pkglibdir'])
+
+    # copy the extension files to the share directory
+    logging.info(f"Copying extension files to the share directory: {share_dir}")
+    sp_sharedir = os.path.join(install_path, 'share')
+    share_dir = os.path.join(share_dir.strip(), 'extension')
+
+    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw--1.0.sql')), share_dir])
+    run_command('sudo', ['cp', str(os.path.join(sp_sharedir, 'springtail_fdw.control')), share_dir])
+
+    # copy the shared library to the lib directory
+    logging.info(f"Copying shared library to the lib directory: {lib_dir}")
+    sp_libdir = os.path.join(install_path, 'lib')
+    lib_dir = os.path.join(lib_dir.strip(), 'springtail_fdw.so')
+    run_command('sudo', ['cp', os.path.join(sp_libdir, 'libspringtail_pg_fdw.so'), lib_dir])
+
+    # Update the postgres configuration file
+    # version string is like: 'PostgreSQL 16.4 (Ubuntu 16.4-0ubuntu0.24.04.2)'
+    logging.info("Updating postgres environment file")
+    version_str = run_command('pg_config', ['--version']).strip()
+    version = version_str.split(' ')[1].split('.')[0]
+    env_file = f'/etc/postgresql/{version}/main/environment'
+
+    # Write the environment variables to a temporary file
+    with tempfile.NamedTemporaryFile(delete=True, mode='w') as temp_file:
+        # Write data to the temporary file
+        for var in ENV_VARS:
+            value = os.environ.get(var)
+            if value:
+                temp_file.write(f"{var} = '{value}'\n")
+        temp_file.flush()
+
+        # Copy the contents of the temporary file to the environment file
+        run_command('sudo', ['cp', temp_file.name, env_file])
+
+    # restart postgres
+    logging.info("Restarting postgres")
+    run_command('sudo', ['service', 'postgresql', 'restart'])
+    time.sleep(5)
+
 
 def send_sns(message: str) -> None:
     """

@@ -16,8 +16,7 @@ namespace {
     {
         pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
         if (ddl_mgr != nullptr) {
-            std::cout << "Shutting down DDL Mgr" << std::endl;
-            ddl_mgr->shutdown();
+            ddl_mgr->stop_thread();
         }
     }
 }
@@ -61,9 +60,6 @@ int main(int argc, char *argv[])
     }
     springtail::springtail_init("pg_ddl_mgr", pidfile, LOG_ALL);
 
-    // get the DDL Mgr instance
-    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-
     // register the SIGINT handler; do this before starting the main thread
     std::signal(SIGINT, handle_sigint);
 
@@ -93,10 +89,13 @@ int main(int argc, char *argv[])
 
     SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
                  fdw_id, username, password, socket_hostname.value_or(""));
-    ddl_mgr->startup(fdw_id, username, password, socket_hostname);
+
+    // get the DDL Mgr instance
+    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
+    ddl_mgr->init(fdw_id, username, password, socket_hostname);
 
     // wait for shutdown; wait for main thread to join
-    ddl_mgr->wait_shutdown();
+    ddl_mgr->shutdown();
 
     return 0;
 }

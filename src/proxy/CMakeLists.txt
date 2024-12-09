@@ -58,7 +58,7 @@ gtest_discover_tests(test_parser)
 
 # test user manager executable
 add_executable(test_user_mgr test/test_user_mgr.cc)
-target_include_directories(test_parser
+target_include_directories(test_user_mgr
     PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/
     PRIVATE ${CMAKE_SOURCE_DIR}/external/libpg_query/src
@@ -71,6 +71,18 @@ target_link_libraries(test_user_mgr
 )
 add_dsymutil_command(test_user_mgr)
 gtest_discover_tests(test_user_mgr)
+
+# test database manager executable
+add_executable(test_database_mgr test/test_database_mgr.cc)
+target_include_directories(test_database_mgr
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_database_mgr
+    PRIVATE springtail_proxy
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_database_mgr)
+gtest_discover_tests(test_database_mgr)
 
 # test parsing executable
 add_executable(parsing test/parsing.cc)
