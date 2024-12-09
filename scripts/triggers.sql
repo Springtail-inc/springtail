@@ -281,7 +281,7 @@ BEGIN
     -- Drop event functions
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops() CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_table_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_set_replica_identity(identity regclass, full_ident boolean DEFAULT true) CASCADE;
+    DROP FUNCTION IF EXISTS springtail_set_replica_identity(identity regclass, full_ident boolean) CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_index_ddl() CASCADE;
     DROP FUNCTION IF EXISTS get_user_access() CASCADE;
     -- Drop event triggers

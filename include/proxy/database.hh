@@ -363,87 +363,67 @@ namespace pg_proxy {
     };
 
     /**
-     * @brief This class represents database tables storage. It maps database id to a collection of schemas.
-     *      Each database schema maps to a collection of tables.
-     *
+     * @brief Database Object class for storing all the information pertaining to a replicated database
      */
-    class DatabaseSchemaTableStore {
+    class DatabaseObject {
     public:
         /**
-         * @brief Default constructor
-         *
-         */
-        DatabaseSchemaTableStore() = default;
-
-        /**
-         * @brief Add item to storage
+         * @brief Construct a new Database Object from database id and name
          *
          * @param db_id - database id
-         * @param db_schema - schema name
-         * @param db_table - table name
+         * @param db_name - database name
          */
-        void add_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
-            std::unique_lock storage_lock(_storage_mutex);
-            auto db_it = _storage.find(db_id);
-            if (db_it == _storage.end()) {
-                std::map<std::string, std::set<std::string>> empty_db;
-                _storage.insert(std::pair(db_id, empty_db));
-                db_it = _storage.find(db_id);
-            }
-            auto &db = db_it->second;
-            auto schema_it = db.find(db_schema);
-            if (schema_it == db.end()) {
+        DatabaseObject(uint64_t db_id, const std::string &db_name) : _db_name(db_name), _db_id(db_id) {}
+
+        /**
+         * @brief Add schema and table
+         *
+         * @param db_schema - schema
+         * @param db_table - table
+         */
+        void add_schema_table(const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_db_mutex);
+            auto schema_it = _schema_tables_map.find(db_schema);
+            if (schema_it == _schema_tables_map.end()) {
                 std::set<std::string> empty_schema;
-                db.insert(std::pair(db_schema, empty_schema));
-                schema_it = db.find(db_schema);
+                _schema_tables_map.insert(std::pair(db_schema, empty_schema));
+                schema_it = _schema_tables_map.find(db_schema);
             }
             auto &schema = schema_it->second;
             schema.insert(db_table);
         }
 
         /**
-         * @brief Remove item from storage
+         * @brief Remove schema and table
          *
-         * @param db_id - database id
-         * @param db_schema - schema name
-         * @param db_table - table name
+         * @param db_schema - schema
+         * @param db_table - table
          */
-        void remove_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
-            std::unique_lock storage_lock(_storage_mutex);
-            auto db_it = _storage.find(db_id);
-            if (db_it == _storage.end()) {
-                return;
-            }
-            auto &db = db_it->second;
-            auto schema_it = db.find(db_schema);
-            if (schema_it == db.end()) {
+        void remove_schema_table(const std::string &db_schema, const std::string &db_table) {
+            std::unique_lock storage_lock(_db_mutex);
+            auto schema_it = _schema_tables_map.find(db_schema);
+            if (schema_it == _schema_tables_map.end()) {
                 return;
             }
             auto &schema = schema_it->second;
             schema.erase(db_table);
             if (schema.empty()) {
-                db.erase(db_schema);
+                _schema_tables_map.erase(db_schema);
             }
         }
 
         /**
-         * @brief Verify if an item is in storage
+         * @brief Verify that the table for the given schema is replicated
          *
-         * @param db_id - database id
-         * @param db_schema - database name
-         * @param db_table - database table
-         * @return true - item found
-         * @return false - item is not found
+         * @param db_schema - schema
+         * @param db_table - table
+         * @return true - replicated
+         * @return false - not replicated
          */
-        bool has_item(const uint64_t db_id, const std::string &db_schema, const std::string &db_table) {
-            std::shared_lock storage_lock(_storage_mutex);
-            auto db_it = _storage.find(db_id);
-            if (db_it == _storage.end()) {
-                return false;
-            }
-            auto &db = db_it->second;
-            auto schema_it = db.find(db_schema);
-            if (schema_it == db.end()) {
+        bool has_schema_table(const std::string &db_schema, const std::string &db_table) {
+            std::shared_lock storage_lock(_db_mutex);
+            auto schema_it = _schema_tables_map.find(db_schema);
+            if (schema_it == _schema_tables_map.end()) {
                 return false;
             }
             auto &schema = schema_it->second;
@@ -452,10 +432,52 @@ namespace pg_proxy {
             }
             return false;
         }
+
+        /**
+         * @brief Set database state
+         *
+         * @param state - state
+         */
+        void set_state(redis::db_state_change::DBState state) {
+            std::unique_lock storage_lock(_db_mutex);
+            _state = state;
+        }
+
+        /**
+         * @brief Get database state
+         *
+         * @return redis::db_state_change::DBState
+         */
+        redis::db_state_change::DBState get_state() {
+            std::shared_lock storage_lock(_db_mutex);
+            return _state;
+        }
+
+        /**
+         * @brief Get the database id
+         *
+         * @return uint64_t - database id
+         */
+        uint64_t get_db_id() const {
+            return _db_id;
+        }
+
+        /**
+         * @brief Get database name
+         *
+         * @return std::string - database name
+         */
+        std::string get_db_name() const {
+            return _db_name;
+        }
     private:
-        std::map<uint64_t, std::map<std::string, std::set<std::string>>> _storage; ///< storage collection
-        std::shared_mutex _storage_mutex;  ///< shared mutex lock for schema tables storage
+        std::map<std::string, std::set<std::string>> _schema_tables_map; ///< maps schema to a set of table names
+        std::shared_mutex _db_mutex;                    ///< mutex for accessing and modifying database data
+        std::string _db_name;                           ///< database name
+        uint64_t _db_id;                                ///< database id
+        redis::db_state_change::DBState _state;         ///< database state
     };
+    using DatabaseObjectPtr = std::shared_ptr<DatabaseObject>;
 
     /**
      * @brief Singleton database manager class. Collects all configuration data from Properties and
@@ -472,27 +494,15 @@ namespace pg_proxy {
         void init();
 
         /**
-         * @brief Add replicated database id and name the collection of replicated databases
-         *          and setup initial state per database
-         *
-         * @param db_id - database id
-         * @param dbname - database name
-         */
-        void add_replicated_database(const uint64_t db_id, const std::string &dbname) {
-            std::unique_lock lock(_db_mutex);
-            _replicated_databases[dbname] = db_id;
-        }
-
-        /**
-         * @brief Get a name of an arbitrary replicated databasethe for running a user query in UserMgr
+         * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
          *
          * @return std::optional<std::string> - name of a replicated database if found
          */
         std::optional<std::string> get_any_replicated_db_name() {
             std::shared_lock lock(_db_mutex);
-            auto it = _replicated_databases.begin();
-            if (it != _replicated_databases.end()) {
-                return it->first;
+            auto iter = _db_name_rep_dbs.begin();
+            if (iter != _db_name_rep_dbs.end()) {
+                return iter->first;
             }
             return {};
         }
@@ -500,12 +510,17 @@ namespace pg_proxy {
         /**
          * @brief Get database id for given database name
          *
-         * @param dbname - database name
-         * @return uint64_t - database id
+         * @param db_name - database name
+         * @return std::optional<uint64_t> - optional database id
          */
-        std::optional<uint64_t> get_database_id(const std::string &dbname) {
+        std::optional<uint64_t> get_database_id(const std::string &db_name) {
+            std::optional<uint64_t> ret;
             std::shared_lock lock(_db_mutex);
-            return _replicated_databases[dbname];
+            auto iter = _db_name_rep_dbs.find(db_name);
+            if (iter != _db_name_rep_dbs.end()) {
+                ret = iter->second->get_db_id();
+            }
+            return ret;
         }
 
         /**
@@ -516,11 +531,14 @@ namespace pg_proxy {
          * @return false - database is not in the running state
          */
         bool is_database_ready(const uint64_t db_id) {
-            std::shared_lock lock(_db_state_mutex);
-            if (!_replicated_database_states.contains(db_id)) {
+            std::shared_lock lock(_db_mutex);
+            auto iter = _db_id_rep_dbs.find(db_id);
+            if (iter == _db_id_rep_dbs.end()) {
                 return false;
             }
-            if (_replicated_database_states[db_id] == redis::db_state_change::DB_STATE_RUNNING) {
+            lock.unlock();
+            DatabaseObjectPtr db_object = iter->second;
+            if (db_object->get_state() == redis::db_state_change::DB_STATE_RUNNING) {
                 return true;
             }
             return false;
@@ -535,7 +553,7 @@ namespace pg_proxy {
          */
         bool is_database_replicated(const std::string &dbname) {
             std::shared_lock lock(_db_mutex);
-            return _replicated_databases.contains(dbname);
+            return _db_name_rep_dbs.contains(dbname);
         }
 
         /**
@@ -596,8 +614,15 @@ namespace pg_proxy {
          * @return true - table is replicated
          * @return false - table is not replicated
          */
-        bool is_table_replicated(uint64_t db_id, const std::string &schema, const std::string &table) {
-            return _schema_tables.has_item(db_id, schema, table);
+        bool is_table_replicated(const uint64_t db_id, const std::string &schema, const std::string &table) {
+            std::shared_lock lock(_db_mutex);
+            auto iter = _db_id_rep_dbs.find(db_id);
+            if (iter == _db_id_rep_dbs.end()) {
+                return false;
+            }
+            lock.unlock();
+            DatabaseObjectPtr db_object = iter->second;
+            return db_object->has_schema_table(schema, table);
         }
 
     protected:
@@ -615,24 +640,18 @@ namespace pg_proxy {
         DatabasePrimarySet _primary_database; ///< set of primary databases
         DatabaseReplicaSet _replica_set;      ///< set of replica databases
 
+        std::map<std::string, DatabaseObjectPtr> _db_name_rep_dbs;  ///< map of database names to database object
+        std::map<uint64_t, DatabaseObjectPtr> _db_id_rep_dbs;       ///< map of database ids to database object
         std::shared_mutex _db_mutex;          ///< shared mutex for read/write access to the replicated databases map
-        std::map<std::string, uint64_t> _replicated_databases; ///< list of authorized databases with associated ids
-
-        std::shared_mutex _db_state_mutex;   ///< shared mutex for read/write access to database state
-        std::map<uint64_t, redis::db_state_change::DBState> _replicated_database_states; ///< list of authorized database ids
-
-        DatabaseSchemaTableStore _schema_tables; ///< storage of schema and table info per database
 
         /**
          * @brief Construct a new Database Mgr object
-         *
          */
         DatabaseMgr() : _config_sub_thread(1, true),
                         _data_sub_thread(1, false) {};
 
         /**
          * @brief Destroy the Database Mgr object
-         *
          */
         ~DatabaseMgr() override = default;
 
@@ -651,6 +670,13 @@ namespace pg_proxy {
         void _handle_db_table_change(const std::string &msg);
 
         /**
+         * @brief Replicated database change handling
+         *
+         * @param msg - message
+         */
+        void _handle_replicated_dbs_change(const std::string &msg);
+
+        /**
          * @brief Initialize pubsub thread for database state change
          *
          */
@@ -658,9 +684,27 @@ namespace pg_proxy {
 
         /**
          * @brief Initialize pubsub thread for database tables subscriber
-         *
          */
         void _init_db_tables_subscriber();
+
+        /**
+         * @brief Initialize pubsub thread for adding and removing databases
+         */
+        void _init_replicated_dbs_subscriber();
+
+        /**
+         * @brief add replicated database
+         *
+         * @param db_id - database id
+         */
+        void _add_replicated_database(uint64_t db_id);
+
+        /**
+         * @brief remove replicated database
+         *
+         * @param db_id - database id
+         */
+        void _remove_replicated_database(uint64_t db_id);
     };
 
 } // namespace pg_proxy
