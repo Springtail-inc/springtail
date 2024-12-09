@@ -50,7 +50,7 @@ namespace springtail::pg_log_mgr {
     private:
         class Batch {
             // 4 MB
-            constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
+            static constexpr uint32_t MAX_BATCH_SIZE = 4 * 1024 * 1024;
 
         public:
             /**
@@ -107,7 +107,7 @@ namespace springtail::pg_log_mgr {
                 TableMap table_map; ///< Map from table ID to TableEntry
                 ChangeList changes; ///< List of (schema change + LSN) ordered by LSN
             };
-            using TxnEntryPtr = std::shared_ptr<TxnEntryPtr>;
+            using TxnEntryPtr = std::shared_ptr<TxnEntry>;
 
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
 
