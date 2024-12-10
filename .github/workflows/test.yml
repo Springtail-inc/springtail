@@ -32,6 +32,7 @@ jobs:
       DOCKER: 1
       ZIC: true
       USER: root
+      PYTHONUNBUFFERED: 1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
