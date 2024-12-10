@@ -1,0 +1,2 @@
+system_json_path: '../../../system.json.test'
+build_dir: '../../../debug'
