@@ -37,9 +37,7 @@ namespace springtail::pg_log_mgr {
         PgLogReader(uint64_t db_id,
                     const PgTransactionQueuePtr queue)
             : _db_id(db_id),
-              _queue(queue),
-              _committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                           Properties::get_db_instance_id()))
+              _queue(queue)
         {}
 
         /**
@@ -209,11 +207,6 @@ namespace springtail::pg_log_mgr {
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
-
-        static RedisDDL _redis_ddl; ///< Interface for accessing the RedisDDL structures
-
-        /** Queue for XID messages to the Committer. */
-        RedisQueue<gc::XidReady> _committer_queue;
 
         /** Process begin message */
         void _process_begin(const PgMsgBegin &begin_msg);

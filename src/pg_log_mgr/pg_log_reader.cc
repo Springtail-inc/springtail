@@ -21,9 +21,6 @@
 
 namespace springtail::pg_log_mgr {
 
-    // static member
-    RedisDDL PgLogReader::_redis_ddl;
-
     void
     PgLogReader::Batch::commit(uint64_t xid)
     {
@@ -147,8 +144,7 @@ namespace springtail::pg_log_mgr {
         } else if constexpr (T == PgMsgEnum::DELETE) {
             MutableTuple(entry.pkey_fields, row).assign(FieldTuple(entry.pg_pkey_fields, &data));
         } else {
-            SPDLOG_ERROR("Unsupported message type: {}", T);
-            throw Error();            
+            static_assert(false, "Invalid template parameter: PgLogReader::Batch::add_mutation");
         }
         entry.op_f->set_int8(row, T);
         entry.lsn_f->set_uint64(row, _lsn++);
@@ -289,6 +285,8 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::_apply_schema_changes(const LsnChangeMap &change_map,
                                               uint64_t xid)
     {
+        RedisDDL redis_ddl;
+
         // apply any schema changes in LSN order to the SysTblMgr
         auto next_i = change_map.begin();
         auto change_i = next_i++;
@@ -355,7 +353,7 @@ namespace springtail::pg_log_mgr {
                 SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
                 throw Error();
             }
-            _redis_ddl.add_ddl(_db, xid, ddl_stmt);
+            redis_ddl.add_ddl(_db, xid, ddl_stmt);
 
             // remove the schema change we just applied
             change_i->second->pop_front();
@@ -542,7 +540,11 @@ namespace springtail::pg_log_mgr {
         _current_batch = nullptr;
 
         // message the Committer
-        _committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+
+        /** Queue for XID messages to the Committer. */
+        RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                             Properties::get_db_instance_id()));
+        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;
@@ -610,7 +612,9 @@ namespace springtail::pg_log_mgr {
         _batch_map.erase(commit_msg.xid);
 
         // message the Committer
-        _committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
+        RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                             Properties::get_db_instance_id()));
+        committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
         xact->springtail_xid = xid;
