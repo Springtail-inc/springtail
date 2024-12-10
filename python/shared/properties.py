@@ -131,6 +131,19 @@ class Properties:
 
         return config
 
+    def get_proxy_config(self):
+        """Return the proxy configuration as an object."""
+        key = 'instance_config:' + str(self.db_instance_id)
+        if 'proxy_config' in self.cache:
+            return self.cache['proxy_config']
+
+        config = json.loads(self.redis.hget(key, 'system_settings'))
+        proxy_config = config['proxy']
+        self.cache['proxy_config'] = proxy_config
+
+        return proxy_config
+
+
     def get_system_config(self):
         """Return the system configuration as an object."""
         key = 'instance_config:' + str(self.db_instance_id)
@@ -215,6 +228,7 @@ class Properties:
         sys_config_json['redis'] = system_json['redis']
         sys_config_json['log_mgr'] = system_json['log_mgr']
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
+        sys_config_json['proxy'] = system_json['proxy']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
