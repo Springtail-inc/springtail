@@ -518,7 +518,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_auth_scram_continue(BufferPtr buffer)
     {
-        std::string_view data = buffer->get_bytes(buffer->remaining());
+        int data_len = buffer->remaining();
+        std::string_view data = buffer->get_bytes(data_len);
 
         if (_login->scram_state.client_nonce == nullptr) {
             SPDLOG_ERROR("No client nonce set");
@@ -531,7 +532,9 @@ namespace springtail::pg_proxy {
         }
 
         int salt_len;
-        char *input = strdup(data.data());
+        char *input = new char[data_len + 1];
+        strncpy(input, data.data(), data_len);
+        input[data_len] = '\0';
 
         if (!read_server_first_message(&_login->scram_state, input,
                                        &_login->scram_state.server_nonce,
@@ -539,9 +542,10 @@ namespace springtail::pg_proxy {
                                        &salt_len,
                                        &_login->scram_state.iterations)) {
             SPDLOG_ERROR("Failed to read server first message");
-            free (input);
+            delete[] input;
             throw ProxyAuthError();
         }
+        delete[] input;
 
         PgUser user;
         user.scram_ClientKey = _login->scram_state.ClientKey;
@@ -550,8 +554,6 @@ namespace springtail::pg_proxy {
         char *client_final_message = build_client_final_message(&_login->scram_state,
 			&user, _login->scram_state.server_nonce,
 			_login->scram_state.salt, salt_len, _login->scram_state.iterations);
-
-        free(input);
 
         if (client_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build client final message");
@@ -573,7 +575,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_auth_scram_complete(BufferPtr buffer)
     {
-        std::string_view data = buffer->get_bytes(buffer->remaining());
+        int data_len = buffer->remaining();
+        std::string_view data = buffer->get_bytes(data_len);
 
         // make sure we are in right flow
         if (_login->scram_state.server_first_message == nullptr) {
@@ -581,15 +584,18 @@ namespace springtail::pg_proxy {
             throw ProxyAuthError();
         }
 
-        char *input = strdup(data.data());
+        char *input = new char[data_len + 1];
+        strncpy(input, data.data(), data_len);
+        input[data_len] = '\0';
         char ServerSignature[SHA256_DIGEST_LENGTH];
 
         // decode the final message from server
         if (!read_server_final_message(input, ServerSignature)) {
             SPDLOG_ERROR("Failed to read server final message");
-            free(input);
+            delete[] input;
             throw ProxyAuthError();
         }
+        delete[] input;
 
         PgUser user;
         user.scram_ClientKey = _login->scram_state.ClientKey;
@@ -599,11 +605,8 @@ namespace springtail::pg_proxy {
         // last step, verify the server signature
         if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
             SPDLOG_ERROR("Failed to verify server signature");
-            free(input);
             throw ProxyAuthError();
         }
-
-        free(input);
     }
 
     void
