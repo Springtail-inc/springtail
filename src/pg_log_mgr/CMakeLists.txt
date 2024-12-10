@@ -20,6 +20,7 @@ target_include_directories(springtail_pglog
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
            springtail_common
+	   springtail_redis
            springtail_xid_mgr
            springtail_storage
            springtail_sys_tbl_mgr

@@ -21,6 +21,9 @@
 
 namespace springtail::pg_log_mgr {
 
+    // static member
+    RedisDDL PgLogReader::_redis_ddl;
+
     void
     PgLogReader::Batch::commit(uint64_t xid)
     {
@@ -117,7 +120,8 @@ namespace springtail::pg_log_mgr {
 
     template <int T>
     void
-    PgLogReader::Batch::add_mutation(int32_t pg_xid,
+    PgLogReader::Batch::add_mutation(uint64_t current_xid,
+                                     int32_t pg_xid,
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
@@ -127,8 +131,8 @@ namespace springtail::pg_log_mgr {
         auto &entry = txn->table_map[tid];
         if (entry.extent == nullptr) {
             if (entry.schema == nullptr) {
-                entry.table_schema = SchemaMgr::get_extent_schema(_db, tid,
-                                                                  XidLsn{_max_committed_xid});
+                XidLsn current(current_xid);
+                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
                 entry.update_schema();
             }
 
@@ -159,7 +163,8 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::Batch::truncate(const PgMsgTruncate &msg)
+    PgLogReader::Batch::truncate(uint64_t current_xid,
+                                 const PgMsgTruncate &msg)
     {
         // get the current txn
         auto txn = _get_txn(msg.xid);
@@ -174,6 +179,12 @@ namespace springtail::pg_log_mgr {
 
             // create a new extent that begins with a truncate operation
             auto &entry = txn->table_map[tid];
+            if (entry.schema == nullptr) {
+                XidLsn current(current_xid);
+                entry.table_schema = SchemaMgr::get_instance()->get_extent_schema(_db, tid, current);
+                entry.update_schema();
+            }
+
             entry.extent = std::make_shared<Extent>(ExtentType{}, 0, entry.schema->row_size());
             entry.start_lsn = _lsn;
 
@@ -312,7 +323,7 @@ namespace springtail::pg_log_mgr {
                     ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
 
                     // check for re-sync
-                    nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                    nlohmann::json action = ddl_stmt.at("action");
                     if (action.get<std::string>() == "resync") {
                         // XXXXXX if a re-sync is required for a table, drop the changes for that table
                         //        from the write cache and initiate a re-sync
@@ -420,30 +431,36 @@ namespace springtail::pg_log_mgr {
                 case PgMsgEnum::INSERT:
                     {
                         auto &insert = std::get<PgMsgInsert>(msg->msg);
-                        _current_batch->add_mutation<PgMsgEnum::INSERT>(insert.xid, insert.rel_id, insert.new_tuple);
+                        _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), insert.xid,
+                                                                        insert.rel_id, insert.new_tuple);
                         break;
                     }
                 case PgMsgEnum::DELETE:
                     {
                         auto &remove = std::get<PgMsgDelete>(msg->msg);
-                        _current_batch->add_mutation<PgMsgEnum::DELETE>(remove.xid, remove.rel_id, remove.tuple);
+                        _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), remove.xid,
+                                                                        remove.rel_id, remove.tuple);
                         break;
                     }
                 case PgMsgEnum::UPDATE:
                     {
                         auto &update = std::get<PgMsgUpdate>(msg->msg);
                         if (update.old_type == 0) {
-                            _current_batch->add_mutation<PgMsgEnum::UPDATE>(update.xid, update.rel_id, update.new_tuple);
+                            _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), update.xid,
+                                                                            update.rel_id, update.new_tuple);
                         } else {
-                            _current_batch->add_mutation<PgMsgEnum::DELETE>(update.xid, update.rel_id, update.old_tuple);
-                            _current_batch->add_mutation<PgMsgEnum::INSERT>(update.xid, update.rel_id, update.new_tuple);
+                            _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), update.xid,
+                                                                            update.rel_id, update.old_tuple);
+                            _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), update.xid,
+                                                                            update.rel_id, update.new_tuple);
                         }
                         break;
                     }
                     break;
 
                 case PgMsgEnum::TRUNCATE:
-                    _current_batch->truncate(std::get<PgMsgTruncate>(msg->msg));
+                    _current_batch->truncate(this->get_current_xid(),
+                                             std::get<PgMsgTruncate>(msg->msg));
                     break;
 
                 case PgMsgEnum::CREATE_TABLE:
@@ -519,7 +536,7 @@ namespace springtail::pg_log_mgr {
         xact->commit_offset = _reader.offset();
 
         // update the write cache and system tables as needed
-        uint64_t xid = _get_next_xid(); // XXXXXX
+        uint64_t xid = this->get_next_xid();
         _current_batch->commit(xid);
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
@@ -588,7 +605,7 @@ namespace springtail::pg_log_mgr {
         assert (xact->type == PgTransaction::TYPE_COMMIT);
 
         // commit the current batch
-        uint64_t xid = _get_next_xid(); // XXXXXX
+        uint64_t xid = this->get_next_xid();
         _current_batch->commit(xid);
         _batch_map.erase(commit_msg.xid);
 

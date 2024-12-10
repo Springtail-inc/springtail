@@ -16,10 +16,14 @@ namespace springtail::pg_log_mgr {
         uint64_t end_offset;
         std::filesystem::path path;
         int num_messages;
+        bool is_stall_message;
 
         PgLogQueueEntry(uint64_t start_offset, uint64_t end_offset, const std::filesystem::path &path)
-            : start_offset(start_offset), end_offset(end_offset), path(path), num_messages(1)
+            : start_offset(start_offset), end_offset(end_offset),
+              path(path), num_messages(1), is_stall_message(false)
         {}
+
+        PgLogQueueEntry(bool stall) : is_stall_message(stall) {}
     };
     using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
 
@@ -50,6 +54,15 @@ namespace springtail::pg_log_mgr {
             PgLogQueueEntryPtr new_entry = std::make_shared<PgLogQueueEntry>(start_offset, end_offset, path);
 
             _internal_push(new_entry, write_lock);
+        }
+
+        /**
+         * @brief Used to push a stall message onto the queue
+         */
+        void push_stall()
+        {
+            std::unique_lock<std::mutex> write_lock{_mutex};
+            _internal_push(std::make_shared<PgLogQueueEntry>(true), write_lock);
         }
     };
 } // namespace springtail::pg_log_mgr

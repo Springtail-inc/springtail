@@ -161,8 +161,7 @@ namespace springtail::pg_log_mgr {
             STATE_RUNNING,      ///< running state
             STATE_SYNC_STALL,   ///< stall state during sync
             STATE_SYNCING,      ///< syncing state (doing table copies)
-            STATE_REPLAYING,    ///< replaying state (replaying logs)
-            STATE_REPLAY_DONE,  ///< replay done, waiting for running from GC
+            STATE_REPLAYING,    ///< replaying state; waiting for running
             STATE_STOPPED
         };
 
@@ -218,7 +217,7 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_log_path;      ///< xact log base path
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
         std::thread _xact_thread;                  ///< xact worker thread
-        std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
+        // std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
         RedisQueue<PgXactMsg> _redis_queue;        ///< redis queue for GC
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
@@ -230,19 +229,8 @@ namespace springtail::pg_log_mgr {
         /** transaction worker -- thread fn */
         void _xact_handler_thread();
 
-        /** push transaction to redis queue */
-        void _push_xact_to_redis(const PgTransactionPtr xact);
-
-        /** batch push transactions to redis */
-        void _push_xacts_to_redis(const std::vector<PgTransactionPtr> &xacts);
-
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
-
-        /** Get next xid */
-        uint64_t _get_next_xid() {
-            return _next_xid.fetch_add(1, std::memory_order_relaxed);
-        }
 
         //// Table copy
         RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
@@ -256,9 +244,6 @@ namespace springtail::pg_log_mgr {
 
         /** Process copy table results; insert into redis */
         void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
-
-        /** Replay xaction logs to redis GC queue; blocks other msgs from being queued */
-        void _replay_xact_logs();
 
         //// Redis pub/sub
         std::thread _pubsub_thread;          ///< redis pub/sub thread

@@ -60,6 +60,25 @@ namespace springtail::pg_log_mgr {
             _xact_map.swap(xact_map);
         }
 
+        /**
+         * Set the starting point for XID assignment.
+         */
+        void set_next_xid(uint64_t xid) {
+            _next_xid = xid;
+        }
+
+        /**
+         * Returns the most recently assigned XID.
+         */
+        uint64_t get_current_xid() const {
+            return _next_xid - 1;
+        }
+
+        /** Get next xid */
+        uint64_t get_next_xid() {
+            return _next_xid.fetch_add(1, std::memory_order_relaxed);
+        }
+
     private:
         class Batch {
             // 4 MB
@@ -91,12 +110,12 @@ namespace springtail::pg_log_mgr {
              * Adds a mutation to a given table's batch.
              */
             template <int T>
-            void add_mutation(int32_t pg_xid, int32_t tid, const PgMsgTupleData &data);
+            void add_mutation(uint64_t current_xid, int32_t pg_xid, int32_t tid, const PgMsgTupleData &data);
 
             /**
              * Records a truncation of a given set of tables into the batch.
              */
-            void truncate(const PgMsgTruncate &msg);
+            void truncate(uint64_t current_xid, const PgMsgTruncate &msg);
 
             /**
              * Records a schema change into the batch.
@@ -126,6 +145,7 @@ namespace springtail::pg_log_mgr {
                 FieldArrayPtr pg_fields; ///< The matching fields for processing a PgMsgTupleData
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
 
+                TableEntry() = default;
                 TableEntry(ExtentSchemaPtr table_schema)
                     : table_schema(table_schema)
                 { }
@@ -183,6 +203,7 @@ namespace springtail::pg_log_mgr {
         PgTransactionQueuePtr _queue;        ///< shared queue for xactions
         PgTransactionPtr _current_xact;      ///< current transaction
         std::map<uint32_t, PgTransactionPtr> _xact_map; ///< in progress xact map
+        std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
 
         /** Tracks mutation batches using a map of pgxid -> Extent.  The pgxid is always the
             top-most pgxid and never a subtxn, which are handled within the batch. */
