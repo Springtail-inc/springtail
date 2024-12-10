@@ -19,7 +19,7 @@ on:
 jobs:
   test:
     name: test
-    runs-on: warp-ubuntu-latest-arm64-4x-spot
+    runs-on: self-hosted
     timeout-minutes: 30
     container:
       image: ${{ inputs.builder_image_version_tag }}
