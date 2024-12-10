@@ -477,20 +477,22 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         if (!read_client_first_message(raw,
                                         &_login->scram_state.cbind_flag,
                                         &_login->scram_state.client_first_message_bare,
                                         &_login->scram_state.client_nonce)) {
             SPDLOG_ERROR("Failed to read client first message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
+        delete[] raw;
 
         // note: some code inside of here could be optimized based on how the password is stored
         if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->_password.c_str())) {
             SPDLOG_ERROR("Failed to build server first message");
-            free (raw);
             throw ProxyAuthError();
         }
 
@@ -503,8 +505,6 @@ namespace springtail::pg_proxy {
         write_buffer->put_bytes(_login->scram_state.server_first_message,
                                  strlen(_login->scram_state.server_first_message));
 
-        free (raw);
-
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
@@ -515,7 +515,9 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth_continue(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         const char *client_final_nonce = nullptr;
 	    char *proof = nullptr;
 
@@ -524,7 +526,7 @@ namespace springtail::pg_proxy {
                                         reinterpret_cast<const uint8_t *>(data.data()),
                                         raw, &client_final_nonce, &proof)) {
             SPDLOG_ERROR("Failed to read client final message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
 
@@ -532,11 +534,13 @@ namespace springtail::pg_proxy {
         if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
             !verify_client_proof(&_login->scram_state, proof)) {
 		    SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
-            free (raw);
+            delete[] raw;
             free (proof);
 
             throw ProxyAuthError();
 	    }
+        delete[] raw;
+        free (proof);
 
         // after verifying the client proof, we now have the client key
         _user->set_client_scram_key(_login->scram_state.ClientKey);
@@ -545,8 +549,6 @@ namespace springtail::pg_proxy {
         char *server_final_message = build_server_final_message(&_login->scram_state);
         if (server_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build server final message");
-            free (raw);
-            free (proof);
 
             throw ProxyAuthError();
         }
@@ -559,9 +561,7 @@ namespace springtail::pg_proxy {
         write_buffer->put32(12); // 12 == SASL final
         write_buffer->put_bytes(server_final_message, strlen(server_final_message));
 
-        free (raw);
         free (server_final_message);
-        free (proof);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
