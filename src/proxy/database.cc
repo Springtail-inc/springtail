@@ -133,7 +133,7 @@ namespace springtail::pg_proxy {
         lock.unlock();
 
         // create a new session
-        session = ServerSession::create(server, user, database, shared_from_this(), _type);
+        session = ServerSession::create(server, user, database, prefix(), shared_from_this(), _type);
 
         return session;
     }
@@ -187,16 +187,20 @@ namespace springtail::pg_proxy {
         std::string host, user, password;
         int port;
         Properties::get_primary_db_config(host, port, user, password);
-        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host, port));
+        set_primary(primary_instance_id, std::make_shared<DatabaseInstance>(Session::Type::PRIMARY, host, "", port));
 
         std::vector<std::string> fdw_id_list = Properties::get_fdw_ids();
         for (const auto & fdw_id: fdw_id_list) {
             nlohmann::json fdw_config = Properties::get_fdw_config(fdw_id);
             auto host = Json::get<std::string>(fdw_config, "host");
             auto port = Json::get<uint16_t>(fdw_config, "port");
+            auto db_prefix = Json::get<std::string>(fdw_config, "db_prefix");
             if (host.has_value() && port.has_value()) {
                 // add replica
-                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), port.value()));
+                if (!db_prefix.has_value()) {
+                    db_prefix = "";
+                }
+                add_replica(std::make_shared<DatabaseInstance>(Session::Type::REPLICA, host.value(), db_prefix.value(), port.value()));
             } else {
                 SPDLOG_ERROR("Could not find the value for replica database {} either host or port", fdw_id);
                 throw ProxyServerError();

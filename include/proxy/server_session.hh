@@ -42,6 +42,7 @@ namespace springtail::pg_proxy {
                       ProxyServerPtr server,
                       UserPtr user,
                       std::string database,
+                      std::string prefix,
                       DatabaseInstancePtr instance,
                       Session::Type type=PRIMARY);
 
@@ -71,6 +72,7 @@ namespace springtail::pg_proxy {
         /** factory to create session */
         static std::shared_ptr<ServerSession>
         create(ProxyServerPtr server, UserPtr user, const std::string &database,
+               const std::string &prefix,
                DatabaseInstancePtr instance, Session::Type type);
 
     protected:
@@ -90,6 +92,7 @@ namespace springtail::pg_proxy {
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
         std::set<std::string> _stmts;              ///< completed prepared statement ids
+        std::string _db_prefix;                    ///< database name prefix to be used for this server session
 
         /** Send startup message */
         void _send_startup_msg(uint64_t seq_id);

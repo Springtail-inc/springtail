@@ -21,9 +21,10 @@ namespace springtail::pg_proxy {
                                  ProxyServerPtr server,
                                  UserPtr user,
                                  std::string database,
+                                 std::string prefix,
                                  DatabaseInstancePtr instance,
                                  Session::Type type)
-        : Session(instance, connection, server, user, database, type)
+        : Session(instance, connection, server, user, database, type), _db_prefix(prefix)
     {
         _state = STARTUP;
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
@@ -371,14 +372,15 @@ namespace springtail::pg_proxy {
     void ServerSession::_send_startup_msg(uint64_t seq_id)
     {
         // Send startup message
-        int msg_len = 8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _database.size() + 3; // length
+        std::string database_name = _db_prefix + _database;
+        int msg_len = 8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + database_name.size() + 3; // length
         BufferPtr buffer = BufferPool::get_instance()->get(msg_len + 4);
         buffer->put32(msg_len);
         buffer->put32(MSG_STARTUP_V3); // protocol version
         buffer->put_string("user");
         buffer->put_string(_user->username());
         buffer->put_string("database");
-        buffer->put_string(_database);
+        buffer->put_string(database_name);
         buffer->put_string("application_name");
         buffer->put_string("Springtail");
         buffer->put_string("client_encoding");
@@ -924,6 +926,7 @@ namespace springtail::pg_proxy {
     ServerSession::create(ProxyServerPtr server,
                           UserPtr user,
                           const std::string &database,
+                          const std::string &prefix,
                           DatabaseInstancePtr instance,
                           Session::Type type)
     {
@@ -938,7 +941,7 @@ namespace springtail::pg_proxy {
             throw ProxyIOConnectionError();
         }
 
-        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, instance, type);
+        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, type);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         return session;
