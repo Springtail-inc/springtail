@@ -262,7 +262,7 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
-        friend std::pair<int, std::vector<ConstQualPtr>>
-        _get_index_score(Index const& idx, List const& qual_list);
+        friend std::vector<ConstQualPtr>
+        _get_index_quals(Index const& idx, List const& qual_list);
     };
 } // namespace springtail::pg_fdw

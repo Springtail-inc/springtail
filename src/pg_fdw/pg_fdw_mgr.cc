@@ -43,8 +43,8 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
-    std::pair<int, std::vector<ConstQualPtr>>
-    _get_index_score(Index const& idx, List const& qual_list) {
+    std::vector<ConstQualPtr>
+    _get_index_quals(Index const& idx, List const& qual_list) {
 
         auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc;
@@ -60,31 +60,18 @@ namespace springtail::pg_fdw {
             return nullptr;
         };
 
-        int offset = 0;
-        std::vector<ConstQualPtr> cols;
+        std::vector<ConstQualPtr> quals;
 
         for (auto const& c: idx.columns) {
             auto qual = find_qual(c.position);
-
             if (find_qual(c.position)) {
-                cols.push_back(qual);
+                quals.push_back(qual);
             } else {
-                if (cols.empty())
-                    ++offset;
-                else 
-                    break;
+                break;
             }
         }
 
-
-        // If the offset into the index is not zero, we do a full scan anyway.
-        // Perhaps we can come up with some optimizations for cases like that.
-
-        if (offset != 0) {
-            return {};
-        }
-
-        return {offset, cols};
+        return quals;
     }
 }
 
@@ -293,30 +280,27 @@ namespace springtail::pg_fdw {
         //select the best index to use
         {
             Index best_index;
-            std::pair<int, std::vector<ConstQualPtr>> best = {std::numeric_limits<int>::max(), {}};
+            std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto score = _get_index_score(idx, *qual_list);
-                if (score.second.empty()) {
+                auto index_quals = _get_index_quals(idx, *qual_list);
+                if (index_quals.empty()) {
                     continue;
                 }
                 // equal score
-                if (score.first == best.first && score.second.size() == best.second.size()) {
+                if (index_quals.size() == best.size()) {
                     // pick primary
                     if (idx.id == constant::INDEX_PRIMARY) {
-                        best = std::move(score);
+                        best = std::move(index_quals);
                         best_index = idx;
                     }
-                } else {
-                    if (score.first < best.first  // less is better
-                            || ((score.first == best.first && score.second.size() > best.second.size())) ) {
-                        best = std::move(score);
-                        best_index = idx;
-                    }
+                } else if (index_quals.size() > best.size()) {
+                    best = std::move(index_quals);
+                    best_index = idx;
                 }
             }
             state->index = std::move(best_index);
-            state->filtered_quals = std::move(best.second);
+            state->filtered_quals = std::move(best);
         }
 
         // note: just because we have some quals doesn't mean we can use them
