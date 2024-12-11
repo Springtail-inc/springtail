@@ -216,7 +216,7 @@ namespace springtail::pg_proxy {
     ClientSession::_handle_startup()
     {
         char buffer[8];
-        ssize_t n = _connection->read(buffer, 8);
+        ssize_t n = _connection->read(buffer, 8, 8);
         assert(n == 8);
 
         int32_t msg_length = recvint32(buffer)-4;
@@ -264,7 +264,7 @@ namespace springtail::pg_proxy {
         assert(remaining <= 4096);
 
         char buffer[remaining];
-        ssize_t n = _connection->read(buffer, remaining);
+        ssize_t n = _connection->read(buffer, remaining, remaining);
         assert(n == remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);

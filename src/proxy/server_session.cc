@@ -183,7 +183,7 @@ namespace springtail::pg_proxy {
         // if not handled above then read in full message
         // get a bufffer from the buffer pool
         BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
-        ssize_t n = _connection->read(buffer->data(), msg_length);
+        ssize_t n = _connection->read(buffer->data(), msg_length, msg_length);
         assert(n == msg_length);
         buffer->set_size(msg_length);
 
@@ -320,7 +320,7 @@ namespace springtail::pg_proxy {
         // Read startup ssl message from server in response to send_startup
         // Just one character: 'N' no ssl or 'S' yes ssl
         char ssl_response;
-        ssize_t n = _connection->read(&ssl_response, 1);
+        ssize_t n = _connection->read(&ssl_response, 1, 1);
         assert(n==1);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
