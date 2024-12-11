@@ -249,7 +249,7 @@ class Properties:
             fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
 
-    def wait_for_state(self, state, id, timeout=3600):
+    def wait_for_state(self, state, id, timeout=600):
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
