@@ -1,4 +1,5 @@
-#include <sys_tbl_mgr/system_tables.hh>
+#include <common/constants.hh>
+#include <limits>
 #include <stdlib.h>
 #include <shared_mutex>
 
@@ -37,6 +38,54 @@ extern "C" {
     #include <storage/pmsignal.h>
     #include <storage/ipc.h>
     #include <tcop/utility.h>
+}
+
+namespace springtail::pg_fdw {
+    using springtail::Index;
+
+    std::pair<int, std::vector<ConstQualPtr>>
+    _get_index_score(Index const& idx, List const& qual_list) {
+
+        auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
+            const ListCell *lc;
+            foreach(lc, &qual_list) {
+                ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
+                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
+                        qual->base.isArray == false &&  
+                        qual->base.varattno == pos ) {
+                    return qual;
+                }
+
+            }
+            return nullptr;
+        };
+
+        int offset = 0;
+        std::vector<ConstQualPtr> cols;
+
+        for (auto const& c: idx.columns) {
+            auto qual = find_qual(c.position);
+
+            if (find_qual(c.position)) {
+                cols.push_back(qual);
+            } else {
+                if (cols.empty())
+                    ++offset;
+                else 
+                    break;
+            }
+        }
+
+
+        // If the offset into the index is not zero, we do a full scan anyway.
+        // Perhaps we can come up with some optimizations for cases like that.
+
+        if (offset != 0) {
+            return {};
+        }
+
+        return {offset, cols};
+    }
 }
 
 using namespace springtail;
@@ -241,38 +290,33 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_init_quals(PgFdwState *state, List *qual_list)
     {
-        ListCell   *lc;
+        //select the best index to use
+        {
+            Index best_index;
+            std::pair<int, std::vector<ConstQualPtr>> best = {std::numeric_limits<int>::max(), {}};
 
-        // map from primary key position to qual
-        std::map<uint32_t, ConstQualPtr> pkey_qual_map;
-
-        // iterate through qual list looking for quals that are primary keys
-        foreach(lc, qual_list) {
-            ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual: varattno: {}, right_type: {}, typeoid: {}, opname: {}, isArray: {}, useOr: {}",
-                                qual->base.varattno, (int)qual->base.right_type, qual->base.typeoid, qual->base.opname, qual->base.isArray, qual->base.useOr);
-
-            // filter out those quals that are not sortable by us, that aren't primary keys or are arrays
-            if (state->columns[qual->base.varattno].pkey_position.has_value() &&
-                _is_type_sortable(qual->base.typeoid, qual->base.op) && qual->base.isArray == false) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual is in primary key and is sortable: {}", state->columns[qual->base.varattno].name);
-                // add qual to the map in primary key position
-                pkey_qual_map[state->columns[qual->base.varattno].pkey_position.value()] = qual;
-            }
-        }
-
-        // go through the primary key qual map and make sure we have quals for columns
-        // that are in primary key order, stop when we find a hole in the pkey space
-        int i = 0;
-        if (!pkey_qual_map.empty()) {
-            for (const auto &[pkey_pos, qual] : pkey_qual_map) {
-                if (pkey_pos != i) {
-                    break;
+            for (auto const& idx: state->indexes) {
+                auto score = _get_index_score(idx, *qual_list);
+                if (score.second.empty()) {
+                    continue;
                 }
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Adding qual: name={}, pkey position={}", state->columns[qual->base.varattno].name, i);
-                state->filtered_quals.push_back(qual);
-                i++;
+                // equal score
+                if (score.first == best.first && score.second.size() == best.second.size()) {
+                    // pick primary
+                    if (idx.id == constant::INDEX_PRIMARY) {
+                        best = std::move(score);
+                        best_index = idx;
+                    }
+                } else {
+                    if (score.first < best.first  // less is better
+                            || ((score.first == best.first && score.second.size() > best.second.size())) ) {
+                        best = std::move(score);
+                        best_index = idx;
+                    }
+                }
             }
+            state->index = std::move(best_index);
+            state->filtered_quals = std::move(best.second);
         }
 
         // note: just because we have some quals doesn't mean we can use them
@@ -425,13 +469,12 @@ namespace springtail::pg_fdw {
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
 
-        // XXX only looking at primary keys for now
         // build up a list of pathkeys that match the sortgroup from the primary key
         // in order, stop when no more matches found
         int i = 0;
         foreach(lc, sortgroup) {
             // check if there are any more primary keys
-            if (i >= pg_state->pkey_column_ids.size()) {
+            if (i >= pg_state->index.columns.size()) {
                 break;
             }
 
@@ -440,12 +483,12 @@ namespace springtail::pg_fdw {
             int attnum = pathkey->attnum;
 
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Checking pathkey attnum: {} against pkey id: {}",
-                                attnum, pg_state->pkey_column_ids[i]);
+                                attnum, pg_state->index.columns[i].position);
 
             // check if this attnum matches next id in primary key id list, and sort order matches
             // XXX ignore collation for now
             if (pathkey->nulls_first || pathkey->reversed ||
-                attnum != pg_state->pkey_column_ids[i]) {
+                attnum != pg_state->index.columns[i].position) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
                 break;
             }
@@ -475,10 +518,9 @@ namespace springtail::pg_fdw {
         // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
 
-        // for now only look at primary key
-        for (const auto id: pg_state->pkey_column_ids) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", id);
-            attnums = list_append_unique_int(attnums, id);
+        for (const auto col: pg_state->index.columns) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
+            attnums = list_append_unique_int(attnums, col.position);
         }
         item = lappend(item, attnums);
         item = lappend(item, makeConst(INT4OID,
@@ -999,4 +1041,13 @@ namespace springtail::pg_fdw {
         }
     }
 
+    PgFdwState::PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
+            : table(table), tid(tid), xid(xid), stats(table->get_stats())
+    {
+        columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
+        if (tid > constant::MAX_SYSTEM_TABLE_ID) {
+            auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
+            indexes = std::move(meta.indexes);
+        }
+    }
 } // namespace springtail::pg_fdw

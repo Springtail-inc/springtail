@@ -375,7 +375,6 @@ namespace springtail::sys_tbl_mgr {
 
         // add schemas entries for each column
         std::vector<ColumnHistory> columns;
-        std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         for (const auto &column : request.table.columns) {
             ColumnHistory history;
             history.xid = xid.xid;
@@ -385,11 +384,6 @@ namespace springtail::sys_tbl_mgr {
             history.__set_column(column);
 
             columns.push_back(history);
-
-            // record the primary key columns and order
-            if (column.__isset.pk_position) {
-                primary_keys[column.pk_position] = column.position;
-            }
 
             // store the column data into the json
             nlohmann::json column_json;
@@ -403,24 +397,7 @@ namespace springtail::sys_tbl_mgr {
             ddl["columns"].push_back(column_json);
         }
 
-        _set_schema_info(request.db_id, request.table.id, columns);
-
-        // update the primary index information
-        {
-            auto write_xid = _get_write_xid(request.db_id);
-            auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
-            auto tuple = sys_tbl::IndexNames::Data::tuple(request.table.schema,
-                    request.table.name + ".primary_key",
-                    request.table.id,
-                    constant::INDEX_PRIMARY, //index id
-                    xid.xid,
-                    xid.lsn,
-                    sys_tbl::IndexNames::State::READY,
-                    true );
-            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
-
-            _write_index(xid, request.db_id, request.table.id, constant::INDEX_PRIMARY, primary_keys);
-        }
+        _set_schema_info(request.db_id, request.table.id, request.table.name, request.table.schema,columns);
 
         return ddl;
     }
@@ -476,7 +453,7 @@ namespace springtail::sys_tbl_mgr {
                 history.update_type != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
 
                 // write the column change to the schemas table and update the cache
-                _set_schema_info(request.db_id, request.table.id, { history });
+                _set_schema_info(request.db_id, request.table.id, request.table.name, request.table.schema, { history });
             }
         }
 
@@ -543,7 +520,7 @@ namespace springtail::sys_tbl_mgr {
 
             changes.push_back(change);
         }
-        _set_schema_info(request.db_id, request.table_id, changes);
+        _set_schema_info(request.db_id, request.table_id, request.name, request.schema, changes);
 
         return ddl;
     }
@@ -1023,12 +1000,40 @@ namespace springtail::sys_tbl_mgr {
             _apply_schema_cache_history(db_id, table_id, access_xid, columns);
         }
 
+        info->indexes = _read_schema_indexes(db_id, table_id, access_xid);
+
+        // If no index is found in sys tables, they probably haven't been finalized
+        // construct the primary index from cache history
+        if (info->indexes.empty()) {
+            IndexInfo index;
+            index.id = constant::INDEX_PRIMARY;
+            index.is_unique = true;
+            index.name =  "primary_key";
+            index.table_id = table_id;
+            index.schema = "public";
+            index.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+            for (auto const& [pos, col]: columns) {
+                if (col.__isset.pk_position) {
+                    IndexColumn key;
+                    key.name = col.name;
+                    key.position = col.position;
+                    key.idx_position = col.pk_position;
+                    index.columns.push_back(key);
+                }
+            }
+            if (!index.columns.empty()) {
+                // make sure to sort by idx_position
+                std::ranges::sort(index.columns, [](auto const& c1, auto const& c2) {
+                        assert(c1.idx_position != c2.idx_position);
+                        return c1.idx_position < c2.idx_position; });
+                info->indexes.push_back(std::move(index));
+            }
+        }
+
         // store the column data into the results
         for (auto &entry : columns) {
             info->columns.push_back(entry.second);
         }
-
-        info->indexes = _read_schema_indexes(db_id, table_id, access_xid);
 
         // note: at this point we have the set of columns at the access_xid
         if (access_xid == target_xid) {
@@ -1145,6 +1150,11 @@ namespace springtail::sys_tbl_mgr {
             if (it != indexes.end()) {
                 indexes.erase(it);
             }
+            // make sure to sort by idx_position
+            std::ranges::sort(info.columns, [](auto const& c1, auto const& c2) {
+                    assert(c1.idx_position != c2.idx_position);
+                    return c1.idx_position < c2.idx_position; });
+
             indexes.push_back(std::move(info));
         }
 
@@ -1415,6 +1425,7 @@ namespace springtail::sys_tbl_mgr {
     void
     Service::_set_schema_info(uint64_t db_id,
                               uint64_t table_id,
+                              const std::string& table_name, const std::string& schema,
                               const std::vector<ColumnHistory> &columns)
     {
         std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
@@ -1425,6 +1436,11 @@ namespace springtail::sys_tbl_mgr {
         for (auto &history : columns) {
             assert(history.__isset.column);
             assert(!history.__isset.index_column);
+
+            // record the primary key columns and order
+            if (history.exists && history.column.__isset.pk_position) {
+                primary_keys[history.column.pk_position] = history.column.position;
+            }
 
             // XXX do we need to enforce XID ordering somehow here?  are we guaranteed to apply these in xid order?
             boost::unique_lock lock(_mutex);
@@ -1448,6 +1464,23 @@ namespace springtail::sys_tbl_mgr {
                                                        value,
                                                        history.update_type);
             schemas_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+        }
+
+        // update the primary index information
+        if (!primary_keys.empty()) {
+            XidLsn xid{write_xid};
+            auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
+            auto tuple = sys_tbl::IndexNames::Data::tuple(schema,
+                    table_name + ".primary_key",
+                    table_id,
+                    constant::INDEX_PRIMARY, //index id
+                    xid.xid,
+                    xid.lsn,
+                    sys_tbl::IndexNames::State::READY,
+                    true );
+            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+
+            _write_index(xid, db_id, table_id, constant::INDEX_PRIMARY, primary_keys);
         }
     }
 
