@@ -284,8 +284,10 @@ def decode_data(data_with_header, header, db_conn=None):
         msg = "Close command: type={}, name={}".format(type, name)
     elif code == 'E' and req_resp_type == 'Response':
         # error response
-        error = pglib.decode_error_response(data_with_header)
-        msg = "Error: {}".format(error)
+        params = pglib.decode_error(data_with_header)
+        msg = "Error: "
+        for key in params:
+            msg += "\nParam: {}={}".format(key, params[key])
     elif code == 'R':
         auth_type = pglib.decode_auth_response(data_with_header)
         msg = "Authentication response: auth_type={}".format(pglib.auth_type_to_string(auth_type))
