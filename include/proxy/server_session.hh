@@ -92,7 +92,7 @@ namespace springtail::pg_proxy {
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
         std::set<std::string> _stmts;              ///< completed prepared statement ids
-        std::string _db_prefix;
+        std::string _db_prefix;                    ///< database name prefix to be used for this server session
 
         /** Send startup message */
         void _send_startup_msg(uint64_t seq_id);

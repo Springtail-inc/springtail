@@ -132,6 +132,11 @@ namespace pg_proxy {
         /** get port */
         int port() const { return _port; }
 
+        /**
+         * @brief Get prefix
+         *
+         * @return const std::string&
+         */
         const std::string &prefix() const { return _replica_db_prefix; }
 
         /** create connection to this instance */
@@ -211,7 +216,7 @@ namespace pg_proxy {
         mutable std::shared_mutex _mutex;
         Session::Type _type;
         std::string _hostname;
-        std::string _replica_db_prefix;
+        std::string _replica_db_prefix = "";         ///< prefix to be used for replica database
         int _port;
         int _max_sessions;
         int _active_sessions=0;
