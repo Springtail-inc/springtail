@@ -31,30 +31,18 @@ namespace springtail::pg_proxy {
     /** Default log level for the proxy server */
     LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
-    static constexpr uint32_t USER_MGR_SLEEP_INTERVAL = 5;
-
-    /**
-     * @brief Construct a new Proxy Server object.
-     * The server handles the poll loop and accepts new connections.
-     * It dispatches readable sockets into the thread pool
-     * @param proxy_port          port to listen for connections on
-     * @param thread_pool_size    number of threads in the thread pool
-     * @param cert_file           path to the server certificate file
-     * @param key_file            path to the server key file
-     * @param enable_ssl          enable SSL
-     */
     ProxyServer::ProxyServer(int proxy_port,
                              int thread_pool_size,
                              const std::filesystem::path &cert_file,
                              const std::filesystem::path &key_file,
-                             bool shadow_mode,
+                             MODE mode,
                              bool enable_ssl,
-                             LoggerPtr logger)
+                             LoggerPtr shadow_logger)
       : _id(arc4random()),
         _thread_pool(thread_pool_size),
         _enable_ssl(enable_ssl),
-        _shadow_mode(shadow_mode),
-        _logger(logger)
+        _mode(mode),
+        _logger(shadow_logger)
     {
         // Initialize SSL
         if (_enable_ssl) {
@@ -112,7 +100,7 @@ namespace springtail::pg_proxy {
         ::signal(SIGPIPE, SIG_IGN);
 
         DatabaseMgr::get_instance()->init();
-        UserMgr::get_instance()->init(5);
+        UserMgr::get_instance()->init(USER_MGR_SLEEP_INTERVAL_SECS);
 
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
@@ -307,7 +295,7 @@ namespace springtail::pg_proxy {
 
             // create the connection and attach it to a client session
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
-            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this(), _shadow_mode);
+            ClientSessionPtr session = std::make_shared<ClientSession>(connection, shared_from_this());
 
             // add session to the waiting sessions list
             // and to the session map
