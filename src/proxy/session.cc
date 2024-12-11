@@ -281,8 +281,6 @@ namespace springtail::pg_proxy {
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
             int n = _connection->read(buffer, read_length, read_length);
-            // std::cout << "===== session read expected msg_length bytes = " << read_length << std::endl;
-            // std::cout << "===== session read n bytes = " << n << std::endl;
             assert (n == read_length);
 
             // log the buffer as incoming
