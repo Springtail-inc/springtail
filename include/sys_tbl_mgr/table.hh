@@ -49,11 +49,7 @@ namespace springtail {
 
             struct Tracker
             {
-                const Table *_table{}; ///< A pointer to the Table object this iterator is for.
-                BTreePtr _btree; ///< A pointer to the BTree of the primary index.
-                BTree::Iterator _btree_i; ///< An iterator into the BTree.
-                                          ///
-                Tracker(const Table *table)
+                explicit Tracker(const Table *table)
                 : _table(table)
                 {}
 
@@ -77,6 +73,11 @@ namespace springtail {
                 virtual void next() = 0;
                 virtual void prev() = 0;
                 virtual const Extent::Row & row() const = 0;
+
+            protected:
+                const Table *_table{}; ///< A pointer to the Table object this iterator is for.
+                BTreePtr _btree; ///< A pointer to the BTree of the primary index.
+                BTree::Iterator _btree_i; ///< An iterator into the BTree.
             };
 
             // This is to iterate using the primary index
@@ -91,17 +92,14 @@ namespace springtail {
                     _page_i(page_i)
                 {}
 
-                Primary(const Table *table) 
+                explicit Primary(const Table *table) 
                     :Tracker{table}
                 {}
 
+                Primary(Primary&&) = default;
                 virtual ~Primary() = default;
 
-                Primary(Primary&&) = default;
-                Primary& operator=(Primary&&) = default;
-
                 void next() override;
-
                 void prev() override;
 
                 const Extent::Row& row() const override 
@@ -136,8 +134,6 @@ namespace springtail {
                 }
 
                 Secondary(Secondary&&) = default;
-                Secondary& operator=(Secondary&&) = default;
-
                 virtual ~Secondary() = default;
 
                 void next() override;
