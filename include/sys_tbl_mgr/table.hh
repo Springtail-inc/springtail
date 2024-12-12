@@ -7,6 +7,7 @@
 #include <storage/mutable_btree.hh>
 
 #include <sys_tbl_mgr/schema_mgr.hh>
+#include <variant>
 
 namespace springtail {
 
@@ -52,8 +53,6 @@ namespace springtail {
                 BTreePtr _btree; ///< A pointer to the BTree of the primary index.
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
                                           ///
-                Tracker() {}
-
                 Tracker(const Table *table)
                 : _table(table)
                 {}
@@ -83,8 +82,6 @@ namespace springtail {
             // This is to iterate using the primary index
             struct Primary : Tracker
             {
-                Primary() {};
-
                 Primary(const Table *table,
                         BTreePtr btree, const BTree::Iterator &btree_i,
                         StorageCache::SafePagePtr page,
@@ -98,7 +95,7 @@ namespace springtail {
                     :Tracker{table}
                 {}
 
-                virtual ~Primary() {}
+                virtual ~Primary() = default;
 
                 Primary(Primary&&) = default;
                 Primary& operator=(Primary&&) = default;
@@ -141,7 +138,7 @@ namespace springtail {
                 Secondary(Secondary&&) = default;
                 Secondary& operator=(Secondary&&) = default;
 
-                virtual ~Secondary() {}
+                virtual ~Secondary() = default;
 
                 void next() override;
                 void prev() override;
@@ -159,7 +156,7 @@ namespace springtail {
                 FieldPtr _row_id_f;
             };
 
-            std::variant<Primary, Secondary> _tracker;
+            std::variant<std::monostate, Primary, Secondary> _tracker;
 
         public:
             using iterator_category = std::bidirectional_iterator_tag;
