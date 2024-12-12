@@ -34,7 +34,7 @@ jobs:
       USER: root
       PYTHONUNBUFFERED: 1
       GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-      GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,8 +93,7 @@ jobs:
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
-          sha="${GITHUB_SHA}"
-          _LOG_SHA=$(echo $sha | cut -c1-7)
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
           mv tmplog $log_file
@@ -156,8 +155,7 @@ jobs:
           # Grab the current PR ID
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
-          sha="${GITHUB_SHA}"
-          _LOG_SHA=$(echo $sha | cut -c1-7)
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
           
           log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
           mv tmplog $log_file
