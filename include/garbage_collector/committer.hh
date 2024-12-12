@@ -85,32 +85,6 @@ namespace springtail::gc {
          */
         void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid);
 
-
-        // /**
-        //  * Worker helper function to process a finalize() on a given table.
-        //  */
-        // void _process_finalize(MutableTablePtr table, uint64_t xid);
-
-        // /**
-        //  * Worker helper function to process mutations to a given extent ID.
-        //  */
-        // void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid,
-        //                    uint64_t txid, uint64_t tlsn);
-
-        // /**
-        //  * Worker helper function to process mutations to a table with no primary key.
-        //  */
-        // void _process_rows_no_primary(MutableTablePtr table, uint64_t xid,
-        //                               uint64_t txid, uint64_t tlsn);
-
-        // /**
-        //  * Helper function to find the enclosing page for a key given an ordered set of contiguous
-        //  * pages.
-        //  */
-        // using SafePageIter = std::vector<StorageCache::SafePagePtr>::iterator;
-        // SafePageIter _find_page(std::vector<StorageCache::SafePagePtr>& pages,
-        //                                  TuplePtr key, ExtentSchemaPtr schema);
-
         /**
          * Shifts the provided metadata to start at the new future XID.  Returns true if the
          * metadata was modified, false otherwise.
