@@ -76,6 +76,8 @@ namespace springtail::pg_proxy {
         std::weak_ptr<ServerSession> _primary_session; ///< primary server session
         std::weak_ptr<ServerSession> _replica_session; ///< replica server session
 
+        std::string _default_schema = "public"; ///< default schema to be used for query parsing
+
         bool _shadow_mode = false;  ///< shadow mode flag; if true, send to primary and replica
         bool _primary_mode = false; ///< primary mode flag; if true, send to primary only
 

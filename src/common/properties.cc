@@ -149,6 +149,7 @@ namespace springtail {
         _json[SYS_TBL_MGR_CONFIG] = system_json["sys_tbl_mgr"];
         _json[ORG_CONFIG] = system_json["org"];
         _json[FS_CONFIG] = system_json["fs"];
+        _json[PROXY_CONFIG] = system_json["proxy"];
 
         // get the redis client
         _create_redis_client();

@@ -58,6 +58,7 @@ int main(int argc, char* argv[])
     std::signal(SIGINT, handle_sigint);
 
     nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
+    std::cout << json.dump() << std::endl;
     Json::get_to<int>(json, "threads", num_threads, 4);
     Json::get_to<int>(json, "port", port, 8888);
 
@@ -78,11 +79,15 @@ int main(int argc, char* argv[])
     std::string mode;
     LoggerPtr logger = nullptr;
     Json::get_to<std::string>(json, "mode", mode, "normal");
+    std::cout << "======= mode = " << mode << std::endl;
     if (mode == "shadow") {
-        Json::get_to<std::filesystem::path>(json, "log", log);
-        if (!std::filesystem::exists(log)) {
-            throw Error("Log file does not exist and shadow mode is enabled");
+        Json::get_to<std::filesystem::path>(json, "shadow_log_path", log);
+        if (log.empty()) {
+            throw Error("shadow_log_path is not defined");
         }
+        std::fstream log_file;
+        log_file.open(log, std::ios::out | std::ios::trunc | std::ios::binary);
+        log_file.close();
 
         SPDLOG_INFO("Logging initialized to: {}", log.string());
         logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
