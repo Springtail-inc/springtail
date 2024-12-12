@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/constants.hh"
+#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
@@ -44,6 +46,121 @@ namespace springtail {
         class Iterator {
             friend Table;
 
+            struct Tracker
+            {
+                const Table *_table{}; ///< A pointer to the Table object this iterator is for.
+                BTreePtr _btree; ///< A pointer to the BTree of the primary index.
+                BTree::Iterator _btree_i; ///< An iterator into the BTree.
+                                          ///
+                Tracker() {}
+
+                Tracker(const Table *table)
+                : _table(table)
+                {}
+
+                Tracker(const Table *table,
+                         BTreePtr btree, const BTree::Iterator &btree_i)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree_i)
+                {}
+
+                friend bool operator==(const Tracker& a, const Tracker& b) {
+                    assert(a._table == b._table);
+                    if (a._btree == nullptr && b._btree == nullptr) {
+                        return true;
+                    } else if (a._btree == nullptr || b._btree == nullptr) {
+                        return false;
+                    }
+                    return (a._btree_i == b._btree_i);
+                }
+
+                virtual void next() = 0;
+                virtual void prev() = 0;
+                virtual const Extent::Row & row() const = 0;
+            };
+
+            // This is to iterate using the primary index
+            struct Primary : Tracker
+            {
+                Primary() {};
+
+                Primary(const Table *table,
+                        BTreePtr btree, const BTree::Iterator &btree_i,
+                        StorageCache::SafePagePtr page,
+                        const StorageCache::Page::Iterator &page_i )
+                    : Tracker{table, btree, btree_i},
+                    _page(std::move(page)),
+                    _page_i(page_i)
+                {}
+
+                Primary(const Table *table) 
+                    :Tracker{table}
+                {}
+
+                virtual ~Primary() {}
+
+                Primary(Primary&&) = default;
+                Primary& operator=(Primary&&) = default;
+
+                void next() override;
+
+                void prev() override;
+
+                const Extent::Row& row() const override 
+                {
+                    return *_page_i;
+                }
+
+                friend bool operator==(const Primary& a, const Primary& b) {
+                    const Tracker& ta = a;
+                    const Tracker& tb = b;
+                    
+                    if (ta == tb) {
+                        return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
+                    }
+                    return false;
+                }
+
+                StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
+                StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            };
+
+            struct Secondary : Tracker
+            {
+                Secondary(const Table *table,
+                        BTreePtr btree, const BTree::Iterator &btree_i,
+                        ExtentSchemaPtr schema )
+                    : Tracker{table, btree, btree_i}
+                    , _index_schema{schema}
+                {
+                    _extent_id_f = _index_schema->get_field(constant::INDEX_EID_FIELD);
+                    _row_id_f = _index_schema->get_field(constant::INDEX_RID_FIELD);
+                }
+
+                Secondary(Secondary&&) = default;
+                Secondary& operator=(Secondary&&) = default;
+
+                virtual ~Secondary() {}
+
+                void next() override;
+                void prev() override;
+                const Extent::Row& row() const override;
+
+                friend bool operator==(const Secondary& a, const Secondary& b) {
+                    const Tracker& ta = a;
+                    const Tracker& tb = b;
+                    //TODO: ...
+                    return ta == tb;
+                }
+
+                ExtentSchemaPtr _index_schema;
+                FieldPtr _extent_id_f;
+                FieldPtr _row_id_f;
+            };
+
+            std::variant<Primary, Secondary> _tracker;
+
         public:
             using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
@@ -51,29 +168,16 @@ namespace springtail {
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() const { return *(_page_i); }
-            pointer operator->() { return &(*(_page_i)); }
+            reference operator*() { 
+                return tracker().row();
+            }
+            pointer operator->() { return &*(*this); }
 
             /**
              * Move the iterator forward to the next row.
              */
             Iterator& operator++() {
-                // move to the next row in the data extent
-                ++_page_i;
-                if (_page_i != _page->end()) {
-                    return *this;
-                }
-
-                // no more rows in the extent, so need to move to the next data extent
-                ++_btree_i;
-                if (_btree_i == _btree->end()) {
-                    return *this;
-                }
-
-                // retrieve the data extent
-                _page = _table->_read_page_via_primary(_btree_i);
-                _page_i = _page->begin();
-
+                tracker().next();
                 return *this;
             }
 
@@ -81,29 +185,7 @@ namespace springtail {
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
-                // check if this is end()
-                if (_page.empty()) {
-                    // move to the final page referenced by the primary index
-                    assert(_btree_i == _btree->end());
-                    --_btree_i;
-
-                    // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
-                    _page_i = _page->end();
-                }
-
-                // check if we are on the first row
-                if (_page_i == _page->begin()) {
-                    // need to move to the previous page
-                    --_btree_i;
-
-                    // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
-                    _page_i = _page->end();
-                }
-
-                // move to the previous row
-                --_page_i;
+                tracker().prev();
                 return *this;
             }
 
@@ -111,14 +193,17 @@ namespace springtail {
              * Compares two iterators for equality.
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
-                if (a._btree == nullptr && b._btree == nullptr) {
-                    return true;
-                } else if (a._btree == nullptr || b._btree == nullptr) {
-                    return false;
+                if (auto pa = std::get_if<Primary>(&a._tracker)) {
+                    auto pb =  std::get_if<Primary>(&b._tracker);
+                    assert(pb);
+                    return *pa == *pb;
+                } else if (auto pa = std::get_if<Secondary>(&a._tracker)) {
+                    auto pb =  std::get_if<Secondary>(&b._tracker);
+                    assert(pb);
+                    return *pa == *pb;
                 }
-
-                return (a._btree_i == b._btree_i &&
-                        (a._btree_i == a._btree->end() || a._page_i == b._page_i));
+                assert(false);
+                return false;
             }
 
             /**
@@ -126,48 +211,69 @@ namespace springtail {
              */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
+
             /** This will return the current extent id of the iterator.
             */
             uint64_t extent_id() const {
-                return _page_i.extent_id();
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return p->_page_i.extent_id();
+                }
+                throw std::runtime_error("Unsupported for secondary indexes");
             }
 
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-                : _table(table),
-                  _btree(nullptr),
-                  _page{}
-            { }
+            { 
+                _tracker.emplace<Primary>(table, 
+                        BTreePtr{}, 
+                        BTree::Iterator{}, 
+                        StorageCache::SafePagePtr{}, 
+                        StorageCache::Page::Iterator{});
+            }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, BTreePtr btree)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree->end()),
-                  _page{}
-            { }
+            Iterator(const Table *table, uint32_t index_id)
+            { 
+                if (index_id == constant::INDEX_PRIMARY) {
+                    _tracker.emplace<Primary>(table, table->_primary_index, 
+                            table->_primary_index->end(), 
+                            StorageCache::SafePagePtr{}, 
+                            StorageCache::Page::Iterator{});
+                } else {
+                    auto btree = table->index(index_id);
+                    _tracker.emplace<Secondary>(table, btree, 
+                            btree->end(), ExtentSchemaPtr{} );
+                }
+            }
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree_i),
-                  _page(std::move(page)),
-                  _page_i(page_i)
-            { }
+            { 
+                _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
+            }
 
-        private:
-            const Table *_table; ///< A pointer to the Table object this iterator is for.
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     ExtentSchemaPtr index_schema)
+            { 
+                _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+            }
 
-            BTreePtr _btree; ///< A pointer to the BTree of the primary index.
-            BTree::Iterator _btree_i; ///< An iterator into the BTree.
-
-            StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
-            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            Tracker& tracker() 
+            {
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return *p;
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    return *p;
+                } else {
+                    assert(false);
+                }
+                throw std::runtime_error("Bad iterator tracker");
+            }
         };
 
     public:
@@ -225,9 +331,9 @@ namespace springtail {
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator lower_bound(TuplePtr search_key);
+        Iterator lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
-        Iterator upper_bound(TuplePtr search_key);
+        Iterator upper_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
@@ -249,7 +355,15 @@ namespace springtail {
             if (_primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, _primary_index);
+            return Iterator(this, constant::INDEX_PRIMARY);
+        }
+
+        /**
+         * An iterator to the end of the index tree.
+         */
+        Iterator end(uint32_t index_id)
+        {
+            return Iterator(this, index_id);
         }
 
         /**
@@ -257,11 +371,11 @@ namespace springtail {
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
          */
-        BTreePtr index(uint32_t idx) {
+        BTreePtr index(uint32_t idx) const {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx].first;
+            return _secondary_indexes.at(idx).first;
         }
 
         /**
