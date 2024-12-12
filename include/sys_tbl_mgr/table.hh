@@ -74,7 +74,6 @@ namespace springtail {
                 virtual void prev() = 0;
                 virtual const Extent::Row & row() const = 0;
 
-            protected:
                 const Table *_table{}; ///< A pointer to the Table object this iterator is for.
                 BTreePtr _btree; ///< A pointer to the BTree of the primary index.
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
@@ -129,8 +128,10 @@ namespace springtail {
                     : Tracker{table, btree, btree_i}
                     , _index_schema{schema}
                 {
-                    _extent_id_f = _index_schema->get_field(constant::INDEX_EID_FIELD);
-                    _row_id_f = _index_schema->get_field(constant::INDEX_RID_FIELD);
+                    if (_index_schema) {
+                        _extent_id_f = _index_schema->get_field(constant::INDEX_EID_FIELD);
+                        _row_id_f = _index_schema->get_field(constant::INDEX_RID_FIELD);
+                    }
                 }
 
                 Secondary(Secondary&&) = default;
@@ -342,20 +343,12 @@ namespace springtail {
         /**
          * An iterator to the end of the table.
          */
-        Iterator end()
+        Iterator end(uint32_t index_id = constant::INDEX_PRIMARY)
         {
             // check for vacant table
-            if (_primary_index == nullptr) {
+            if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, constant::INDEX_PRIMARY);
-        }
-
-        /**
-         * An iterator to the end of the index tree.
-         */
-        Iterator end(uint32_t index_id)
-        {
             return Iterator(this, index_id);
         }
 

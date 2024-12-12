@@ -212,7 +212,7 @@ namespace springtail {
     Table::lower_bound(TuplePtr search_key, uint32_t index_id)
     {
         if (index_id != constant::INDEX_PRIMARY) {
-            auto const& [btree, cols] = _secondary_indexes[index_id];
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
             auto index_schema = _create_index_schema(_schema, cols);
 
             // find the extent that could contain the lower_bound() key
@@ -665,8 +665,8 @@ namespace springtail {
                 auto key_fields = _schema->get_fields(keys);
                 auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 secondary->remove(skey);
-                ++row_id;
             }
+            ++row_id;
         }
     }
 
@@ -728,8 +728,8 @@ namespace springtail {
                     // note: uncomment if you need to debug the entries being populated into the secondary indexes
                     // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
-                    ++row_id;
                 }
+                ++row_id;
             }
 
             SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
@@ -1168,7 +1168,7 @@ namespace springtail {
     const Extent::Row& Table::Iterator::Secondary::row() const
     {
         uint64_t extent_id = _extent_id_f->get_uint64(*_btree_i);
-        uint64_t row_id = _row_id_f->get_uint64(*_btree_i);
+        uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
         auto page = _table->_read_page(extent_id);
         return *page->at(row_id);
     }

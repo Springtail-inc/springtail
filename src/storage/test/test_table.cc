@@ -95,6 +95,7 @@ namespace {
         // secondary keys
         std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
         {
+            int i = 0;
             std::vector<Index> keys;
             for (auto const& v: roots) {
                 if (v.index_id == constant::INDEX_PRIMARY) {
@@ -104,11 +105,12 @@ namespace {
                 Index idx;
                 idx.id = v.index_id;
                 idx.table_id = table_id;
-                idx.name="table_id";
+                idx.name=_schema->column_order()[i];
                 idx.is_unique = false;
                 idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
-                idx.columns.emplace_back(0, 1);
+                idx.columns.emplace_back(0, i+1);
                 keys.push_back(idx);
+                ++i;
             }
             return keys;
         }
@@ -135,6 +137,7 @@ namespace {
             tbl_meta.snapshot_xid = 1;
 
             auto keys = _make_keys(table_id, roots);
+
 
             return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
                                                   _primary_keys, keys,
@@ -839,6 +842,78 @@ namespace {
 
         // run the phase using 4 threads (just one phase here)
         tester.run(4);
+    }
+
+    TEST_P(Table_Test, SecondaryIndex) {
+        uint64_t access_xid = 1, target_xid = 2;
+
+        // create a mutable table
+        TableMetadata metadata;
+    
+        // this will create two indexes on the first and second columns
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT} };
+
+        auto mtable = _create_mtable(1001, target_xid, metadata.roots);
+
+        // insert a number of rows
+        _populate_table(mtable, target_xid);
+
+        // finalize the table
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+
+        // create an access table
+        access_xid = target_xid;
+        auto table = _create_table(1001, access_xid, metadata.roots);
+
+        // ensure that it has all of the inserted rows through both the primary and secondary index
+        // and that everything else works as expected (find, lower_bound, etc)
+        int count = 0;
+        std::string prev = "";
+        for (auto &row : *table) {
+            if (prev != "") {
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+            }
+
+            prev = _fields->at(1)->get_text(row);
+            ++count;
+        }
+        ASSERT_EQ(count, 5000);
+
+        
+        // test the first index
+        {
+            uint64_t test_value = 30;
+
+            auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 1);
+            auto end_it = table->end(1);
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto v = _fields->at(0)->get_uint64(row);
+                ASSERT_LE(test_value, v);
+            }
+        }
+
+        // test the second index
+        {
+            std::string test_value = "f";
+
+            auto k = std::make_shared<ConstTypeField<std::string>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 2);
+            auto end_it = table->end(1);
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto v = _fields->at(1)->get_text(row);
+                ASSERT_LE(test_value[0], v[0]);
+            }
+        }
     }
 
     INSTANTIATE_TEST_CASE_P(Table_Test,
