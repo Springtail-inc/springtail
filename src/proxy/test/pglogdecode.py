@@ -70,7 +70,7 @@ def db_insert_session(conn, header, endpoint):
     # Insert the session into the database
 
     cursor.execute(
-        """INSERT INTO sessions (server_id, session_id, session_type, customer_id, endpoint, created_at)
+        """INSERT INTO sessions (server_id, session_id, type, customer_id, endpoint, created_at)
            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
         (header['server_id'], header['session_id'], header['type_str'],
          0, endpoint, header['timestamp'])
