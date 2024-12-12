@@ -390,7 +390,7 @@ namespace springtail {
                   _next_cache_id(0)
             { }
 
-            void validate() {
+            void validate() const {
                 assert(_dirty_cache.size() + _clean_cache.size() == _size);
                 assert(_dirty_lru.size() + _clean_lru.size() == _size);
             }
@@ -524,6 +524,14 @@ namespace springtail {
             void _gen_cache_id(CacheExtentPtr extent);
 
         private:
+            /** Structure for tracking IO condition variables. */
+            struct IoCv {
+                boost::condition_variable cv;
+                uint32_t counter = 1;
+                bool signaled = false;
+            };
+
+        private:
             boost::mutex _mutex; ///< Mutex on the cache object to maintain thread-safety.
 
             CleanCache _clean_cache; ///< The lookup cache of clean extents.
@@ -533,7 +541,7 @@ namespace springtail {
             ExtentLru _dirty_lru; ///< An LRU of the dirty extents.
 
             /** Map of condition variables used to block multiple callers reading the same extent from disk concurrently. */
-            std::map<CacheKey, std::shared_ptr<boost::condition_variable>> _io_map;
+            std::map<CacheKey, std::shared_ptr<IoCv>> _io_map;
 
             /** Map from cache ID to the most recent on-disk location of the extent. */
             std::map<uint64_t, CacheKey> _cache_id_map;
@@ -1081,9 +1089,9 @@ namespace springtail {
              */
             void drop_file(const std::filesystem::path &file);
 
-            void validate() {
+            void validate() const {
                 uint32_t size = 0;
-                for (auto &entry : _cache) {
+                for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
                 assert(size == _lru.size());
@@ -1184,7 +1192,7 @@ namespace springtail {
          */
         void drop_for_truncate(const std::filesystem::path &file);
 
-        void validate() {
+        void validate() const {
             _data_cache->validate();
             _page_cache->validate();
         }

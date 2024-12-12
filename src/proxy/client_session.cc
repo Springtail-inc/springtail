@@ -25,12 +25,12 @@
 namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection,
-                                 ProxyServerPtr server,
-                                 bool shadow_mode)
+                                 ProxyServerPtr server)
 
         : Session(connection, server, CLIENT),
           _stmt_cache(STATEMENT_CACHE_SIZE),
-          _shadow_mode(shadow_mode)
+          _shadow_mode(server->mode() == ProxyServer::MODE::SHADOW),
+          _primary_mode(server->mode() == ProxyServer::MODE::PRIMARY)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
@@ -216,7 +216,7 @@ namespace springtail::pg_proxy {
     ClientSession::_handle_startup()
     {
         char buffer[8];
-        ssize_t n = _connection->read(buffer, 8);
+        ssize_t n = _connection->read(buffer, 8, 8);
         assert(n == 8);
 
         int32_t msg_length = recvint32(buffer)-4;
@@ -264,7 +264,7 @@ namespace springtail::pg_proxy {
         assert(remaining <= 4096);
 
         char buffer[remaining];
-        ssize_t n = _connection->read(buffer, remaining);
+        ssize_t n = _connection->read(buffer, remaining, remaining);
         assert(n == remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
@@ -288,14 +288,20 @@ namespace springtail::pg_proxy {
         assert(c == '\0');
 
         // get user info and store it
-        _user = _server->get_user_mgr()->get_user(username);
+        _user = UserMgr::get_instance()->get_user(username, database);
         if (_user == nullptr) {
             SPDLOG_ERROR("User {} not found", username);
             _state = ERROR;
             return;
         }
         _database = database;
-        _db_id = _server->get_database_id(_database);
+        auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
+        if (!optional_db_id.has_value()) {
+            SPDLOG_ERROR("Database {} not found", _database);
+            _state = ERROR;
+            return;
+        }
+        _db_id = optional_db_id.value();
 
         // get login info for the user
         _login = _user->get_user_login();
@@ -471,20 +477,22 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         if (!read_client_first_message(raw,
                                         &_login->scram_state.cbind_flag,
                                         &_login->scram_state.client_first_message_bare,
                                         &_login->scram_state.client_nonce)) {
             SPDLOG_ERROR("Failed to read client first message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
+        delete[] raw;
 
         // note: some code inside of here could be optimized based on how the password is stored
         if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->_password.c_str())) {
             SPDLOG_ERROR("Failed to build server first message");
-            free (raw);
             throw ProxyAuthError();
         }
 
@@ -497,8 +505,6 @@ namespace springtail::pg_proxy {
         write_buffer->put_bytes(_login->scram_state.server_first_message,
                                  strlen(_login->scram_state.server_first_message));
 
-        free (raw);
-
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
@@ -509,7 +515,9 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth_continue(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         const char *client_final_nonce = nullptr;
 	    char *proof = nullptr;
 
@@ -518,7 +526,7 @@ namespace springtail::pg_proxy {
                                         reinterpret_cast<const uint8_t *>(data.data()),
                                         raw, &client_final_nonce, &proof)) {
             SPDLOG_ERROR("Failed to read client final message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
 
@@ -526,11 +534,13 @@ namespace springtail::pg_proxy {
         if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
             !verify_client_proof(&_login->scram_state, proof)) {
 		    SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
-            free (raw);
+            delete[] raw;
             free (proof);
 
             throw ProxyAuthError();
 	    }
+        delete[] raw;
+        free (proof);
 
         // after verifying the client proof, we now have the client key
         _user->set_client_scram_key(_login->scram_state.ClientKey);
@@ -539,8 +549,6 @@ namespace springtail::pg_proxy {
         char *server_final_message = build_server_final_message(&_login->scram_state);
         if (server_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build server final message");
-            free (raw);
-            free (proof);
 
             throw ProxyAuthError();
         }
@@ -553,9 +561,7 @@ namespace springtail::pg_proxy {
         write_buffer->put32(12); // 12 == SASL final
         write_buffer->put_bytes(server_final_message, strlen(server_final_message));
 
-        free (raw);
         free (server_final_message);
-        free (proof);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
@@ -578,7 +584,7 @@ namespace springtail::pg_proxy {
     bool
     ClientSession::_primary_pool_exists()
     {
-        DatabaseInstancePtr primary = _server->get_primary_instance();
+        DatabaseInstancePtr primary = DatabaseMgr::get_instance()->get_primary_instance();
         assert (primary != nullptr);
         DatabasePoolPtr pool = primary->get_pool(_db_id, _user->username());
         if (pool == nullptr || pool->total_count() == 0) {
@@ -794,7 +800,7 @@ namespace springtail::pg_proxy {
 
         // parse the query
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return this->_server->is_table_replicated(this->_db_id, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // Create a query statement object
@@ -1052,6 +1058,11 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        if (_primary_mode) {
+            // send to primary session force to !readonly
+            is_readonly = false;
+        }
+
         // not in shadow mode or not readonly, send to single server
         if (!_shadow_mode || !is_readonly) {
             // select a server session and notify it of this message
@@ -1093,8 +1104,12 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
-        redis::db_state_change::DBState db_state = _server->get_database_state(_db_id);
-        if (type == REPLICA && db_state != redis::db_state_change::DB_STATE_RUNNING) {
+        if (_primary_mode) {
+            // force primary mode
+            type = PRIMARY;
+        }
+
+        if (type == REPLICA && !DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
             type = PRIMARY;
         }
 
@@ -1145,10 +1160,11 @@ namespace springtail::pg_proxy {
         DatabaseInstancePtr instance = nullptr;
         if (type == PRIMARY) {
             // get a primary session
-            instance = _server->get_primary_instance();
+            instance = DatabaseMgr::get_instance()->get_primary_instance();
         } else {
             // get a replica session
-            instance = _server->get_replica_instance(_db_id, _user->username());
+            assert (_primary_mode == false);
+            instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
         }
         assert (instance != nullptr);
 
@@ -1157,7 +1173,10 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            session = instance->allocate_session(_server, _user, _database);
+            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+                SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                return nullptr;
+            }
         }
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 
@@ -1292,7 +1311,7 @@ namespace springtail::pg_proxy {
         bool is_read_safe = true;
         // first parse the query to determine the type of statement(s)
         std::vector<Parser::StmtContextPtr> &&parse_contexts = Parser::parse_query(query, [this](const std::string &schema, const std::string &table) {
-            return this->_server->is_table_replicated(this->_db_id, schema, table);
+            return DatabaseMgr::get_instance()->is_table_replicated(this->_db_id, schema, table);
         });
 
         // iterate through the parse contexts (one per query within multi-statement block)

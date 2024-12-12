@@ -125,36 +125,103 @@ namespace springtail {
         _json.merge_patch(system_json);
     }
 
+    void
+    Properties::_load_redis(const std::string &config_file)
+    {
+        // check if file exists
+        if (!std::filesystem::exists(std::filesystem::path(config_file))) {
+            throw Error("Error missing config file");
+        }
+
+        // Load the system settings into json
+        std::ifstream file(config_file);
+        nlohmann::json system_json;
+        file >> system_json;
+
+        // Extract system config
+        _json[LOGGING_CONFIG] = system_json["logging"];
+        _json[IOPOOL_CONFIG] = system_json["iopool"];
+        _json[WRITE_CACHE_CONFIG] = system_json["write_cache"];
+        _json[XID_MGR_CONFIG] = system_json["xid_mgr"];
+        _json[STORAGE_CONFIG] = system_json["storage"];
+        _json[REDIS_CONFIG] = system_json["redis"];
+        _json[LOG_MGR_CONFIG] = system_json["log_mgr"];
+        _json[SYS_TBL_MGR_CONFIG] = system_json["sys_tbl_mgr"];
+        _json[ORG_CONFIG] = system_json["org"];
+        _json[FS_CONFIG] = system_json["fs"];
+
+        // get the redis client
+        _create_redis_client();
+
+        // Clear the Redis data and config databases
+        _redis_config_client->flushdb();
+
+        // set db instance id
+        uint64_t db_instance_id = system_json["org"]["db_instance_id"].get<uint64_t>();
+        std::string db_instance_key = "instance_config:" + std::to_string(db_instance_id);
+        _redis_config_client->hset(db_instance_key, "id", std::to_string(db_instance_id));
+
+        // set primary db
+        nlohmann::json db_instance_json = system_json["db_instances"][std::to_string(db_instance_id)];
+        _redis_config_client->hset(db_instance_key, "primary_db", db_instance_json["primary_db"].dump());
+
+        // Set the hostnames for ingestion and proxy instances
+        _redis_config_client->hset(db_instance_key, "hostname:ingestion", db_instance_json["hostname:ingestion"].get<std::string>());
+        _redis_config_client->hset(db_instance_key, "hostname:proxy", db_instance_json["hostname:proxy"].get<std::string>());
+
+        // Set the database ids
+        std::string db_ids = db_instance_json["database_ids"].dump();
+        _redis_config_client->hset(db_instance_key, "database_ids", db_ids);
+
+        // Setup system settings
+        _redis_config_client->hset(db_instance_key, "system_settings", _json.dump());
+
+        // Setup db_config
+        for (const auto& db_id : db_instance_json["database_ids"]) {
+            nlohmann::json db_json = system_json["databases"][db_id.get<std::string>()];
+            std::string db_key = "db_config:" + std::to_string(db_instance_id);
+            _redis_config_client->hset(db_key, db_id.get<std::string>(), db_json.dump());
+
+            // Set state; default to initialize
+            std::string db_state_key = "instance_state:" + std::to_string(db_instance_id);
+            _redis_config_client->hset(db_state_key, db_id.get<std::string>(), "initialize");
+        }
+
+        // Create hset for fdws
+        std::string fdw_key = "fdw:" + std::to_string(db_instance_id);
+        for (const auto& fdw_id : system_json["fdws"].items()) {
+            std::string fdw_json_str = fdw_id.value().dump();
+            _redis_config_client->hset(fdw_key, fdw_id.key(), fdw_json_str);
+        }
+    }
+
     Properties::Properties()
     {
-        // read the base config from the environment
-        _read_environment();
-
         // check for an override properties file;
         // if it exists use it rather than reading the config from redis
         const char *file = std::getenv(environment::PROPERTIES_FILE_OVERRIDE);
-
         if (file != nullptr) {
-            std::cout << "Properties override file: " << file << std::endl;
-        }
-        if (file && std::filesystem::exists(std::filesystem::path(file))) {
+            SPDLOG_INFO("Properties override file: {}", file);
+
             // read the system properties from the configuration file
-            std::ifstream ifs(file);
-            _json.merge_patch(nlohmann::json::parse(ifs));
-            _properties_file_override = true;
+            _load_redis(file);
         } else {
+            // read the base config from the environment
+            _read_environment();
+
             // read the system properties from redis
             _read_redis_properties();
         }
 
         // check for overrides in the environment variables
+        // Note: overrides will only apply to config in _json
         const char *var = std::getenv(environment::ENV_OVERRIDE);
         if (var == nullptr) {
             return; // no overrides, exit
         }
 
-        // note: overrides are in the form <key>=<val>;<key2>=<val2> where keys are a dot-separated
-        //       path within the json configuration
+        // overrides are in the form <key>=<val>;<key2>=<val2> where keys are a dot-separated
+        // path within the json configuration
         std::string_view props(var);
         std::size_t pos = 0;
         while (pos < props.size()) {
@@ -205,21 +272,15 @@ namespace springtail {
 
         // get the database_ids from the db_instance_key
         nlohmann::json db_ids;
-        // see if we are using the properties file override
-        if (_instance != nullptr && _instance->_properties_file_override) {
-            std::cout << "Json: " << _instance->_json.dump(4) << std::endl;
-            db_ids = _instance->_json["db_instances"][std::to_string(db_instance_id)]["database_ids"];
-        } else {
-            // otherwise, we are using redis
-            RedisClientPtr redis_client = _get_redis_client();
-            std::optional<std::string> db_id_str = redis_client->hget(db_instance_key, "database_ids");
-            if (!db_id_str.has_value()) {
-                throw RedisNotFoundError("Error missing database_ids in redis");
-            }
 
-            // convert to json
-            db_ids = nlohmann::json::parse(db_id_str.value());
+        RedisClientPtr redis_client = _get_redis_client();
+        std::optional<std::string> db_id_str = redis_client->hget(db_instance_key, "database_ids");
+        if (!db_id_str.has_value()) {
+            throw RedisNotFoundError("Error missing database_ids in redis");
         }
+
+        // convert to json
+        db_ids = nlohmann::json::parse(db_id_str.value());
 
         // iterate through the db_ids and get the db_config_id
         for (auto &db_id_json: db_ids) {
@@ -246,11 +307,6 @@ namespace springtail {
     {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
-
-        // see if we are using the properties file override
-        if (_instance != nullptr && _instance->_properties_file_override) {
-            return _instance->_json["databases"][std::to_string(db_id)];
-        }
 
         // otherwise, we are using redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -330,13 +386,6 @@ namespace springtail {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
 
-        // see if we are using the properties file override
-        if (_instance != nullptr && _instance->_properties_file_override) {
-            std::string fdw_id;
-            Json::get_to<std::string>(_instance->_json[ORG_CONFIG], "fdw_id", fdw_id);
-            return {fdw_id};
-        }
-
         // get the redis client and lookup the db ids from the db_instance config
         RedisClientPtr redis_client = _get_redis_client();
         std::string fdw_key = std::format(redis::HASH_FDW, db_instance_id);
@@ -348,7 +397,7 @@ namespace springtail {
     }
 
     nlohmann::json
-    Properties::get_primary_db_config()
+    Properties::_get_primary_db_config()
     {
         // get the db_instance_id (initially set from env or system.json)
         uint64_t db_instance_id = get_db_instance_id();
@@ -358,15 +407,6 @@ namespace springtail {
         std::string replication_user_password;
         if (org.contains("replication_user_password")) {
             Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
-        }
-
-        // see if we are using the properties file override
-        if (_instance != nullptr && _instance->_properties_file_override) {
-            nlohmann::json json = _instance->_json["db_instances"][std::to_string(db_instance_id)]["primary_db"];
-            if (!replication_user_password.empty()) {
-                json["password"] = replication_user_password;
-            }
-            return json;
         }
 
         // otherwise, we are using redis
@@ -385,6 +425,25 @@ namespace springtail {
             json["password"] = replication_user_password;
         }
         return json;
+    }
+
+    void Properties::get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
+        auto primary_config = Properties::_get_primary_db_config();
+
+        auto optional_host = Json::get<std::string>(primary_config, "host");
+        auto optional_port = Json::get<uint16_t>(primary_config, "port");
+        auto optional_user = Json::get<std::string>(primary_config, "replication_user");
+        auto optional_password = Json::get<std::string>(primary_config, "password");
+
+        if (optional_host.has_value() && optional_port.has_value() && optional_user.has_value() && optional_password.has_value()) {
+            host = optional_host.value();
+            port = optional_port.value();
+            user = optional_user.value();
+            password = optional_password.value();
+        } else {
+            SPDLOG_ERROR("Could not find the value for primary database either host, port, user, or password");
+            throw Error();
+        }
     }
 
     nlohmann::json

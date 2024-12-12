@@ -44,6 +44,8 @@ namespace springtail {
         static inline constexpr char FS_CONFIG[] = "fs";
         /** PID path in logging config */
         static inline constexpr char PID_PATH[] = "pid_path";
+        /** Proxy configuration section */
+        static inline constexpr char PROXY_CONFIG[] = "proxy";
 
         /**
          * @brief Get JSON object from a key
@@ -100,8 +102,8 @@ namespace springtail {
         /** Helper to get db config for given database */
         static nlohmann::json get_db_config(uint64_t db_id);
 
-        /** Helper to get primary db json for current db instance */
-        static nlohmann::json get_primary_db_config();
+        /** Helper to get host, port, user, and password for the primary database */
+        static void get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
 
         /** Helper to get db state */
         static std::string get_db_state(uint64_t db_id);
@@ -137,9 +139,6 @@ namespace springtail {
         /** json containing parsed settings file */
         nlohmann::json _json;
 
-        /** properties file override env is set */
-        bool _properties_file_override = false;
-
         /**
          * @brief Construct a new Properties object
          */
@@ -161,6 +160,12 @@ namespace springtail {
         void _create_redis_client();
 
         /**
+         * @brief Load redis config from file
+         * @param config_file path to config file
+         */
+        void _load_redis(const std::string &config_file);
+
+        /**
          * @brief Get config redis client
          */
         static RedisClientPtr _get_redis_client() {
@@ -176,6 +181,9 @@ namespace springtail {
          * @brief Get the hostname for the ingestion instance machine
          */
         static std::string _get_ingestion_hostname();
+
+        /** Helper to get primary db json for current db instance */
+        static nlohmann::json _get_primary_db_config();
 
         // delete move constructor
         Properties(const Properties &)     = delete;

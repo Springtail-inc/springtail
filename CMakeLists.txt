@@ -28,6 +28,9 @@ include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 ## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
 include(DSymUtil)
 
+## add make install target to copy git hash to install directory
+include(GitInstall)
+
 ## CXX options
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

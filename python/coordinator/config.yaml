@@ -1,0 +1,9 @@
+system_json_path: '../../system.json.test'
+
+# for test
+install_dir: '../../install'
+production: False
+
+# for production
+#install_dir: '/opt/springtail'
+#production: True

@@ -61,7 +61,12 @@ namespace springtail::pg_proxy {
           _instance(instance),
           _id(session_id++)
     {
-        _db_id = _server->get_database_id(_database);
+        auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
+        if (optional_db_id.has_value()) {
+            _db_id = optional_db_id.value();
+        } else {
+            _state = ERROR;
+        }
     }
 
     void
@@ -274,8 +279,9 @@ namespace springtail::pg_proxy {
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Reading {} bytes from local socket", (_type == CLIENT ? 'C': 'S'), _id, std::min(msg_length, 4096));
 
             // throws exception on error
-            int n = _connection->read(buffer, std::min(msg_length, 4096));
-            assert (n == std::min(msg_length, 4096));
+            int read_length = std::min(msg_length, 4096);
+            int n = _connection->read(buffer, read_length, read_length);
+            assert (n == read_length);
 
             // log the buffer as incoming
             _log_buffer(true, code, n, buffer, seq_id, n == msg_length);

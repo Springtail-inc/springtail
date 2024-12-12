@@ -143,7 +143,7 @@ def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True)
 
         run_command(cmd_dir, args)
 
-        time.sleep(1)
+        time.sleep(2)
 
     # check if all daemons are running
     (all_running, not_running) = check_daemons_running(daemon_names)

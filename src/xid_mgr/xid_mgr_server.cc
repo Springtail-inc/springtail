@@ -25,19 +25,6 @@
 
 namespace springtail::xid_mgr {
 
-    /* static initialization must happen outside of class */
-    XidMgrServer* XidMgrServer::_instance {nullptr};
-
-    std::once_flag XidMgrServer::_init_flag;
-    std::once_flag XidMgrServer::_shutdown_flag;
-
-    XidMgrServer *
-    XidMgrServer::_init()
-    {
-        _instance = new XidMgrServer();
-        return _instance;
-    }
-
     XidMgrServer::XidMgrServer()
     {
         nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
@@ -71,7 +58,7 @@ namespace springtail::xid_mgr {
      * Startup thrift threaded server; called by the static startup().
      */
     void
-    XidMgrServer::_startup()
+    XidMgrServer::startup()
     {
         // create a thread manager with right number of worker threads
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
@@ -140,15 +127,6 @@ namespace springtail::xid_mgr {
     }
 
     void
-    XidMgrServer::_shutdown()
-    {
-        if (_instance != nullptr) {
-            _instance->_internal_shutdown();
-            _instance->_server->stop();
-        }
-    }
-
-    void
     XidMgrServer::_internal_shutdown()
     {
         std::unique_lock lock(_mutex);
@@ -156,6 +134,8 @@ namespace springtail::xid_mgr {
         for (auto &partition : _partitions) {
             partition->shutdown();
         }
+        lock.unlock();
+        _server->stop();
     }
 
     PartitionPtr
