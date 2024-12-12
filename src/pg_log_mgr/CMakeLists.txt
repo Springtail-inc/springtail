@@ -44,6 +44,7 @@ target_link_libraries(test_log_reader
            springtail_common
            springtail_storage
            springtail_sys_tbl_mgr
+	   springtail_test
     PRIVATE GTest::gtest_main)
 target_include_directories(test_log_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_log_reader)

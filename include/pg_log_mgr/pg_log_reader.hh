@@ -188,7 +188,7 @@ namespace springtail::pg_log_mgr {
             uint64_t _db; ///< The associated database ID
             int32_t _pg_xid; ///< The top-most pgxid for the transaction
 
-            int32_t _cur_pg_xid = 0; ///< The current pgxid being processed
+            int32_t _cur_pg_xid = -1; ///< The current pgxid being processed
             TxnEntryPtr _cur_txn; ///< The TxnEntry of the current txn/subtxn
 
             uint64_t _lsn = 0; ///< The LSN counter

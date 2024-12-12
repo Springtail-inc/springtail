@@ -113,6 +113,11 @@ namespace springtail::pg_log_mgr {
         for (int i = 0; i < fields->size(); i++) {
             pg_fields->push_back(std::make_shared<PgLogField>(fields->at(i)->get_type(), i));
         }
+
+        pg_pkey_fields = std::make_shared<FieldArray>();
+        for (int i = 0; i < pkey_fields->size(); i++) {
+            pg_pkey_fields->push_back(std::make_shared<PgLogField>(pkey_fields->at(i)->get_type(), i));
+        }
     }
 
     template <int T>
@@ -258,17 +263,19 @@ namespace springtail::pg_log_mgr {
         auto sub_txn = std::make_shared<TxnEntry>(pg_xid);
 
         // send the current txn's extents to the write cache and pull the schema forward to the subtxn
-        for (auto &entry : _cur_txn->table_map) {
-            auto &table = entry.second;
+        if (_cur_txn != nullptr) {
+            for (auto &entry : _cur_txn->table_map) {
+                auto &table = entry.second;
 
-            // send the current extent to the WriteCache
-            WriteCacheFuncImpl::add_extent(_db, entry.first, _cur_txn->pg_xid,
-                                           table.start_lsn, table.extent);
-            table.extent = nullptr;
+                // send the current extent to the WriteCache
+                WriteCacheFuncImpl::add_extent(_db, entry.first, _cur_txn->pg_xid,
+                                               table.start_lsn, table.extent);
+                table.extent = nullptr;
 
-            // use the schema information from the current txn in the subtxn
-            auto &&p = sub_txn->table_map.try_emplace(entry.first, TableEntry{ table.schema });
-            p.first->second.update_schema();
+                // use the schema information from the current txn in the subtxn
+                auto &&p = sub_txn->table_map.try_emplace(entry.first, TableEntry{ table.table_schema });
+                p.first->second.update_schema();
+            }
         }
 
         // record the subtransaction into the map
@@ -307,7 +314,7 @@ namespace springtail::pg_log_mgr {
             auto change = change_i->second->front().first;
             XidLsn xidlsn(xid, change_i->second->front().second);
 
-            nlohmann::json ddl_stmt;
+            std::string ddl_stmt;
             switch(change->msg_type) {
             case PgMsgEnum::CREATE_TABLE:
                 {
@@ -321,7 +328,7 @@ namespace springtail::pg_log_mgr {
                     ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
 
                     // check for re-sync
-                    nlohmann::json action = ddl_stmt.at("action");
+                    nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                     if (action.get<std::string>() == "resync") {
                         // XXXXXX if a re-sync is required for a table, drop the changes for that table
                         //        from the write cache and initiate a re-sync
@@ -429,27 +436,30 @@ namespace springtail::pg_log_mgr {
                 case PgMsgEnum::INSERT:
                     {
                         auto &insert = std::get<PgMsgInsert>(msg->msg);
-                        _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), insert.xid,
+                        int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
+                        _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                         insert.rel_id, insert.new_tuple);
                         break;
                     }
                 case PgMsgEnum::DELETE:
                     {
                         auto &remove = std::get<PgMsgDelete>(msg->msg);
-                        _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), remove.xid,
+                        int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
+                        _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
                                                                         remove.rel_id, remove.tuple);
                         break;
                     }
                 case PgMsgEnum::UPDATE:
                     {
                         auto &update = std::get<PgMsgUpdate>(msg->msg);
+                        int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
                         if (update.old_type == 0) {
-                            _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), update.xid,
+                            _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
                                                                             update.rel_id, update.new_tuple);
                         } else {
-                            _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), update.xid,
+                            _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
                                                                             update.rel_id, update.old_tuple);
-                            _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), update.xid,
+                            _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
                                                                             update.rel_id, update.new_tuple);
                         }
                         break;
@@ -662,6 +672,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_ddl(uint32_t oid, int32_t xid, bool is_streaming, PgMsgPtr msg)
     {
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, xid);
+
         // record the schema change into the batch
         _current_batch->schema_change(oid, xid, msg);
 
