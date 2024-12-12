@@ -880,22 +880,35 @@ namespace {
         }
         ASSERT_EQ(count, 5000);
 
-        
         // test the first index
         {
-            uint64_t test_value = 30;
+            //define a test set
+            int set_size = 0;
+            uint64_t test_value = 20;
 
+            for (auto &row : *table) {
+                auto v = _fields->at(0)->get_uint64(row);
+                if (v >= test_value) {
+                    ++set_size;
+                }
+            }
+
+            // use the secondary index to iterate over the same set
             auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
             std::vector<ConstFieldPtr> v({ k });
             auto key = std::make_shared<ValueTuple>(v);
 
             auto it = table->lower_bound(key, 1);
             auto end_it = table->end(1);
+
+            int count = 0;
             for (; it != end_it; ++it) {
                 auto row = *it;
                 auto v = _fields->at(0)->get_uint64(row);
                 ASSERT_LE(test_value, v);
+                ++count;
             }
+            ASSERT_EQ(count, set_size);
         }
 
         // test the second index

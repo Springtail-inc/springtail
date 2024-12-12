@@ -218,7 +218,7 @@ namespace springtail {
             // find the extent that could contain the lower_bound() key
             auto &&i = btree->lower_bound(search_key);
             if (i == btree->end()) {
-                return end();
+                return end(index_id);
             }
             return Iterator(this, btree, i, index_schema);
         }
