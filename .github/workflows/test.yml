@@ -34,7 +34,7 @@ jobs:
       USER: root
       PYTHONUNBUFFERED: 1
       GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -170,7 +170,7 @@ jobs:
           # Springtail service log
           springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
           output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
-          fname=$(echo $c  | cut -f2 -d':' | xargs | head -1)
+          fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
           mv $fname $springtail_log_file
           springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$springtail_log_file"
           aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
@@ -183,7 +183,6 @@ jobs:
           name: Integration Tests (test_runner)            # Name of the check run which will be created
           path: ./integration-test-report.xml
           reporter: java-junit
-          badge-title: 'integration tests'
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed
