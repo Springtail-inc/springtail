@@ -26,21 +26,30 @@ from component_factory import ComponentFactory
 PG_REGRESS_PATH = 'test/regress/pg_regress'
 
 class Test:
-    def __init__(self, config_file: str, build_dir: str, external_dir: str):
+    def __init__(self,
+                 config_file: str,
+                 build_dir: str,
+                 bin_dir: str,
+                 external_dir: str):
+        """Initialize the test runner"""
         self._config_file = config_file
         self._build_dir = build_dir
+        self._bin_dir = bin_dir
         self._external_dir = external_dir
 
         self._props = springtail.Properties(config_file, True)
 
-        fdw_config = self._props.get_fdw_config()
+        # get the primary db info
         db_configs = self._props.get_db_configs()
-        self._primary_name = db_configs[0]['name']
-        if 'db_prefix' in fdw_config:
-            self._replica_name = fdw_config['db_prefix'] + self._primary_name
-        else:
-            self._replica_name = self._primary_name
+        self._primary_dbname = db_configs[0]['name']
 
+        db_instance = self._props.get_db_instance_config()
+        self._primary_user = db_instance['replication_user']
+        self._primary_pass = db_instance['password']
+        self._primary_port = db_instance['port']
+        self._primary_host = db_instance['host']
+
+        # get the proxy configuration
         self._proxy_config = self._props.get_proxy_config()
 
         # get the path to the pg_regress binary
@@ -54,21 +63,59 @@ class Test:
 
         expected_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/expected/*.out'))
 
-        # create the sql directory and the expected directory
-        makedir('sql')
-        makedir('expected')
+        data_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/data/*.data'))
+
+        # create the sql, expected and data directories
+        makedir('regress/sql')
+        makedir('regress/expected')
+        makedir('regress/data')
+
+        # create the results directory
+        self._result_path = os.path.join(os.getcwd(), 'regress/results')
+        makedir(self._result_path);
 
         # remove any existing symlinks
-        for f in os.listdir('sql'):
+        for f in os.listdir('regress/sql'):
             os.remove(os.path.join('sql', f))
 
-        for f in os.listdir('expected'):
+        for f in os.listdir('regress/expected'):
             os.remove(os.path.join('expected', f))
 
-        for sql_file in sql_files:
-            os.symlink(sql_file, os.path.join('sql', os.path.basename(sql_file)))
+        for f in os.listdir('regress/data'):
+            os.remove(os.path.join('data', f))
 
-    def run(self):
+        # create symlinks to the sql, expected and data files
+        for file in sql_files:
+            os.symlink(file, os.path.join('regress/sql', os.path.basename(file)))
+
+        for file in expected_files:
+            os.symlink(file, os.path.join('regress/expected', os.path.basename(file)))
+
+        for file in data_files:
+            os.symlink(file, os.path.join('regress/data', os.path.basename(file)))
+
+        # copy the resultmap and the schedule files
+        schedule_file = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
+        resultmap_file = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/resultmap'))
+
+        for f in schedule_file:
+            os.symlink(f, os.path.join('regress', os.path.basename(f)))
+
+        for f in resultmap_file:
+            os.symlink(f, os.path.join('regress', os.path.basename(f)))
+
+        # set the environment variables expected by pg_regress sql files
+        self._regress_path = os.path.join(os.getcwd(), 'regress')
+        os.environ['PG_ABS_SRCDIR'] = self._regress_path
+        os.environ['PG_ABS_BUILDDIR'] = self._regress_path
+        # PG_LIBDIR, PG_DLSUFFIX
+
+    def run_regress(self):
+        """Run the regression tests"""
+        # remove all files in result directory
+        for f in os.listdir(self._result_path):
+            os.remove(os.path.join(self._result_path, f))
+
         # make sure Springtail is stopped
         logging.debug('Stopping any existing Springtail instance')
         springtail.stop(self._config_file, do_cleanup=True)
@@ -77,7 +124,28 @@ class Test:
         logging.debug('Starting the Springtail instance')
         springtail.start(self._config_file, self._build_dir, do_cleanup=False)
 
+        # start the proxy
+        logging.debug('Starting the proxy')
+        factory = ComponentFactory(self._bin_dir, self._props.get_pid_path())
+        proxy = factory.create_proxy()
+        if proxy.is_running():
+            if not proxy.shutdown():
+                raise ValueError("Failed to stop the proxy")
+        if not proxy.start():
+            raise ValueError("Failed to start the proxy")
 
+        # run the regression tests
+        logging.info('Running the regression tests')
+        os.environ['PGPASSWORD'] = self._primary_pass
+        run_command(self._pg_regress, [f'--dbname={self._primary_dbname}',
+                                       f'--expecteddir={self._regress_path}/expected',
+                                       f'--inputdir={self._regress_path}/sql',
+                                       f'--host=localhost',
+                                       f'--port={self._proxy_config["port"]}',
+                                       f'--user={self._primary_user}',
+                                       f'--schedule={self._regress_path}/parallel_schedule',
+                                       '--max-connections=1',
+                                       '--use-existing'])
 
 
 def parse_arguments():

@@ -465,7 +465,7 @@ namespace springtail::gc {
             std::map<uint64_t, std::map<uint64_t, boost::condition_variable>> _xid_map;
 
             /** Flag indicating if the processing should be halted. */
-            bool _halt_processing = false;
+            bool _halt_processing = true;
 
             /** Condition variable used to notify when processing can continue. */
             boost::condition_variable _halt_cond;
