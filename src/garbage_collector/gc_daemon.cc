@@ -3,15 +3,12 @@
 
 #include <common/common.hh>
 #include <common/coordinator.hh>
-#include <garbage_collector/log_parser.hh>
 #include <garbage_collector/committer.hh>
 
 namespace {
-    std::shared_ptr<springtail::gc::LogParser> log_parser;
     std::shared_ptr<springtail::gc::Committer> committer;
 
     void shutdown_handler(int signal) {
-        log_parser->shutdown();
         committer->shutdown();
     }
 }
@@ -47,14 +44,10 @@ main(int argc,
 
     // the GC components
     // note: each performs any crash cleanup for their components prior to startup
-    log_parser = std::make_shared<springtail::gc::LogParser>(1, 1);
     committer = std::make_shared<springtail::gc::Committer>(1);
 
     // signal handler for shutdown
     std::signal(SIGINT, shutdown_handler);
-
-    // start the GC log parser
-    log_parser->run();
 
     // start the GC committer
     committer->run();

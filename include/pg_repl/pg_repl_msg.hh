@@ -190,7 +190,7 @@ namespace springtail
     struct PgMsgSchemaIndexColumn {
         std::string column_name;
         int position;        // position is maintained if column is renamed
-        int idx_position;    // position in the index 
+        int idx_position;    // position in the index
     };
 
     struct PgMsgIndex {
@@ -277,7 +277,7 @@ namespace springtail
             TYPE_COMMIT = 0,        ///< normal commit or stream commit
             TYPE_STREAM_START = 1,  ///< stream start
             TYPE_STREAM_ABORT = 2,  ///< stream abort
-            TYPE_PIPELINE_STALL = 3 ///< stall pipeline
+            TYPE_PIPELINE_STALL = 3 ///< stalls the pipeline for table sync
         };
 
         uint64_t begin_offset;   ///< offset to start of block header

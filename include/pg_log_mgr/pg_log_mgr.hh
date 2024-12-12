@@ -88,7 +88,7 @@ namespace springtail::pg_log_mgr {
           _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
+          _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
           _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
@@ -105,7 +105,7 @@ namespace springtail::pg_log_mgr {
           _internal_state(STATE_RUNNING),
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(_xact_queue), _xact_log_path(xact_log_path),
+          _pg_log_reader(_db_id, _xact_queue), _xact_log_path(xact_log_path),
           _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
           _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
@@ -161,8 +161,7 @@ namespace springtail::pg_log_mgr {
             STATE_RUNNING,      ///< running state
             STATE_SYNC_STALL,   ///< stall state during sync
             STATE_SYNCING,      ///< syncing state (doing table copies)
-            STATE_REPLAYING,    ///< replaying state (replaying logs)
-            STATE_REPLAY_DONE,  ///< replay done, waiting for running from GC
+            STATE_REPLAYING,    ///< replaying state; waiting for running
             STATE_STOPPED
         };
 
@@ -218,7 +217,7 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_log_path;      ///< xact log base path
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
         std::thread _xact_thread;                  ///< xact worker thread
-        std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
+        // std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
         RedisQueue<PgXactMsg> _redis_queue;        ///< redis queue for GC
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
@@ -230,19 +229,8 @@ namespace springtail::pg_log_mgr {
         /** transaction worker -- thread fn */
         void _xact_handler_thread();
 
-        /** push transaction to redis queue */
-        void _push_xact_to_redis(const PgTransactionPtr xact);
-
-        /** batch push transactions to redis */
-        void _push_xacts_to_redis(const std::vector<PgTransactionPtr> &xacts);
-
         /** notify xact handler to start sync */
         void _notify_xact_start_sync();
-
-        /** Get next xid */
-        uint64_t _get_next_xid() {
-            return _next_xid.fetch_add(1, std::memory_order_relaxed);
-        }
 
         //// Table copy
         RedisQueue<std::string> _redis_sync_queue; ///< redis queue for table sync
@@ -256,9 +244,6 @@ namespace springtail::pg_log_mgr {
 
         /** Process copy table results; insert into redis */
         void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
-
-        /** Replay xaction logs to redis GC queue; blocks other msgs from being queued */
-        void _replay_xact_logs();
 
         //// Redis pub/sub
         std::thread _pubsub_thread;          ///< redis pub/sub thread
