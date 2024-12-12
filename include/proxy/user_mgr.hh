@@ -19,6 +19,7 @@
 namespace springtail {
 namespace pg_proxy {
 
+    /** Auth type, if this changes, change string mapping in user_mgr.cc */
     enum AuthType : int8_t {
         TRUST=0,
         MD5=1,
@@ -178,7 +179,7 @@ namespace pg_proxy {
         /**
          * @brief Initialize UserMgr object
          *
-         * @param sleep_interval - UserMgr thread sleep interval
+         * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
         void init(const uint32_t sleep_interval) {
             _sleep_interval = sleep_interval;

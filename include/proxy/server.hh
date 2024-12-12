@@ -25,17 +25,38 @@ namespace springtail::pg_proxy {
 
     class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
     public:
+        static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
+
+        enum MODE : int8_t {
+            NORMAL=0,   ///< normal mode, read-write splitting
+            PRIMARY=1,  ///< primary mode, all traffic to primary
+            SHADOW=2    ///< shadow mode, replica shadows primary and logs
+        };
+
+        /**
+         * @brief Construct a new Proxy Server object
+         * The server handles the poll loop and accepts new connections.
+         * It dispatches readable sockets into the thread pool
+         * @param port - port to listen for connections on
+         * @param thread_pool_size - number of threads in the thread pool
+         * @param cert_file - path to the server certificate file
+         * @param key_file - path to the server key file
+         * @param mode - mode of the server
+         * @param enable_ssl - enable SSL
+         * @param logger - logger object for shadow mode
+         */
         ProxyServer(int port,
                     int thread_pool_size,
                     const std::filesystem::path &cert_file,
                     const std::filesystem::path &key_file,
-                    bool shadow_mode=false,
+                    MODE mode=MODE::NORMAL,
                     bool enable_ssl=false,
-                    LoggerPtr logger=nullptr);
+                    LoggerPtr shadow_logger=nullptr);
 
         /** Start server main loop */
         void run();
 
+        /** Cleanup server resources */
         void cleanup();
 
         /** Signal server main loop to reset poll fd set */
@@ -59,12 +80,12 @@ namespace springtail::pg_proxy {
         }
 
         /** Is ssl enabled globally? */
-        bool is_ssl_enabled() {
+        bool is_ssl_enabled() const {
             return _enable_ssl;
         }
 
         /** Get the logger object */
-        LoggerPtr get_logger() {
+        LoggerPtr get_logger() const {
             return _logger;
         }
 
@@ -72,8 +93,13 @@ namespace springtail::pg_proxy {
         void shutdown();
 
         /** Get the proxy id */
-        uint32_t id() {
+        uint32_t id() const {
             return _id;
+        }
+
+        /** Get the server mode */
+        MODE mode() const {
+            return _mode;
         }
 
     private:
@@ -92,8 +118,8 @@ namespace springtail::pg_proxy {
 
         bool _enable_ssl = false;            ///< true if SSL is enabled
 
-        bool _shadow_mode = false; ///< shadow mode flag; if true, replca shadows primary
-        std::atomic<bool> _shutdown = false;    ///< true if server is shutting down
+        MODE _mode;                          ///< server mode
+        std::atomic<bool> _shutdown = false; ///< true if server is shutting down
 
         LoggerPtr _logger;         ///< logger object (may be null)
 

@@ -35,7 +35,8 @@ def md5_hash_user_pass(username, password, salt):
 def md5_hash(strs):
     hasher = hashlib.md5()
     for str in strs:
-        hasher.update(str.encode())
+        if str is not None:
+            hasher.update(str.encode())
     return hasher.hexdigest()
 
 def read_startup(conn):
@@ -440,7 +441,7 @@ def decode_data_row(message):
 
     for _ in range(num_columns):
         # Read the length of the column value
-        column_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+        column_length = int.from_bytes(message[offset:offset+4], byteorder='big', signed=True)
         offset += 4
 
         if column_length == -1:

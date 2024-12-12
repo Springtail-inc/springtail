@@ -120,9 +120,10 @@ namespace pg_proxy {
     public:
         DatabaseInstance(const Session::Type type,
                          const std::string &hostname,
+                         const std::string &db_prefix,
                          int port=5432,
                          int max_sessions=100)
-            : _type(type), _hostname(hostname), _port(port), _max_sessions(max_sessions)
+            : _type(type), _hostname(hostname), _replica_db_prefix(db_prefix), _port(port), _max_sessions(max_sessions)
         {}
 
         /** get hostname */
@@ -130,6 +131,13 @@ namespace pg_proxy {
 
         /** get port */
         int port() const { return _port; }
+
+        /**
+         * @brief Get prefix
+         *
+         * @return const std::string&
+         */
+        const std::string &prefix() const { return _replica_db_prefix; }
 
         /** create connection to this instance */
         ProxyConnectionPtr create_connection() {
@@ -208,6 +216,7 @@ namespace pg_proxy {
         mutable std::shared_mutex _mutex;
         Session::Type _type;
         std::string _hostname;
+        std::string _replica_db_prefix = "";         ///< prefix to be used for replica database
         int _port;
         int _max_sessions;
         int _active_sessions=0;
@@ -643,6 +652,8 @@ namespace pg_proxy {
         std::map<std::string, DatabaseObjectPtr> _db_name_rep_dbs;  ///< map of database names to database object
         std::map<uint64_t, DatabaseObjectPtr> _db_id_rep_dbs;       ///< map of database ids to database object
         std::shared_mutex _db_mutex;          ///< shared mutex for read/write access to the replicated databases map
+
+        std::string _db_replica_prefix;
 
         /**
          * @brief Construct a new Database Mgr object
