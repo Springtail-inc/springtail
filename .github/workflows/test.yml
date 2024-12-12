@@ -94,7 +94,7 @@ jobs:
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
           sha="${GITHUB_SHA}"
-          _LOG_SHA="${sha:0:7}"
+          _LOG_SHA=$(echo $sha | cut -c1-7)
           
           log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
           mv tmplog $log_file
@@ -157,7 +157,7 @@ jobs:
           _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
           # Grab the short SHA
           sha="${GITHUB_SHA}"
-          _LOG_SHA="${sha:0:7}"
+          _LOG_SHA=$(echo $sha | cut -c1-7)
           
           log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
           mv tmplog $log_file
