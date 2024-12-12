@@ -25,12 +25,12 @@
 namespace springtail::pg_proxy {
 
     ClientSession::ClientSession(ProxyConnectionPtr connection,
-                                 ProxyServerPtr server,
-                                 bool shadow_mode)
+                                 ProxyServerPtr server)
 
         : Session(connection, server, CLIENT),
           _stmt_cache(STATEMENT_CACHE_SIZE),
-          _shadow_mode(shadow_mode)
+          _shadow_mode(server->mode() == ProxyServer::MODE::SHADOW),
+          _primary_mode(server->mode() == ProxyServer::MODE::PRIMARY)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client connected: endpoint={}", _id, connection->endpoint());
 
@@ -216,7 +216,7 @@ namespace springtail::pg_proxy {
     ClientSession::_handle_startup()
     {
         char buffer[8];
-        ssize_t n = _connection->read(buffer, 8);
+        ssize_t n = _connection->read(buffer, 8, 8);
         assert(n == 8);
 
         int32_t msg_length = recvint32(buffer)-4;
@@ -264,7 +264,7 @@ namespace springtail::pg_proxy {
         assert(remaining <= 4096);
 
         char buffer[remaining];
-        ssize_t n = _connection->read(buffer, remaining);
+        ssize_t n = _connection->read(buffer, remaining, remaining);
         assert(n == remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
@@ -477,20 +477,22 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         if (!read_client_first_message(raw,
                                         &_login->scram_state.cbind_flag,
                                         &_login->scram_state.client_first_message_bare,
                                         &_login->scram_state.client_nonce)) {
             SPDLOG_ERROR("Failed to read client first message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
+        delete[] raw;
 
         // note: some code inside of here could be optimized based on how the password is stored
         if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->_password.c_str())) {
             SPDLOG_ERROR("Failed to build server first message");
-            free (raw);
             throw ProxyAuthError();
         }
 
@@ -503,8 +505,6 @@ namespace springtail::pg_proxy {
         write_buffer->put_bytes(_login->scram_state.server_first_message,
                                  strlen(_login->scram_state.server_first_message));
 
-        free (raw);
-
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
 
@@ -515,7 +515,9 @@ namespace springtail::pg_proxy {
     void
     ClientSession::_handle_scram_auth_continue(const std::string_view data, uint64_t seq_id)
     {
-        char *raw = ::strdup(data.data()); // copy to remove constness
+        char *raw = new char[data.size() + 1];
+        strncpy(raw, data.data(), data.size());
+        raw[data.size()] = '\0';
         const char *client_final_nonce = nullptr;
 	    char *proof = nullptr;
 
@@ -524,7 +526,7 @@ namespace springtail::pg_proxy {
                                         reinterpret_cast<const uint8_t *>(data.data()),
                                         raw, &client_final_nonce, &proof)) {
             SPDLOG_ERROR("Failed to read client final message");
-            free (raw);
+            delete[] raw;
             throw ProxyAuthError();
         }
 
@@ -532,11 +534,13 @@ namespace springtail::pg_proxy {
         if (!verify_final_nonce(&_login->scram_state, client_final_nonce) ||
             !verify_client_proof(&_login->scram_state, proof)) {
 		    SPDLOG_ERROR("Invalid SCRAM response (nonce or proof does not match)");
-            free (raw);
+            delete[] raw;
             free (proof);
 
             throw ProxyAuthError();
 	    }
+        delete[] raw;
+        free (proof);
 
         // after verifying the client proof, we now have the client key
         _user->set_client_scram_key(_login->scram_state.ClientKey);
@@ -545,8 +549,6 @@ namespace springtail::pg_proxy {
         char *server_final_message = build_server_final_message(&_login->scram_state);
         if (server_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build server final message");
-            free (raw);
-            free (proof);
 
             throw ProxyAuthError();
         }
@@ -559,9 +561,7 @@ namespace springtail::pg_proxy {
         write_buffer->put32(12); // 12 == SASL final
         write_buffer->put_bytes(server_final_message, strlen(server_final_message));
 
-        free (raw);
         free (server_final_message);
-        free (proof);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
         assert(n == write_buffer->size());
@@ -1058,6 +1058,11 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        if (_primary_mode) {
+            // send to primary session force to !readonly
+            is_readonly = false;
+        }
+
         // not in shadow mode or not readonly, send to single server
         if (!_shadow_mode || !is_readonly) {
             // select a server session and notify it of this message
@@ -1099,7 +1104,12 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Selecting server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
 
-        if (type == REPLICA && DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
+        if (_primary_mode) {
+            // force primary mode
+            type = PRIMARY;
+        }
+
+        if (type == REPLICA && !DatabaseMgr::get_instance()->is_database_ready(_db_id)) {
             type = PRIMARY;
         }
 
@@ -1153,6 +1163,7 @@ namespace springtail::pg_proxy {
             instance = DatabaseMgr::get_instance()->get_primary_instance();
         } else {
             // get a replica session
+            assert (_primary_mode == false);
             instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
         }
         assert (instance != nullptr);

@@ -259,7 +259,7 @@ namespace springtail::gc {
              * are no pg_xids that might need to be skipped due to the pipeline stall.  This is
              * expected in the case that a sync occurs isolated from any other database activity
              * (e.g., an idle database).
-             * 
+             *
              * @return 0 if still in progress, otherwise the max XID seen among the syncs
              */
             uint64_t check_immediate_commit(uint64_t db_id);
@@ -465,7 +465,7 @@ namespace springtail::gc {
             std::map<uint64_t, std::map<uint64_t, boost::condition_variable>> _xid_map;
 
             /** Flag indicating if the processing should be halted. */
-            bool _halt_processing;
+            bool _halt_processing = false;
 
             /** Condition variable used to notify when processing can continue. */
             boost::condition_variable _halt_cond;

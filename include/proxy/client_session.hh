@@ -30,8 +30,7 @@ namespace springtail::pg_proxy {
 
         /** Construct a connection with the given socket. */
         ClientSession(ProxyConnectionPtr connection,
-                      ProxyServerPtr server,
-                      bool shadow_mode=false);
+                      ProxyServerPtr server);
 
         ~ClientSession();
 
@@ -40,6 +39,10 @@ namespace springtail::pg_proxy {
 
         bool is_shadow_mode() const {
             return _shadow_mode;
+        }
+
+        bool is_primary_mode() const {
+            return _primary_mode;
         }
 
         ServerSessionPtr get_shadow_session() {
@@ -73,7 +76,8 @@ namespace springtail::pg_proxy {
         std::weak_ptr<ServerSession> _primary_session; ///< primary server session
         std::weak_ptr<ServerSession> _replica_session; ///< replica server session
 
-        bool _shadow_mode = false; ///< shadow mode flag; if true, send to primary and replica
+        bool _shadow_mode = false;  ///< shadow mode flag; if true, send to primary and replica
+        bool _primary_mode = false; ///< primary mode flag; if true, send to primary only
 
         void _process_startup_msg(int32_t msg_length, uint64_t seq_id);
         void _process_ssl_request();

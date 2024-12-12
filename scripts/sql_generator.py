@@ -1,8 +1,8 @@
 import psycopg2
-import sys
 import string
 import random
 import argparse
+import logging
 
 class Generator:
 
@@ -56,6 +56,8 @@ class Generator:
     def insert(self, table_idx, a, b):
         table = self.tables[table_idx]
 
+        logging.debug(f"INSERT INTO {table}")
+
         sql = "INSERT INTO {} (a, b) VALUES ({}, '{}')".format(table, a, b)
         self.execute(sql)
 
@@ -75,17 +77,27 @@ class Generator:
 
     def savepoint(self, name):
         sql = "SAVEPOINT {}".format(name)
+
+        logging.debug(sql)
+
         self.execute(sql)
 
     def release_savepoint(self, name):
         sql = "RELEASE SAVEPOINT {}".format(name)
+
+        logging.debug(sql)
+
         self.execute(sql)
 
     def rollback_savepoint(self, name):
         sql = "ROLLBACK TO SAVEPOINT {}".format(name)
+
+        logging.debug(sql)
+
         self.execute(sql)
 
     def commit(self):
+        logging.debug("COMMIT")
         self.connection.commit()
 
 
@@ -112,8 +124,12 @@ if __name__ == '__main__':
     parser.add_argument('-i', help='number of inserts per table', dest='iters', type=int, default=1)
     parser.add_argument('-s', help='row size (B) per insert', dest='rsize', type=int, default=200)
     parser.add_argument('-n', help='number of tables', dest='ntables', type=int, default=1)
+    parser.add_argument('-v', help='verbose', dest='verbose', action='store_true')
 
     args = parser.parse_args();
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
     generator = Generator()
 
@@ -138,7 +154,17 @@ if __name__ == '__main__':
         for j in range(0, args.ntables):
             generator.insert(tables[j], i, text)
 
-    generator.rollback_savepoint("subxact")
+    generator.savepoint("subxact2")
+
+    for i in range(0, args.iters):
+        for j in range(0, args.ntables):
+            generator.insert(tables[j], i, text)
+
+    generator.release_savepoint("subxact2")
+
+    for i in range(0, args.iters):
+        for j in range(0, args.ntables):
+            generator.insert(tables[j], i, text)
 
     # generate sub query
     # generator.sub_insert(tables[0], 0, text)
