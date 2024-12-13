@@ -258,18 +258,18 @@ namespace springtail::pg_fdw {
         if (op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
             state->iter_start.emplace(state->table->begin());
         } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
-            state->iter_start.emplace(state->table->lower_bound(tuple));
+            state->iter_start.emplace(state->table->lower_bound(tuple, state->index.id));
         } else if (op == GREATER_THAN) {
-            state->iter_start.emplace(state->table->upper_bound(tuple));
+            state->iter_start.emplace(state->table->upper_bound(tuple, state->index.id));
         }
 
         // set end iterator based on first key op
         if (op == LESS_THAN || op == NOT_EQUALS) {
-            state->iter_end.emplace(state->table->lower_bound(tuple));
+            state->iter_end.emplace(state->table->lower_bound(tuple, state->index.id));
         } else if (op == LESS_THAN_EQUALS || op == EQUALS) {
-            state->iter_end.emplace(state->table->upper_bound(tuple));
+            state->iter_end.emplace(state->table->upper_bound(tuple, state->index.id));
         } else if (op == GREATER_THAN || op == GREATER_THAN_EQUALS) {
-            state->iter_end.emplace(state->table->end());
+            state->iter_end.emplace(state->table->end(state->index.id));
         }
     }
 
@@ -360,10 +360,10 @@ namespace springtail::pg_fdw {
             if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->iter_end != state->table->end()) {
+                if (state->iter_end != state->table->end(state->index.id)) {
                     FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple));
-                    state->iter_end.emplace(state->table->end());
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index.id));
+                    state->iter_end.emplace(state->table->end(state->index.id));
                     return false;
                 }
             }

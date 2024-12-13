@@ -250,6 +250,18 @@ namespace springtail {
     Table::Iterator
     Table::upper_bound(TuplePtr search_key, uint32_t index_id)
     {
+        if (index_id != constant::INDEX_PRIMARY) {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto &&i = btree->upper_bound(search_key);
+            if (i == btree->end()) {
+                return end(index_id);
+            }
+            return Iterator(this, btree, i, index_schema);
+        }
+
         // check if the table is vacant
         if (_primary_index == nullptr) {
             return end();
