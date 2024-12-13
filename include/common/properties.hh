@@ -129,6 +129,9 @@ namespace springtail {
         /** Helper to get write cache hostname */
         static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
 
+        /** Helper to set env vars from config file */
+        static void set_env_from_file(const char *config_file);
+
     private:
         /** static _instance singleton */
         static Properties *_instance;

@@ -90,9 +90,18 @@ namespace springtail {
         connect_options.user = user;
         connect_options.password = password;
         connect_options.db = config_db;
+        connect_options.resp = 3;
+        connect_options.socket_timeout = std::chrono::milliseconds(0);
+        connect_options.keep_alive = true;
+        connect_options.keep_alive_s = std::chrono::seconds(30);
+
+        sw::redis::ConnectionPoolOptions pool_options;
+        pool_options.size = 5;
+        pool_options.connection_idle_time = std::chrono::seconds(0);
+        pool_options.connection_lifetime = std::chrono::seconds(60);
 
         // create redis client just for accessing config db
-        _redis_config_client = std::make_shared<RedisClient>(connect_options);
+        _redis_config_client = std::make_shared<RedisClient>(connect_options, pool_options);
     }
 
     void
@@ -193,6 +202,55 @@ namespace springtail {
         for (const auto& fdw_id : system_json["fdws"].items()) {
             std::string fdw_json_str = fdw_id.value().dump();
             _redis_config_client->hset(fdw_key, fdw_id.key(), fdw_json_str);
+        }
+    }
+
+    void
+    Properties::set_env_from_file(const char *config_file)
+    {
+        // check if file exists
+        if (!std::filesystem::exists(std::filesystem::path(config_file))) {
+            throw Error("Error missing config file");
+        }
+
+        // Load the system settings into json
+        std::ifstream file(config_file);
+        nlohmann::json system_json;
+        file >> system_json;
+
+        // iterate through the environment and add to json config
+        for (auto &variable: environment::Variables) {
+            const char *env_var = std::get<0>(variable);
+            environment::Type type = std::get<1>(variable);
+            const char *json_obj_name = std::get<2>(variable);
+            const char *json_key_name = std::get<3>(variable);
+
+            // lookup the value in the system settings using object and key
+            if (system_json.contains(json_obj_name) && system_json[json_obj_name].contains(json_key_name)) {
+
+                if (system_json[json_obj_name][json_key_name].is_null()) {
+                    ::setenv(env_var, "", 1);
+                    continue;
+                }
+
+                switch (type) {
+                    case environment::STR: {
+                        std::string val = system_json[json_obj_name][json_key_name].get<std::string>();
+                        ::setenv(env_var, val.c_str(), 1);
+                        break;
+                    }
+                    case environment::UINT32: {
+                        uint32_t val = system_json[json_obj_name][json_key_name].get<uint32_t>();
+                        ::setenv(env_var, std::to_string(val).c_str(), 1);
+                        break;
+                    }
+                    case environment::UINT64: {
+                        uint64_t val = system_json[json_obj_name][json_key_name].get<uint64_t>();
+                        ::setenv(env_var, std::to_string(val).c_str(), 1);
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -389,10 +447,10 @@ namespace springtail {
 
         // get the redis client and lookup the db ids from the db_instance config
         RedisClientPtr redis_client = _get_redis_client();
-        std::string fdw_key = std::format(redis::HASH_FDW, db_instance_id);
+        std::string fdw_key = std::format(redis::SET_FDW_IDS, db_instance_id);
 
         std::vector<std::string> fdw_ids;
-        redis_client->hkeys(fdw_key, std::back_inserter(fdw_ids));
+        redis_client->smembers(fdw_key, std::back_inserter(fdw_ids));
 
         return fdw_ids;
     }

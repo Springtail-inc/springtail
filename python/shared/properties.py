@@ -23,7 +23,8 @@ class Properties:
             self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
 
         if config_file:
-            os.environ['SPRINGTAIL_PROPERTIES_FILE'] = config_file
+            # remove the environment variable; prevents daemons from reloading redis
+            os.environ.pop('SPRINGTAIL_PROPERTIES_FILE', None)
 
             with open(config_file) as file:
                 system_json = json.load(file)
@@ -57,12 +58,16 @@ class Properties:
                     'REDIS_USER_DATABASE_ID': str(self.redis_data_db),
                     'REDIS_CONFIG_DATABASE_ID': str(self.redis_config_db),
                     'MOUNT_POINT': system_json['fs']['mount_point'],
+                    'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
+                    'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
                     'REPLICATION_USER_PASSWORD': self.replication_user_password,
                     'FDW_USER_PASSWORD': self.fdw_user_password
                 }
 
                 for (key, value) in env_vars.items():
-                    os.environ[key] = value
+                    if value is not None:
+                        os.environ[key] = value
+
             except KeyError as e:
                 raise Exception(f'JSON key error, missing key: {e}')
         else:
@@ -85,14 +90,14 @@ class Properties:
         """Return a json array of database instance id:name pairs.
            return: [{"id":, "name":, "replication_slot":, "publication_name": }, ...]
         """
-        key = 'instance_config:' + str(self.db_instance_id)
+        key = str(self.db_instance_id) + ':instance_config'
         if 'db_configs' in self.cache:
             return self.cache['db_configs']
 
         ids = json.loads(self.redis.hget(key, 'database_ids'))
         dbs = []
         for id in ids:
-            db_key = 'db_config:' + str(self.db_instance_id)
+            db_key = str(self.db_instance_id) + ':db_config'
             db = json.loads(self.redis.hget(db_key, str(id)))
 
             dbs.append({"id": id,
@@ -109,7 +114,7 @@ class Properties:
         """Return the primary db instance configuration as an object.
         return: {"host":, "port":, "replication_user":, "password":}
         """
-        key = 'instance_config:' + str(self.db_instance_id)
+        key = str(self.db_instance_id) + ':instance_config'
         if 'db_instance_config' in self.cache:
             return self.cache['db_instance_config']
 
@@ -121,7 +126,7 @@ class Properties:
 
     def get_fdw_config(self):
         """Return a config object for foreign data wrapper configuration."""
-        key = 'fdw:' + str(self.db_instance_id)
+        key = str(self.db_instance_id) + ':fdw'
         if 'fdw_config' in self.cache:
             return self.cache['fdw_config']
 
@@ -133,7 +138,7 @@ class Properties:
 
     def get_system_config(self):
         """Return the system configuration as an object."""
-        key = 'instance_config:' + str(self.db_instance_id)
+        key = str(self.db_instance_id) + ':instance_config'
         if 'system_config' in self.cache:
             return self.cache['system_config']
 
@@ -157,12 +162,12 @@ class Properties:
     def get_liveness_hash(self):
         """Return the liveness hash key."""
         # see common/redis_types.hh HASH_LIVENESS
-        return 'hash:liveness:' + self.db_instance_id
+        return self.db_instance_id + ':hash:liveness'
 
     def get_liveness_notification_pubsub(self):
         """Return the liveness notification pubsub channel."""
         # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
-        return 'pubsub:liveness_notify:' + self.db_instance_id
+        return self.db_instance_id + ':pubsub:liveness_notify'
 
     def __load_redis(self, config_file=None):
         """Load redis based on a system.json file.
@@ -192,7 +197,7 @@ class Properties:
         self.redis.flushdb()
 
         db_instance_id = system_json['org']['db_instance_id']
-        db_instance_key = 'instance_config:' + str(db_instance_id)
+        db_instance_key = str(db_instance_id) + ':instance_config'
         self.redis.hset(db_instance_key, 'id', db_instance_id)
 
         db_instance_json = system_json['db_instances'][str(db_instance_id)]
@@ -222,18 +227,19 @@ class Properties:
         for db_id in db_instance_json['database_ids']:
             db_json = system_json['databases'][str(db_id)]
             # set db_config
-            db_key = 'db_config:' + str(db_instance_id)
+            db_key = str(db_instance_id) + ':db_config'
             self.redis.hset(db_key, str(db_id), json.dumps(db_json))
 
             #set state; default to initialize
-            db_state_key = 'instance_state:' + str(db_instance_id)
+            db_state_key = str(db_instance_id) + ':instance_state'
             self.redis.hset(db_state_key, str(db_id), 'initialize')
 
-        # create hset for fdws
-        fdw_key = 'fdw:' + str(db_instance_id)
+        # create hset for fdw configs, and set the fdw ids
+        fdw_key = str(db_instance_id) + ':fdw'
         for fdw_id in system_json['fdws']:
             fdw_json_str = json.dumps(system_json['fdws'][fdw_id])
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
+            self.redis.sadd(fdw_key + '_ids', fdw_id)
 
     def wait_for_state(self, state, id, timeout=600):
         """Wait for the database state to reach the desired state.
@@ -241,7 +247,7 @@ class Properties:
         :param id: the database id to check
         :param timeout: the maximum time to wait in seconds (0 wait forever)
         """
-        key = 'instance_state:' + self.db_instance_id
+        key = self.db_instance_id + ':instance_state'
         start = time.time()
         while True:
             if self.redis.hget(key, str(id)) == state:
