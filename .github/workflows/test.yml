@@ -33,6 +33,8 @@ jobs:
       ZIC: true
       USER: root
       PYTHONUNBUFFERED: 1
+      GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -79,9 +81,24 @@ jobs:
           cd python/testing
           python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
           cd ../../debug
-          log_file="unit-test-$(date +%s).log" 
-          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose" 2>&1 | tee $log_file
+          
+          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose" 2>&1 | tee tmplog
+          
+          # Grab the success/failure status of the unit tests
+          _LOG_FLAG="succeeded"
+          if !  grep -qE "100% tests passed" tmplog
+          then 
+            _LOG_FLAG="failed"
+          fi
+          # Grab the current PR ID
+          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
+          # Grab the short SHA
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
+          
+          log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
+          mv tmplog $log_file
           unit_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
+          
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
 
@@ -123,11 +140,39 @@ jobs:
           service postgresql start
           ./startup.sh -s data_init.sql
           
-          log_file="integration-test-$(date +%s).log" 
-          python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee $log_file
-          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/$(date +"%Y/%m/%d/%H")/$log_file"
+          python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
+          
+          # Grab the success/failure status of the integration tests
+          _LOG_FLAG="succeeded"
+          if grep -qE "Tests failed: [1-9][0-9]*" tmplog
+          then 
+            _LOG_FLAG="failed"
+          fi
+          # Timestamp
+          _LOG_TIMESTAMP=$(date +%s)
+          _LOG_DATE=$(date +"%Y/%m/%d/%H")
+          
+          # Grab the current PR ID
+          _LOG_PR_ID="${GITHUB_EVENT_PULL_REQUEST_NUMBER}"
+          # Grab the short SHA
+          _LOG_SHA=$(echo $GITHUB_LATEST_SHA | cut -c1-7)
+          
+          log_file="integration-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
+          mv tmplog $log_file
+          
+          # Integration test log
+          integration_test_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$log_file"
           aws s3 cp "$log_file" "$integration_test_log_s3key"
           echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
+          
+          # Springtail service log
+          springtail_log_file="springtail-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
+          output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
+          fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
+          mv $fname $springtail_log_file
+          springtail_log_s3key="s3://devsupport.springtail.internal/testlogs/${_LOG_DATE}/$springtail_log_file"
+          aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
+          echo "*** Springtail Log S3 Key: $springtail_log_s3key"
 
       - name: Integration Test Report
         uses: dorny/test-reporter@v1
@@ -136,10 +181,15 @@ jobs:
           name: Integration Tests (test_runner)            # Name of the check run which will be created
           path: ./integration-test-report.xml
           reporter: java-junit
-          badge-title: 'integration tests'
 
       - uses: actions/upload-artifact@v4
         if: success() || failure()      # run this step even if previous step failed
         with:
           name: 'Integration Test Logs'
           path: ./python/testing/integration-test-*.log
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()      # run this step even if previous step failed
+        with:
+          name: 'Springtail Logs'
+          path: ./python/testing/springtail-*.tar.gz

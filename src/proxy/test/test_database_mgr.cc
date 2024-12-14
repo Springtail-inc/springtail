@@ -141,28 +141,28 @@ namespace {
         void _add_table(uint64_t db_id, const std::string &schema, const std::string &table, bool test = true)
         {
             if (test) {
-                EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(db_id, schema, table));
+                EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(db_id, "public", schema, table));
             }
             auto ts = _data_client->transaction(false, false);
             RedisDbTables::add_table(ts, db_id, table, schema);
             ts.exec();
             if (test) {
                 sleep(1);
-                EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(db_id, schema, table));
+                EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(db_id, "public", schema, table));
             }
         }
 
         void _remove_table(uint64_t db_id, const std::string &schema, const std::string &table, bool test = true)
         {
             if (test) {
-                EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(db_id, schema, table));
+                EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(db_id, "public", schema, table));
             }
             auto ts = _data_client->transaction(false, false);
             RedisDbTables::remove_table(ts, db_id, table, schema);
             ts.exec();
             if (test) {
                 sleep(1);
-                EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(db_id, schema, table));
+                EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(db_id, "public", schema, table));
             }
         }
     };
@@ -202,10 +202,10 @@ namespace {
 
         _remove_database(2, "springtail_1");
 
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table1));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table2));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table1));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table2));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table1));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table2));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table1));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table2));
 
         // clean up redis
         _remove_table(2, schema1, table1, false);
@@ -225,17 +225,17 @@ namespace {
         _add_table(2, schema2, table1, false);
         _add_table(2, schema2, table2, false);
 
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table1));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table2));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table1));
-        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table2));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table1));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table2));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table1));
+        EXPECT_FALSE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table2));
 
         _add_database(2, "springtail_1");
 
-        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table1));
-        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, schema1, table2));
-        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table1));
-        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, schema2, table2));
+        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table1));
+        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema1, table2));
+        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table1));
+        EXPECT_TRUE(DatabaseMgr::get_instance()->is_table_replicated(2, "public", schema2, table2));
 
         _remove_table(2, schema1, table1);
         _remove_table(2, schema1, table2);
