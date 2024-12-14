@@ -33,7 +33,6 @@ namespace springtail::sys_tbl_mgr {
     void
     Service::shutdown()
     {
-        assert(0);
         boost::unique_lock lock(_instance_mutex);
 
         if (_instance != nullptr) {
