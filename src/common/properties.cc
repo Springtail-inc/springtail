@@ -168,7 +168,7 @@ namespace springtail {
 
         // set db instance id
         uint64_t db_instance_id = system_json["org"]["db_instance_id"].get<uint64_t>();
-        std::string db_instance_key = "instance_config:" + std::to_string(db_instance_id);
+        std::string db_instance_key = fmt::format(redis::DB_INSTANCE_CONFIG, db_instance_id);
         _redis_config_client->hset(db_instance_key, "id", std::to_string(db_instance_id));
 
         // set primary db
@@ -189,19 +189,21 @@ namespace springtail {
         // Setup db_config
         for (const auto& db_id : db_instance_json["database_ids"]) {
             nlohmann::json db_json = system_json["databases"][db_id.get<std::string>()];
-            std::string db_key = "db_config:" + std::to_string(db_instance_id);
+            std::string db_key = fmt::format(redis::DB_CONFIG, db_instance_id);
             _redis_config_client->hset(db_key, db_id.get<std::string>(), db_json.dump());
 
             // Set state; default to initialize
-            std::string db_state_key = "instance_state:" + std::to_string(db_instance_id);
+            std::string db_state_key = fmt::format(redis::DB_INSTANCE_STATE, db_instance_id);
             _redis_config_client->hset(db_state_key, db_id.get<std::string>(), "initialize");
         }
 
         // Create hset for fdws
-        std::string fdw_key = "fdw:" + std::to_string(db_instance_id);
+        std::string fdw_key = fmt::format(redis::HASH_FDW, db_instance_id);
+        std::string fdw_id_key = fmt::format(redis::SET_FDW_IDS, db_instance_id);
         for (const auto& fdw_id : system_json["fdws"].items()) {
             std::string fdw_json_str = fdw_id.value().dump();
             _redis_config_client->hset(fdw_key, fdw_id.key(), fdw_json_str);
+            _redis_config_client->sadd(fdw_id_key, fdw_id.key());
         }
     }
 
@@ -254,7 +256,7 @@ namespace springtail {
         }
     }
 
-    Properties::Properties()
+    Properties::Properties(bool load_redis)
     {
         // check for an override properties file;
         // if it exists use it rather than reading the config from redis
@@ -262,9 +264,16 @@ namespace springtail {
         if (file != nullptr) {
             SPDLOG_INFO("Properties override file: {}", file);
 
-            // read the system properties from the configuration file
-            _load_redis(file);
-        } else {
+            if (load_redis) {
+                // read the system properties from the configuration file
+                _load_redis(file);
+            } else {
+                // otherwise set the environment variables from the file
+                set_env_from_file(file);
+            }
+        }
+
+        if (!load_redis || file == nullptr) {
             // read the base config from the environment
             _read_environment();
 
@@ -563,12 +572,12 @@ namespace springtail {
     }
 
     void
-    Properties::init()
+    Properties::init(bool load_redis)
     {
         if (_instance == nullptr) {
             // once init
-            std::call_once(_init_flag, []() {
-                _instance = new Properties();
+            std::call_once(_init_flag, [load_redis]() {
+                _instance = new Properties(load_redis);
             });
         }
     }

@@ -57,7 +57,7 @@ namespace springtail {
         /**
          * @brief Init _instance and read from redis
          */
-        static void init();
+        static void init(bool load_redis = false);
 
         /** Helper to get db instance id */
         static uint64_t get_db_instance_id() {
@@ -145,7 +145,7 @@ namespace springtail {
         /**
          * @brief Construct a new Properties object
          */
-        Properties();
+        Properties(bool load_redis);
 
         /**
          * @brief Read the environment variables into base config
