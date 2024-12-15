@@ -320,6 +320,7 @@ namespace springtail::pg_log_mgr {
                 {
                     auto &table_msg = std::get<PgMsgTable>(change->msg);
                     ddl_stmt = client->create_table(_db, xidlsn, table_msg);
+                    redis_ddl.add_ddl(_db, xid, ddl_stmt);
                     break;
                 }
             case PgMsgEnum::ALTER_TABLE:
@@ -334,6 +335,8 @@ namespace springtail::pg_log_mgr {
                         //        from the write cache and initiate a re-sync
                         SPDLOG_ERROR("Still need to implement resync");
                         throw Error();
+                    } else if (action.get<std::string>() != "no_change") {
+                        redis_ddl.add_ddl(_db, xid, ddl_stmt);
                     }
                     break;
                 }
@@ -341,6 +344,7 @@ namespace springtail::pg_log_mgr {
                 {
                     auto &drop_msg = std::get<PgMsgDropTable>(change->msg);
                     ddl_stmt = client->drop_table(_db, xidlsn, drop_msg);
+                    redis_ddl.add_ddl(_db, xid, ddl_stmt);
                     break;
                 }
             case PgMsgEnum::CREATE_INDEX:
@@ -360,7 +364,6 @@ namespace springtail::pg_log_mgr {
                 SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
                 throw Error();
             }
-            redis_ddl.add_ddl(_db, xid, ddl_stmt);
 
             // remove the schema change we just applied
             change_i->second->pop_front();

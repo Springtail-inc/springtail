@@ -322,7 +322,7 @@ namespace springtail::pg_log_mgr {
         } else {
             // no tables copied
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
-            // ste to running this unblocks the xact handler
+            // set to running this unblocks the xact handler
             _internal_state.set(STATE_RUNNING);
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
         }
@@ -508,7 +508,8 @@ namespace springtail::pg_log_mgr {
             if (log_entry->is_stall_message) {
                 assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
-                _internal_state.wait_and_set(STATE_SYNCING, STATE_REPLAYING);
+                _internal_state.set(STATE_SYNCING);
+                _internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING });
                 continue;
             }
 
