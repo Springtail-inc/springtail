@@ -42,6 +42,9 @@ extern "C" {
 namespace springtail::pg_fdw {
     using springtail::Index;
 
+    // This is to return an intersection between Index columns and quals.
+    // The intersection must start at the first index column and be
+    // continuous.
     std::vector<ConstQualPtr>
     _get_index_quals(Index const& idx, List const& qual_list) {
 
@@ -262,21 +265,23 @@ namespace springtail::pg_fdw {
 
         // set up the start iterator based on first key op
         QualOpName op = qual->base.op;
-        if (op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
+        if (!state->index.has_value() || op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
             state->iter_start.emplace(state->table->begin());
         } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
-            state->iter_start.emplace(state->table->lower_bound(tuple, state->index.id));
+            state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
         } else if (op == GREATER_THAN) {
-            state->iter_start.emplace(state->table->upper_bound(tuple, state->index.id));
+            state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
         }
 
         // set end iterator based on first key op
-        if (op == LESS_THAN || op == NOT_EQUALS) {
-            state->iter_end.emplace(state->table->lower_bound(tuple, state->index.id));
+        if (!state->index.has_value()) {
+            state->iter_end.emplace(state->table->end());
+        } else if (op == LESS_THAN || op == NOT_EQUALS) {
+            state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
         } else if (op == LESS_THAN_EQUALS || op == EQUALS) {
-            state->iter_end.emplace(state->table->upper_bound(tuple, state->index.id));
+            state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
         } else if (op == GREATER_THAN || op == GREATER_THAN_EQUALS) {
-            state->iter_end.emplace(state->table->end(state->index.id));
+            state->iter_end.emplace(state->table->end(state->index->id));
         }
     }
 
@@ -285,7 +290,7 @@ namespace springtail::pg_fdw {
     {
         //select the best index to use
         {
-            Index best_index;
+            std::optional<Index> best_index;
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
@@ -367,10 +372,10 @@ namespace springtail::pg_fdw {
             if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->iter_end != state->table->end(state->index.id)) {
+                if (state->iter_end != state->table->end(state->index->id)) {
                     FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index.id));
-                    state->iter_end.emplace(state->table->end(state->index.id));
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                    state->iter_end.emplace(state->table->end(state->index->id));
                     return false;
                 }
             }
@@ -464,7 +469,7 @@ namespace springtail::pg_fdw {
         int i = 0;
         foreach(lc, sortgroup) {
             // check if there are any more primary keys
-            if (i >= pg_state->index.columns.size()) {
+            if (!pg_state->index.has_value() || i >= pg_state->index->columns.size()) {
                 break;
             }
 
@@ -473,12 +478,12 @@ namespace springtail::pg_fdw {
             int attnum = pathkey->attnum;
 
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Checking pathkey attnum: {} against pkey id: {}",
-                                attnum, pg_state->index.columns[i].position);
+                                attnum, pg_state->index->columns[i].position);
 
             // check if this attnum matches next id in primary key id list, and sort order matches
             // XXX ignore collation for now
             if (pathkey->nulls_first || pathkey->reversed ||
-                attnum != pg_state->index.columns[i].position) {
+                attnum != pg_state->index->columns[i].position) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
                 break;
             }
@@ -507,10 +512,12 @@ namespace springtail::pg_fdw {
 
         // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
-
-        for (const auto col: pg_state->index.columns) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
-            attnums = list_append_unique_int(attnums, col.position);
+        
+        if (pg_state->index.has_value()) {
+            for (const auto col: pg_state->index->columns) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
+                attnums = list_append_unique_int(attnums, col.position);
+            }
         }
         item = lappend(item, attnums);
         item = lappend(item, makeConst(INT4OID,

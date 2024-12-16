@@ -80,7 +80,7 @@ namespace springtail::pg_fdw {
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index. 
                                     /// Index columns are sorted by their position in the index.
-        Index index; ///< Index id to use for scanning
+        std::optional<Index> index; ///< Index id to use for scanning
 
 
         /** Constructor */

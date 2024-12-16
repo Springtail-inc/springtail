@@ -47,6 +47,9 @@ namespace springtail {
         class Iterator {
             friend Table;
 
+            // We use the same Iterator type for both primary and secondary indexes.
+            // However the way the indexes move around isn't the same.
+            // Tracker provides an abstraction the various index types.
             struct Tracker
             {
                 explicit Tracker(const Table *table)
