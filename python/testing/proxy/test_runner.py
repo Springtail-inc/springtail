@@ -4,6 +4,7 @@ import sys
 import yaml
 import argparse
 import glob
+import shutil
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,7 +24,8 @@ from common import (
 from component import Component
 from component_factory import ComponentFactory
 
-PG_REGRESS_PATH = 'test/regress/pg_regress'
+
+PG_REGRESS_PATH = 'pgxs/src/test/regress/pg_regress'
 
 class Test:
     def __init__(self,
@@ -53,22 +55,23 @@ class Test:
         self._proxy_config = self._props.get_proxy_config()
 
         # get the path to the pg_regress binary
-        # pgxs looks like: /usr/lib/postgresql/12/lib/pgxs/src/makefiles/pgxs.mk
-        pgxs = run_command('/usr/bin/pg_config', ['--pgxs'])
-        # remove last two components of the path
-        pgxs = os.path.join(*os.path.split(pgxs)[:-2])
-        self._pg_regress = os.path.join(pgxs, PG_REGRESS_PATH)
+        # pkglibdir looks like: /usr/lib/postgresql/16/lib
+        pkg_libdir = run_command('/usr/bin/pg_config', ['--pkglibdir']).strip()
+        self._pg_regress = os.path.join(pkg_libdir, PG_REGRESS_PATH)
 
+        # copy the libregress.so from fdw build dir to pkg_libdir
+        libregress_so = os.path.join(self._build_dir, 'src/pg_fdw/libregress.so')
+        run_command('sudo', ['cp', libregress_so, os.path.join(pkg_libdir, 'regress.so')])
+
+        # fetch the sql, expected and data files from the external libpq build
         sql_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/sql/*.sql'))
-
         expected_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/expected/*.out'))
-
         data_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/data/*.data'))
 
         # create the sql, expected and data directories
-        makedir('regress/sql')
-        makedir('regress/expected')
-        makedir('regress/data')
+        makedir('./regress/sql')
+        makedir('./regress/expected')
+        makedir('./regress/data')
 
         # create the results directory
         self._result_path = os.path.join(os.getcwd(), 'regress/results')
@@ -84,15 +87,16 @@ class Test:
         for f in os.listdir('regress/data'):
             os.remove(os.path.join('data', f))
 
-        # create symlinks to the sql, expected and data files
+        # create symlinks to the sql and expected files
         for file in sql_files:
             os.symlink(file, os.path.join('regress/sql', os.path.basename(file)))
 
         for file in expected_files:
             os.symlink(file, os.path.join('regress/expected', os.path.basename(file)))
 
+        # copy the data files
         for file in data_files:
-            os.symlink(file, os.path.join('regress/data', os.path.basename(file)))
+            shutil.copy(file, os.path.join('regress/data', os.path.basename(file)))
 
         # copy the resultmap and the schedule files
         schedule_file = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
@@ -134,16 +138,19 @@ class Test:
         if not proxy.start():
             raise ValueError("Failed to start the proxy")
 
+        # remove old regression files
+        for f in ['regression.out', 'regression.diffs']:
+            os.remove(os.path.join(self._regress_path, f))
+
         # run the regression tests
         logging.info('Running the regression tests')
         os.environ['PGPASSWORD'] = self._primary_pass
         run_command(self._pg_regress, [f'--dbname={self._primary_dbname}',
-                                       f'--expecteddir={self._regress_path}/expected',
-                                       f'--inputdir={self._regress_path}/sql',
+                                       f'--inputdir={self._regress_path}',
                                        f'--host=localhost',
                                        f'--port={self._proxy_config["port"]}',
                                        f'--user={self._primary_user}',
-                                       f'--schedule={self._regress_path}/parallel_schedule',
+                                       f'--schedule={os.path.join(self._regress_path, 'parallel_schedule')}',
                                        '--max-connections=1',
                                        '--use-existing'])
 

@@ -62,7 +62,11 @@ FDW_DAEMONS = [
     ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql')
 ]
 
-ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
+PROXY_DAEMONS = [
+    ('proxy', 'src/proxy/proxy')
+]
+
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
@@ -288,6 +292,13 @@ def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
         else:
             daemons.append(d)
     start_daemons(build_dir, daemons)
+
+
+def start_proxy(props : Properties, build_dir : str) -> None:
+    """Start the proxy."""
+    # Start the proxy
+    print("Starting proxy...")
+    start_daemons(build_dir, PROXY_DAEMONS)
 
 
 def wait_for_running(props : Properties) -> None:
