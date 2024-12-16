@@ -42,6 +42,7 @@ class Properties:
                 self.redis_password = system_json['redis']['password'] if system_json['redis']['password'] else None
                 self.redis_data_db = system_json['redis']['db']
                 self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+                self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
                 self.replication_user_password = system_json['org']['replication_user_password']
@@ -75,19 +76,19 @@ class Properties:
         else:
             # otherwise, read in redis settings from environment
             # Assume in this case we are running under a deployed environment
-            use_ssl = True
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
             self.redis_port = os.environ.get('REDIS_PORT', 6379)
             self.redis_user = os.environ.get('REDIS_USER', 'default')
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
             self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
             self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
+            self.redis_ssl = os.environ.get('REDIS_SSL', False)
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
             self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
-        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=use_ssl,
+        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
     def get_db_configs(self):
