@@ -23,6 +23,8 @@ class Properties:
             self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
 
         if config_file:
+            # Assume under this branch we are running local tests
+            use_ssl = False
             # remove the environment variable; prevents daemons from reloading redis
             os.environ.pop('SPRINGTAIL_PROPERTIES_FILE', None)
 
@@ -72,6 +74,8 @@ class Properties:
                 raise Exception(f'JSON key error, missing key: {e}')
         else:
             # otherwise, read in redis settings from environment
+            # Assume in this case we are running under a deployed environment
+            use_ssl = True
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
             self.redis_port = os.environ.get('REDIS_PORT', 6379)
             self.redis_user = os.environ.get('REDIS_USER', 'default')
@@ -83,7 +87,7 @@ class Properties:
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
-        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=use_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
     def get_db_configs(self):
