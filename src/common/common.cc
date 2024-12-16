@@ -75,7 +75,8 @@ namespace springtail {
         init_exception();
 
         // init system properties
-        Properties::init();
+        // only load redis from properties if no daemon pid is set
+        Properties::init(!daemon_pid.has_value());
 
         // if requested, daemonize the process
         if (daemon_pid) {

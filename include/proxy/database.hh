@@ -618,12 +618,13 @@ namespace pg_proxy {
          * @brief Verify if the table is replicated for give database and schema
          *
          * @param db_id - database id
+         * @param default_schema - default schema name to use in case schema is empty
          * @param schema - schema name
          * @param table - table name
          * @return true - table is replicated
          * @return false - table is not replicated
          */
-        bool is_table_replicated(const uint64_t db_id, const std::string &schema, const std::string &table) {
+        bool is_table_replicated(const uint64_t db_id, const std::string &default_schema, const std::string &schema, const std::string &table) {
             std::shared_lock lock(_db_mutex);
             auto iter = _db_id_rep_dbs.find(db_id);
             if (iter == _db_id_rep_dbs.end()) {
@@ -631,7 +632,7 @@ namespace pg_proxy {
             }
             lock.unlock();
             DatabaseObjectPtr db_object = iter->second;
-            return db_object->has_schema_table(schema, table);
+            return db_object->has_schema_table((schema.empty())? default_schema : schema, table);
         }
 
     protected:
