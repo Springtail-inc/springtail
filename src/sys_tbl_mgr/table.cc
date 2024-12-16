@@ -1163,6 +1163,9 @@ namespace springtail {
             _page = _table->_read_page_via_primary(_btree_i);
             _page_i = _page->end();
         }
+
+        // move to the previous row
+        --_page_i;
     }
 
     void Table::Iterator::Secondary::next()
