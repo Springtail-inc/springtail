@@ -3,6 +3,7 @@ import redis
 import sys
 import os
 import time
+from common import parse_bool
 
 class Properties:
     def __init__(self, config_file=None, load_redis=False):
@@ -82,7 +83,7 @@ class Properties:
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
             self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
             self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
-            self.redis_ssl = os.environ.get('REDIS_SSL', False)
+            self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
             self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
