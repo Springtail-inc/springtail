@@ -188,6 +188,23 @@ namespace {
             sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_lsn, msg, sys_tbl::IndexNames::State::READY);
         }
 
+        static void
+        _drop_index(uint64_t db_id, uint32_t index_id, uint64_t xid)
+        {
+            PgMsgDropIndex msg;
+
+            msg.lsn = 0;
+            msg.xid = xid;
+            msg.schema = "public";
+            msg.oid = index_id;
+
+            XidLsn xid_lsn{xid};
+
+            sys_tbl_mgr::Client::get_instance()->drop_index(db_id, xid_lsn, msg);
+
+            sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+        }
+
         std::shared_ptr<Tuple>
         _create_key(const std::string &name)
         {
@@ -316,6 +333,7 @@ namespace {
             mgr->fdw_begin_scan(state, _target_list, qual_list, nullptr);
 
             if (index_id == std::numeric_limits<uint32_t>::max()) {
+                // a full scan is expected 
                 ASSERT_EQ(state->index.has_value(), false);
             } else {
                 // the index expected to be used for the scan
@@ -509,8 +527,14 @@ namespace {
         std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
         _run_scan(qual_list, filtered_data, _secondary_index_id);
 
-        // col5 = 3
+        // col5 = 3, should do a full scan
         qual_list = _add_qual(_columns[4].position, EQUALS, 3);
         _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
+
+        // drop the secondary index, and verify full scan
+        _drop_index(_db_id, _secondary_index_id, _table_xid);
+        qual_list = _add_qual(_columns[3].position, EQUALS, 3);
+        _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
+
     }
 } // namespace
