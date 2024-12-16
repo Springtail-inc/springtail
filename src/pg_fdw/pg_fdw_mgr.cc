@@ -85,9 +85,14 @@ namespace springtail::pg_fdw {
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        springtail_init(PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
+        elog(NOTICE, "Initializing PgFdwMgr");
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
+        // initialize logging
+        try {
+            springtail_init(PG_FDW_LOG_FILE_PREFIX, std::nullopt, LOG_ALL);
+        } catch (const std::exception &e) {
+            elog(ERROR, "Error initializing logging: %s", e.what());
+        }
 
         _instance = new PgFdwMgr();
 
@@ -100,9 +105,11 @@ namespace springtail::pg_fdw {
     PgFdwMgr::fdw_init(const char *config_file)
     {
         if (config_file != nullptr) {
-            // set env variable
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing fdw; config file: {}", config_file);
-            setenv("SPRINGTAIL_PROPERTIES_FILE", config_file, 1);
+            // set env variables based on redis config
+            // we don't reload redis config here, just set the env variables
+            elog(NOTICE, "Setting properties from file: %s", config_file);
+            Properties::set_env_from_file(config_file);
+            ::unsetenv("SPRINGTAIL_PROPERTIES_FILE");
         }
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Initializing PgFdwMgr");
