@@ -29,6 +29,7 @@ jobs:
 
     env:
       VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_ROOT: /home/dev/external/vcpkg
       DOCKER: 1
       ZIC: true
       USER: root
@@ -62,6 +63,7 @@ jobs:
 
       - name: Build
         run: |
+          ln -s /home/dev/external external
           ./clean.sh
           ./debug.sh -j 4
 
