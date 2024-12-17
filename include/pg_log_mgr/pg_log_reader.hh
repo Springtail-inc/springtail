@@ -6,6 +6,10 @@
 #include <map>
 #include <vector>
 
+#include <opentelemetry/trace/provider.h>
+#include <opentelemetry/trace/tracer.h>
+#include <opentelemetry/trace/span.h>
+
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
 
@@ -38,7 +42,7 @@ namespace springtail::pg_log_mgr {
                     const PgTransactionQueuePtr queue)
             : _db_id(db_id),
               _queue(queue)
-        {}
+        { }
 
         /**
          * @brief Process next set of messages from log file
@@ -85,7 +89,12 @@ namespace springtail::pg_log_mgr {
         public:
             Batch(uint64_t db_id, int32_t pg_xid)
                 : _db(db_id), _pg_xid(pg_xid)
-            { }
+            {
+                auto provider = opentelemetry::trace::Provider::GetTracerProvider();
+                auto tracer = provider->GetTracer("PgLogReader");
+                _span = tracer->StartSpan("Transaction");
+                _span->SetAttribute("pg_xid", pg_xid);
+            }
 
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
@@ -192,6 +201,8 @@ namespace springtail::pg_log_mgr {
             TxnEntryPtr _cur_txn; ///< The TxnEntry of the current txn/subtxn
 
             uint64_t _lsn = 0; ///< The LSN counter
+
+            opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> _span; ///< Timing for the txn processing.
         };
         using BatchPtr = std::shared_ptr<Batch>;
 

@@ -17,7 +17,8 @@
         "gtest",
         "vincentlaucsb-csv-parser",
         "openssl",
-        "c-ares"
+        "c-ares",
+	"opentelemetry-cpp"
     ],
     "builtin-baseline": "2e7fd315d713e9eac52f6bdb24afbf1b4dbbe1e5",
     "overrides": [

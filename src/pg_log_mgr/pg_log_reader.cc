@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include <common/logging.hh>
+#include <common/tracing.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -24,6 +25,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid)
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
         std::map<uint64_t, ChangeListPtr> change_map;
@@ -55,21 +58,32 @@ namespace springtail::pg_log_mgr {
 
         // assign an XID to the committed transaction and update the mappings in the write cache
         WriteCacheFuncImpl::commit(_db, xid, pg_xids);
+
+        // stop timing for this transaction
+        _span->SetAttribute("xid", static_cast<int64_t>(xid));
+        _span->End();
     }
 
     void
     PgLogReader::Batch::abort()
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
             auto txn = entry.second;
             WriteCacheFuncImpl::abort(_db, txn->pg_xid);
         }
+
+        // stop timing for this transaction
+        _span->End();
     }
 
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid)
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
         assert(itr != _txns.end());
@@ -127,6 +141,8 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -167,6 +183,8 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::truncate(uint64_t current_xid,
                                  const PgMsgTruncate &msg)
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         // get the current txn
         auto txn = _get_txn(msg.xid);
 
@@ -199,6 +217,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg)
     {
+        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+
         // get the table entry
         auto txn = _get_txn(pg_xid);
         auto &entry = txn->table_map[tid];

@@ -3,16 +3,18 @@ find_package(redis++ CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
+find_package(opentelemetry-cpp CONFIG REQUIRED)
 
 set(COMMON_LIB_SOURCES
+  coordinator.cc
+  common.cc
+  dns_resolver.cc
   exception.cc
   logging.cc
-  common.cc
   properties.cc
   redis.cc
+  tracing.cc
   tracking_allocator.cc
-  dns_resolver.cc
-  coordinator.cc
 )
 
 add_library(springtail_common ${COMMON_LIB_SOURCES})
@@ -24,6 +26,10 @@ target_link_libraries(springtail_common
          redis++::redis++_static
 	       nlohmann_json::nlohmann_json
          c-ares::cares
+	 opentelemetry-cpp::api
+	 opentelemetry-cpp::sdk
+	 opentelemetry-cpp::trace
+	 opentelemetry-cpp::ostream_span_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)
