@@ -31,6 +31,7 @@ namespace springtail {
         nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
 
         int keep_alive_secs;
+        bool ssl_enabled;
 
         Json::get_to<std::string>(json, "host", _connect_options.host, "localhost");
         Json::get_to<std::string>(json, "user", _connect_options.user, "user");
@@ -38,11 +39,13 @@ namespace springtail {
         Json::get_to<int>(json, "port", _connect_options.port, 6379);
         Json::get_to<int>(json, "db", _connect_options.db, REDIS_DATA_DB);
         Json::get_to<int>(json, "keep_alive_sec", keep_alive_secs, 30);
+        Json::get_to<bool>(json, "ssl", ssl_enabled, false);
 
         _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
         _connect_options.keep_alive = true;
         _connect_options.resp = 3;
         _connect_options.socket_timeout = std::chrono::milliseconds(0);
+        _connect_options.tls.enabled = ssl_enabled;
 
         nlohmann::json pool_json;
         if (!Json::get_to(json, "pool", pool_json)) {

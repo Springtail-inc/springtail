@@ -244,5 +244,18 @@ namespace springtail {
 
             return;
         }
+
+        static inline
+        bool to_bool(std::string str)
+        {
+            if (str.empty()) {
+                return false;
+            }
+            std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+            if (str == "1" || str == "true" || str == "yes" || str == "t" || str == "y") {
+                return true;
+            }
+            return false;
+        }
     }
 }
