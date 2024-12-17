@@ -202,3 +202,10 @@ def makedir(path : str, mode : str = '755') -> None:
         except Exception as e:
             print(f"Failed to create directory: {path}")
             raise e
+
+
+def parse_bool(value: str) -> bool:
+    """
+    Convert a string to a boolean. Useful for parsing environment variables.
+    """
+    return value.lower() in ('true', '1', 't', 'y', 'yes')

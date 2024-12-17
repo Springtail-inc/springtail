@@ -3,6 +3,7 @@ import redis
 import sys
 import os
 import time
+from common import parse_bool
 
 class Properties:
     def __init__(self, config_file=None, load_redis=False):
@@ -36,10 +37,12 @@ class Properties:
             try:
                 self.redis_host = system_json['redis']['host']
                 self.redis_port = system_json['redis']['port']
+                self.redis_ssl = system_json['redis']['ssl']
                 self.redis_user = system_json['redis']['user']
                 self.redis_password = system_json['redis']['password'] if system_json['redis']['password'] else None
                 self.redis_data_db = system_json['redis']['db']
                 self.redis_config_db = system_json['redis']['config_db'] if 'config_db' in system_json['redis'] else 0
+                self.redis_ssl = system_json['redis']['ssl'] if 'ssl' in system_json['redis'] else False
                 self.db_instance_id = str(system_json['org']['db_instance_id'])
                 self.fdw_id = system_json['org']['fdw_id']
                 self.replication_user_password = system_json['org']['replication_user_password']
@@ -57,6 +60,7 @@ class Properties:
                     'REDIS_PASSWORD': self.redis_password if self.redis_password else '',
                     'REDIS_USER_DATABASE_ID': str(self.redis_data_db),
                     'REDIS_CONFIG_DATABASE_ID': str(self.redis_config_db),
+                    'REDIS_SSL': '1' if self.redis_ssl else '0',
                     'MOUNT_POINT': system_json['fs']['mount_point'],
                     'LUSTRE_MOUNT_NAME': system_json['fs']['mount_name'],
                     'LUSTRE_DNS_NAME': system_json['fs']['dns_name'],
@@ -75,15 +79,17 @@ class Properties:
             self.redis_host = os.environ.get('REDIS_HOST', 'localhost')
             self.redis_port = os.environ.get('REDIS_PORT', 6379)
             self.redis_user = os.environ.get('REDIS_USER', 'default')
+            self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', '0'))
             self.redis_password = os.environ.get('REDIS_PASSWORD', None)
             self.redis_data_db = os.environ.get('REDIS_USER_DATABASE_ID', 1)
             self.redis_config_db = os.environ.get('REDIS_CONFIG_DATABASE_ID', 0)
+            self.redis_ssl = parse_bool(os.environ.get('REDIS_SSL', 'false'))
             self.db_instance_id = os.environ.get('DATABASE_INSTANCE_ID', None)
             self.replication_user_password = os.environ.get('REPLICATION_USER_PASSWORD', None)
             self.fdw_user_password = os.environ.get('FDW_USER_PASSWORD', None)
             self.fdw_id = os.environ.get('FDW_ID', None)
 
-        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
+        self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
     def get_db_configs(self):
@@ -199,7 +205,7 @@ class Properties:
 
         # connect to the Redis config server
         self.redis_data = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
-            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
+            username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
         # load the system settings into Redis
         with open(config_file) as f:
@@ -294,4 +300,4 @@ class Properties:
         """Return the data redis object."""
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
                                  username=self.redis_user, password=self.redis_password,
-                                 encoding="utf-8", decode_responses=True)
+                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
