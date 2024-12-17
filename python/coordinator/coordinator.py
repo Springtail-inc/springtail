@@ -137,7 +137,7 @@ if __name__ == "__main__":
     # Get the service type
     service_type = args.service
     if not service_type:
-        service_type = os.environ.get('SERVICE_TYPE')
+        service_type = os.environ.get('SERVICE_NAME')
         if not service_type:
             raise ValueError("Service type not provided")
 
