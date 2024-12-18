@@ -10,6 +10,7 @@ set(PG_LOG_SOURCES
     pg_log_reader.cc
     pg_xact_log_writer.cc
     pg_xact_log_reader.cc
+    sync_tracker.cc
 )
 
 add_library(springtail_pglog ${PG_LOG_SOURCES})

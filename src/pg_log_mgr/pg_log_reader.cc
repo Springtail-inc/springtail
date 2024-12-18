@@ -10,6 +10,7 @@
 
 #include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/sync_tracker.hh>
 
 #include <pg_repl/pg_msg_stream.hh>
 
@@ -25,7 +26,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::commit(uint64_t xid)
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // go through each subtxn and push it's outstanding batches to the WriteCache
         std::vector<uint64_t> pg_xids;
@@ -67,7 +68,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort()
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // drop any batches for all active txns
         for (auto &&entry : _txns) {
@@ -82,7 +83,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::abort_subtxn(int32_t pg_xid)
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // find the txn to abort it
         auto itr = _txns.find(pg_xid);
@@ -141,8 +142,12 @@ namespace springtail::pg_log_mgr {
                                      int32_t tid,
                                      const PgMsgTupleData &data)
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        // check if we should skip the mutation due to ongoing table sync
+        if (_sync_tracker.should_skip(_db, tid, _pg_xid)) {
+            return;
+        }
 
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
         auto txn = _get_txn(pg_xid);
 
         // get the Extent containing mutations
@@ -183,13 +188,18 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::truncate(uint64_t current_xid,
                                  const PgMsgTruncate &msg)
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the current txn
         auto txn = _get_txn(msg.xid);
 
         // note: there may be multiple truncates due to CASCADE
         for (auto tid : msg.rel_ids) {
+            // check if we should skip this table due to ongoing table sync
+            if (_sync_tracker.should_skip(_db, tid, _pg_xid)) {
+                continue;
+            }
+
             // if we sent any batches to the WriteCache, evict them
             WriteCacheFuncImpl::drop_table(_db, tid, _cur_pg_xid);
 
@@ -217,7 +227,7 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::Batch::schema_change(int32_t tid, int32_t pg_xid, PgMsgPtr msg)
     {
-        tracing::tracer("PgLogReader")->WithActiveSpan(_span);
+        auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
         // get the table entry
         auto txn = _get_txn(pg_xid);
@@ -351,10 +361,19 @@ namespace springtail::pg_log_mgr {
                     // check for re-sync
                     nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                     if (action.get<std::string>() == "resync") {
-                        // XXXXXX if a re-sync is required for a table, drop the changes for that table
-                        //        from the write cache and initiate a re-sync
-                        SPDLOG_ERROR("Still need to implement resync");
-                        throw Error();
+                        // mark the table as syncing to ensure we properly skip messages
+                        bool is_first = _sync_tracker.mark_resync(_db, table_msg.oid);
+
+                        // notify the PgLogParser to resync the table
+                        auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
+                                               Properties::get_db_instance_id(), _db);
+                        RedisQueue<std::string> table_sync_queue(key);
+                        table_sync_queue.push(std::to_string(table_msg.oid));
+
+                        // notify the Committer to stop committing XIDs
+                        if (is_first) {
+                            _gc_queue.push(XidReady(state->entry.db_id));
+                        }
                     } else if (action.get<std::string>() != "no_change") {
                         redis_ddl.add_ddl(_db, xid, ddl_stmt);
                     }
@@ -490,10 +509,11 @@ namespace springtail::pg_log_mgr {
                     break;
 
                 case PgMsgEnum::TRUNCATE:
-                    _current_batch->truncate(this->get_current_xid(),
-                                             std::get<PgMsgTruncate>(msg->msg));
-                    break;
-
+                    {
+                        _current_batch->truncate(this->get_current_xid(),
+                                                 std::get<PgMsgTruncate>(msg->msg));
+                        break;
+                    }
                 case PgMsgEnum::CREATE_TABLE:
                 case PgMsgEnum::ALTER_TABLE:
                     {
@@ -572,9 +592,25 @@ namespace springtail::pg_log_mgr {
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
 
-        // message the Committer
+        // check if we need to perform a table swap / commit before proceeding
+        auto &&commit_msg = _sync_tracker.check_commit(_db_id, xact->xid);
+        if (commit_msg) {
+            // synchronously issue the swap/commit at the GC-2 prior to processing this xid
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", _db_id, xid);
+            _gc_queue.push(*commit_msg);
 
-        /** Queue for XID messages to the Committer. */
+            // block until the Committer notifies us that the swap/commit is complete
+            // XXX We could optimistically continue and only block if we attempt to
+            //     mutate a table being swapped prior to the TABLE_SYNC_COMMIT
+            //     completing.
+            // _parser_notify.pop_and_commit();
+
+            // once the swap/commit is complete, we can clear the entry from the sync
+            // tracker and continue processing
+            _sync_tracker.clear_tables(_db_id, *commit_msg);
+        }
+
+        // message the Committer
         RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
                                                              Properties::get_db_instance_id()));
         committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
@@ -693,24 +729,31 @@ namespace springtail::pg_log_mgr {
     }
 
     void
-    PgLogReader::_process_ddl(uint32_t oid, int32_t xid, bool is_streaming, PgMsgPtr msg)
+    PgLogReader::_process_ddl(uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
     {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, xid);
+        // check if we should ignore this message
+        bool skip = _sync_tracker.should_skip(_db_id, oid, pg_xid);
+        if (skip) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid);
+            return;
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid);
 
         // record the schema change into the batch
-        _current_batch->schema_change(oid, xid, msg);
+        _current_batch->schema_change(oid, pg_xid, msg);
 
         if (!is_streaming) {
-            // not streaming, so xid is invalid; use current_xact
+            // not streaming, so pg_xid is invalid; use current_xact
             _current_xact->oids.insert(oid);
             return;
         }
 
-        // if streaming, then xid is valid
-        auto itr = _xact_map.find(xid);
+        // if streaming, then pg_xid is valid
+        auto itr = _xact_map.find(pg_xid);
         if (itr == _xact_map.end()) {
             // no start streaming xact found...
-            SPDLOG_WARN("XID not found for message: xid={}\n", xid);
+            SPDLOG_WARN("PG_XID not found for message: pg_xid={}\n", pg_xid);
             return;
         }
 
