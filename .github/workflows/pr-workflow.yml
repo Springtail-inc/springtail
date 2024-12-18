@@ -3,6 +3,8 @@ name: PR Actions (PR to Main)
 on:
   pull_request:
     types: [ opened, synchronize, reopened ]
+    branches:
+      - main
   # By default, this workflow will be triggered when PR is opened or reopened or when the head
   # branch of the pull request is updated. You can also invoke this manually.
   # pull_request:

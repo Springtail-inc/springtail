@@ -58,8 +58,6 @@ namespace springtail {
                     sw::redis::ConnectionPoolOptions pool_options) :
             sw::redis::Redis(options, pool_options)
         {}
-
-        /** Helper to set key expiry */
     };
     using RedisClientPtr = std::shared_ptr<RedisClient>;
 
