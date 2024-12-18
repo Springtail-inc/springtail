@@ -129,6 +129,7 @@ install(TARGETS
 # install shared library to lib directory
 install(TARGETS
     springtail_pg_fdw
+    regress
     LIBRARY DESTINATION lib
 )
 

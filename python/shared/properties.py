@@ -154,7 +154,6 @@ class Properties:
 
         return proxy_config
 
-
     def get_system_config(self):
         """Return the system configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
@@ -301,3 +300,32 @@ class Properties:
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def add_database(self, dbname : str):
+        """Add a database to the database instance."""
+        # check if the database already exists
+        db_configs = self.get_db_configs()
+        for db in db_configs:
+            if db['name'] == dbname:
+                return
+
+        # add the database config
+        key = self.db_instance_id + ':db_config'
+        self.redis.hset(key, dbname, json.dumps({
+            'name': dbname,
+            'replication_slot': dbname + '_slot',
+            'publication_name': dbname + '_pub',
+            'include': {
+                'schemas': ['*']
+            }
+        }))
+        self.cache.pop('db_configs', None)
+
+        # add the database to the database instance
+        instance_key = self.db_instance_id + ':instance_config'
+        db_ids = json.loads(self.redis.hget(instance_key, 'database_ids'))
+        db_ids.append(dbname)
+        self.redis.hset(instance_key, 'database_ids', json.dumps(db_ids))
+        self.cache.pop('db_instance_config', None)
+
+
