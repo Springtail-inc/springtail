@@ -105,7 +105,7 @@ namespace springtail::pg_proxy {
 
         /** Destruct a connection. */
         virtual ~Session() {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Destructing session", (_type == CLIENT ? 'C': 'S'), _id,);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Destructing session", (_type == CLIENT ? 'C': 'S'), _id);
         };
 
         /** Process messages for session connection;
