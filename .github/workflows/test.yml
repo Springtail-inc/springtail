@@ -8,6 +8,10 @@ on:
         description: 'The image version tag for the base builder to pull.'
         type: string
         required: true
+      num_procs:
+        description: 'The number of processes to use for the build.'
+        type: string
+        default: "4"
     secrets:
       aws_role_arn:
         description: "The ARN of the role to assume."
@@ -36,9 +40,17 @@ jobs:
       PYTHONUNBUFFERED: 1
       GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
       GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
+      NUM_PROCS: ${{ inputs.num_procs }}
     steps:
+      - name: Clean up
+        run: |
+          rm -f /opt/springtail/pids/*
+          rm -f /__w/springtail/springtail/*.{log,gz,xml}
+
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          clean: true
 
       - name: install-aws-cli-action
         uses: unfor19/install-aws-cli-action@v1
@@ -65,7 +77,7 @@ jobs:
         run: |
           ln -s /home/dev/external external
           ./clean.sh
-          ./debug.sh -j 4
+          ./debug.sh -j ${NUM_PROCS}
 
       - name: Prepare DB for Unit Tests
         run: |
