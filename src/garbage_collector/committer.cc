@@ -2,6 +2,7 @@
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
 #include <garbage_collector/log_parser.hh>
+#include <memory>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -9,11 +10,22 @@
 
 namespace springtail::gc {
 
+    bool _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
+    {
+        TableMetadata meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+        auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {
+                    return index_id == v.index_id;
+                });
+        return it != meta.roots.end();
+    }
+
+
     void
     Committer::run()
     {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
+        _create_indexer();
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -270,32 +282,40 @@ namespace springtail::gc {
 
             SPDLOG_DEBUG_MODULE(LOG_GC, "All tables to complete for XID {}", xid);
 
-            // retrieve any schema changes available in Redis
-            auto &&ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
-            if (!ddls.is_null()) {
-                auto client = sys_tbl_mgr::Client::get_instance();
+            if (!index_ddls.is_null()) {
+                _redis_ddl.precommit_index_ddl(db_id, xid, index_ddls);
+                _indexer->process_ddls(db_id, xid, index_ddls);
+                _indexer->wait_for_completion(db_id);
+                sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                _redis_ddl.commit_index_ddl(db_id, xid);
+            } else {
+                if (!completed_ddls.is_null()) {
+                    // finalize the system metadata
+                    sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
+                }
+            }
 
-                // finalize the system metadata
-                client->finalize(db_id, xid);
-
+            if (!completed_ddls.is_null()) {
                 // pre-commit the DDLs to be applied to the FDWs
-                _redis_ddl.precommit_ddl(db_id, xid, ddls);
+                _redis_ddl.precommit_ddl(db_id, xid, completed_ddls);
             }
 
             // check if we are doing an active table sync, in which case we have to block commits
             if (!_block_commit.contains(db_id)) {
                 // commit the completed XID
-                _xid_mgr->commit_xid(db_id, xid, !ddls.is_null());
+                _xid_mgr->commit_xid(db_id, xid, !completed_ddls.is_null());
                 _committed_xids[db_id] = xid;
-            } else if (!ddls.is_null()) {
+            } else if (!completed_ddls.is_null()) {
                 // don't commit, but record any DDL changes to the history
                 _xid_mgr->record_ddl_change(db_id, xid);
             }
             _completed_xids[db_id] = xid;
 
-            // push any DDL changes to the FDWs
-            if (!ddls.is_null()) {
+            if (!completed_ddls.is_null()) {
+                // push completed DDL changes to the FDWs
                 _redis_ddl.commit_ddl(db_id, xid);
             }
 
@@ -303,6 +323,7 @@ namespace springtail::gc {
 
             // mark the XID message as complete in the redis queue
             _redis.commit(_worker_id);
+
 
             // clear the DDL dependency data from the redis SortedSet
             std::string key = fmt::format(redis::SET_PG_OID_XIDS,
@@ -318,6 +339,9 @@ namespace springtail::gc {
 
         // unregister the thread on shutdown
         coordinator->unregister_thread(daemon_type, _worker_id);
+
+        _indexer.reset();
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Committer shutdown");
     }
 
     void
@@ -376,6 +400,87 @@ namespace springtail::gc {
         coordinator->unregister_threads(daemon_type, cleanup_threads);
     }
 
+
+    void 
+    Committer::_create_indexer()
+    {
+        // use the same worker count for Indexer
+        _indexer = std::make_unique<Indexer>(_worker_count);
+
+        // cleanup
+        auto &&precommit = _redis_ddl.get_precommit_index_ddl();
+
+        //make sure it is sorted
+        std::ranges::sort(precommit, [](auto const& a, auto const& b) {
+                    auto const& [db_id1, xid1, v1] = a;
+                    auto const& [db_id2, xid2, v2] = b;
+                    if (db_id1 == db_id2) {
+                        return xid1 < xid2;
+                    }
+                    return db_id1 < db_id2;
+                });
+
+        for (auto [db_id, xid, ddls] : precommit) {
+            uint64_t commit_xid = _xid_mgr->get_committed_xid(db_id, 0);
+            if (xid <= commit_xid) {
+                //TODO: In the synchronized version this should not be possible.
+                // We should figure out how to deal with it eventually.
+                assert(false);
+                _redis_ddl.abort_index_ddl(db_id, xid);
+                continue;
+            }
+            for (auto const &ddl: ddls) {
+                auto action = ddl["action"];
+                uint32_t index_id = ddl["id"];
+                if (action == "create_index") {
+                    uint64_t tid = ddl["table_id"];
+                    if (_index_exists(db_id, tid, index_id, xid)) {
+                        // this is very unlikely. It would mean that the system went down
+                        // after the index build was finalized but before it had a chance
+                        // to commit the DDL to redis.
+                        SPDLOG_DEBUG_MODULE(LOG_GC, "* Uncommitted index {}@{} -- {} {}", db_id, xid, tid, index_id);
+                    } else {
+                        // reconstruct the log message
+                        PgMsgIndex msg;
+                        msg.oid = index_id;
+                        msg.xid = xid;
+                        msg.schema = ddl["schema"];
+                        msg.index = ddl["index"];
+                        msg.is_unique = ddl["is_unique"];
+                        msg.table_oid = tid;
+                        for (auto const& c: ddl["columns"]) {
+                            PgMsgSchemaIndexColumn col;
+                            col.idx_position = c["idx_position"];
+                            col.position = c["position"];
+                            col.name = c["name"];
+                            msg.columns.push_back(col);
+                        }
+                        XidLsn xid_c(xid);
+                        sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_c,
+                                msg, sys_tbl::IndexNames::State::READY);
+                        _indexer->build({db_id, xid, ddl});
+                    }
+                } else if (action == "drop_index") {
+                    _indexer->drop(db_id, index_id, xid);
+                } else {
+                    assert(false);
+                }
+            }
+        }
+
+        // wait for completion
+        for (auto [db_id, xid, ddls] : precommit) {
+            _indexer->wait_for_completion(db_id);
+        }
+
+        //finalize and commit
+        auto client = sys_tbl_mgr::Client::get_instance();
+        for (auto const& [db_id, xid, ddls] : precommit) {
+            client->finalize(db_id, xid);
+            _redis_ddl.commit_ddl(db_id, xid);
+        }
+    }
+
     void
     Committer::_run_worker(int thread_id)
     {
@@ -403,7 +508,6 @@ namespace springtail::gc {
                 // timed out, try again
                 continue;
             }
-
             if (entry->do_finalize) {
                 _process_finalize(entry->table, entry->xid);
             } else {

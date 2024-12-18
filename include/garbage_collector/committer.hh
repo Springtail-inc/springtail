@@ -17,6 +17,7 @@
 #include <redis/redis_containers.hh>
 
 #include <garbage_collector/xid_ready.hh>
+#include <garbage_collector/indexer.hh>
 
 #include <sys_tbl_mgr/table.hh>
 #include <write_cache/write_cache_client.hh>
@@ -61,6 +62,8 @@ namespace springtail::gc {
         constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
+        void _create_indexer();
+
         /**
          * The structure that defines a worker job.
          */
@@ -166,5 +169,9 @@ namespace springtail::gc {
         /** The set of databases that are currently not committing XIDs because they are in a table
             sync state. */
         std::set<uint64_t> _block_commit;
+
+        /** Indexer
+         */
+        std::unique_ptr<Indexer> _indexer;
     };
 }

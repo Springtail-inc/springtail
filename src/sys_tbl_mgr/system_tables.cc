@@ -153,13 +153,13 @@ namespace springtail::sys_tbl {
 
     // IndexNames
     const std::vector<SchemaColumn> IndexNames::Data::SCHEMA = {
-        { "namespace", 1, SchemaType::TEXT, TEXTOID, false },
-        { "name", 2, SchemaType::TEXT, TEXTOID, false },
-        { "table_id", 3, SchemaType::UINT64, INT8OID, false, 0 },
-        { "index_id", 4, SchemaType::UINT64, INT8OID, false, 1 },
-        { "xid", 5, SchemaType::UINT64, INT8OID, false, 2 },
-        { "lsn", 6, SchemaType::UINT64, INT8OID, false, 3 },
-        { "exists", 7, SchemaType::BOOLEAN, BOOLOID, false },
+        { "table_id", 1, SchemaType::UINT64, INT8OID, false, 0 },
+        { "index_id", 2, SchemaType::UINT64, INT8OID, false, 1 },
+        { "xid", 3, SchemaType::UINT64, INT8OID, false, 2 },
+        { "lsn", 4, SchemaType::UINT64, INT8OID, false, 3 },
+        { "namespace", 5, SchemaType::TEXT, TEXTOID, false },
+        { "name", 6, SchemaType::TEXT, TEXTOID, false },
+        { "state", 7, SchemaType::UINT8, INT8OID, false },
         { "is_unique", 8, SchemaType::BOOLEAN, BOOLOID, false }
     };
 

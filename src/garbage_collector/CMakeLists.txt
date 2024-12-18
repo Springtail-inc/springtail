@@ -1,7 +1,7 @@
 find_package(Boost COMPONENTS program_options REQUIRED)
 
 # source files
-set(GC_SOURCES log_parser.cc committer.cc)
+set(GC_SOURCES log_parser.cc committer.cc indexer.cc)
 
 add_library(springtail_gc ${GC_SOURCES})
 target_include_directories(springtail_gc PRIVATE ${CMAKE_SOURCE_DIR}/include)

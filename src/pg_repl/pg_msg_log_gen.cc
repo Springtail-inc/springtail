@@ -227,7 +227,7 @@ namespace springtail {
 
         for (auto &&c: columns) {
             nlohmann::json col;
-            col["name"] = c.column_name;
+            col["name"] = c.name;
             col["position"] = c.position;
             col["idx_position"] = c.idx_position;
             columns_json.push_back(col);
@@ -672,7 +672,7 @@ namespace springtail {
 
         for (auto &&c: json["columns"]) {
             PgMsgSchemaIndexColumn col;
-            col.column_name = c["name"];
+            col.name = c["name"];
             col.position = c["position"];
             col.idx_position = c["idx_position"];
             columns.push_back(col);

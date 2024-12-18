@@ -1,3 +1,5 @@
+#include "common/constants.hh"
+#include <sys_tbl_mgr/system_tables.hh>
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
@@ -62,7 +64,6 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-            _secondary_keys = { std::vector<std::string>({"table_id"}) };
 
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
@@ -87,32 +88,56 @@ namespace {
         FieldArrayPtr _fields, _csv_fields;
 
         std::vector<std::string> _primary_keys;
-        std::vector<std::vector<std::string>> _secondary_keys;
 
         std::filesystem::path _base_dir;
         uint64_t _db_id = 1;
 
+        // secondary keys
+        std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
+        {
+            std::vector<Index> keys;
+            for (auto const& v: roots) {
+                if (v.index_id == constant::INDEX_PRIMARY) {
+                    continue;
+                }
+                
+                Index idx;
+                idx.id = v.index_id;
+                idx.table_id = table_id;
+                idx.name="table_id";
+                idx.is_unique = false;
+                idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+                idx.columns.emplace_back(0, 1);
+                keys.push_back(idx);
+            }
+            return keys;
+        }
+
         TablePtr
-        _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_table(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            auto keys = _make_keys(table_id, roots);
+
             return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
-                                           _primary_keys, _secondary_keys,
+                                           _primary_keys, keys,
                                            tbl_meta, _schema);
         }
 
         MutableTablePtr
-        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            auto keys = _make_keys(table_id, roots);
+
             return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
-                                                  _primary_keys, _secondary_keys,
+                                                  _primary_keys, keys,
                                                   tbl_meta, _schema);
         }
 
@@ -184,7 +209,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
@@ -203,7 +228,7 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
+        ASSERT_TRUE(table->index(0)->begin() == table->index(0)->end());
     }
 
     TEST_P(Table_Test, Inserts) {
@@ -211,7 +236,8 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -259,7 +285,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = {{0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}};
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -350,7 +376,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        // verify the secondary index
         auto secondary = table->index(1);
 
         count = 0;
@@ -370,7 +395,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -442,7 +467,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // verify the secondary index
         auto secondary = table->index(1);
 
         count = 0;
@@ -527,7 +551,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -616,7 +639,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 10, upserted 10
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -713,7 +735,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -733,7 +754,7 @@ namespace {
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -801,7 +822,6 @@ namespace {
             }
             ASSERT_EQ(count, 5000);
 
-            // verify the secondary index
             auto secondary = table->index(1);
 
             count = 0;
