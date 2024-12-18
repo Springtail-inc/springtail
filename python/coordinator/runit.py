@@ -21,7 +21,7 @@ from properties import Properties
 def parse_arguments():
     """Parse the command line arguments."""
     # Create the argument parser
-    parser = argparse.ArgumentParser(description="Run tests, or start/stop/kill components. Component names: xid_mgr_daemon, write_cache_daemon, sys_tbl_mgr_daemon, gc_daemon, postgres, ddl_daemon")
+    parser = argparse.ArgumentParser(description="Run tests, or start/stop/kill components. Component names: xid_mgr_daemon, sys_tbl_mgr_daemon, gc_daemon, postgres, ddl_daemon")
 
     # Add arguments -f for config file and -b for build directory
     parser.add_argument('-c', '--config-file', type=str, default='config.yaml', help='Path to the configuration file')
@@ -88,10 +88,6 @@ def run_tests(factory: ComponentFactory) -> None:
 
     xid_mgr_daemon.start()
     assert xid_mgr_daemon.is_running()
-
-    write_cache_daemon = factory.create_write_cache_daemon()
-    test(write_cache_daemon)
-    assert not write_cache_daemon.is_running()
 
     sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
     test(sys_tbl_mgr_daemon)
@@ -162,9 +158,6 @@ if __name__ == "__main__":
         sys_tbl_mgr_daemon = factory.create_sys_tbl_mgr_daemon()
         if not sys_tbl_mgr_daemon.shutdown() and not sys_tbl_mgr_daemon.kill():
             raise ValueError("Failed to stop sys_tbl_mgr_daemon")
-        write_cache_daemon = factory.create_write_cache_daemon()
-        if not write_cache_daemon.shutdown() and not write_cache_daemon.kill():
-            raise ValueError("Failed to stop write_cache");
         ddl_daemon = factory.create_ddl_daemon('test_user', 'test_password')
         if not ddl_daemon.shutdown() and not ddl_daemon.kill():
             raise ValueError("Failed to stop ddl_daemon")
@@ -186,8 +179,6 @@ if __name__ == "__main__":
     component = None
     if component_name == 'xid_mgr_daemon':
         component = factory.create_xid_mgr_daemon()
-    elif component_name == 'write_cache_daemon':
-        component = factory.create_write_cache_daemon()
     elif component_name == 'sys_tbl_mgr_daemon':
         component = factory.create_sys_tbl_mgr_daemon()
     elif component_name == 'gc_daemon':

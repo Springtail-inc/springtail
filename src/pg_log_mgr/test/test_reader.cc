@@ -210,12 +210,6 @@ namespace {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
-        // init the redis queue
-        RedisQueue<PgXactMsg> queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS,
-                                                Properties::get_db_instance_id()));
-
-        queue.clear();
-
         // initialize the log mgr
         PgXactLogWriterPtr xact_writer = _log_mgr->create_xact_log_writer();
 

@@ -143,7 +143,8 @@ namespace springtail::pg_log_mgr {
                                      const PgMsgTupleData &data)
     {
         // check if we should skip the mutation due to ongoing table sync
-        if (_sync_tracker.should_skip(_db, tid, _pg_xid)) {
+        if (SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid)) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip mutation: oid={} pg_xid={}\n", tid, pg_xid);
             return;
         }
 
@@ -196,7 +197,8 @@ namespace springtail::pg_log_mgr {
         // note: there may be multiple truncates due to CASCADE
         for (auto tid : msg.rel_ids) {
             // check if we should skip this table due to ongoing table sync
-            if (_sync_tracker.should_skip(_db, tid, _pg_xid)) {
+            if (SyncTracker::get_instance()->should_skip(_db, tid, _pg_xid)) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip truncate: oid={} pg_xid={}\n", tid, _pg_xid);
                 continue;
             }
 
@@ -356,13 +358,16 @@ namespace springtail::pg_log_mgr {
             case PgMsgEnum::ALTER_TABLE:
                 {
                     auto &table_msg = std::get<PgMsgTable>(change->msg);
+                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
+                                        xidlsn.xid, table_msg.xid, table_msg.oid);
+
                     ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
 
                     // check for re-sync
                     nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
                     if (action.get<std::string>() == "resync") {
                         // mark the table as syncing to ensure we properly skip messages
-                        bool is_first = _sync_tracker.mark_resync(_db, table_msg.oid);
+                        bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid);
 
                         // notify the PgLogParser to resync the table
                         auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
@@ -372,7 +377,10 @@ namespace springtail::pg_log_mgr {
 
                         // notify the Committer to stop committing XIDs
                         if (is_first) {
-                            _gc_queue.push(XidReady(state->entry.db_id));
+                            RedisQueue<gc::XidReady>
+                                committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                            Properties::get_db_instance_id()));
+                            committer_queue.push(gc::XidReady(_db));
                         }
                     } else if (action.get<std::string>() != "no_change") {
                         redis_ddl.add_ddl(_db, xid, ddl_stmt);
@@ -592,12 +600,17 @@ namespace springtail::pg_log_mgr {
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
 
+        // connect to the committer queue
+        RedisQueue<gc::XidReady>
+            committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                        Properties::get_db_instance_id()));
+
         // check if we need to perform a table swap / commit before proceeding
-        auto &&commit_msg = _sync_tracker.check_commit(_db_id, xact->xid);
-        if (commit_msg) {
+        auto &&xid_msg = SyncTracker::get_instance()->check_commit(_db_id, xact->xid);
+        if (xid_msg) {
             // synchronously issue the swap/commit at the GC-2 prior to processing this xid
             SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", _db_id, xid);
-            _gc_queue.push(*commit_msg);
+            committer_queue.push(*xid_msg);
 
             // block until the Committer notifies us that the swap/commit is complete
             // XXX We could optimistically continue and only block if we attempt to
@@ -607,12 +620,11 @@ namespace springtail::pg_log_mgr {
 
             // once the swap/commit is complete, we can clear the entry from the sync
             // tracker and continue processing
-            _sync_tracker.clear_tables(_db_id, *commit_msg);
+            SyncTracker::get_instance()->clear_tables(_db_id, *xid_msg);
         }
 
         // message the Committer
-        RedisQueue<gc::XidReady> committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                             Properties::get_db_instance_id()));
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
         committer_queue.push(gc::XidReady(_db_id, gc::XidReady::XactMsg(xid)));
 
         // pass the xact to the xact logging thread
@@ -731,33 +743,35 @@ namespace springtail::pg_log_mgr {
     void
     PgLogReader::_process_ddl(uint32_t oid, int32_t pg_xid, bool is_streaming, PgMsgPtr msg)
     {
+        int32_t pg_xid_txn;
+        PgTransactionPtr xact;
+        if (!is_streaming) {
+            // not streaming, so pg_xid is invalid; use current_xact
+            xact = _current_xact;
+            pg_xid_txn = pg_xid = xact->xid;
+        } else {
+            // if streaming, then pg_xid is valid
+            auto itr = _xact_map.find(pg_xid);
+            if (itr == _xact_map.end()) {
+                // no start streaming xact found...
+                SPDLOG_WARN("PG_XID not found for message: pg_xid={}\n", pg_xid);
+                return;
+            }
+
+            xact = itr->second;
+            pg_xid_txn = xact->xid;
+        }
+        xact->oids.insert(oid);
+
         // check if we should ignore this message
-        bool skip = _sync_tracker.should_skip(_db_id, oid, pg_xid);
-        if (skip) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid);
+        if (SyncTracker::get_instance()->should_skip(_db_id, oid, pg_xid_txn)) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Skip DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
             return;
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Process DDL: oid={} pg_xid={}\n", oid, pg_xid_txn);
 
         // record the schema change into the batch
         _current_batch->schema_change(oid, pg_xid, msg);
-
-        if (!is_streaming) {
-            // not streaming, so pg_xid is invalid; use current_xact
-            _current_xact->oids.insert(oid);
-            return;
-        }
-
-        // if streaming, then pg_xid is valid
-        auto itr = _xact_map.find(pg_xid);
-        if (itr == _xact_map.end()) {
-            // no start streaming xact found...
-            SPDLOG_WARN("PG_XID not found for message: pg_xid={}\n", pg_xid);
-            return;
-        }
-
-        PgTransactionPtr xact = itr->second;
-        xact->oids.insert(oid);
     }
 } // namespace springtail::pg_log_mgr

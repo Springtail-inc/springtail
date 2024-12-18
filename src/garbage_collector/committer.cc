@@ -1,7 +1,6 @@
 #include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
-#include <garbage_collector/log_parser.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
@@ -147,9 +146,6 @@ namespace springtail::gc {
                     _block_commit.erase(db_id);
                 }
 
-                // signal the GC-1 LogParser that it can unblock and continue operation
-                _parser_notify.push(XidReady(db_id));
-
                 // commit this work item and continue
                 _redis.commit(_worker_id);
                 continue;
@@ -232,13 +228,6 @@ namespace springtail::gc {
 
             // mark the XID message as complete in the redis queue
             _redis.commit(_worker_id);
-
-            // clear the DDL dependency data from the redis SortedSet
-            // XXXXXX do we still need this?
-            std::string key = fmt::format(redis::SET_PG_OID_XIDS,
-                                          Properties::get_db_instance_id(), db_id);
-            pg_log_mgr::RSSOidValue set(key);
-            set.remove_by_score(0, xid);
         }
 
         // join all of the worker threads
@@ -274,13 +263,9 @@ namespace springtail::gc {
             common::split_string("_", thread_id, parts);
 
             // check the id is valid
-            assert(parts.size() == 3 &&
-                   (parts[0] == LogParser::THREAD_TYPE || parts[0] == THREAD_TYPE));
+            assert(parts.size() == 3 && parts[0] == THREAD_TYPE);
 
-            // only handle "parser" threads here
-            if (parts[0] != THREAD_TYPE) {
-                continue;
-            }
+            // record the thread ID for cleanup
             cleanup_threads.push_back(thread_id);
 
             // perform thread-type-specific cleanup
@@ -423,8 +408,14 @@ namespace springtail::gc {
                         }
                     case DELETE:
                         {
-                            auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                            table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                            if (wc_key_fields->empty()) {
+                                // no sort key, so need to handle non-primary key by using the entire row
+                                auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                                table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                            } else {
+                                auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
+                                table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                            }
                             break;
                         }
 

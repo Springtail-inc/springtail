@@ -20,6 +20,7 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
+#include <pg_log_mgr/sync_tracker.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -42,9 +43,6 @@ namespace springtail::pg_log_mgr {
             // XXX need to handle, not sure whether to reset to running or initialize
             assert(false);
         }
-
-        // clear out GC redis queue
-        _redis_queue.clear();
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
@@ -165,10 +163,6 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_xact_log_path);
 
         // clear out Redis
-        // GC queue
-        _redis_queue.clear();
-        // GC oid queue
-        _redis_oid_set.clear();
         // Table sync queue
         _redis_sync_queue.clear();
 
@@ -354,15 +348,17 @@ namespace springtail::pg_log_mgr {
             }
 
             // send table sync message to GC
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync msgs: target_xid={}", r->target_xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recording table sync msgs: target_xid={}", r->target_xid);
             PgXactMsg redis_xact(_db_id, r);
-            _redis_queue.push(redis_xact);
-        }
 
-        // push done message to redis GC queue; send table sync end msg
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync done msg");
-        PgXactMsg redis_xact2(_db_id);
-        _redis_queue.push(redis_xact2);
+            bool sync_start = SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
+            if (sync_start) {
+                RedisQueue<gc::XidReady>
+                    committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                Properties::get_db_instance_id()));
+                committer_queue.push(gc::XidReady(_db_id));
+            }
+        }
 
         // process stalled messages; set state to replaying
         _internal_state.set(STATE_REPLAYING);

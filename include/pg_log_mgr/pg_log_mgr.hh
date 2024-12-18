@@ -89,8 +89,6 @@ namespace springtail::pg_log_mgr {
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
-          _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -106,8 +104,6 @@ namespace springtail::pg_log_mgr {
           _repl_log_path(repl_log_path),
           _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
           _pg_log_reader(_db_id, _xact_queue), _xact_log_path(xact_log_path),
-          _redis_queue(fmt::format(redis::QUEUE_PG_TRANSACTIONS, _db_instance_id)),
-          _redis_oid_set(fmt::format(redis::SET_PG_OID_XIDS, _db_instance_id, _db_id)),
           _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
         {}
 
@@ -218,11 +214,7 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
         std::thread _xact_thread;                  ///< xact worker thread
         // std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
-        RedisQueue<PgXactMsg> _redis_queue;        ///< redis queue for GC
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
-
-        /** Redis sorted set for oid to xid mapping */
-        RedisSortedSet<PgRedisOidValue> _redis_oid_set;
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC
 
