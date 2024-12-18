@@ -104,7 +104,9 @@ namespace springtail::pg_proxy {
         Session& operator=(const Session&) = delete;
 
         /** Destruct a connection. */
-        virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
+        virtual ~Session() {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Destructing session", (_type == CLIENT ? 'C': 'S'), _id,);
+        };
 
         /** Process messages for session connection;
          * thread entry, calls _process() */
@@ -181,8 +183,9 @@ namespace springtail::pg_proxy {
 
         /** Shutdown the session, close connection, etc */
         void shutdown() {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
-                         _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Shutting down session: _type={}, socket={}",
+                        (_type == CLIENT ? 'C': 'S'), _id,
+                         _type == Type::PRIMARY ? "PRIMARY" : _type == Type::REPLICA ? "REPLICA" : "CLIENT",
                          _connection->get_socket());
             assert(_associated_session == nullptr);
             _state = ERROR;
@@ -238,10 +241,12 @@ namespace springtail::pg_proxy {
         }
 
         void block_messages() {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Block messages:", (_type == CLIENT ? 'C': 'S'), _id);
             _ready_for_message = false;
         }
 
         void enable_messages() {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Enable messages:", (_type == CLIENT ? 'C': 'S'), _id);
             _ready_for_message = true;
         }
 
@@ -272,7 +277,18 @@ namespace springtail::pg_proxy {
             return _is_shadow;
         }
 
+        const std::string& state_str(State state) {
+            static const std::string unknown_state = "UNKNOWN_STATE";
+            if (_state_map.contains(state)) {
+                return _state_map.at(_state);
+            }
+            return unknown_state;
+        }
+
     protected:
+        /** type to string map -- defined in session.cc */
+        static const std::map<State, std::string> _state_map;
+
         ProxyConnectionPtr _connection;    ///< connection associated with this session
         ProxyServerPtr     _server;        ///< server associated with this session
 
@@ -297,6 +313,8 @@ namespace springtail::pg_proxy {
         bool _in_transaction = false;      ///< is this session in a transaction
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
+
+        bool _ready_for_message = true;  ///< ready to process messages
 
         /** Process messages for session connection,
          * must be implemented by derived class */
@@ -339,8 +357,6 @@ namespace springtail::pg_proxy {
         /** waiting on associated session for data -- _associated_session should be set */
         bool _waiting_on_session = false;
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
-
-        bool _ready_for_message = true;  ///< ready to process messages
 
         /** queue of messages to process */
         ConcurrentQueue<SessionMsg> _msg_queue;

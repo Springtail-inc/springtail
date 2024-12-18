@@ -29,7 +29,7 @@
 namespace springtail::pg_proxy {
 
     /** Default log level for the proxy server */
-    LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
+    LogLevel proxy_log_level = LOG_LEVEL_DEBUG4;
 
     ProxyServer::ProxyServer(int proxy_port,
                              int thread_pool_size,
@@ -163,7 +163,7 @@ namespace springtail::pg_proxy {
             exit(1);
         }
 
-#if SPDLOG_ACTIVE_LEVEL==SPDLOG_ACTIVE_DEBUG
+#if SPDLOG_ACTIVE_LEVEL==SPDLOG_LEVEL_DEBUG
         // set the info callback
         SSL_CTX_set_info_callback(ssl_ctx, ssl_info_callback);
 #endif
@@ -424,6 +424,7 @@ namespace springtail::pg_proxy {
             _logger->flush();
         }
         SPDLOG_INFO("Proxy server finished cleanup");
+        Properties::shutdown();
     }
 
     void
@@ -443,6 +444,7 @@ namespace springtail::pg_proxy {
     ProxyServer::shutdown_session(SessionPtr session)
     {
         int socket = session->get_connection()->get_socket();
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Shutting down session with socket {}", socket);
         _log_disconnect(session);
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         _sessions.erase(socket);

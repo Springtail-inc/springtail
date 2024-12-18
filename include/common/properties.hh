@@ -129,6 +129,12 @@ namespace springtail {
         /** Helper to get write cache hostname */
         static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
 
+        static void shutdown() {
+            if (_instance != nullptr) {
+                delete _instance;
+                _instance = nullptr;
+            }
+        }
     private:
         /** static _instance singleton */
         static Properties *_instance;

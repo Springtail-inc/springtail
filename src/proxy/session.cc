@@ -36,6 +36,20 @@ namespace springtail::pg_proxy {
             {MSG_SERVER_CLIENT_FATAL_ERROR, "MSG_SERVER_CLIENT_FATAL_ERROR"}
     };
 
+    const std::map<Session::State, std::string> Session::_state_map = {
+        {Session::STARTUP,          "STARTUP"},
+        {Session::SSL_HANDSHAKE,    "SSL_HANDSHAKE"},
+        {Session::AUTH,             "AUTH"},
+        {Session::AUTH_SERVER,      "AUTH_SERVER"},
+        {Session::AUTH_DONE,        "AUTH_DONE"},
+        {Session::READY,            "READY"},
+        {Session::DEPENDENCIES,     "DEPENDENCIES"},
+        {Session::QUERY,            "QUERY"},
+        {Session::EXTENDED_ERROR,   "EXTENDED_ERROR"},
+        {Session::ERROR,            "ERROR"}
+   };
+
+
     Session::Session(ProxyConnectionPtr connection,
                      ProxyServerPtr server,
                      Type type)

@@ -111,7 +111,7 @@ namespace springtail::pg_proxy {
         void _send_auth_req(uint64_t seq_id);
         void _send_auth_done(uint64_t seq_id);
 
-        ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
+        ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id, bool is_shadow = false);
 
         /** Does primary server pool exist */
         bool _primary_pool_exists();

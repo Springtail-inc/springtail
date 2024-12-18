@@ -84,7 +84,8 @@ namespace springtail::pg_proxy {
     ServerSessionPtr
     DatabaseInstance::allocate_session(ProxyServerPtr server,
                                        UserPtr user,
-                                       const std::string &database)
+                                       const std::string &database,
+                                       bool is_shadow)
     {
         std::unique_lock lock(_mutex);
 
@@ -133,7 +134,7 @@ namespace springtail::pg_proxy {
         lock.unlock();
 
         // create a new session
-        session = ServerSession::create(server, user, database, prefix(), shared_from_this(), _type);
+        session = ServerSession::create(server, user, database, prefix(), shared_from_this(), _type, is_shadow);
 
         return session;
     }

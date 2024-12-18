@@ -44,7 +44,7 @@ namespace springtail::pg_proxy {
                       std::string database,
                       std::string prefix,
                       DatabaseInstancePtr instance,
-                      Session::Type type=PRIMARY);
+                      Session::Type type=PRIMARY, bool is_shadow = false);
 
         ~ServerSession() {};
 
@@ -73,7 +73,7 @@ namespace springtail::pg_proxy {
         static std::shared_ptr<ServerSession>
         create(ProxyServerPtr server, UserPtr user, const std::string &database,
                const std::string &prefix,
-               DatabaseInstancePtr instance, Session::Type type);
+               DatabaseInstancePtr instance, Session::Type type, bool is_shadow = false);
 
     protected:
         void _process_connection() override;
@@ -94,6 +94,25 @@ namespace springtail::pg_proxy {
         std::set<std::string> _stmts;              ///< completed prepared statement ids
         std::string _db_prefix;                    ///< database name prefix to be used for this server session
 
+        static std::set<char> _unblocking_responses[8];
+
+        SessionMsg::Type _blocking_message;
+
+        void _block_messages(SessionMsg::Type type)
+        {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Block messages: type: {}", (_type == CLIENT ? 'C': 'S'), _id, SessionMsg::type_map.at(type));
+            _blocking_message = type;
+            _ready_for_message = false;
+        }
+
+        void _enable_messages(char type)
+        {
+            std::set<char> &unblocking_responses = _unblocking_responses[_blocking_message];
+            if (unblocking_responses.contains(type)) {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Enabled messages: type: {}, after receiving message {}", (_type == CLIENT ? 'C': 'S'), _id, SessionMsg::type_map.at(_blocking_message), type);
+                _ready_for_message = true;
+            }
+        }
         /** Send startup message */
         void _send_startup_msg(uint64_t seq_id);
 

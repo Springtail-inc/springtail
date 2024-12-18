@@ -34,7 +34,7 @@ namespace pg_proxy {
         AuthType _type;
 
         /** Scram state, freed in destructor */
-        ScramState scram_state;
+        ScramState scram_state = {0};
 
         /** password;
          * for SCRAM - SCRAM-SHA-256$<iterations>:<salt>$<storedkey>:<serverkey>
@@ -225,7 +225,9 @@ namespace pg_proxy {
          * @brief Private destructor
          *
          */
-        ~UserMgr() override = default;
+        ~UserMgr() override {
+            _users.clear();
+        };
 
         /**
          * @brief Comparison operator for ordering User objects by username inside the map container

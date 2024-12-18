@@ -192,7 +192,8 @@ namespace pg_proxy {
          */
         ServerSessionPtr allocate_session(ProxyServerPtr server,
                                           UserPtr user,
-                                          const std::string &dbname);
+                                          const std::string &dbname,
+                                          bool is_shadow = false);
 
         /**
          * @brief Get total count of sessions associated with this instance.
@@ -665,7 +666,9 @@ namespace pg_proxy {
         /**
          * @brief Destroy the Database Mgr object
          */
-        ~DatabaseMgr() override = default;
+        ~DatabaseMgr() override {
+            RedisMgr::get_instance()->shutdown();
+        };
 
         /**
          * @brief Database state change handling

@@ -16,6 +16,16 @@
 #include <proxy/auth/scram.hh>
 
 namespace springtail::pg_proxy {
+    std::set<char> ServerSession::_unblocking_responses[8] = {
+        {'Z', 'E'},             // SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY -> ReadyForQuery, ErrorResponse
+        {'Z', 'E'},             // SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY -> ReadyForQuery, ErrorResponse
+        {'1', 'E'},             // SessionMsg::MSG_CLIENT_SERVER_PARSE -> ParseComplete, ErrorResponse
+        {'2', 'E'},             // SessionMsg::MSG_CLIENT_SERVER_BIND -> BindComplete, ErrorResponse
+        {'T', 'n', 'E'},        // SessionMsg::MSG_CLIENT_SERVER_DESCRIBE -> RowDescription, NoData, ErrorResponse
+        {'I', 'C', 'E', 's'},   // SessionMsg::MSG_CLIENT_SERVER_EXECUTE -> EmptyQueryResponse, CommandComplete, ErrorResponse, PortalSuspended
+        {'3', 'E'},             // SessionMsg::MSG_CLIENT_SERVER_CLOSE -> CloseComplete, ErrorResponse
+        {'Z'}                   // SessionMsg::MSG_CLIENT_SERVER_SYNC -> ReadyForQuery
+    };
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server,
@@ -23,8 +33,9 @@ namespace springtail::pg_proxy {
                                  std::string database,
                                  std::string prefix,
                                  DatabaseInstancePtr instance,
-                                 Session::Type type)
-        : Session(instance, connection, server, user, database, type), _db_prefix(prefix)
+                                 Session::Type type,
+                                 bool is_shadow)
+        : Session(instance, connection, server, user, database, type), _is_shadow(is_shadow), _db_prefix(prefix)
     {
         _state = STARTUP;
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
@@ -50,7 +61,7 @@ namespace springtail::pg_proxy {
             _seq_id = msg->seq_id();
 
             // block more messages until we are ready
-            block_messages();
+            _block_messages(msg->type());
 
             // this is the startup message from client session
             if (_server->is_ssl_enabled()) {
@@ -70,6 +81,7 @@ namespace springtail::pg_proxy {
         case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
         case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
         case SessionMsg::MSG_CLIENT_SERVER_SYNC:
+            _block_messages(msg->type());
             _handle_msg_to_server(msg);
             break;
 
@@ -91,7 +103,7 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_process_connection()
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={}", _id, state_str(_state));
 
         // entry point for connection message processing
         // called from operator() in session
@@ -113,7 +125,7 @@ namespace springtail::pg_proxy {
             _handle_message_from_server();
             break;
         default:
-            SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
+            SPDLOG_ERROR("Unknown state: {}", state_str(_state));
             _state = ERROR;
             break;
         }
@@ -141,6 +153,7 @@ namespace springtail::pg_proxy {
 
         // read just the header, the message length is the remaining bytes
         auto [code, msg_length] = _read_hdr();
+        _enable_messages(code);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
 
@@ -159,6 +172,7 @@ namespace springtail::pg_proxy {
                 if (_state == QUERY) {
                     // we are in query state, continue with query responses
                     _handle_query_response();
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] State after query processing: state={}", _id, state_str(_state));
                 }
                 if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
@@ -267,7 +281,7 @@ namespace springtail::pg_proxy {
                 // Ready for query
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Looking for messages, status={}", _id, status);
 
                 if (_state == AUTH_DONE) {
                     assert (status == 'I');
@@ -928,7 +942,8 @@ namespace springtail::pg_proxy {
                           const std::string &database,
                           const std::string &prefix,
                           DatabaseInstancePtr instance,
-                          Session::Type type)
+                          Session::Type type,
+                          bool is_shadow)
     {
         if (instance == nullptr) {
             assert (type == Session::Type::PRIMARY);
@@ -941,7 +956,7 @@ namespace springtail::pg_proxy {
             throw ProxyIOConnectionError();
         }
 
-        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, type);
+        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, type, is_shadow);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         return session;

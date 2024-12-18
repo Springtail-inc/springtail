@@ -101,7 +101,7 @@ namespace springtail::pg_proxy {
                 if (_shadow_mode && _replica_session.expired()) {
                     uint64_t seq_id = _gen_seq_id();
                     PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating replica session in shadow mode: seq_id={}", _id, seq_id);
-                    _create_server_session(Session::Type::REPLICA, seq_id);
+                    _create_server_session(Session::Type::REPLICA, seq_id, _shadow_mode);
                 }
 
                 break;
@@ -1087,7 +1087,7 @@ namespace springtail::pg_proxy {
             session = _replica_session.lock();
         } else {
             // create a new replica session; shouldn't be common to get here
-            session = _create_server_session(REPLICA, msg->seq_id());
+            session = _create_server_session(REPLICA, msg->seq_id(), _shadow_mode);
         }
 
         assert (session != nullptr);
@@ -1142,7 +1142,7 @@ namespace springtail::pg_proxy {
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating new server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
-        session = _create_server_session(type, seq_id);
+        session = _create_server_session(type, seq_id, (type == REPLICA)? _shadow_mode : false);
         assert (session != nullptr);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Created new server session: id={}", _id, session->id());
 
@@ -1154,7 +1154,7 @@ namespace springtail::pg_proxy {
     }
 
     ServerSessionPtr
-    ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
+    ClientSession::_create_server_session(Session::Type type, uint64_t seq_id, bool is_shadow)
     {
         // get database instance from either primary or replica set
         DatabaseInstancePtr instance = nullptr;
@@ -1173,7 +1173,7 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+            if ((session = instance->allocate_session(_server, _user, _database, is_shadow)) == nullptr) {
                 SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
                 return nullptr;
             }
