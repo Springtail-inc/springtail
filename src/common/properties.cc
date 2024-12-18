@@ -12,6 +12,7 @@
 #include <common/redis_types.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
+#include <common/common.hh>
 
 namespace springtail {
 
@@ -48,6 +49,9 @@ namespace springtail {
                     case environment::UINT64:
                         _json[json_obj_name][json_key_name] = std::stoull(env_var);
                         break;
+                    case environment::BOOL:
+                        _json[json_obj_name][json_key_name] = common::to_bool(env_var);
+                        break;
                 }
             } else {
                 _json[json_obj_name][json_key_name] = nullptr;
@@ -83,6 +87,10 @@ namespace springtail {
         Json::get_to<std::string>(redis_config, "password", password);
         int config_db = redis_config["config_db"];
 
+        // check if ssl is enabled
+        bool ssl_enabled;
+        Json::get_to<bool>(_json[REDIS_CONFIG], "ssl", ssl_enabled, false);
+
         // create connection options for config db
         sw::redis::ConnectionOptions connect_options;
         connect_options.host = hostname;
@@ -94,6 +102,7 @@ namespace springtail {
         connect_options.socket_timeout = std::chrono::milliseconds(0);
         connect_options.keep_alive = true;
         connect_options.keep_alive_s = std::chrono::seconds(30);
+        connect_options.tls.enabled = ssl_enabled;
 
         sw::redis::ConnectionPoolOptions pool_options;
         pool_options.size = 5;
@@ -249,6 +258,12 @@ namespace springtail {
                     case environment::UINT64: {
                         uint64_t val = system_json[json_obj_name][json_key_name].get<uint64_t>();
                         ::setenv(env_var, std::to_string(val).c_str(), 1);
+                        break;
+                    }
+
+                    case environment::BOOL: {
+                        bool val = system_json[json_obj_name][json_key_name].get<bool>();
+                        ::setenv(env_var, val ? "1" : "0", 1);
                         break;
                     }
                 }
