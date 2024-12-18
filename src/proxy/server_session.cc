@@ -167,7 +167,6 @@ namespace springtail::pg_proxy {
             case 'I': // Empty query response (execute)
             case 'C': // Command complete (execute, simple query)
             case 'n': // No data - response to (describe)
-            case 'T': // Row description (describe)
             case 't': // Parameter description (describe)
                 if (_state == QUERY) {
                     // we are in query state, continue with query responses
@@ -190,6 +189,7 @@ namespace springtail::pg_proxy {
             case 'D': // Data row
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
+            case 'T': // Row description (describe)
                 _stream_to_remote_session(code, msg_length, _seq_id);
                 return;
         }
