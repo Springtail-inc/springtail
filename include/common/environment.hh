@@ -6,7 +6,8 @@ namespace springtail::environment {
     enum Type {
         STR,
         UINT32,
-        UINT64
+        UINT64,
+        BOOL
     };
 
     /** Environment variable name for property overrides */
@@ -28,6 +29,7 @@ namespace springtail::environment {
         {"REDIS_USER_DATABASE_ID", UINT32, "redis", "db"},
         {"REDIS_CONFIG_DATABASE_ID", UINT32, "redis", "config_db"},
         {"REDIS_PORT", UINT32, "redis", "port"},
+        {"REDIS_SSL", BOOL, "redis", "ssl"},
         {"ORGANIZATION_ID", STR, "org", "organization_id"},
         {"ACCOUNT_ID", STR, "org", "account_id"},
         {"DATABASE_INSTANCE_ID", UINT64, "org", "db_instance_id"},
