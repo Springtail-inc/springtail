@@ -155,7 +155,7 @@ namespace springtail::pg_proxy {
     Session::_internal_process_msgs(bool is_remote)
     {
         while (_ready_for_message) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Looking for messages", (_type == CLIENT ? 'C': 'S'), _id);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Looking for messages: queue size {:d}", (_type == CLIENT ? 'C': 'S'), _id, _msg_queue.size());
 
             SessionMsgPtr msg = get_msg();
             if (msg == nullptr) {

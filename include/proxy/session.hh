@@ -206,6 +206,10 @@ namespace springtail::pg_proxy {
                 set_associated_session(remote_session);
             }
             remote_session->_msg_queue.push(msg);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Queued message to remote session [{}:{}], message queue size: {:d}",
+                (_type == CLIENT ? 'C': 'S'), _id,
+                (remote_session->type() == CLIENT ? 'C': 'S'), remote_session->id(),
+                remote_session->_msg_queue.size());
         }
 
         /**
@@ -218,6 +222,10 @@ namespace springtail::pg_proxy {
             }
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[{}:{}] Queued message to remote session [{}:{}], message queue size: {:d}",
+                (_type == CLIENT ? 'C': 'S'), _id,
+                (_associated_session->type() == CLIENT ? 'C': 'S'), _associated_session->id(),
+                _associated_session->_msg_queue.size());
             if (_type == Type::CLIENT) {
                 assert (_waiting_on_session == true);
             }
