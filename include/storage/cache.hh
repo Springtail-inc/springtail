@@ -727,6 +727,12 @@ namespace springtail {
 
                 bool operator!=(const Iterator &rhs) { return !(*this == rhs); }
 
+                /** This will return the current extent id of the iterator.
+                 */
+                uint64_t extent_id() const {
+                    return _extent.get_ref().id();
+                }
+
             private:
                 Iterator(Page *page,
                          std::vector<ExtentRef>::iterator extent_i)

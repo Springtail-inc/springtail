@@ -93,11 +93,29 @@ namespace springtail {
     };
 
     /**
+     * Object representing the table index.
+     */
+    struct Index {
+        struct Column {
+            uint32_t idx_position;
+            uint32_t position;
+        };
+        uint64_t id;
+        std::string schema;
+        std::string name;
+        uint64_t table_id;
+        bool is_unique;
+        uint8_t state;
+        std::vector<Column> columns;
+    };
+
+    /**
      * Object representing the metadata of a schema.
      */
     struct SchemaMetadata {
         std::vector<SchemaColumn> columns;
         std::vector<SchemaColumn> history;
+        std::vector<Index> indexes;
     };
 
     /**

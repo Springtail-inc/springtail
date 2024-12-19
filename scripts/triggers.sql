@@ -207,7 +207,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'ALTER INDEX', 'CREATE INDEX' )
+   WHEN TAG IN ( 'CREATE INDEX' )
    EXECUTE FUNCTION springtail_event_trigger_for_index_ddl();
 
 

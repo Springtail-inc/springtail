@@ -49,6 +49,7 @@ namespace springtail {
                 break;
 
             default:
+                SPDLOG_ERROR("Unsupported column type: {}", (int)column.type);
                 throw TypeError();
             }
 

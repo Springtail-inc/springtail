@@ -16,10 +16,18 @@ namespace springtail {
     };
 
     /**
+     * Structure to hold table roots.
+     */
+    struct TableRoot {
+        uint64_t index_id = 0;
+        uint64_t extent_id = 0;
+    };
+
+    /**
      * Structure to hold table metadata required to record a table snapshot.
      */
     struct TableMetadata {
-        std::vector<uint64_t> roots;
+        std::vector<TableRoot> roots;
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
@@ -118,6 +126,12 @@ namespace springtail {
              */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
+            /** This will return the current extent id of the iterator.
+            */
+            uint64_t extent_id() const {
+                return _page_i.extent_id();
+            }
+
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
@@ -165,7 +179,7 @@ namespace springtail {
               uint64_t xid,
               const std::filesystem::path &table_base,
               const std::vector<std::string> &primary_key,
-              const std::vector<std::vector<std::string>> &secondary_keys,
+              const std::vector<Index> &secondary,
               const TableMetadata &metadata,
               ExtentSchemaPtr schema);
 
@@ -202,6 +216,10 @@ namespace springtail {
         {
             return _id;
         }
+
+        /** This will convert column positions to column names based on the table schema
+         */
+        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
@@ -243,7 +261,7 @@ namespace springtail {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx - 1];
+            return _secondary_indexes[idx].first;
         }
 
         /**
@@ -276,6 +294,12 @@ namespace springtail {
          */
         StorageCache::SafePagePtr _read_page(uint64_t extent_id) const;
 
+        /**
+         * Creates read-only index of the table.
+         */
+        BTreePtr 
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
+
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -283,7 +307,6 @@ namespace springtail {
         uint64_t _xid; ///< The XID at which this table is being accessed.
         std::filesystem::path _table_dir; ///< The directory holding the table data.
         std::vector<std::string> _primary_key; ///< The primary index key columns.
-        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns for each secondary index.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
@@ -292,10 +315,17 @@ namespace springtail {
         /** The primary index of the table. */
         BTreePtr _primary_index;
 
-        std::vector<BTreePtr> _secondary_indexes; ///< The secondary indexes of the table.
+
+        /** A map of secondary indexes
+         * first is the index id
+         * second.first is btree
+         * second.second are the index columns
+         */
+        std::map<uint64_t, std::pair<BTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The secondary indexes of the table..
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
+        FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
     };
@@ -315,7 +345,7 @@ namespace springtail {
                      uint64_t target_xid,
                      const std::filesystem::path &table_base,
                      const std::vector<std::string> &primary_key,
-                     const std::vector<std::vector<std::string>> &secondary_keys,
+                     const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
@@ -414,6 +444,28 @@ namespace springtail {
         uint64_t id() const {
             return _id;
         }
+
+        /** Create a btree that can be used for indexes.
+         * @param index_id PG index ID.
+         * @param index_columns Positions of the index columns.
+         */
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+
+        /**
+         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @return A BTree object of the requested index.
+         */
+        MutableBTreePtr index(uint32_t idx) {
+            if (idx == 0) {
+                return _primary_index;
+            }
+            return _secondary_indexes[idx].first;
+        }
+
+        /** This will convert column positions to column names based on the table schema
+         */
+        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
     private:
         /**
@@ -532,7 +584,6 @@ namespace springtail {
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
-        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns of each secondary index.
 
         /** A lookup version of the primary index.  Pinned to the most recent XID. */
         BTreePtr _primary_lookup;
@@ -540,17 +591,25 @@ namespace springtail {
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
-        std::vector<MutableBTreePtr> _secondary_indexes; ///< The mutable secondary index btrees.
+        /** A map of secondary indexes
+         * first is the index id
+         * second.first is btree
+         * second.second are the index columns
+         */
+        std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
+        MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
+                      ///
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
+
 
 }

@@ -188,7 +188,7 @@ namespace springtail
 
     /** Column schema for a single column used by Create index */
     struct PgMsgSchemaIndexColumn {
-        std::string column_name;
+        std::string name;
         int position;        // position is maintained if column is renamed
         int idx_position;    // position in the index
     };

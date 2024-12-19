@@ -55,6 +55,11 @@ struct TableStats {
     1: i64 row_count
 }
 
+struct RootInfo {
+    1: i64 index_id,
+    2: i64 extent_id,
+}
+
 struct IndexColumn {
     1: string name,
     2: i32 position,
@@ -68,7 +73,8 @@ struct IndexInfo {
     4: bool is_unique,
     5: i64 table_id,
     6: string table_name,
-    7: list<IndexColumn> columns
+    7: i8 state,
+    8: list<IndexColumn> columns
 }
 
 struct IndexRequest {
@@ -76,7 +82,15 @@ struct IndexRequest {
     2: i64 xid,
     3: i64 lsn,
     4: IndexInfo index,
-    5: i64 snapshot_xid
+}
+
+struct SetIndexStateRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: i64 table_id,
+    5: i64 index_id,
+    6: i8 state,
 }
 
 struct DropIndexRequest {
@@ -88,11 +102,18 @@ struct DropIndexRequest {
     6: string name
 }
 
+struct GetIndexInfoRequest {
+    1: i64 db_id,
+    2: i64 xid,
+    3: i64 lsn,
+    4: i64 index_id,
+}
+
 struct UpdateRootsRequest {
     1: i64 db_id,
     2: i64 xid,
     3: i64 table_id,
-    4: list<i64> roots,
+    4: list<RootInfo> roots,
     5: TableStats stats,
     6: i64 snapshot_xid
 }
@@ -109,7 +130,7 @@ struct GetRootsRequest {
 }
 
 struct GetRootsResponse {
-    1: list<i64> roots,
+    1: list<RootInfo> roots,
     2: TableStats stats,
     3: i64 snapshot_xid
 }
@@ -141,7 +162,8 @@ struct ColumnHistory {
 
 struct GetSchemaResponse {
     1: list<TableColumn> columns,
-    2: list<ColumnHistory> history
+    2: list<ColumnHistory> history,
+    3: list<IndexInfo> indexes
 }
 
 struct ExistsRequest {
@@ -160,6 +182,12 @@ service Service {
 
     // drops an existing index at the given xid/lsn
     DDLStatement drop_index(1: DropIndexRequest request),
+
+    // set the index state at the given xid/lsn
+    Status set_index_state(1: SetIndexStateRequest request),
+
+    // get the index info at the given xid/lsn
+    IndexInfo get_index_info(1: GetIndexInfoRequest request),
 
     // creates a new data table at the given xid/lsn
     DDLStatement create_table(1: TableRequest request),
