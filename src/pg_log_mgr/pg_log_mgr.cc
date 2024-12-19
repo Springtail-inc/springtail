@@ -139,7 +139,6 @@ namespace springtail::pg_log_mgr {
         }
 
         // need to add back table sync worker items to redis sync queue
-        // XXX is this still needed?
         _redis_sync_queue.abort(REDIS_WORKER_ID);
 
         // set state to running

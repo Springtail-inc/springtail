@@ -213,7 +213,6 @@ namespace springtail::pg_log_mgr {
         std::filesystem::path _xact_log_path;      ///< xact log base path
         std::filesystem::path _xact_sync_log_file; ///< xact table copy log base path
         std::thread _xact_thread;                  ///< xact worker thread
-        // std::atomic<uint64_t> _next_xid{0};        ///< next xid in xid range
         PgXactLogWriterPtr _xact_logger = nullptr; ///< xact log writer
 
         LSN_t _last_pushed_lsn = INVALID_LSN;      ///< last pushed lsn to redis queue for GC

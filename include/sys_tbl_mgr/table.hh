@@ -516,6 +516,11 @@ namespace springtail {
          */
         void _update_by_lookup(TuplePtr key, uint64_t xid);
 
+        /**
+         * Convert the schema of the page, if needed based on the target XID.
+         */
+        void _check_convert_page(StorageCache::SafePagePtr &page);
+
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.

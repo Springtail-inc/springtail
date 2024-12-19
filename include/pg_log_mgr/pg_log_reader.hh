@@ -6,12 +6,9 @@
 #include <map>
 #include <vector>
 
-#include <opentelemetry/trace/provider.h>
-#include <opentelemetry/trace/tracer.h>
-#include <opentelemetry/trace/span.h>
-
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
+#include <common/tracing.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -22,6 +19,7 @@
 
 #include <storage/extent.hh>
 #include <storage/field.hh>
+#include <storage/xid.hh>
 
 namespace springtail::pg_log_mgr {
     /**
@@ -153,7 +151,7 @@ namespace springtail::pg_log_mgr {
                 FieldArrayPtr pg_pkey_fields; ///< The matching pkey fields for processing a PgMsgTupleData
 
                 TableEntry() = default;
-                TableEntry(ExtentSchemaPtr table_schema)
+                explicit TableEntry(ExtentSchemaPtr table_schema)
                     : table_schema(table_schema)
                 { }
 
@@ -168,7 +166,7 @@ namespace springtail::pg_log_mgr {
                 TableMap table_map; ///< Map from table ID to TableEntry
                 ChangeListPtr changes; ///< List of (schema change + LSN) ordered by LSN
 
-                TxnEntry(int32_t pg_xid)
+                explicit TxnEntry(int32_t pg_xid)
                     : pg_xid(pg_xid)
                 { }
             };
@@ -190,6 +188,10 @@ namespace springtail::pg_log_mgr {
              */
             void _apply_schema_changes(const LsnChangeMap &change_map, uint64_t xid);
 
+            /**
+             * Apply a single schema change to the SysTblMgr.
+             */
+            void _apply_schema_change(PgMsgPtr change, const XidLsn &xidlsn);
 
             //// MEMBER VARIABLES
             std::map<int32_t, TxnEntryPtr> _txns; ///< Map of pgxid to txn details.
@@ -202,7 +204,7 @@ namespace springtail::pg_log_mgr {
 
             uint64_t _lsn = 0; ///< The LSN counter
 
-            opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> _span; ///< Timing for the txn processing.
+            tracing::SpanPtr _span; ///< Timing for the txn processing.
         };
         using BatchPtr = std::shared_ptr<Batch>;
 
@@ -218,6 +220,9 @@ namespace springtail::pg_log_mgr {
             top-most pgxid and never a subtxn, which are handled within the batch. */
         std::map<int32_t, BatchPtr> _batch_map;
         BatchPtr _current_batch; ///< The batch matching the current pg xid
+
+        /** Process a PG message */
+        void _process_msg(PgMsgPtr msg);
 
         /** Process begin message */
         void _process_begin(const PgMsgBegin &begin_msg);

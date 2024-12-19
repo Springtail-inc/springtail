@@ -695,20 +695,8 @@ namespace springtail {
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false, 
                                                       [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        // XXXXXX check if we need to convert the page contents to a new schema
-        {
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
-            XidLsn target_xid(_target_xid);
-
-            // convert this page to a new schema if needed
-            auto client = sys_tbl_mgr::Client::get_instance();
-            auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, _schema, _target_xid);
-            }
-        }
+        // check if we need to convert the page contents to a new schema
+        _check_convert_page(page);
 
         // add the row to the page
         page->insert(value, _schema);
@@ -763,20 +751,8 @@ namespace springtail {
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        // XXXXXX check if we need to convert the page contents to a new schema
-        {
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
-            XidLsn target_xid(_target_xid);
-
-            // convert this page to a new schema if needed
-            auto client = sys_tbl_mgr::Client::get_instance();
-            auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, _schema, _target_xid);
-            }
-        }
+        // check if we need to convert the page contents to a new schema
+        _check_convert_page(page);
 
         // append the value to the extent
         page->append(value, _schema);
@@ -818,20 +794,8 @@ namespace springtail {
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        // XXXXXX check if we need to convert the page contents to a new schema
-        {
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
-            XidLsn target_xid(_target_xid);
-
-            // convert this page to a new schema if needed
-            auto client = sys_tbl_mgr::Client::get_instance();
-            auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, _schema, _target_xid);
-            }
-        }
+        // check if we need to convert the page contents to a new schema
+        _check_convert_page(page);
 
         // add the row to the page
         bool did_insert = page->upsert(value, _schema);
@@ -888,20 +852,8 @@ namespace springtail {
         auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        // XXXXXX check if we need to convert the page contents to a new schema
-        {
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
-            XidLsn target_xid(_target_xid);
-
-            // convert this page to a new schema if needed
-            auto client = sys_tbl_mgr::Client::get_instance();
-            auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, _schema, _target_xid);
-            }
-        }
+        // check if we need to convert the page contents to a new schema
+        _check_convert_page(page);
 
         // remove the row from the page
         // note: this can only be used when a primary key is present, otherwise use _remove_by_scan()
@@ -969,20 +921,8 @@ namespace springtail {
             auto page = StorageCache::get_instance()->get(_data_file, extent_id, _access_xid, _target_xid, false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-            // XXXXXX check if we need to convert the page contents to a new schema
-            {
-                auto header = page->header();
-                XidLsn access_xid(header.xid);
-                XidLsn target_xid(_target_xid);
-
-                // convert this page to a new schema if needed
-                auto client = sys_tbl_mgr::Client::get_instance();
-                auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-                if (!meta.history.empty()) {
-                    auto source_schema = std::make_shared<VirtualSchema>(meta);
-                    page->convert(source_schema, _schema, _target_xid);
-                }
-            }
+            // check if we need to convert the page contents to a new schema
+            _check_convert_page(page);
 
             auto &&j = page->begin();
             while (!found && j != page->end()) {
@@ -1010,20 +950,8 @@ namespace springtail {
                 false,
                 [this](StorageCache::PagePtr page) { return _flush_handler(page); } );
 
-        // XXXXXX check if we need to convert the page contents to a new schema
-        {
-            auto header = page->header();
-            XidLsn access_xid(header.xid);
-            XidLsn target_xid(_target_xid);
-
-            // convert this page to a new schema if needed
-            auto client = sys_tbl_mgr::Client::get_instance();
-            auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-            if (!meta.history.empty()) {
-                auto source_schema = std::make_shared<VirtualSchema>(meta);
-                page->convert(source_schema, _schema, _target_xid);
-            }
-        }
+        // check if we need to convert the page contents to a new schema
+        _check_convert_page(page);
 
         // update the row in the page
         // note: this can only be used when a primary key is present, otherwise update should have been split
@@ -1069,6 +997,22 @@ namespace springtail {
 
         // then we can do a direct update
         _update_direct(value, xid, extent_id);
+    }
+
+    void
+    MutableTable::_check_convert_page(StorageCache::SafePagePtr &page)
+    {
+        auto header = page->header();
+        XidLsn access_xid(header.xid);
+        XidLsn target_xid(_target_xid);
+
+        // convert this page to a new schema if needed
+        auto client = sys_tbl_mgr::Client::get_instance();
+        auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
+        if (!meta.history.empty()) {
+            auto source_schema = std::make_shared<VirtualSchema>(meta);
+            page->convert(source_schema, _schema, _target_xid);
+        }
     }
 
 }

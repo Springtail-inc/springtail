@@ -23,7 +23,7 @@ namespace springtail::pg_log_mgr {
               path(path), num_messages(1), is_stall_message(false)
         {}
 
-        PgLogQueueEntry(bool stall) : is_stall_message(stall) {}
+        explicit PgLogQueueEntry(bool stall) : is_stall_message(stall) {}
     };
     using PgLogQueueEntryPtr = std::shared_ptr<PgLogQueueEntry>;
 

@@ -85,6 +85,17 @@ namespace springtail::gc {
         void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid);
 
         /**
+         * Process a single extent of mutations from the write cache.
+         * @param db_id The database ID
+         * @param tid The table ID
+         * @param xid The XID to process
+         * @param table The MutableTable being mutated
+         * @param wc_extent The WriteCacheExtent containing the mutations
+         */
+        void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
+                             const WriteCacheClient::WriteCacheExtent &wc_extent);
+
+        /**
          * Shifts the provided metadata to start at the new future XID.  Returns true if the
          * metadata was modified, false otherwise.
          */

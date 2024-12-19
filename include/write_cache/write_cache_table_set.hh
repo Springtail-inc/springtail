@@ -25,7 +25,7 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Table Set object
          */
-        WriteCacheTableSet(int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
+        explicit WriteCacheTableSet(int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
 
         /**
          * @brief Add extent to table set

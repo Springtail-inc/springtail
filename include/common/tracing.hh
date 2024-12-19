@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opentelemetry/exporters/ostream/span_exporter_factory.h>
+
 #include <opentelemetry/sdk/trace/exporter.h>
 #include <opentelemetry/sdk/trace/processor.h>
 #include <opentelemetry/sdk/trace/simple_processor_factory.h>
@@ -8,6 +9,7 @@
 #include <opentelemetry/sdk/trace/recordable.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/sdk/trace/tracer_provider_factory.h>
+
 #include <opentelemetry/trace/provider.h>
 #include <opentelemetry/trace/span.h>
 #include <opentelemetry/trace/tracer.h>
@@ -15,6 +17,9 @@
 #include <common/logging.hh>
 
 namespace springtail::tracing {
+    /** Convenience name */
+    using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
+
     class SpdlogExporter : public opentelemetry::sdk::trace::SpanExporter {
     public:
         std::unique_ptr<opentelemetry::sdk::trace::Recordable>

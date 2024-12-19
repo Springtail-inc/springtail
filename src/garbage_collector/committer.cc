@@ -360,73 +360,7 @@ namespace springtail::gc {
 
             // process each extent of ordered mutations
             for (auto wc_extent : extent_list) {
-                // get the schema at the given XID/LSN
-                // note: we are guaranteed that the entire batch will utilize the same schema
-                XidLsn xid(wc_extent.xid, wc_extent.lsn);
-                auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, tid, xid);
-
-                auto sort_keys = schema->get_sort_keys();
-                sort_keys.push_back("__springtail_lsn");
-
-                auto columns = schema->column_order();
-
-                SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
-                SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
-                std::vector<SchemaColumn> new_columns{op, lsn};
-
-                auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
-
-                // deserialize the extent
-                ExtentHeader header(ExtentType(), wc_extent.xid, wc_schema->row_size());
-                Extent extent(header);
-                extent.deserialize(wc_extent.data);
-
-                // process the rows
-                auto op_f = wc_schema->get_field("__springtail_op");
-                auto wc_fields = wc_schema->get_fields(columns);
-                auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
-                
-                // XXX We know that these operations are sorted in key + LSN order, so we should be
-                //     able to perform a more efficient merge using hints.  For a large extent we
-                //     could parallelize the mutations.  The one exception is a table truncation,
-                //     which must always appear first in a batch (although not necessarily first in
-                //     the transaction).
-                for (auto &row : extent) {
-                    uint8_t op = op_f->get_uint8(row);
-                    switch (op) {
-                    case INSERT:
-                        {
-                            auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                            table->insert(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
-                            break;
-                        }
-                    case UPDATE:
-                        {
-                            auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                            table->update(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
-                            break;
-                        }
-                    case DELETE:
-                        {
-                            if (wc_key_fields->empty()) {
-                                // no sort key, so need to handle non-primary key by using the entire row
-                                auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
-                                table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
-                            } else {
-                                auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
-                                table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
-                            }
-                            break;
-                        }
-
-                    case TRUNCATE:
-                        {
-                            // note: this should always be the first operation within an extent
-                            table->truncate();
-                            break;
-                        }
-                    }
-                }
+                _process_extent(db_id, tid, table, wc_extent);
             }
         }
 
@@ -435,5 +369,80 @@ namespace springtail::gc {
 
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);
+    }
+
+    void
+    Committer::_process_extent(uint64_t db_id,
+                               uint64_t tid,
+                               MutableTablePtr table,
+                               const WriteCacheClient::WriteCacheExtent &wc_extent)
+    {
+        // get the schema at the given XID/LSN
+        // note: we are guaranteed that the entire batch will utilize the same schema
+        XidLsn xid(wc_extent.xid, wc_extent.lsn);
+        auto schema = SchemaMgr::get_instance()->get_extent_schema(db_id, tid, xid);
+
+        auto sort_keys = schema->get_sort_keys();
+        sort_keys.push_back("__springtail_lsn");
+
+        auto columns = schema->column_order();
+
+        SchemaColumn op("__springtail_op", 0, SchemaType::UINT8, 0, false);
+        SchemaColumn lsn("__springtail_lsn", 0, SchemaType::UINT64, 0, false);
+        std::vector<SchemaColumn> new_columns{op, lsn};
+
+        auto wc_schema = schema->create_schema(columns, new_columns, sort_keys);
+
+        // deserialize the extent
+        ExtentHeader header(ExtentType(), wc_extent.xid, wc_schema->row_size());
+        Extent extent(header);
+        extent.deserialize(wc_extent.data);
+
+        // process the rows
+        auto op_f = wc_schema->get_field("__springtail_op");
+        auto wc_fields = wc_schema->get_fields(columns);
+        auto wc_key_fields = wc_schema->get_fields(schema->get_sort_keys());
+                
+        // XXX We know that these operations are sorted in key + LSN order, so we should be
+        //     able to perform a more efficient merge using hints.  For a large extent we
+        //     could parallelize the mutations.  The one exception is a table truncation,
+        //     which must always appear first in a batch (although not necessarily first in
+        //     the transaction).
+        for (auto &row : extent) {
+            uint8_t op = op_f->get_uint8(row);
+            switch (op) {
+            case INSERT:
+                {
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    table->insert(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    break;
+                }
+            case UPDATE:
+                {
+                    auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                    table->update(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    break;
+                }
+            case DELETE:
+                {
+                    if (wc_key_fields->empty()) {
+                        // no sort key, so need to handle non-primary key by using the entire row
+                        auto tuple = std::make_shared<FieldTuple>(wc_fields, row);
+                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    } else {
+                        auto tuple = std::make_shared<FieldTuple>(wc_key_fields, row);
+                        table->remove(tuple, wc_extent.xid, constant::UNKNOWN_EXTENT);
+                    }
+                    break;
+                }
+
+            case TRUNCATE:
+                {
+                    // note: this should always be the first operation within an extent
+                    table->truncate();
+                    break;
+                }
+            }
+        }
     }
 }

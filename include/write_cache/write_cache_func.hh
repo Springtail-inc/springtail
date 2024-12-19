@@ -18,6 +18,7 @@ namespace springtail {
 
         /** Delete copy constructor */
         WriteCacheFuncImpl(const WriteCacheFuncImpl &) = delete;
+        WriteCacheFuncImpl &operator=(const WriteCacheFuncImpl &) = delete;
 
         /**
          * @brief Add an extent to the write cache

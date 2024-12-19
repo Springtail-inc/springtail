@@ -324,8 +324,6 @@ namespace springtail::pg_log_mgr {
     PgLogReader::Batch::_apply_schema_changes(const LsnChangeMap &change_map,
                                               uint64_t xid)
     {
-        RedisDDL redis_ddl;
-
         // apply any schema changes in LSN order to the SysTblMgr
         auto next_i = change_map.begin();
         auto change_i = next_i++;
@@ -342,75 +340,10 @@ namespace springtail::pg_log_mgr {
             }
 
             // apply the schema change
-            auto client = sys_tbl_mgr::Client::get_instance();
             auto change = change_i->second->front().first;
             XidLsn xidlsn(xid, change_i->second->front().second);
 
-            std::string ddl_stmt;
-            switch(change->msg_type) {
-            case PgMsgEnum::CREATE_TABLE:
-                {
-                    auto &table_msg = std::get<PgMsgTable>(change->msg);
-                    ddl_stmt = client->create_table(_db, xidlsn, table_msg);
-                    redis_ddl.add_ddl(_db, xid, ddl_stmt);
-                    break;
-                }
-            case PgMsgEnum::ALTER_TABLE:
-                {
-                    auto &table_msg = std::get<PgMsgTable>(change->msg);
-                    SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
-                                        xidlsn.xid, table_msg.xid, table_msg.oid);
-
-                    ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
-
-                    // check for re-sync
-                    nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
-                    if (action.get<std::string>() == "resync") {
-                        // mark the table as syncing to ensure we properly skip messages
-                        bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid);
-
-                        // notify the PgLogParser to resync the table
-                        auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
-                                               Properties::get_db_instance_id(), _db);
-                        RedisQueue<std::string> table_sync_queue(key);
-                        table_sync_queue.push(std::to_string(table_msg.oid));
-
-                        // notify the Committer to stop committing XIDs
-                        if (is_first) {
-                            RedisQueue<gc::XidReady>
-                                committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
-                                                            Properties::get_db_instance_id()));
-                            committer_queue.push(gc::XidReady(_db));
-                        }
-                    } else if (action.get<std::string>() != "no_change") {
-                        redis_ddl.add_ddl(_db, xid, ddl_stmt);
-                    }
-                    break;
-                }
-            case PgMsgEnum::DROP_TABLE:
-                {
-                    auto &drop_msg = std::get<PgMsgDropTable>(change->msg);
-                    ddl_stmt = client->drop_table(_db, xidlsn, drop_msg);
-                    redis_ddl.add_ddl(_db, xid, ddl_stmt);
-                    break;
-                }
-            case PgMsgEnum::CREATE_INDEX:
-                {
-                    auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                    ddl_stmt = client->create_index(_db, xidlsn, index_msg);
-                    break;
-                }
-            case PgMsgEnum::DROP_INDEX:
-                {
-                    auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
-                    ddl_stmt = client->drop_index(_db, xidlsn, index_msg);
-                    break;
-                }
-
-            default:
-                SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
-                throw Error();
-            }
+            _apply_schema_change(change, xidlsn);
 
             // remove the schema change we just applied
             change_i->second->pop_front();
@@ -422,6 +355,79 @@ namespace springtail::pg_log_mgr {
                     ++next_i;
                 }
             }
+        }
+    }
+
+    void
+    PgLogReader::Batch::_apply_schema_change(PgMsgPtr change,
+                                             const XidLsn &xidlsn)
+    {
+        RedisDDL redis_ddl;
+        auto client = sys_tbl_mgr::Client::get_instance();
+
+        switch(change->msg_type) {
+        case PgMsgEnum::CREATE_TABLE:
+            {
+                auto &table_msg = std::get<PgMsgTable>(change->msg);
+                std::string &&ddl_stmt = client->create_table(_db, xidlsn, table_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::ALTER_TABLE:
+            {
+                auto &table_msg = std::get<PgMsgTable>(change->msg);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "ALTER TABLE: xid={}, pg_xid={}, tid={}",
+                                    xidlsn.xid, table_msg.xid, table_msg.oid);
+
+                std::string &&ddl_stmt = client->alter_table(_db, xidlsn, table_msg);
+
+                // check for re-sync
+                nlohmann::json action = nlohmann::json::parse(ddl_stmt).at("action");
+                if (action.get<std::string>() == "resync") {
+                    // mark the table as syncing to ensure we properly skip messages
+                    bool is_first = SyncTracker::get_instance()->mark_resync(_db, table_msg.oid);
+
+                    // notify the PgLogParser to resync the table
+                    auto key = fmt::format(redis::QUEUE_SYNC_TABLES,
+                                           Properties::get_db_instance_id(), _db);
+                    RedisQueue<std::string> table_sync_queue(key);
+                    table_sync_queue.push(std::to_string(table_msg.oid));
+
+                    // notify the Committer to stop committing XIDs
+                    if (is_first) {
+                        RedisQueue<gc::XidReady>
+                            committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                        Properties::get_db_instance_id()));
+                        committer_queue.push(gc::XidReady(_db));
+                    }
+                } else if (action.get<std::string>() != "no_change") {
+                    redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                }
+                break;
+            }
+        case PgMsgEnum::DROP_TABLE:
+            {
+                auto &drop_msg = std::get<PgMsgDropTable>(change->msg);
+                std::string &&ddl_stmt = client->drop_table(_db, xidlsn, drop_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::CREATE_INDEX:
+            {
+                auto &index_msg = std::get<PgMsgIndex>(change->msg);
+                std::string &&ddl_stmt = client->create_index(_db, xidlsn, index_msg);
+                break;
+            }
+        case PgMsgEnum::DROP_INDEX:
+            {
+                auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
+                std::string &&ddl_stmt = client->drop_index(_db, xidlsn, index_msg);
+                break;
+            }
+
+        default:
+            SPDLOG_ERROR("Message type {} not handled", static_cast<uint8_t>(change->msg_type));
+            throw Error();
         }
     }
 
@@ -461,101 +467,108 @@ namespace springtail::pg_log_mgr {
                     continue;
                 }
 
-                // handle the message
-                switch(msg->msg_type) {
-                case PgMsgEnum::BEGIN:
-                    _process_begin(std::get<PgMsgBegin>(msg->msg));
-                    break;
-
-                case PgMsgEnum::COMMIT:
-                    _process_commit(std::get<PgMsgCommit>(msg->msg));
-                    break;
-
-                case PgMsgEnum::STREAM_START:
-                    _process_stream_start(std::get<PgMsgStreamStart>(msg->msg));
-                    break;
-
-                case PgMsgEnum::STREAM_COMMIT:
-                    _process_stream_commit(std::get<PgMsgStreamCommit>(msg->msg));
-                    break;
-
-                case PgMsgEnum::STREAM_ABORT:
-                    _process_stream_abort(std::get<PgMsgStreamAbort>(msg->msg));
-                    break;
-
-                case PgMsgEnum::INSERT:
-                    {
-                        auto &insert = std::get<PgMsgInsert>(msg->msg);
-                        int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
-                        _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
-                                                                        insert.rel_id, insert.new_tuple);
-                        break;
-                    }
-                case PgMsgEnum::DELETE:
-                    {
-                        auto &remove = std::get<PgMsgDelete>(msg->msg);
-                        int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
-                        _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
-                                                                        remove.rel_id, remove.tuple);
-                        break;
-                    }
-                case PgMsgEnum::UPDATE:
-                    {
-                        auto &update = std::get<PgMsgUpdate>(msg->msg);
-                        int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
-                        if (update.old_type == 0) {
-                            _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
-                                                                            update.rel_id, update.new_tuple);
-                        } else {
-                            _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
-                                                                            update.rel_id, update.old_tuple);
-                            _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
-                                                                            update.rel_id, update.new_tuple);
-                        }
-                        break;
-                    }
-                    break;
-
-                case PgMsgEnum::TRUNCATE:
-                    {
-                        _current_batch->truncate(this->get_current_xid(),
-                                                 std::get<PgMsgTruncate>(msg->msg));
-                        break;
-                    }
-                case PgMsgEnum::CREATE_TABLE:
-                case PgMsgEnum::ALTER_TABLE:
-                    {
-                        PgMsgTable &table_msg = std::get<PgMsgTable>(msg->msg);
-                        _process_ddl(table_msg.oid, table_msg.xid, msg->is_streaming, msg);
-                        break;
-                    }
-                case PgMsgEnum::DROP_TABLE:
-                    {
-                        PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
-                        _process_ddl(drop_msg.oid, drop_msg.xid, msg->is_streaming, msg);
-                        break;
-                    }
-                case PgMsgEnum::CREATE_INDEX:
-                    {
-                        const auto &index_msg = std::get<PgMsgIndex>(msg->msg);
-                        _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
-                        break;
-                    }
-                case PgMsgEnum::DROP_INDEX:
-                    {
-                        const auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
-                        _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
-                        break;
-                    }
-                default:
-                    SPDLOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
-                    break;
-                }
+                // process the message
+                _process_msg(msg);
             }
 
             if (num_messages > 0) {
                 num_messages--;
             }
+        }
+    }
+
+    void
+    PgLogReader::_process_msg(PgMsgPtr msg)
+    {
+        // handle the message
+        switch(msg->msg_type) {
+        case PgMsgEnum::BEGIN:
+            _process_begin(std::get<PgMsgBegin>(msg->msg));
+            break;
+
+        case PgMsgEnum::COMMIT:
+            _process_commit(std::get<PgMsgCommit>(msg->msg));
+            break;
+
+        case PgMsgEnum::STREAM_START:
+            _process_stream_start(std::get<PgMsgStreamStart>(msg->msg));
+            break;
+
+        case PgMsgEnum::STREAM_COMMIT:
+            _process_stream_commit(std::get<PgMsgStreamCommit>(msg->msg));
+            break;
+
+        case PgMsgEnum::STREAM_ABORT:
+            _process_stream_abort(std::get<PgMsgStreamAbort>(msg->msg));
+            break;
+
+        case PgMsgEnum::INSERT:
+            {
+                auto &insert = std::get<PgMsgInsert>(msg->msg);
+                int32_t pg_xid = (msg->is_streaming) ? insert.xid : _current_xact->xid;
+                _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
+                                                                insert.rel_id, insert.new_tuple);
+                break;
+            }
+        case PgMsgEnum::DELETE:
+            {
+                auto &remove = std::get<PgMsgDelete>(msg->msg);
+                int32_t pg_xid = (msg->is_streaming) ? remove.xid : _current_xact->xid;
+                _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
+                                                                remove.rel_id, remove.tuple);
+                break;
+            }
+        case PgMsgEnum::UPDATE:
+            {
+                auto &update = std::get<PgMsgUpdate>(msg->msg);
+                int32_t pg_xid = (msg->is_streaming) ? update.xid : _current_xact->xid;
+                if (update.old_type == 0) {
+                    _current_batch->add_mutation<PgMsgEnum::UPDATE>(this->get_current_xid(), pg_xid,
+                                                                    update.rel_id, update.new_tuple);
+                } else {
+                    _current_batch->add_mutation<PgMsgEnum::DELETE>(this->get_current_xid(), pg_xid,
+                                                                    update.rel_id, update.old_tuple);
+                    _current_batch->add_mutation<PgMsgEnum::INSERT>(this->get_current_xid(), pg_xid,
+                                                                    update.rel_id, update.new_tuple);
+                }
+                break;
+            }
+            break;
+
+        case PgMsgEnum::TRUNCATE:
+            {
+                _current_batch->truncate(this->get_current_xid(),
+                                         std::get<PgMsgTruncate>(msg->msg));
+                break;
+            }
+        case PgMsgEnum::CREATE_TABLE:
+        case PgMsgEnum::ALTER_TABLE:
+            {
+                PgMsgTable &table_msg = std::get<PgMsgTable>(msg->msg);
+                _process_ddl(table_msg.oid, table_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DROP_TABLE:
+            {
+                PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
+                _process_ddl(drop_msg.oid, drop_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::CREATE_INDEX:
+            {
+                const auto &index_msg = std::get<PgMsgIndex>(msg->msg);
+                _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::DROP_INDEX:
+            {
+                const auto &index_msg = std::get<PgMsgDropIndex>(msg->msg);
+                _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        default:
+            SPDLOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
+            break;
         }
     }
 
