@@ -6,6 +6,7 @@ import argparse
 import traceback
 import tempfile
 import time
+import logging
 from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extensions import quote_ident
@@ -81,7 +82,6 @@ def cleanup_filesystem(props : Properties) -> None:
     """Clear the file system data at the given mount path."""
     # Get the mount path
     mount_path = props.get_mount_path()
-    sys_config = props.get_system_config()
     log_path = props.get_log_path()
     pid_path = props.get_pid_path()
 
@@ -352,6 +352,20 @@ def check_config(props : Properties) -> None:
     # if fdw_prefix is not set
     if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
         raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
+
+    # Get the mount path
+    mount_path = props.get_mount_path()
+    log_path = props.get_log_path()
+    pid_path = props.get_pid_path()
+
+    # Create log path if it doesn't exist
+    makedir(log_path, '777')
+
+    # Create the mount path if it doesn't exist
+    makedir(mount_path, '755')
+
+    # Check that the pid path exists; if not try to create it
+    makedir(pid_path, '755')
 
 
 def check_log_writable(props : Properties) -> None:
@@ -657,6 +671,12 @@ if __name__ == "__main__":
     if not is_linux():
         print("This script only supports running on Linux.")
         sys.exit(1)
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(asctime)s.%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                            datefmt='%Y-%m-%d:%H:%M:%S',
+                            handlers=logging.StreamHandler(sys.stdout))
 
     try:
         if args.status:

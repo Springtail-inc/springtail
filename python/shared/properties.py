@@ -144,7 +144,7 @@ class Properties:
 
     def get_proxy_config(self):
         """Return the proxy configuration as an object."""
-        key = 'instance_config:' + str(self.db_instance_id)
+        key = str(self.db_instance_id) + ':instance_config'
         if 'proxy_config' in self.cache:
             return self.cache['proxy_config']
 

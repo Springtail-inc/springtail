@@ -5,6 +5,7 @@ import yaml
 import argparse
 import glob
 import shutil
+import datetime
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,8 +42,8 @@ class Test:
                  external_dir: str):
         """Initialize the test runner"""
         self._config_file = config_file
-        self._install_dir = install_dir
-        self._external_dir = external_dir
+        self._install_dir = os.path.abspath(install_dir)
+        self._external_dir = os.path.abspath(external_dir)
 
         self._props = springtail.Properties(config_file, True)
 
@@ -60,7 +61,7 @@ class Test:
         self._proxy_config = self._props.get_proxy_config()
 
         # add the regression database to redis
-        springtail.add_db_to_redis(self._props, REGRESSION_DB)
+        self._props.add_database(REGRESSION_DB)
 
         # get the path to the pg_regress binary
         # pkglibdir looks like: /usr/lib/postgresql/16/lib
@@ -71,59 +72,63 @@ class Test:
         libregress_so = os.path.join(self._install_dir, 'lib/libregress.so')
         run_command('sudo', ['cp', libregress_so, os.path.join(pkg_libdir, 'regress.so')])
 
-        # fetch the sql, expected and data files from the external libpq build
-        sql_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/sql/*.sql'))
-        expected_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/expected/*.out'))
-        data_files = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/data/*.data'))
+    def allocate_regress_dir(self) -> None:
+        """Allocate the regression directory"""
+        # create the regression directory
+        current_date = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        self._regress_path = os.path.join('/tmp', f'regress_{current_date}')
+        makedir(self._regress_path, '777')
 
-        # remove any existing regress directory
-        run_command('sudo', ['rm', '-rf', 'regress'])
+        logging.info(f'Created regression directory: {self._regress_path}')
 
+        # set the other paths based on the regress path
+        self._sql_path = os.path.join(self._regress_path, 'sql')
+        self._expected_path = os.path.join(self._regress_path, 'expected')
+        self._data_path = os.path.join(self._regress_path, 'data')
+        self._result_path = os.path.join(self._regress_path, 'results')
+
+
+    def setup_regress_files(self) -> None:
+        """Setup the regression files.
+        This function will copy the sql, expected and data files from the external libpq build.
+        """
         # create the sql, expected and data directories
-        self._expected_path = os.path.join(os.getcwd(), 'regress/expected')
-        makedir(os.path.join(os.getcwd(), 'regress/sql'))
+        makedir(os.path.join(self._sql_path))
         makedir(os.path.join(self._expected_path))
-        makedir(os.path.join(os.getcwd(), 'regress/data'))
+        makedir(os.path.join(self._data_path))
 
         # create the results directory
-        self._result_path = os.path.join(os.getcwd(), 'regress/results')
         makedir(self._result_path, '777');
 
-        # remove any existing symlinks
-        for f in os.listdir('regress/sql'):
-            os.remove(os.path.join('sql', f))
-
-        for f in os.listdir('regress/expected'):
-            os.remove(os.path.join('expected', f))
-
-        for f in os.listdir('regress/data'):
-            os.remove(os.path.join('data', f))
+        # fetch the sql, expected and data files from the external libpq build
+        sql_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/sql/*.sql'))
+        expected_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/expected/*.out'))
+        data_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/data/*.data'))
 
         # create symlinks to the sql and expected files
         for file in sql_files:
-            os.symlink(file, os.path.join('regress/sql', os.path.basename(file)))
+            os.symlink(file, os.path.join(self._sql_path, os.path.basename(file)))
 
         for file in expected_files:
-            os.symlink(file, os.path.join('regress/expected', os.path.basename(file)))
+            os.symlink(file, os.path.join(self._expected_path, os.path.basename(file)))
 
         # copy the data files
         for file in data_files:
-            shutil.copy(file, os.path.join('regress/data', os.path.basename(file)))
+            shutil.copy(file, os.path.join(self._data_path, os.path.basename(file)))
 
         # copy the resultmap and the schedule files
-        schedule_file = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
-        resultmap_file = glob.glob(os.path.join(external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/resultmap'))
+        schedule_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
+        resultmap_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/resultmap'))
 
         for f in schedule_file:
-            os.symlink(f, os.path.join('regress', os.path.basename(f)))
+            shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
 
         for f in resultmap_file:
-            os.symlink(f, os.path.join('regress', os.path.basename(f)))
+            shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
 
         # set the environment variables expected by pg_regress sql files
-        self._regress_path = os.path.join(os.getcwd(), 'regress')
-        os.environ['PG_ABS_SRCDIR'] = self._regress_path
-        os.environ['PG_ABS_BUILDDIR'] = self._regress_path
+        #os.environ['PG_ABS_SRCDIR'] = self._regress_path
+        #os.environ['PG_ABS_BUILDDIR'] = self._regress_path
         # PG_LIBDIR, PG_DLSUFFIX
 
 
@@ -138,29 +143,57 @@ class Test:
         primary_conn.close()
 
 
-    def run_regress_cmd(self, port : int, file_out : str) -> None:
+    def run_regress_cmd(self, port : int, suffix : str) -> None:
         """Run the regression test"""
-        # run the regression tests first against normal postgres
-        logging.info('Running the regression tests: output to ' + file_out)
-
         # remove all files in result directory
         for f in os.listdir(self._result_path):
             os.remove(os.path.join(self._result_path, f))
 
         # remove old regression files
         for f in ['regression.out', 'regression.diffs']:
-            os.remove(os.path.join(self._regress_path, f))
+            if os.path.exists(os.path.join(self._regress_path, f)):
+                os.remove(os.path.join(self._regress_path, f))
 
+        # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
-        run_command(self._pg_regress, [f'--dbname={REGRESSION_DB}',
-                                       f'--inputdir={self._regress_path}',
-                                       f'--host=localhost',
-                                       f'--port={port}',
-                                       f'--user={self._primary_user}',
-                                       f'--schedule={os.path.join(self._regress_path, 'parallel_schedule')}',
-                                       '--max-connections=5',
-                                       '--use-existing'],
-                    os.path.join(self._regress_path, file_out))
+        args = [f'--dbname={REGRESSION_DB}',
+                f'--inputdir={self._regress_path}',
+                f'--host=localhost',
+                f'--port={port}',
+                f'--user={self._primary_user}',
+                f'--schedule={os.path.join(self._regress_path, 'parallel_schedule')}',
+                '--max-connections=1',
+                '--use-existing']
+
+        logging.info(self._pg_regress + ' ' + ' '.join(args))
+
+        # run the regression tests
+        out = run_command(self._pg_regress, args, no_err=True, cwd=self._regress_path)
+
+        if '# All' in out:  # all tests passed, return
+            logging.info('Regression tests completed successfully')
+            return
+
+        if len(os.listdir(self._result_path)) == 0:
+            logging.error(f'No result files found in the results directory')
+            raise ValueError("No result files found in the results directory")
+
+        # check for errors from logs
+        err_count = 0
+        total = 0
+        if os.path.exists(os.path.join(self._regress_path, 'regression.out')):
+            with open(os.path.join(self._regress_path, 'regression.out'), 'r') as f:
+                # for each line in the file
+                for line in f:
+                    if 'not ok' in line:
+                        err_count += 1
+                    total += 1
+
+            logging.info(f'Regression tests failed: {err_count} / {total}')
+
+        # rename regression output files
+        os.rename(os.path.join(self._regress_path, 'regression.out'), os.path.join(self._regress_path, 'regression.out.' + suffix))
+        os.rename(os.path.join(self._regress_path, 'regression.diffs'), os.path.join(self._regress_path, 'regression.diff.' + suffix))
 
 
     def start_proxy(self) -> None:
@@ -182,7 +215,6 @@ class Test:
 
     def run_regress(self) -> None:
         """Run the regression tests"""
-
         # make sure postgres is running
         if not check_postgres_running():
             start_postgres(self._props)
@@ -192,6 +224,12 @@ class Test:
         # connect and drop the tablespace
         self.reset_db()
 
+        # allocate the regression directory and set the paths
+        self.allocate_regress_dir()
+
+        # setup the regression files
+        self.setup_regress_files()
+
         # run the regression tests first against normal postgres
         self.run_regress_cmd(self._primary_port, 'pg.out')
 
@@ -200,10 +238,6 @@ class Test:
 
         # rename the results dir to the expected dir
         os.rename(self._result_path, self._expected_path)
-
-        # rename regression output files
-        os.rename(os.path.join(self._regress_path, 'regression.out'), os.path.join(self._regress_path, 'regression.out.pg'))
-        os.rename(os.path.join(self._regress_path, 'regression.diff'), os.path.join(self._regress_path, 'regression.diff.pg'))
 
         # recreate the results dir
         makedir(self._result_path, '777')
@@ -216,8 +250,14 @@ class Test:
 
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
-        self.run_regress(self._primary_port, 'proxy.out')
-        # self.run_regress(self._proxy_config['port'], 'proxy.out')
+        self.run_regress_cmd(self._primary_port, '.proxy')
+        # self.run_regress_cmd(self._proxy_config['port'], 'proxy.out')
+
+
+    def cleanup(self):
+        """Cleanup the regression directory"""
+        logging.info(f'Cleaning up regression directory: {self._regress_path}')
+        run_command('sudo', ['rm', '-rf', self._regress_path])
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -231,13 +271,29 @@ if __name__ == "__main__":
     # parse the command line arguments
     args = parse_arguments()
 
+    # set the log level and format
+    handlers = []
+    handlers.append(logging.StreamHandler(sys.stdout))
+    handlers.append(logging.FileHandler(os.path.join(os.getcwd(), 'proxy_regress.log')))
+
+    logging.basicConfig(format='%(asctime)s.%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                        datefmt='%Y-%m-%d:%H:%M:%S',
+                        level=logging.DEBUG,
+                        handlers=handlers)
+
     # parse the test configuration
     with open(args.config, 'r') as f:
         yaml_config = yaml.safe_load(f)
 
     test = Test(yaml_config['system_json_path'], yaml_config['install_dir'], yaml_config['external_dir'])
 
-    test.run_regress()
+    try:
+        test.run_regress()
+    except Exception as e:
+        logging.error(f'Failed to run the regression tests: {e}')
+        # cleanup the regression tmp dir on exception
+        # test.cleanup()
+        raise e
 
 
 

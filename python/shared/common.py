@@ -4,11 +4,12 @@ import subprocess
 import psycopg2
 import platform
 import re
+import logging
 from typing import Dict, List, Optional
 
 def connect_db(dbname : str, username : str, password : str, host : str, port : int, autocommit : bool=True) -> psycopg2.extensions.connection:
     """Connect to the given database with the given username, password, host, and port."""
-    print(f"Connecting to database: {dbname} with username: {username} and host: {host}")
+    logging.debug(f"Connecting to database: {dbname} with username: {username} and host: {host}")
     try:
         conn = psycopg2.connect(dbname=dbname, user=username, password=password, host=host, port=port)
         if autocommit:
@@ -22,7 +23,7 @@ def connect_db(dbname : str, username : str, password : str, host : str, port : 
 
 def execute_sql(conn, sql : str, args=None) -> None:
     """Execute the given sql statement with the given arguments on the given connection."""
-    print(f"Executing sql: {sql} with args: {args}")
+    logging.debug(f"Executing sql: {sql} with args: {args}")
     try:
         if isinstance(args, str):
             args = (args,)
@@ -37,7 +38,7 @@ def execute_sql(conn, sql : str, args=None) -> None:
 
 def execute_sql_script(conn, script_file : str) -> None:
     """Execute the given sql script file on the given connection."""
-    print(f"Executing sql script: {script_file}")
+    logging.debug(f"Executing sql script: {script_file}")
     if not os.path.exists(script_file):
         print(f"Script sql file not found: {script_file}")
         raise Exception(f"Script sql file not found: {script_file}")
@@ -55,7 +56,7 @@ def execute_sql_script(conn, script_file : str) -> None:
 # execute a sql select statement and return the result
 def execute_sql_select(conn, sql : str, args=None) -> List:
     """Execute the given sql select statement with the given arguments on the given connection and return the result."""
-    print(f"Executing sql select: {sql} with args: {args}")
+    logging.debug(f"Executing sql select: {sql} with args: {args}")
     try:
         if isinstance(args, str):
             args = (args,)
@@ -96,7 +97,7 @@ def kill_processes(names : List[str]) -> None:
             proc.kill()
 
 
-def run_command(command, args : List[str], outfile : str = None) -> Optional[str]:
+def run_command(command, args : List[str], outfile : str = None, no_err : bool = False, cwd : str = os.getcwd()) -> Optional[str]:
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
 
@@ -104,16 +105,16 @@ def run_command(command, args : List[str], outfile : str = None) -> Optional[str
     result = None
     if outfile:
         with open(outfile, 'w') as f:
-            result = subprocess.run(command_with_args, stdout=f, stderr=subprocess.PIPE, text=True, shell=False)
+            result = subprocess.run(command_with_args, stdout=f, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd)
     else:
-        result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False)
+        result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd)
 
     # Check if the command was successful
-    if result.returncode != 0:
+    if result.returncode != 0 and not no_err:
         raise Exception(f"Command failed with error: {result.stderr}")
 
     if outfile:
-        return None
+        return result.returncode
 
     # Split the output into lines and get the last line
     output_lines = result.stdout.strip().split('\n')
@@ -194,7 +195,7 @@ def makedir(path : str, mode : str = '755') -> None:
     """Make the directory at the given path."""
     if not os.path.exists(path):
         try:
-            print(f"Creating directory: {path} with mode: {mode}")
+            logging.debug(f"Creating directory: {path} with mode: {mode}")
             user = os.environ.get('USER') or os.environ.get('USERNAME')
             run_command('sudo', ['mkdir', '-p', path])
             run_command('sudo', ['chown', '-R', f'{user}', path])
