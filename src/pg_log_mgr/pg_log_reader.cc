@@ -415,13 +415,20 @@ namespace springtail::pg_log_mgr {
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
-                std::string &&ddl_stmt = client->create_index(_db, xidlsn, index_msg);
+                std::string &&ddl_stmt = client->create_index(_db, xidlsn, index_msg,
+                                                              sys_tbl::IndexNames::State::READY);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_INDEX:
             {
                 auto &index_msg = std::get<PgMsgDropIndex>(change->msg);
                 std::string &&ddl_stmt = client->drop_index(_db, xidlsn, index_msg);
+
+                // Store the DDL statement for the Committer
+                redis_ddl.add_index_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
 

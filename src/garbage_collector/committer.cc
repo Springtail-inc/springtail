@@ -58,6 +58,7 @@ namespace springtail::gc {
 
             // handle a TABLE_SYNC_START
             if (result->type() == XidReady::Type::TABLE_SYNC_START) {
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Stop committing due to table sync: {}", db_id);
                 // stop performing commits on this db until the table syncs are complete and aligned
                 _block_commit.insert(db_id);
 
@@ -81,8 +82,8 @@ namespace springtail::gc {
             // handle a TABLE_SYNC_COMMIT
             if (result->type() == XidReady::Type::TABLE_SYNC_COMMIT ||
                 result->type() == XidReady::Type::TABLE_SYNC_SWAP) {
-                SPDLOG_INFO("Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
-                            static_cast<char>(result->type()), db_id, completed_xid);
+                SPDLOG_DEBUG_MODULE(LOG_GC, "Handle a TABLE_SYNC_SWAP/COMMIT: {}, {}, completed xid @{}",
+                                    static_cast<char>(result->type()), db_id, completed_xid);
 
                 nlohmann::json ddls;
 

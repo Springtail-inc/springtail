@@ -154,16 +154,11 @@ namespace springtail {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
-        auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{snapshot_xid});
-        // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
-        }
-
         // construct an empty mutable table with the provided snapshot XID and return it
+        // XXX we need to eventually get these secondary keys passed down from the table copy code
+        std::vector<Index> secondary_keys;
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
-                                              _table_base, schema->get_sort_keys(), meta.indexes,
+                                              _table_base, schema->get_sort_keys(), secondary_keys,
                                               tbl_meta, schema, false);
     }
 

@@ -46,14 +46,26 @@ namespace springtail::pg_log_mgr {
         // make a record of the table mapping(s)
         auto record = std::make_shared<XidRecord>(sync_msg);
 
-        // store it against the pg_xid for this sync's snapshot
+        // make sure that the database has entries in the maps
         auto &db_map = (db_i == _sync_map.end()) ? _sync_map[sync_msg.db_id] : db_i->second;
+        auto &table_map = _table_map[sync_msg.db_id];
+
+        // check if we already have a record of a previous sync for this table
+        for (auto &tid : record->tids()) {
+            auto table_i = table_map.find(tid);
+            if (table_i == table_map.end()) {
+                continue;
+            }
+
+            // remove the existing entry to ensure we track only the latest un-swapped sync
+            db_map.erase(table_i->second->pg_xid());
+        }
+
+        // store it against the pg_xid for this sync's snapshot
         db_map[sync_msg.pg_xid] = record;
 
         // also keep a map to the record for each table being copied
-        auto &table_map = _table_map[sync_msg.db_id];
         for (int32_t table_id : sync_msg.tids) {
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Add table: {}", table_id);
             table_map[table_id] = record; // add the record to the sync map
         }
 

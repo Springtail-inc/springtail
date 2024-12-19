@@ -64,7 +64,8 @@ namespace springtail::pg_log_mgr {
         class XidRecord {
         public:
             XidRecord(const PgXactMsg::TableSyncMsg &sync_msg)
-                : _xmax(sync_msg.xmax),
+                : _pg_xid(sync_msg.pg_xid),
+                  _xmax(sync_msg.xmax),
                   _inflight(sync_msg.xips.begin(), sync_msg.xips.end()),
                   _tids(sync_msg.tids)
             { }
@@ -103,14 +104,25 @@ namespace springtail::pg_log_mgr {
                 return true;
             }
 
-            const std::vector<int32_t> &tids() {
+            /**
+             * Retrieve the list of tables that were part of this sync.
+             */
+            const std::vector<int32_t> &tids() const {
                 return _tids;
             }
 
+            /**
+             * Retrieve the PG xid at which this sync occurred.
+             */
+            const uint32_t pg_xid() const {
+                return _pg_xid;
+            }
+
         private:
-            uint32_t _xmax;
-            std::set<uint32_t> _inflight;
-            std::vector<int32_t> _tids;
+            uint32_t _pg_xid; ///< The PG xid at which the sync occurred
+            uint32_t _xmax; ///< The XMAX at postgres for the sync transaction
+            std::set<uint32_t> _inflight; ///< The in-flight PG xids for the sync txn
+            std::vector<int32_t> _tids; ///< The table ids being synced
         };
 
     private:
