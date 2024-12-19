@@ -1,9 +1,11 @@
+#include "common/constants.hh"
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/properties.hh>
 
+#include <limits>
 #include <sys_tbl_mgr/table.hh>
 
 #include <pg_fdw/pg_fdw_mgr.hh>
@@ -34,27 +36,29 @@ namespace {
                 {"col1", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
                 {"col2", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 2, 1, false, true, false},
                 {"col3", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 3, 2, false, true, false},
+                {"col4", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 4, 0, false, false, false},
+                {"col5", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 5, 0, false, false, false},
             };
 
             _data = {
-                {1, 1, 1},
-                {1, 2, 2},
-                {1, 3, 1},
-                {1, 3, 2},
-                {1, 5, 1},
-                {1, 5, 2},
-                {2, 1, 1},
-                {2, 2, 2},
-                {2, 3, 1},
-                {2, 3, 2},
-                {2, 5, 1},
-                {2, 5, 2},
-                {3, 1, 1},
-                {3, 2, 2},
-                {3, 3, 1},
-                {3, 3, 2},
-                {5, 2, 1},
-                {5, 4, 2}
+                {1, 1, 1, 1, 1},
+                {1, 2, 2, 2, 2},
+                {1, 3, 1, 1, 1},
+                {1, 3, 2, 2, 3},
+                {1, 5, 1, 1, 1},
+                {1, 5, 2, 2, 2},
+                {2, 1, 1, 1, 1},
+                {2, 2, 2, 2, 2},
+                {2, 3, 1, 1, 1},
+                {2, 3, 2, 2, 2},
+                {2, 5, 1, 1, 1},
+                {2, 5, 2, 2, 2},
+                {3, 1, 1, 1, 1},
+                {3, 2, 2, 2, 2},
+                {3, 3, 1, 1, 1},
+                {3, 3, 2, 2, 2},
+                {5, 2, 1, 3, 3},
+                {5, 4, 2, 3, 3}
             };
 
             uint64_t access_xid = 1, target_xid = 2;
@@ -63,9 +67,14 @@ namespace {
 
             // create the table via the table mgr
             _create_table(_db_id, _tid, access_xid);
-
             access_xid++;
             target_xid++;
+
+            _create_index(_db_id, _tid, access_xid);
+            access_xid++;
+            target_xid++;
+            sys_tbl_mgr::Client::get_instance()->finalize(_db_id, access_xid);
+
 
             // create a mutable table
             auto mtable = TableMgr::get_instance()->get_mutable_table(_db_id, _tid, access_xid, target_xid, false);
@@ -125,6 +134,8 @@ namespace {
 
         inline static std::vector<std::vector<int32_t>> _data;
 
+        static constexpr uint32_t _secondary_index_id{1234};
+
         List *_target_list = nullptr;
 
         std::map<QualOpName, std::string> _op_names = {
@@ -151,6 +162,47 @@ namespace {
             create_msg.columns = _columns;
 
             TableMgr::get_instance()->create_table(db_id, { xid, 0 }, create_msg);
+
+        }
+
+        static void
+        _create_index(uint64_t db_id, uint64_t table_id, uint64_t xid) 
+        {
+
+            std::vector<PgMsgSchemaIndexColumn> columns;
+            PgMsgIndex msg;
+
+            msg.lsn = 0;
+            msg.xid = xid;
+            msg.schema = "public";
+            msg.index = "secondary_index";
+            msg.is_unique = false;
+            msg.table_oid = table_id;
+            msg.oid = _secondary_index_id;
+
+            msg.columns.push_back({"col4", 4, 0});
+            msg.columns.push_back({"col5", 5, 1});
+
+            XidLsn xid_lsn{xid};
+
+            sys_tbl_mgr::Client::get_instance()->create_index(db_id, xid_lsn, msg, sys_tbl::IndexNames::State::READY);
+        }
+
+        static void
+        _drop_index(uint64_t db_id, uint32_t index_id, uint64_t xid)
+        {
+            PgMsgDropIndex msg;
+
+            msg.lsn = 0;
+            msg.xid = xid;
+            msg.schema = "public";
+            msg.oid = index_id;
+
+            XidLsn xid_lsn{xid};
+
+            sys_tbl_mgr::Client::get_instance()->drop_index(db_id, xid_lsn, msg);
+
+            sys_tbl_mgr::Client::get_instance()->finalize(db_id, xid);
         }
 
         std::shared_ptr<Tuple>
@@ -267,7 +319,8 @@ namespace {
         }
 
         void
-        _run_scan(List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data)
+        _run_scan(List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
+                uint32_t index_id = constant::INDEX_PRIMARY)
         {
             // get the fdw mgr
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
@@ -278,6 +331,14 @@ namespace {
 
             // begin the scan
             mgr->fdw_begin_scan(state, _target_list, qual_list, nullptr);
+
+            if (index_id == std::numeric_limits<uint32_t>::max()) {
+                // a full scan is expected 
+                ASSERT_EQ(state->index.has_value(), false);
+            } else {
+                // the index expected to be used for the scan
+                ASSERT_EQ(state->index->id, index_id);
+            }
 
             int rows_valid = 0;
             bool eos = false;
@@ -311,11 +372,11 @@ namespace {
 
     TEST_F(FDWWhere_Test, Test_FullScan)
     {
-        _run_scan(nullptr, _data);
+        _run_scan(nullptr, _data, std::numeric_limits<uint32_t>::max());
 
         // col2 = 2; results in a full scan
         List *qual_list = _add_qual(_columns[1].position, EQUALS, 2);
-        _run_scan(qual_list, _data);
+        _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
     }
 
     TEST_F(FDWWhere_Test, Test_Pkey1)
@@ -457,5 +518,23 @@ namespace {
         filtered_data = _filter_data(qual_list);
 
         _run_scan(qual_list, filtered_data);
+    }
+
+    TEST_F(FDWWhere_Test, Test_Secondary)
+    {
+        // col4 = 3
+        List *qual_list = _add_qual(_columns[3].position, EQUALS, 3);
+        std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
+        _run_scan(qual_list, filtered_data, _secondary_index_id);
+
+        // col5 = 3, should do a full scan
+        qual_list = _add_qual(_columns[4].position, EQUALS, 3);
+        _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
+
+        // drop the secondary index, and verify full scan
+        _drop_index(_db_id, _secondary_index_id, _table_xid);
+        qual_list = _add_qual(_columns[3].position, EQUALS, 3);
+        _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
+
     }
 } // namespace

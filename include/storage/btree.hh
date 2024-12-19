@@ -58,7 +58,7 @@ namespace springtail {
             const BTree * const _btree; ///< A pointer to the BTree this iterator is associated with.
             NodePtr _node; ///< A Node representing a leaf extent and the path to it from the root.
 
-            Iterator(const BTree * const btree, NodePtr node)
+            Iterator(const BTree * btree, NodePtr node)
                 : _btree(btree), _node(node)
             { }
 
