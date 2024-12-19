@@ -824,6 +824,8 @@ namespace springtail {
              * Page is based on.
              */
             ExtentHeader header() const {
+                boost::shared_lock lock(_mutex);
+
                 assert(!_extents.empty());
                 SafeExtent extent{ _extents.front().make_safe_extent(_file) };
                 return (*extent)->header();
@@ -834,6 +836,8 @@ namespace springtail {
              * with no rows.
              */
             bool empty() const {
+                boost::shared_lock lock(_mutex);
+
                 // if no extents, empty
                 if (_extents.empty()) {
                     return true;
@@ -853,6 +857,7 @@ namespace springtail {
              * Returns the number of extents that are backing the Page.
              */
             uint32_t extent_count() const {
+                boost::shared_lock lock(_mutex);
                 return _extents.size();
             }
 
