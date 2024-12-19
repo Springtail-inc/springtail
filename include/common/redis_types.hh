@@ -62,32 +62,10 @@ namespace springtail::redis {
     //// Postgres redis key prefixes.  Value defs in: pg_log_mgr/pg_redis_xact.hh
 
     /**
-     * Queue between pg log mgr and gc for transaction processing
-     * args: <db_instance_id>
-     */
-    static constexpr char QUEUE_PG_TRANSACTIONS[] = "{}:queue:pg_xact";
-
-    /**
-     * Maintains a mapping from each XID to the Table OIDs it mutates.
-     * Populated by the PgLogMgr and utilized by the gc::LogParser::Backlog.
-     * There is one sorted set maintained per database.
-     *
-     * args: <db_instance_id>, <db_id>
-     */
-    static constexpr char SET_PG_OID_XIDS[] = "{}:set:pg_xid_oids:{}";
-
-    /**
-     * Queue between the GC-1 and GC-2.  Passes an XidReady object.
+     * Queue between the PgLogMgr and the Committer.  Passes an XidReady object.
      * args: <db_instance_id>
      */
     static constexpr char QUEUE_GC_XID_READY[] = "{}:queue:gc_xid_ready";
-
-    /**
-     * Queue from the GC-2 back to the GC-1.  Passes an XidReady object to notify when a table sync
-     * commit has been processed and the GC-1 can unblock.
-     * args: <db_instance_id>
-     */
-    static constexpr char QUEUE_GC_PARSER_NOTIFY[] = "{}:queue:gc_parser_notify";
 
     //// For RedisDDL
 
@@ -96,6 +74,12 @@ namespace springtail::redis {
      * args: <db_instance_id>, <db_id>, <xid>
      */
     static constexpr char QUEUE_DDL_XID[] = "{}:queue:ddl:xid:{}:{}";
+
+    /**
+     * Queue of DDL index operations for a given XID coming out of the GC1 LogParser
+     * args: <db_instance_id>, <db_id>, <xid>
+     */
+    static constexpr char QUEUE_INDEX_DDL_XID[] = "{}:queue:index:ddl:xid:{}:{}";
 
     /**
      * HASH of pre-commit DDL operations.  Stored with a key of "db_id:xid"
@@ -170,4 +154,10 @@ namespace springtail::redis {
      * see RedisDbTables::decode_pubsub_msg()
      */
     static constexpr char PUBSUB_DB_TABLE_CHANGES[] = "{}:pubsub:db_table_changes";
+
+    /**
+     * HASH of pre-commit DDL operations for index mutations.  Stored with a key of "db_id:xid"
+     * args: <db_instance_id>
+     */
+    static constexpr char HASH_DDL_INDEX_PRECOMMIT[] = "{}:hash:idx:ddl:pc";
 }

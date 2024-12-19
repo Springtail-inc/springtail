@@ -128,7 +128,7 @@ namespace springtail {
         Json::get_to<uint64_t>(_json[ORG_CONFIG], "db_instance_id", db_instance_id);
 
         // read the system properties from redis
-        std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, std::to_string(db_instance_id));
+        std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, db_instance_id);
         std::string system_key = "system_settings";
 
         // read the system properties from redis

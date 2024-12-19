@@ -90,7 +90,7 @@ namespace springtail {
             }
             col["is_pkey"] = c.is_pkey;
             col["position"] = c.position;
-            col["pk_position"] = c.pk_position;
+            col["pkey_pos"] = c.pk_position;
             col["is_generated"] = false;
             columns_json.push_back(col);
 
@@ -227,7 +227,7 @@ namespace springtail {
 
         for (auto &&c: columns) {
             nlohmann::json col;
-            col["name"] = c.column_name;
+            col["name"] = c.name;
             col["position"] = c.position;
             col["idx_position"] = c.idx_position;
             columns_json.push_back(col);
@@ -630,7 +630,6 @@ namespace springtail {
     {
         std::vector<PgMsgSchemaColumn> columns;
         int i = 0;
-        int pkey_pos = 0;
         for (auto &&c: json["columns"]) {
             PgMsgSchemaColumn col;
             col.column_name = c["name"];
@@ -641,12 +640,8 @@ namespace springtail {
             } else {
                 col.default_value = c["default"];
             }
-            col.is_pkey = c["is_pkey"];
-            if (col.is_pkey) {
-                col.pk_position = pkey_pos++;
-            } else {
-                col.pk_position = -1;
-            }
+            col.pk_position = c["pk_position"];
+            col.is_pkey = (col.pk_position != -1);
             col.position = i++;
             columns.push_back(col);
         }
@@ -672,7 +667,7 @@ namespace springtail {
 
         for (auto &&c: json["columns"]) {
             PgMsgSchemaIndexColumn col;
-            col.column_name = c["name"];
+            col.name = c["name"];
             col.position = c["position"];
             col.idx_position = c["idx_position"];
             columns.push_back(col);

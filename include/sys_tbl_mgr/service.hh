@@ -41,6 +41,12 @@ namespace springtail::sys_tbl_mgr {
         /** Drops an index within the system tables. */
         void drop_index(DDLStatement& _return, const DropIndexRequest &request) override;
 
+        /** Set the state of the index within the system tables. */
+        void set_index_state(Status& _return, const SetIndexStateRequest &request) override;
+
+        /** Get the index info. */
+        void get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request) override;
+
         /** Creates a table within the system tables. */
         void create_table(DDLStatement& _return, const TableRequest &request) override;
 
@@ -183,6 +189,14 @@ namespace springtail::sys_tbl_mgr {
         std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
+         * Helper function to read the table indexes.
+         * @param db_id The datebase ID.
+         * @param table_id The table for which we are constructing a schema.
+         * @param access_xid The XID/LSN at which we are querying the schema.
+         */
+        std::vector<IndexInfo> _read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+
+        /**
          * Helper function to apply any in-memory changes to the schema columns that might be
          * required to bring them up-to-date to the provided XID/LSN.
          * @param table_id The table for which we are constructing a schema.
@@ -257,7 +271,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Performs a drop_index() assuming that the correct locks are already held.
          */
-        nlohmann::json _drop_index(const DropIndexRequest &request);
+        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id);
 
         /**
          * Performs a create_table() assuming that the correct locks are already held.
@@ -274,6 +288,17 @@ namespace springtail::sys_tbl_mgr {
          */
         void _update_roots(const UpdateRootsRequest &request);
 
+        /** Performs an set_index_state() assuming that the correct locks are already held.
+         */
+        bool _set_index_state(const SetIndexStateRequest &request);
+
+        /** Performs an get_index_info() assuming that the correct locks are already held.
+         */
+        IndexInfo _get_index_info(const GetIndexInfoRequest &request);
+
+        /** This doesn't return information about index columns
+         */
+        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id, const XidLsn& xid);
 
         /**
          * Retrieve the current read XID for a db.
@@ -291,7 +316,6 @@ namespace springtail::sys_tbl_mgr {
         void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
-
         static Service *_instance; ///< static instance (singleton)
         static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
 

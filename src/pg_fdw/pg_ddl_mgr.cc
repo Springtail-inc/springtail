@@ -391,7 +391,7 @@ namespace springtail::pg_fdw {
         assert(ddl.is_object());
         assert(ddl.contains("action"));
 
-        auto &action = ddl.at("action");
+        auto const &action = ddl.at("action");
         if (action == "create") {
             std::vector<std::tuple<std::string, std::string, bool>> columns;
 
@@ -419,7 +419,7 @@ namespace springtail::pg_fdw {
                                       ddl.at("tid"), columns);
         }
 
-        if (action == "rename") {
+        else if (action == "rename") {
             std::string rename = fmt::format("ALTER FOREIGN TABLE {}.{} RENAME TO {};",
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
@@ -434,13 +434,13 @@ namespace springtail::pg_fdw {
             }
         }
 
-        if (action == "drop") {
+        else if (action == "drop") {
             return fmt::format("DROP FOREIGN TABLE {}.{};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
 
-        if (action == "col_add") {
+        else if (action == "col_add") {
             auto &col = ddl.at("column");
 
             std::string constraints;
@@ -464,14 +464,14 @@ namespace springtail::pg_fdw {
                                constraints);
         }
 
-        if (action == "col_drop") {
+        else if (action == "col_drop") {
             return fmt::format("ALTER FOREIGN TABLE {}.{} DROP COLUMN {};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(ddl.at("column").get<std::string>()));
         }
 
-        if (action == "col_rename") {
+        else if (action == "col_rename") {
             return fmt::format("ALTER FOREIGN TABLE {}.{} RENAME COLUMN {} TO {};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
@@ -479,13 +479,24 @@ namespace springtail::pg_fdw {
                                conn->escape_identifier(ddl.at("new_name").get<std::string>()));
         }
 
-        if (action == "col_nullable") {
+        else if (action == "col_nullable") {
             auto &col = ddl.at("column");
             return fmt::format("ALTER FOREIGN TABLE {}.{} ALTER COLUMN {} {} NOT NULL;",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()),
                                conn->escape_identifier(col.at("name").get<std::string>()),
                                col.at("nullable").get<bool>() ? "DROP" : "SET");
+        }
+
+        else if (action == "create_index") {
+            // TODO: do something? 
+            SPDLOG_ERROR("CREATE INDEX");
+            return "";
+        }
+        else if (action == "drop_index") {
+            // TODO: do something? 
+            SPDLOG_ERROR("DROP INDEX");
+            return "";
         }
 
         // can't currently support other kinds of DDL mutations

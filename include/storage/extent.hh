@@ -85,7 +85,7 @@ namespace springtail {
         }
 
         /** Serialize the header. */
-        std::vector<char> pack()
+        std::vector<char> pack() const
         {
             std::vector<char> data(21);
 

@@ -8,6 +8,7 @@
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
+#include <common/tracing.hh>
 
 namespace springtail {
 
@@ -85,6 +86,9 @@ namespace springtail {
 
         // initialize the logging infrastructure
         init_logging(logging_mask, log_filename, daemon_pid.has_value());
+
+        // initialize the tracing infrastructure
+        tracing::init_tracing();
     }
 
     void springtail_init(const std::string &log_filename,

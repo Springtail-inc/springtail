@@ -2,6 +2,7 @@
 #include <common/properties.hh>
 
 #include <storage/cache.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
 
@@ -846,6 +847,7 @@ namespace springtail {
                                               [&schema](const Extent::Row &row) {
                                                   return FieldTuple(schema->get_sort_fields(), row);
                                               });
+        assert(row_i != (**extent).end());
 
         // note: row's key should match the tuple's key
         assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
