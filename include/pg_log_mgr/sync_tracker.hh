@@ -63,7 +63,7 @@ namespace springtail::pg_log_mgr {
          */
         class XidRecord {
         public:
-            XidRecord(const PgXactMsg::TableSyncMsg &sync_msg)
+            explicit XidRecord(const PgXactMsg::TableSyncMsg &sync_msg)
                 : _pg_xid(sync_msg.pg_xid),
                   _xmax(sync_msg.xmax),
                   _inflight(sync_msg.xips.begin(), sync_msg.xips.end()),
@@ -77,13 +77,13 @@ namespace springtail::pg_log_mgr {
             should_skip(uint32_t pg_xid) const
             {
                 // do a guess-timate if the pgxid wrapped ahead of xmax
-                if (pg_xid < (2 << 26) && _xmax > (2 << 30)) {
+                if (pg_xid < (1 << 26) && _xmax > (1 << 30)) {
                     // we assume that the pg_xid is ahead of xmax
                     return false;
                 }
 
                 // now check if xmax wrapped ahead of the pgxid
-                if (_xmax < (2 << 26) && pg_xid > (2 << 30)) {
+                if (_xmax < (1 << 26) && pg_xid > (1 << 30)) {
                     // we assume that xmax is ahead of pg_xid
                     if (_inflight.contains(pg_xid)) {
                         return false;
