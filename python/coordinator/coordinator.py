@@ -181,10 +181,9 @@ if __name__ == "__main__":
 
     if service_type == "ingestion":
         scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-        scheduler.register_component(factory.create_write_cache_daemon(), 2)
-        scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 3)
-        scheduler.register_component(factory.create_gc_daemon(), 4)
-        scheduler.register_component(factory.create_log_mgr_daemon(), 5)
+        scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+        scheduler.register_component(factory.create_gc_daemon(), 3)
+        scheduler.register_component(factory.create_log_mgr_daemon(), 4)
 
     elif service_type == "fdw":
         try:

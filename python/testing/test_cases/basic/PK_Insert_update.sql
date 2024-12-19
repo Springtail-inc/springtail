@@ -6,8 +6,6 @@ CREATE TABLE IF NOT EXISTS test_no_pkey (
 );
 
 -- Set replica identity for update support.
-ALTER TABLE test_no_pkey REPLICA IDENTITY FULL;
-
 INSERT INTO test_no_pkey (value) VALUES ('duplicate');
 INSERT INTO test_no_pkey (value) VALUES ('duplicate');
 

@@ -10,6 +10,7 @@ set(PG_LOG_SOURCES
     pg_log_reader.cc
     pg_xact_log_writer.cc
     pg_xact_log_reader.cc
+    sync_tracker.cc
 )
 
 add_library(springtail_pglog ${PG_LOG_SOURCES})
@@ -20,6 +21,7 @@ target_include_directories(springtail_pglog
 target_link_libraries(springtail_pglog
     PUBLIC springtail_pg
            springtail_common
+	   springtail_redis
            springtail_xid_mgr
            springtail_storage
            springtail_sys_tbl_mgr
@@ -43,6 +45,7 @@ target_link_libraries(test_log_reader
            springtail_common
            springtail_storage
            springtail_sys_tbl_mgr
+	   springtail_test
     PRIVATE GTest::gtest_main)
 target_include_directories(test_log_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dsymutil_command(test_log_reader)

@@ -10,6 +10,8 @@
 #include <write_cache/write_cache_index_common.hh>
 #include <write_cache/write_cache_table_set.hh>
 
+#include <storage/extent.hh>
+
 namespace springtail {
     /**
      * @brief Write Cache Index -- the core index interface; Contains a set of partitions based on Table ID
@@ -30,94 +32,82 @@ namespace springtail {
         }
 
         /**
-         * @brief Add row to the index
-         * @param tid table id
-         * @param eid extent id
-         * @param data row data
-         */
-        void add_rows(uint64_t tid, uint64_t eid, const std::vector<WriteCacheIndexRowPtr> &data);
-
-        /**
-         * @brief Get list of dirty table ids within xid range
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         * @param count max number of items to return (may be less)
-         * @param cursor cursor indicating current position
-         * @return std::vector<int64_t> list of table IDs
-         */
-        std::vector<int64_t> get_tids(uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
-
-        /**
-         * @brief Get list of dirty extents
+         * @brief Add a new extent to the index
          * @param tid table ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         * @param count max number of items to return (may be less)
-         * @param cursor cursor indicating current position
-         * @return std::vector<int64_t> list of extent IDs
+         * @param pg_xid Postgres XID
+         * @param lsn LSN of the extent
+         * @param data extent data
          */
-        std::vector<int64_t> get_eids(uint64_t tid, uint64_t start_xid, uint64_t end_xid, uint32_t count, uint64_t &cursor);
+        void add_extent(uint64_t tid, uint64_t pg_xid, uint64_t lsn, const ExtentPtr data);
 
         /**
-         * @brief Get data rows
-         * @param tid table ID
-         * @param eid extent ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         * @param count max number of items
-         * @param cursor cursor indicating current position
-         * @return std::vector<std::shared_ptr<WriteCacheIndexRow>>
+         * @brief Add a mapping from springtail XID to Postgres XID
+         * @param pg_xid Postgres XID
+         * @param xid springtail XID
          */
-        std::vector<WriteCacheIndexRowPtr> get_rows(uint64_t tid, uint64_t eid, uint64_t start_xid,
-                                                    uint64_t end_xid, uint32_t count, uint64_t &cursor);
+        void commit(uint64_t pg_xid, uint64_t xid);
+
+        /**
+         * @brief Add a mapping from springtail XID to Postgres XID
+         * @param pg_xids Postgres XID
+         * @param xid springtail XID
+         */
+        void commit(std::vector<uint64_t> pg_xids, uint64_t xid);
+
+        /**
+         * @brief Drop a table from the index
+         * @param tid table ID
+         * @param pg_xid Postgres XID
+         */
+        void drop_table(uint64_t tid, uint64_t pg_xid);
+
+        /**
+         * @brief Drop all data for a given XID
+         * @param pg_xid Postgres XID
+         */
+        void abort(uint64_t pg_xid);
+
+        /**
+         * @brief Drop all data for a given XID
+         * @param pg_xids Postgres XIDs
+         */
+        void abort(std::vector<uint64_t> pg_xids);
+
+        //// Thrift interface
+
+        /**
+         * @brief Get the table ids for a given XID
+         * @param xid springtail XID
+         * @param count number of items to return
+         * @param cursor current offset into result set
+         * @return std::vector<uint64_t>
+         */
+        std::vector<uint64_t> get_tids(uint64_t xid, uint32_t count, uint64_t &cursor);
 
         /**
          * @brief Evict extent from cache
          * @param tid table ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
+         * @param xid springtail XID
          */
-        void evict_table(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        void evict_table(uint64_t tid, uint64_t xid);
 
         /**
-         * @brief Add a table change
-         * @param change ptr to change struct
+         * @brief Evict springtail XID from cache (and all data)
+         * @param xid springtail XID
          */
-        void add_table_change(WriteCacheIndexTableChangePtr change);
+        void evict_xid(uint64_t xid);
 
         /**
-         * @brief Get set of table changes for a table
+         * @brief Get the extents for a table at a given XID
          * @param tid table ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         * @return std::vector<std::shared_ptr<WriteCacheIndexTableChange>>
+         * @param xid springtail XID
+         * @param count max. number of extents to fetch; done when count >= vector size
+         * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @return std::vector<WriteCacheIndexExtentPtr>
          */
-        std::vector<std::shared_ptr<WriteCacheIndexTableChange>> get_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
+        std::vector<WriteCacheIndexExtentPtr> get_extents(uint64_t tid, uint64_t xid,
+                                                          uint32_t count, uint64_t &cursor);
 
-        /**
-         * @brief Evict table changes between xid range
-         * @param tid table ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         */
-        void evict_table_changes(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
-
-        /**
-         * @brief Set clean flag on extent under table
-         * @param tid table ID
-         * @param eid extent ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         */
-        void set_clean_flag(uint64_t tid, uint64_t eid, uint64_t start_xid, uint64_t end_xid);
-
-        /**
-         * @brief Reset (unset) clean flag on all extents under table
-         * @param tid table ID
-         * @param start_xid start of xid range (exclusive)
-         * @param end_xid end of xid range (inclusive)
-         */
-        void reset_clean_flag(uint64_t tid, uint64_t start_xid, uint64_t end_xid);
 
     private:
         /** Set of partitions to hold table data, enables more parallelism */

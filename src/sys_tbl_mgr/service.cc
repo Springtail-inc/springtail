@@ -331,7 +331,8 @@ namespace springtail::sys_tbl_mgr {
     Service::create_table(DDLStatement& _return,
                           const TableRequest &request)
     {
-        SPDLOG_INFO("got create_table()");
+        SPDLOG_INFO("got create_table() -- db {} table {} xid {} lsn {}",
+                    request.db_id, request.table.id, request.xid, request.lsn);
 
         // acquire a shared lock to ensure no one is doing a inalize
         boost::shared_lock lock(_write_mutex);

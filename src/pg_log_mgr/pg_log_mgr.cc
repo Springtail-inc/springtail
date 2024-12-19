@@ -20,6 +20,7 @@
 #include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <pg_log_mgr/pg_log_coordinator.hh>
+#include <pg_log_mgr/sync_tracker.hh>
 
 namespace springtail::pg_log_mgr {
 
@@ -43,16 +44,14 @@ namespace springtail::pg_log_mgr {
             assert(false);
         }
 
-        // clear out GC redis queue
-        _redis_queue.clear();
-
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Starting up: DB state: {}", state);
 
         // fetch latest xid from xid mgr
         XidMgrClient *xid_mgr = XidMgrClient::get_instance();
-        _next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
+        uint64_t next_xid = xid_mgr->get_committed_xid(_db_id, 0) + 1;
+        _pg_log_reader.set_next_xid(next_xid);
 
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", _next_xid-1);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Last committed XID: {}", next_xid-1);
 
         uint64_t lsn = INVALID_LSN;
         if (state == redis::db_state_change::REDIS_STATE_INITIALIZE) {
@@ -94,7 +93,8 @@ namespace springtail::pg_log_mgr {
         // fetch xaction list from xact reader, and add them to Redis
         // these are transactions with springtail XIDs that are > than last committed XID
         PgTransactionPtr last_xact = nullptr;
-        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, _next_xid-1);
+        uint64_t current_xid = _pg_log_reader.get_current_xid();
+        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, current_xid);
         xact_reader.begin();
         while (true) {
             // go through log and fetch batches of transactions to send to redis
@@ -105,20 +105,19 @@ namespace springtail::pg_log_mgr {
             }
 
             for (auto &xact: committed_xacts) {
-                assert (xact->springtail_xid >= _next_xid);
+                assert (xact->springtail_xid >= current_xid);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
             }
 
-            _push_xacts_to_redis(committed_xacts);
             last_xact = committed_xacts.back();
             committed_xacts.clear();
         }
 
         // update next xid if we find an xid higher than committed xid in the log
         uint64_t last_allocated_xid = xact_reader.get_max_sp_xid();
-        if (last_allocated_xid > _next_xid) {
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", _next_xid, last_allocated_xid + 1);
-            _next_xid = last_allocated_xid + 1;
+        if (last_allocated_xid > current_xid) {
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Updating next xid: {} -> {}", current_xid, last_allocated_xid + 1);
+            _pg_log_reader.set_next_xid(last_allocated_xid + 1);
         }
 
         // move contents of stream map into pg log reader, invalidates stream map
@@ -163,10 +162,6 @@ namespace springtail::pg_log_mgr {
         std::filesystem::create_directories(_xact_log_path);
 
         // clear out Redis
-        // GC queue
-        _redis_queue.clear();
-        // GC oid queue
-        _redis_oid_set.clear();
         // Table sync queue
         _redis_sync_queue.clear();
 
@@ -189,10 +184,10 @@ namespace springtail::pg_log_mgr {
                 // if in replaying, wait for replay done before switching to running
                 // XXX this blocks the pubsub thread until replay is done
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
-                _internal_state.wait_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
+                _internal_state.wait_and_set(STATE_REPLAYING, STATE_RUNNING);
             }
             // if in replay done set to running
-            _internal_state.test_and_set(STATE_REPLAY_DONE, STATE_RUNNING);
+            _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
         }
     }
@@ -305,7 +300,7 @@ namespace springtail::pg_log_mgr {
 
         // copy tables
         std::vector<PgCopyResultPtr> res;
-        auto xid = _get_next_xid();
+        auto xid = _pg_log_reader.get_next_xid();
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Copying tables; target xid={}", xid);
         if (table_ids.has_value()) {
             res = PgCopyTable::copy_tables(_db_id, xid, table_ids.value());
@@ -317,14 +312,10 @@ namespace springtail::pg_log_mgr {
         if (res.size() > 0) {
             // process copy results
             _process_copy_results(res);
-            // replay xact logs (queued during stall)
-            _replay_xact_logs();
         } else {
             // no tables copied
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "No tables copied; setting state=running");
-            // rollover xact logger
-            _create_xact_logger();
-            // ste to running this unblocks the xact handler
+            // set to running this unblocks the xact handler
             _internal_state.set(STATE_RUNNING);
             Properties::set_db_state(_db_id, redis::db_state_change::REDIS_STATE_RUNNING);
         }
@@ -336,8 +327,7 @@ namespace springtail::pg_log_mgr {
     {
         // push a message onto xact handler's queue to stall the pipeline
         assert(_internal_state.is(STATE_SYNC_STALL));
-        PgTransactionPtr xact = std::make_shared<PgTransaction>(PgTransaction::TYPE_PIPELINE_STALL);
-        _xact_queue->push(xact);
+        _logger_queue.push_stall();
     }
 
 
@@ -357,58 +347,22 @@ namespace springtail::pg_log_mgr {
             }
 
             // send table sync message to GC
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync msgs: target_xid={}", r->target_xid);
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Recording table sync msgs: target_xid={}", r->target_xid);
             PgXactMsg redis_xact(_db_id, r);
-            _redis_queue.push(redis_xact);
-        }
 
-        // push done message to redis GC queue
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sending table sync done msg");
-        PgXactMsg redis_xact2(_db_id);
-        _redis_queue.push(redis_xact2);
+            bool sync_start = SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
+            if (sync_start) {
+                RedisQueue<gc::XidReady>
+                    committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                                Properties::get_db_instance_id()));
+                committer_queue.push(gc::XidReady(_db_id));
+            }
+        }
 
         // process stalled messages; set state to replaying
         _internal_state.set(STATE_REPLAYING);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Table copy done; state=replaying");
-    }
-
-
-    void
-    PgLogMgr::_replay_xact_logs()
-    {
-        assert(_internal_state.is(STATE_REPLAYING));
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs");
-
-        // replay xact log after a copy
-        PgXactLogReader xact_reader(_xact_log_path, LOG_PREFIX_XACT, LOG_SUFFIX, 0);
-        xact_reader.begin(_xact_sync_log_file);
-        while (true) {
-            // go through log and fetch batches of transactions to send to redis
-            std::vector<PgTransactionPtr> committed_xacts;
-            int num_xacts = xact_reader.next(MAX_REDIS_BATCH_SIZE, committed_xacts);
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs: num_xacts={}", num_xacts);
-            assert (num_xacts == committed_xacts.size());
-            if (num_xacts == 0) {
-                break;
-            }
-            _push_xacts_to_redis(committed_xacts);
-        }
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact logs done");
-
-        // rollover xact logger
-        _create_xact_logger();
-
-        // clear the log resync file in redis
-        RedisMgr::get_instance()->get_client()->del(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id));
-
-        // set state to replay done if we are in replaying state
-        // this unblocks the xact handler
-        _internal_state.set(STATE_REPLAY_DONE);
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Internal state set to: replay_done");
     }
 
     void
@@ -545,6 +499,15 @@ namespace springtail::pg_log_mgr {
                 continue;
             }
 
+            // check for stall message, if so then wait for sync to complete
+            if (log_entry->is_stall_message) {
+                assert (_internal_state.is(STATE_SYNC_STALL));
+                // wait for sync to complete
+                _internal_state.set(STATE_SYNCING);
+                _internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING });
+                continue;
+            }
+
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
                                 log_entry->path, log_entry->start_offset, log_entry->num_messages);
             _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
@@ -603,25 +566,7 @@ namespace springtail::pg_log_mgr {
 
             PgTransactionPtr xact = _xact_queue->pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (xact == nullptr) {
-                continue;
-            }
-
-            // if in sync stall state and we get a pipeline stall message
-            // then rollover log and set state to syncing
-            if (xact->type == PgTransaction::TYPE_PIPELINE_STALL &&
-                _internal_state.is(STATE_SYNC_STALL))
-            {
-                // stall state, rollover log
-                _create_xact_logger();
-
-                // record in redis the log file
-                RedisMgr::get_instance()->get_client()->set(fmt::format(redis::STRING_LOG_RESYNC, _db_instance_id, _db_id),
-                                                            _xact_logger->file().string());
-
-                _xact_sync_log_file = _xact_logger->file();
-
-                _internal_state.set(STATE_SYNCING);
-
+                // timeout
                 continue;
             }
 
@@ -641,13 +586,6 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_process_xact(const PgTransactionPtr xact)
     {
-        StateEnum state = _internal_state.get();
-        if (state == STATE_REPLAYING) {
-            // replaying state, block further messages
-            _internal_state.wait_for_state({STATE_REPLAY_DONE, STATE_RUNNING});
-            // fall through to running state
-        }
-
         // if stream start, just log it
         if (xact->type == PgTransaction::TYPE_STREAM_START ||
             xact->type == PgTransaction::TYPE_STREAM_ABORT) {
@@ -664,75 +602,8 @@ namespace springtail::pg_log_mgr {
             return;
         }
 
-        // first allocate an xid for this xact
-        uint64_t xid = _get_next_xid();
-
-        // next log the data
-        xact->springtail_xid = xid;
+        // log the xact
         _xact_logger->log_commit(xact);
-
-        // block until we are in running state or replay done state
-        if (!_internal_state.is(STATE_RUNNING) && !_internal_state.is(STATE_REPLAY_DONE)) {
-            return;
-        }
-
-        // insert into redis queue
-        _push_xact_to_redis(xact);
-    }
-
-    void
-    PgLogMgr::_push_xact_to_redis(const PgTransactionPtr xact)
-    {
-        uint64_t xid = xact->springtail_xid;
-
-        // go through the oid map and update redis
-        for (auto &oid : xact->oids) {
-            _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
-        }
-
-        // finally send notification to GC
-        PgXactMsg redis_xact(xact->begin_path, xact->commit_path,
-                             _db_id, xact->begin_offset,
-                             xact->commit_offset, xact->xact_lsn,
-                             xid, xact->xid, xact->aborted_xids);
-
-        // track last xact lsn we've pushed to redis
-        assert (xact->xact_lsn > _last_pushed_lsn);
-        _last_pushed_lsn = xact->xact_lsn;
-
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing xact to redis: xid={}, xact_lsn={}", xid, xact->xact_lsn);
-        _redis_queue.push(redis_xact);
-    }
-
-    void
-    PgLogMgr::_push_xacts_to_redis(const std::vector<PgTransactionPtr> &xacts)
-    {
-        std::vector<std::string> msgs;
-        for (auto &xact : xacts) {
-            uint64_t xid = xact->springtail_xid;
-
-            // go through the oid map and update redis
-            for (auto &oid : xact->oids) {
-                _redis_oid_set.add(PgRedisOidValue(oid, xid), xid);
-            }
-
-            PgXactMsg redis_xact(xact->begin_path, xact->commit_path,
-                                 _db_id, xact->begin_offset,
-                                 xact->commit_offset, xact->xact_lsn,
-                                 xid, xact->xid, xact->aborted_xids);
-
-            // track last xact lsn we've pushed to redis
-            assert (xact->xact_lsn > _last_pushed_lsn);
-            _last_pushed_lsn = xact->xact_lsn;
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Pushing (batch) xact to redis: xid={}, xact_lsn={}", xid, xact->xact_lsn);
-
-            // convert to string and push to redis queue
-            msgs.push_back(static_cast<std::string>(redis_xact));
-        }
-
-        // do an underlying batch/bulk push
-        _redis_queue.push(msgs);
     }
 
 } // namespace springtail::pg_log_mgr
