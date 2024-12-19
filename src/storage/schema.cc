@@ -182,7 +182,7 @@ namespace springtail {
         for (auto &&name : old_columns) {
             auto &&i = _field_map.find(name);
 
-            uint32_t size = all_columns.size();
+            int32_t size = all_columns.size();
 
             auto pos = std::ranges::find(sort_columns, name);
             if (pos == sort_columns.end()) {

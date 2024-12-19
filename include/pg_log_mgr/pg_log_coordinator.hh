@@ -34,16 +34,17 @@ namespace springtail::pg_log_mgr {
         ~PgLogCoordinator() = default;
 
         Counter _shutdown_counter;
-        std::mutex _mutex;                              ///< mutex for _log_mgrs map
-        std::map<uint64_t, PgLogMgrPtr> _log_mgrs;      ///< map of db_id to log mgr
-        PubSubThread _config_sub_thread;                ///< pubsub thread for redis config database
-        std::string _repl_log;                          ///< common part of replication log path
-        std::string _trans_log;                         ///< common part of transcation log path
-        uint64_t _db_instance_id;                       ///< database instance id
-        std::string _host;                              ///< host name for connecting to database
-        std::string _user_name;                         ///< user name for connecting to database
-        std::string _password;                          ///< password for connecting to database
-        int _port;                                      ///< port for connecting to database
+        std::mutex _mutex;                         ///< mutex for _log_mgrs map
+        std::map<uint64_t, PgLogMgrPtr> _log_mgrs; ///< map of db_id to log mgr
+        PubSubThread _config_sub_thread;           ///< pubsub thread for redis config database
+        std::string _repl_log;                     ///< common part of replication log path
+        std::string _trans_log;                    ///< common part of transcation log path
+        uint64_t _db_instance_id;                  ///< database instance id
+        std::string _host;                         ///< host name for connecting to database
+        std::string _user_name;                    ///< user name for connecting to database
+        std::string _password;                     ///< password for connecting to database
+        int _port;                                 ///< port for connecting to database
+        std::thread _write_cache_thread;           ///< thread for the write cache thrift interface
 
         /**
          * @brief Function for performing shutdown that is called by Singleton

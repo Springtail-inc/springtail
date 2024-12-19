@@ -36,16 +36,10 @@ namespace springtail {
         }
 
         void ping(thrift::write_cache::Status& _return) override;
-        void add_rows(thrift::write_cache::Status& _return, const thrift::write_cache::AddRowsRequest& request) override;
-        void list_extents(thrift::write_cache::ListExtentsResponse& _return, const thrift::write_cache::ListExtentsRequest& request) override;
-        void get_rows(thrift::write_cache::GetRowsResponse& _return, const thrift::write_cache::GetRowsRequest& request) override;
         void evict_table(thrift::write_cache::Status& _return, const thrift::write_cache::EvictTableRequest& request) override;
-        void add_table_change(thrift::write_cache::Status& _return, const thrift::write_cache::AddTableChangeRequest& request) override;
-        void get_table_changes(thrift::write_cache::GetTableChangeResponse& _return, const thrift::write_cache::GetTableChangeRequest& request) override;
+        void evict_xid(thrift::write_cache::Status& _return, const thrift::write_cache::EvictXidRequest& request) override;
         void list_tables(thrift::write_cache::ListTablesResponse& _return, const thrift::write_cache::ListTablesRequest& request) override;
-        void evict_table_changes(thrift::write_cache::Status& _return, const thrift::write_cache::EvictTableChangesRequest& request) override;
-        void set_clean_flag(thrift::write_cache::Status& _return, const thrift::write_cache::SetCleanFlagRequest& request) override;
-        void reset_clean_flag(thrift::write_cache::Status& _return, const thrift::write_cache::ResetCleanFlagRequest& request) override;
+        void get_extents(thrift::write_cache::GetExtentsResponse& _return, const thrift::write_cache::GetExtentsRequest& request) override;
 
         void add_mapping(thrift::write_cache::Status &_return, const thrift::write_cache::AddMappingRequest &request) override;
         void set_lookup(thrift::write_cache::Status &_return, const thrift::write_cache::SetLookupRequest &request) override;

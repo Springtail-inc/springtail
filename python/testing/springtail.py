@@ -53,9 +53,8 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 CORE_DAEMONS = [
     ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
     ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
-    ('write_cache_daemon', 'src/write_cache/write_cache_daemon'),
-    ('gc_daemon', 'src/garbage_collector/gc_daemon'),
-    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
+    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon'),
+    ('gc_daemon', 'src/garbage_collector/gc_daemon')
 ]
 
 FDW_DAEMONS = [

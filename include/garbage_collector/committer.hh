@@ -39,7 +39,6 @@ namespace springtail::gc {
     public:
         Committer(uint32_t worker_count)
             : _redis(fmt::format(redis::QUEUE_GC_XID_READY, Properties::get_db_instance_id())),
-              _parser_notify(fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, Properties::get_db_instance_id())),
               _worker_count(worker_count)
         {
             _xid_mgr = XidMgrClient::get_instance();
@@ -68,30 +67,10 @@ namespace springtail::gc {
          * The structure that defines a worker job.
          */
         struct WorkerEntry {
-            MutableTablePtr table;
-            uint64_t extent_id;
+            uint64_t db_id;
+            uint64_t tid;
+            uint64_t completed_xid;
             uint64_t xid;
-            uint64_t txid; ///< The XID at which a truncate took place.  Zero if none.
-            uint64_t tlsn; ///< The LSN at which a truncate took place.  Zero if none.
-            bool do_finalize;
-
-            WorkerEntry(MutableTablePtr table, uint64_t extent_id, uint64_t xid, uint64_t txid, uint64_t tlsn)
-                : table(table),
-                  extent_id(extent_id),
-                  xid(xid),
-                  txid(txid),
-                  tlsn(tlsn),
-                  do_finalize(false)
-            { }
-
-            WorkerEntry(MutableTablePtr table, uint64_t xid)
-                : table(table),
-                  extent_id(constant::UNKNOWN_EXTENT),
-                  xid(xid),
-                  txid(0),
-                  tlsn(0),
-                  do_finalize(true)
-            { }
         };
 
         /**
@@ -100,29 +79,24 @@ namespace springtail::gc {
         void _run_worker(int thread_id);
 
         /**
-         * Worker helper function to process a finalize() on a given table.
+         * Process all of the mutations for a given table.
+         * @param db_id The database ID
+         * @param tid The table ID
+         * @param completed_xid The most recent XID we completed processing
+         * @param xid The XID to process
          */
-        void _process_finalize(MutableTablePtr table, uint64_t xid);
+        void _process_table(uint64_t db_id, uint64_t tid, uint64_t completed_xid, uint64_t xid);
 
         /**
-         * Worker helper function to process mutations to a given extent ID.
+         * Process a single extent of mutations from the write cache.
+         * @param db_id The database ID
+         * @param tid The table ID
+         * @param xid The XID to process
+         * @param table The MutableTable being mutated
+         * @param wc_extent The WriteCacheExtent containing the mutations
          */
-        void _process_rows(MutableTablePtr table, uint64_t extent_id, uint64_t xid,
-                           uint64_t txid, uint64_t tlsn);
-
-        /**
-         * Worker helper function to process mutations to a table with no primary key.
-         */
-        void _process_rows_no_primary(MutableTablePtr table, uint64_t xid,
-                                      uint64_t txid, uint64_t tlsn);
-
-        /**
-         * Helper function to find the enclosing page for a key given an ordered set of contiguous
-         * pages.
-         */
-        using SafePageIter = std::vector<StorageCache::SafePagePtr>::iterator;
-        SafePageIter _find_page(std::vector<StorageCache::SafePagePtr>& pages,
-                                         TuplePtr key, ExtentSchemaPtr schema);
+        void _process_extent(uint64_t db_id, uint64_t tid, MutableTablePtr table,
+                             const WriteCacheClient::WriteCacheExtent &wc_extent);
 
         /**
          * Shifts the provided metadata to start at the new future XID.  Returns true if the
@@ -134,10 +108,7 @@ namespace springtail::gc {
         XidMgrClient *_xid_mgr; ///< Pointer to the XidMgr client singleton.
         WriteCacheClient *_write_cache; ///< Pointer to the WriteCache client singleton.
 
-        RedisQueue<XidReady> _redis; ///< The redis queue to communicate between the LogParser and the Committer.
-
-        /** Queue for notify messages from the GC-2 committer back to the GC-1 after a table sync commit. */
-        RedisQueue<XidReady> _parser_notify;
+        RedisQueue<XidReady> _redis; ///< The redis queue to communicate from the PgLogMgr to the Committer.
 
         RedisDDL _redis_ddl; ///< The interfaces to manage the DDL statements in Redis.
         std::string _worker_id; ///< Unique worker ID for the Committer.
@@ -151,10 +122,7 @@ namespace springtail::gc {
         boost::mutex _mutex; ///< Mutex to protect internal maps.
         boost::condition_variable _cv; ///< Condition variable to notify from the workers back to the main loop
 
-        /** Map from TID -> the number of outstanding extents to process.  A value of 0 indicates
-            that all extents have been processed.  A value of -1 indicates that the table has been
-            finalized. */
-        std::map<uint64_t, int64_t> _tid_count;
+        std::set<uint64_t> _tid_set; ///< Set of in-flight tables being processed.
 
         /** Cache of mutable tables that are in-flight. */
         std::map<uint64_t, MutableTablePtr> _table_map;

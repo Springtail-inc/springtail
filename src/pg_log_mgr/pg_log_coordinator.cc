@@ -6,6 +6,8 @@
 #include <pg_log_mgr/pg_log_coordinator.hh>
 #include <pg_log_mgr/pg_log_mgr.hh>
 
+#include <write_cache/write_cache_server.hh>
+
 namespace springtail::pg_log_mgr {
 
     void
@@ -13,6 +15,9 @@ namespace springtail::pg_log_mgr {
     {
         // shutdown redis pubsub thread
         _config_sub_thread.shutdown();
+
+        // shutdown the write cache thread
+        WriteCacheServer::shutdown();
 
         // shut down all log managers
         std::unique_lock lock(_mutex);
@@ -54,6 +59,11 @@ namespace springtail::pg_log_mgr {
             });
 
          _config_sub_thread.start();
+
+         // create a thread for the write cache
+         _write_cache_thread = std::thread([](){
+             WriteCacheServer::startup();
+         });
    }
 
     void
