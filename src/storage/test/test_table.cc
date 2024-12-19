@@ -868,7 +868,7 @@ namespace {
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
-        int count = 0;
+        int counter = 0;
         std::string prev = "";
         for (auto &row : *table) {
             if (prev != "") {
@@ -876,9 +876,9 @@ namespace {
             }
 
             prev = _fields->at(1)->get_text(row);
-            ++count;
+            ++counter;
         }
-        ASSERT_EQ(count, 5000);
+        ASSERT_EQ(counter, 5000);
 
         // test the first index
         {
@@ -887,8 +887,8 @@ namespace {
             uint64_t test_value = 20;
 
             for (auto &row : *table) {
-                auto v = _fields->at(0)->get_uint64(row);
-                if (v >= test_value) {
+                auto value = _fields->at(0)->get_uint64(row);
+                if (value >= test_value) {
                     ++set_size;
                 }
             }
@@ -904,8 +904,8 @@ namespace {
             int count = 0;
             for (; it != end_it; ++it) {
                 auto row = *it;
-                auto v = _fields->at(0)->get_uint64(row);
-                ASSERT_LE(test_value, v);
+                auto value = _fields->at(0)->get_uint64(row);
+                ASSERT_LE(test_value, value);
                 ++count;
             }
             ASSERT_EQ(count, set_size);
@@ -923,8 +923,8 @@ namespace {
             auto end_it = table->end(1);
             for (; it != end_it; ++it) {
                 auto row = *it;
-                auto v = _fields->at(1)->get_text(row);
-                ASSERT_LE(test_value[0], v[0]);
+                auto txt = _fields->at(1)->get_text(row);
+                ASSERT_LE(test_value[0], txt[0]);
             }
         }
     }

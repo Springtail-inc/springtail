@@ -102,7 +102,7 @@ namespace springtail {
                     :Tracker{table}
                 {}
 
-                Primary(Primary&&) = default;
+                Primary(Primary&&) noexcept = default;
                 virtual ~Primary() = default;
 
                 void next() override;
