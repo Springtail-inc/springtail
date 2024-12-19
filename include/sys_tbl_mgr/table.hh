@@ -47,9 +47,11 @@ namespace springtail {
         class Iterator {
             friend Table;
 
-            // We use the same Iterator type for both primary and secondary indexes.
-            // However the way the indexes move around isn't the same.
-            // Tracker provides an abstraction the various index types.
+            /** 
+             * We use the same Iterator type for both primary and secondary indexes.
+             * However the way the indexes move around isn't the same.
+             * Tracker provides an abstraction for the various index types.
+             */
             struct Tracker
             {
                 explicit Tracker(const Table *table)
@@ -82,7 +84,9 @@ namespace springtail {
                 BTree::Iterator _btree_i; ///< An iterator into the BTree.
             };
 
-            // This is to iterate using the primary index
+            /**
+             * This is to iterate using the primary index.
+             */
             struct Primary : Tracker
             {
                 Primary(const Table *table,
@@ -123,6 +127,9 @@ namespace springtail {
                 StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
             };
 
+            /**
+             * This is to iterate using the secondary index.
+             */
             struct Secondary : Tracker
             {
                 Secondary(const Table *table,
@@ -147,7 +154,6 @@ namespace springtail {
                 friend bool operator==(const Secondary& a, const Secondary& b) {
                     const Tracker& ta = a;
                     const Tracker& tb = b;
-                    //TODO: ...
                     return ta == tb;
                 }
 

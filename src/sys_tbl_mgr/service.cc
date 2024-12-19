@@ -1149,11 +1149,6 @@ namespace springtail::sys_tbl_mgr {
             if (it != indexes.end()) {
                 indexes.erase(it);
             }
-            // make sure to sort by idx_position
-            std::ranges::sort(info.columns, [](auto const& c1, auto const& c2) {
-                    assert(c1.idx_position != c2.idx_position);
-                    return c1.idx_position < c2.idx_position; });
-
             indexes.push_back(std::move(info));
         }
 
