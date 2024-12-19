@@ -11,7 +11,7 @@
 
 #include <thrift/sys_tbl_mgr/Service.h>
 
-#define RECONNECT_SLEEP_INTERVAL_USEC 1000000
+constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
 namespace springtail::sys_tbl_mgr {
     /**

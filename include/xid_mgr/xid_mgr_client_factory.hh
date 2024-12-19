@@ -12,7 +12,7 @@
 
 #include <thrift/xid_mgr/ThriftXidMgr.h>
 
-#define RECONNECT_SLEEP_INTERVAL_USEC 1000000
+constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
 namespace springtail {
     /**
