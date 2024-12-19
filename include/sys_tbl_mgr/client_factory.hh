@@ -11,6 +11,8 @@
 
 #include <thrift/sys_tbl_mgr/Service.h>
 
+constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
+
 namespace springtail::sys_tbl_mgr {
     /**
      * @brief Object pool factory for thrift cache client objects
@@ -50,10 +52,14 @@ namespace springtail::sys_tbl_mgr {
         {
             // validate that the transport is connected
             auto proto = client->getOutputProtocol();
-            if (proto->getTransport()->isOpen()) {
-                return;
+            while (!proto->getTransport()->isOpen()) {
+                try {
+                    proto->getTransport()->open();
+                } catch (const apache::thrift::transport::TTransportException& e) {
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed to connect to thrift server: ", e.what());
+                    ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
+                }
             }
-            proto->getTransport()->open();
         }
 
     private:
