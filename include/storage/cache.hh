@@ -825,10 +825,7 @@ namespace springtail {
              */
             ExtentHeader header() const {
                 boost::shared_lock lock(_mutex);
-
-                assert(!_extents.empty());
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
-                return (*extent)->header();
+                return _header();
             }
 
             /**
@@ -837,20 +834,7 @@ namespace springtail {
              */
             bool empty() const {
                 boost::shared_lock lock(_mutex);
-
-                // if no extents, empty
-                if (_extents.empty()) {
-                    return true;
-                }
-
-                // if more than one extent, can't be empty
-                if (_extents.size() > 1) {
-                    return false;
-                }
-
-                // if one extent, and the extent is empty, then empty
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
-                return (*extent)->empty();
+                return _empty();
             }
 
             /**
@@ -909,6 +893,36 @@ namespace springtail {
 
         private:
             // HELPER FUNCTIONS
+
+            /**
+             * Returns the Page object's extent header data.  It is based of the original extent the
+             * Page is based on.
+             */
+            ExtentHeader _header() const {
+                assert(!_extents.empty());
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                return (*extent)->header();
+            }
+
+            /**
+             * Checks if the Page object is empty -- either contains no extents, or a single extent
+             * with no rows.
+             */
+            bool _empty() const {
+                // if no extents, empty
+                if (_extents.empty()) {
+                    return true;
+                }
+
+                // if more than one extent, can't be empty
+                if (_extents.size() > 1) {
+                    return false;
+                }
+
+                // if one extent, and the extent is empty, then empty
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                return (*extent)->empty();
+            }
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.
