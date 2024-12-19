@@ -305,13 +305,18 @@ class Properties:
         """Add a database to the database instance."""
         # check if the database already exists
         db_configs = self.get_db_configs()
+        max_id = 0
         for db in db_configs:
+            if int(db['id']) > max_id:
+                max_id = int(db['id'])
             if db['name'] == dbname:
                 return
 
+        new_id = str(max_id+1)
+
         # add the database config
         key = self.db_instance_id + ':db_config'
-        self.redis.hset(key, dbname, json.dumps({
+        self.redis.hset(key, new_id, json.dumps({
             'name': dbname,
             'replication_slot': dbname + '_slot',
             'publication_name': dbname + '_pub',
@@ -324,7 +329,7 @@ class Properties:
         # add the database to the database instance
         instance_key = self.db_instance_id + ':instance_config'
         db_ids = json.loads(self.redis.hget(instance_key, 'database_ids'))
-        db_ids.append(dbname)
+        db_ids.append(new_id)
         self.redis.hset(instance_key, 'database_ids', json.dumps(db_ids))
         self.cache.pop('db_instance_config', None)
 

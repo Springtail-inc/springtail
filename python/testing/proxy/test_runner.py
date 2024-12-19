@@ -120,16 +120,11 @@ class Test:
         schedule_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
         resultmap_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/resultmap'))
 
-        for f in schedule_file:
+        for f in ['parallel_schedule']: #schedule_file:
             shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
 
         for f in resultmap_file:
             shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
-
-        # set the environment variables expected by pg_regress sql files
-        #os.environ['PG_ABS_SRCDIR'] = self._regress_path
-        #os.environ['PG_ABS_BUILDDIR'] = self._regress_path
-        # PG_LIBDIR, PG_DLSUFFIX
 
 
     def reset_db(self) -> None:
@@ -187,7 +182,9 @@ class Test:
                 for line in f:
                     if 'not ok' in line:
                         err_count += 1
-                    total += 1
+                        total += 1
+                    elif 'ok' in line:
+                        total += 1
 
             logging.info(f'Regression tests failed: {err_count} / {total}')
 
@@ -202,9 +199,9 @@ class Test:
         logging.debug('Starting the proxy')
 
         # override the proxy type to 'primary'
-        os.environ['SPRINGTAIL_PROPERTIES', 'proxy.mode=primary']
+        os.environ['SPRINGTAIL_PROPERTIES'] = 'proxy.mode=primary'
 
-        factory = ComponentFactory(self._install_dir, self._props.get_pid_path())
+        factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props.get_pid_path())
         proxy = factory.create_proxy()
         if proxy.is_running():
             if not proxy.shutdown():
@@ -246,12 +243,12 @@ class Test:
         self.reset_db()
 
         # start the proxy
-        # self.start_proxy()
+        self.start_proxy()
 
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
-        self.run_regress_cmd(self._primary_port, '.proxy')
-        # self.run_regress_cmd(self._proxy_config['port'], 'proxy.out')
+        # self.run_regress_cmd(self._primary_port, '.proxy')
+        self.run_regress_cmd(self._proxy_config['port'], 'proxy.out')
 
 
     def cleanup(self):
