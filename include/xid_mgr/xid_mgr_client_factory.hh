@@ -8,8 +8,11 @@
 #include <thrift/protocol/TCompactProtocol.h>
 
 #include <common/object_pool.hh>
+#include <common/logging.hh>
 
 #include <thrift/xid_mgr/ThriftXidMgr.h>
+
+constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
 namespace springtail {
     /**
@@ -54,10 +57,14 @@ namespace springtail {
         {
             // validate that the transport is connected
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
-            if (proto->getTransport()->isOpen()) {
-                return;
+            while (!proto->getTransport()->isOpen()) {
+                try {
+                    proto->getTransport()->open();
+                } catch (const apache::thrift::transport::TTransportException& e) {
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed to connect to thrift server: ", e.what());
+                    ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
+                }
             }
-            proto->getTransport()->open();
         }
 
     private:
