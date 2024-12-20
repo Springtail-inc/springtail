@@ -37,6 +37,22 @@ namespace springtail {
             return col_names;
         }
 
+        std::shared_ptr<ExtentSchema> 
+        _create_index_schema(ExtentSchemaPtr schema, const std::vector<uint32_t>& index_columns)
+        {
+
+            // get the column names in the order they appear in the index
+            std::vector<std::string> col_names = _get_column_names(schema, index_columns);
+
+            SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
+            SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
+
+            auto key = col_names;
+            key.push_back(constant::INDEX_EID_FIELD);
+            key.push_back(constant::INDEX_RID_FIELD);
+
+            return schema->create_schema(col_names, { extent_c, row_c }, key);
+        }
     }
 
     Table::Table(uint64_t db_id,
@@ -110,7 +126,6 @@ namespace springtail {
         if (primary_key.empty()) {
             std::vector<std::string> non_primary_key = { constant::INDEX_EID_FIELD };
             primary_schema = _schema->create_schema({}, { extent_c }, non_primary_key);
-
         } else {
             primary_schema = _schema->create_schema(primary_key, { extent_c }, primary_key);
         }
@@ -194,16 +209,29 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::lower_bound(TuplePtr search_key)
+    Table::lower_bound(TuplePtr search_key, uint32_t index_id)
     {
+        if (index_id != constant::INDEX_PRIMARY) {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto &&i = btree->lower_bound(search_key);
+            if (i == btree->end()) {
+                return end(index_id);
+            }
+            return Iterator(this, btree, i, index_schema);
+        }
         // check if the table is vacant
         if (_primary_index == nullptr) {
             return end();
         }
 
+        BTreePtr btree = index(index_id);
+
         // find the extent that could contain the lower_bound() key
-        auto &&i = _primary_index->lower_bound(search_key);
-        if (i == _primary_index->end()) {
+        auto &&i = btree->lower_bound(search_key);
+        if (i == btree->end()) {
             return end();
         }
 
@@ -220,8 +248,20 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::upper_bound(TuplePtr search_key)
+    Table::upper_bound(TuplePtr search_key, uint32_t index_id)
     {
+        if (index_id != constant::INDEX_PRIMARY) {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto &&i = btree->upper_bound(search_key);
+            if (i == btree->end()) {
+                return end(index_id);
+            }
+            return Iterator(this, btree, i, index_schema);
+        }
+
         // check if the table is vacant
         if (_primary_index == nullptr) {
             return end();
@@ -320,18 +360,7 @@ namespace springtail {
     BTreePtr 
     Table::_create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset)
     {
-        // get the column names in the order they appear in the index
-        std::vector<std::string> col_names = _get_column_names(_schema, index_columns);
-
-        SchemaColumn extent_c(constant::INDEX_EID_FIELD, 0, SchemaType::UINT64, 0, false);
-        SchemaColumn row_c(constant::INDEX_RID_FIELD, 1, SchemaType::UINT32, 0, false);
-
-        auto key = col_names;
-        key.push_back(constant::INDEX_EID_FIELD);
-        key.push_back(constant::INDEX_RID_FIELD);
-
-        auto index_schema = _schema->create_schema(col_names, { extent_c, row_c }, key);
-
+        auto index_schema = _create_index_schema(_schema, index_columns);
         auto btree = std::make_shared<BTree>(_table_dir / fmt::format(constant::INDEX_FILE, index_id),
                 _xid, index_schema,
                 offset);
@@ -648,8 +677,8 @@ namespace springtail {
                 auto key_fields = _schema->get_fields(keys);
                 auto &&skey = std::make_shared<KeyValueTuple>(key_fields, value_fields, row);
                 secondary->remove(skey);
-                ++row_id;
             }
+            ++row_id;
         }
     }
 
@@ -711,8 +740,8 @@ namespace springtail {
                     // note: uncomment if you need to debug the entries being populated into the secondary indexes
                     // SPDLOG_DEBUG_MODULE(LOG_BTREE, "Secondary populate {}", svalue->to_string());
                     secondary->insert(svalue);
-                    ++row_id;
                 }
+                ++row_id;
             }
 
             SPDLOG_DEBUG_MODULE(LOG_BTREE, "Populated {} secondary rows", row_id);
@@ -1125,4 +1154,69 @@ namespace springtail {
         }
     }
 
+    void Table::Iterator::Primary::next()
+    {
+        // move to the next row in the data extent
+        ++_page_i;
+        if (_page_i != _page->end()) {
+            return;
+        }
+
+        // no more rows in the extent, so need to move to the next data extent
+        ++_btree_i;
+        if (_btree_i == _btree->end()) {
+            return;
+        }
+
+        // retrieve the data extent
+        _page = _table->_read_page_via_primary(_btree_i);
+        _page_i = _page->begin();
+    }
+
+    void Table::Iterator::Primary::prev()
+    {
+        // check if this is end()
+        if (_page.empty()) {
+            // move to the final page referenced by the primary index
+            assert(_btree_i == _btree->end());
+            --_btree_i;
+
+            // read the page and reference the end() of that page
+            _page = _table->_read_page_via_primary(_btree_i);
+            _page_i = _page->end();
+        }
+
+        // check if we are on the first row
+        if (_page_i == _page->begin()) {
+            // need to move to the previous page
+            --_btree_i;
+
+            // read the page and reference the end() of that page
+            _page = _table->_read_page_via_primary(_btree_i);
+            _page_i = _page->end();
+        }
+
+        // move to the previous row
+        --_page_i;
+    }
+
+    void Table::Iterator::Secondary::next()
+    {
+        ++_btree_i;
+        if (_btree_i == _btree->end()) {
+            return;
+        }
+    }
+    void Table::Iterator::Secondary::prev()
+    {
+        --_btree_i;
+    }
+
+    const Extent::Row& Table::Iterator::Secondary::row() const
+    {
+        uint64_t extent_id = _extent_id_f->get_uint64(*_btree_i);
+        uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
+        auto page = _table->_read_page(extent_id);
+        return *page->at(row_id);
+    }
 }

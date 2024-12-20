@@ -4,8 +4,6 @@
 #include <memory>
 #include <shared_mutex>
 #include <optional>
-#include <thread>
-#include <atomic>
 
 #include <common/constants.hh>
 #include <common/concurrent_queue.hh>
@@ -19,6 +17,7 @@
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
+#include <sys_tbl_mgr/client.hh>
 
 #include <xid_mgr/xid_mgr_client.hh>
 
@@ -76,29 +75,16 @@ namespace springtail::pg_fdw {
         std::optional<Table::Iterator> iter_end = std::nullopt;
 
         std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
-        std::vector<uint32_t> pkey_column_ids;        ///< Primary key column IDs
         std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
         std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
+        std::vector<Index> indexes; ///< List of table indexes including the primary index. 
+                                    /// Index columns are sorted by their position in the index.
+        std::optional<Index> index; ///< Index id to use for scanning
+
 
         /** Constructor */
-        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid)
-            : table(table), tid(tid), xid(xid), stats(table->get_stats())
-        {
-            // fetch the columns and column IDs for the table
-            columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
-
-            // populate pkey column ids
-            int num_pkeys = 0;
-            pkey_column_ids.resize(columns.size());
-            for (const auto &col : columns) {
-                if (col.second.exists && col.second.pkey_position.has_value()) {
-                    pkey_column_ids[col.second.pkey_position.value()] = col.first;
-                    num_pkeys++;
-                }
-            }
-            pkey_column_ids.resize(num_pkeys);
-        }
+        PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
     };
     using PgFdwStatePtr = std::shared_ptr<PgFdwState>;
 
@@ -276,6 +262,7 @@ namespace springtail::pg_fdw {
         static FieldTuplePtr _gen_qual_tuple(const std::vector<ConstQualPtr> &quals,
                                              const FieldArrayPtr qual_fields);
 
-
+        friend std::vector<ConstQualPtr>
+        _get_index_quals(Index const& idx, List const& qual_list);
     };
 } // namespace springtail::pg_fdw
