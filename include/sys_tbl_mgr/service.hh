@@ -171,9 +171,13 @@ namespace springtail::sys_tbl_mgr {
          * StorageCache.  Nothing from the cache is not evicted until _clear_schema_info() is
          * called.
          * @param table_id The table that the schema is for.
+         * @param table_name The table name.
+         * @param schema The table schema.
          * @param columns The set of column data to record.
          */
-        void _set_schema_info(uint64_t db_id, uint64_t table_id, const std::vector<ColumnHistory> &columns);
+        void _set_schema_info(uint64_t db_id, uint64_t table_id,
+                const std::string& table_name, const std::string& schema,
+                const std::vector<ColumnHistory> &columns);
 
         /**
          * Clears the cache of schema data.  Called by finalize() once the system tables are

@@ -133,7 +133,7 @@ CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
-    tab_obj record;
+    ind_obj record;
     msg text;
     json_columns json;
 BEGIN
@@ -145,30 +145,27 @@ BEGIN
                 c.oid AS table_oid,
                 c.relname AS table_name,
                 i.indisunique AS is_unique,
-                i.indisprimary AS primary_idx
+                i.indisprimary AS primary_idx,
+                i.indkey AS indkey
             FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-            WHERE i.indexrelid = %s', obj.objid) INTO tab_obj;
+            WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
 
-        IF tab_obj.primary_idx is true THEN
+        IF ind_obj.primary_idx is true THEN
             RETURN;
         END IF;
 
         -- get index columns
         SELECT json_agg(json_col)
         FROM (
-            SELECT json_build_object('name', column_name,
-                'position', ordinal_position,
-                'idx_position', array_position(pgi.indkey, pga.attnum)
+            SELECT json_build_object('name', pga.attname,
+                'position', pga.attnum,
+                'idx_position', array_position(ind_obj.indkey, pga.attnum)
             ) AS json_col
             FROM pg_attribute pga
-            JOIN information_schema.columns
-                ON column_name=pga.attname
-            LEFT OUTER JOIN pg_index pgi
-                ON pgi.indexrelid=obj.objid
-            WHERE pgi.indexrelid=obj.objid
-                AND pga.attrelid=pgi.indrelid
-                AND obj.object_type = 'index'
-                AND (array_position(pgi.indkey, pga.attnum) IS NOT NULL)
+            WHERE
+                pga.attrelid=ind_obj.table_oid
+                AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
+                AND attisdropped=false
         ) AS obj_select
         INTO json_columns;
 
@@ -179,9 +176,9 @@ BEGIN
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'identity', obj.object_identity,
-            'table_oid', tab_obj.table_oid::bigint,
-            'table_name', tab_obj.table_name,
-            'is_unique', tab_obj.is_unique,
+            'table_oid', ind_obj.table_oid::bigint,
+            'table_name', ind_obj.table_name,
+            'is_unique', ind_obj.is_unique,
             'columns', json_columns);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
