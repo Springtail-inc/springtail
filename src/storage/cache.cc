@@ -612,7 +612,7 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // check if the page is empty
-        if (empty()) {
+        if (_empty()) {
             return end();
         }
 
@@ -936,7 +936,7 @@ namespace springtail {
         std::vector<ExtentRef> new_extents;
         for (auto &ref : _extents) {
             // get a new extent
-            ExtentHeader new_header(header().type, target_xid, target_schema->row_size());
+            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size());
             auto new_extent = cache->_data_cache->get_empty(_file, new_header);
 
             // get the old extent
