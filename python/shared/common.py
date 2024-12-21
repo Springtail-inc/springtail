@@ -97,17 +97,29 @@ def kill_processes(names : List[str]) -> None:
             proc.kill()
 
 
-def run_command(command, args : List[str], outfile : str = None, no_err : bool = False, cwd : str = os.getcwd()) -> Optional[str]:
+def run_command(command, args : List[str], outfile : str = None, no_err : bool = False, cwd : str = os.getcwd(), timeout : float = None) -> Optional[str]:
     """Run the given command with the given arguments and return the last line of the output."""
     command_with_args = [command] + args
 
-    # Run the external command
+    check = False
+    if timeout is not None:
+        check = True
+
+    # Run the external command in try block due to timeout
     result = None
-    if outfile:
-        with open(outfile, 'w') as f:
-            result = subprocess.run(command_with_args, stdout=f, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd)
-    else:
-        result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd)
+    try:
+        if outfile:
+            with open(outfile, 'w') as f:
+                result = subprocess.run(command_with_args, stdout=f, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd, check=check, timeout=timeout)
+        else:
+            result = subprocess.run(command_with_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False, cwd=cwd, check=check, timeout=timeout)
+    except subprocess.TimeoutExpired as te:
+        logging.error("Command timed out: {' '.join(command_with_args)}")
+        raise te
+    except subprocess.CalledProcessError as cpe:
+        logging.error(f"Command failed with error: {cpe.returncode}")
+        result = cpe
+        pass
 
     # Check if the command was successful
     if result.returncode != 0 and not no_err:

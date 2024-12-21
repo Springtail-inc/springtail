@@ -6,6 +6,7 @@ import argparse
 import glob
 import shutil
 import datetime
+import time
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +22,9 @@ from properties import Properties
 from common import (
     run_command,
     makedir,
-    execute_sql
+    execute_sql,
+    execute_sql_script,
+    running_pids
 )
 from sysutils import (
     check_postgres_running,
@@ -62,6 +65,8 @@ class Test:
 
         # add the regression database to redis
         self._props.add_database(REGRESSION_DB)
+        # set db state to running so it can be used by the proxy
+        self._props.set_db_state(REGRESSION_DB, 'running')
 
         # get the path to the pg_regress binary
         # pkglibdir looks like: /usr/lib/postgresql/16/lib
@@ -101,29 +106,24 @@ class Test:
         makedir(self._result_path, '777');
 
         # fetch the sql, expected and data files from the external libpq build
-        sql_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/sql/*.sql'))
-        expected_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/expected/*.out'))
-        data_files = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/data/*.data'))
+        sql_files = glob.glob(os.path.join(os.getcwd(), 'tests/sql/*.sql'))
+        expected_files = glob.glob(os.path.join(os.getcwd(), 'tests/sql/*.out'))
+        data_files = glob.glob(os.path.join(os.getcwd(), 'tests/data/*.data'))
 
         # create symlinks to the sql and expected files
         for file in sql_files:
-            os.symlink(file, os.path.join(self._sql_path, os.path.basename(file)))
+            shutil.copy(file, os.path.join(self._sql_path, os.path.basename(file)))
 
         for file in expected_files:
-            os.symlink(file, os.path.join(self._expected_path, os.path.basename(file)))
+            shutil.copy(file, os.path.join(self._expected_path, os.path.basename(file)))
 
         # copy the data files
         for file in data_files:
             shutil.copy(file, os.path.join(self._data_path, os.path.basename(file)))
 
-        # copy the resultmap and the schedule files
-        schedule_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/parallel_schedule'))
-        resultmap_file = glob.glob(os.path.join(self._external_dir, 'vcpkg/buildtrees/libpq/src/*/src/test/regress/resultmap'))
-
-        for f in ['parallel_schedule']: #schedule_file:
-            shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
-
-        for f in resultmap_file:
+        # copy the schedule files
+        schedule_files = glob.glob(os.path.join(os.getcwd(), 'tests/schedules/*'))
+        for f in schedule_files:
             shutil.copy(f, os.path.join(self._regress_path, os.path.basename(f)))
 
 
@@ -137,8 +137,21 @@ class Test:
         execute_sql(primary_conn, f'CREATE DATABASE {REGRESSION_DB}')
         primary_conn.close()
 
+        # load the trigger functions
+        primary_conn = springtail.connect_db_instance(self._props, REGRESSION_DB)
+        parent_dir = os.path.dirname(self._install_dir)
+        trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
+        execute_sql_script(primary_conn, trigger_sql)
+        primary_conn.close()
 
-    def run_regress_cmd(self, port : int, suffix : str) -> None:
+        primary_conn = springtail.connect_db_instance(self._props, "springtail")
+        parent_dir = os.path.dirname(self._install_dir)
+        trigger_sql = os.path.join(parent_dir, 'scripts/triggers.sql')
+        execute_sql_script(primary_conn, trigger_sql)
+        primary_conn.close()
+
+
+    def run_regress_cmd(self, port : int, schedule : str, suffix : str) -> None:
         """Run the regression test"""
         # remove all files in result directory
         for f in os.listdir(self._result_path):
@@ -149,6 +162,18 @@ class Test:
             if os.path.exists(os.path.join(self._regress_path, f)):
                 os.remove(os.path.join(self._regress_path, f))
 
+        # see if there is a timeout in the schedule file
+        timeout = 60
+        with open(os.path.join(self._regress_path, schedule), 'r') as f:
+            line = f.readline()
+            try:
+                if 'timeout' in line:
+                    timeout = float(line.split('=')[1].strip())
+            except:
+                timeout = 60
+                pass
+
+
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
         args = [f'--dbname={REGRESSION_DB}',
@@ -156,14 +181,15 @@ class Test:
                 f'--host=localhost',
                 f'--port={port}',
                 f'--user={self._primary_user}',
-                f'--schedule={os.path.join(self._regress_path, 'parallel_schedule')}',
+                f'--schedule={os.path.join(self._regress_path, schedule)}',
                 '--max-connections=1',
                 '--use-existing']
 
         logging.info(self._pg_regress + ' ' + ' '.join(args))
+        logging.info(f"Timeout: {timeout} seconds")
 
-        # run the regression tests
-        out = run_command(self._pg_regress, args, no_err=True, cwd=self._regress_path)
+        # run the regression tests; throws a subprocess.TimeoutExpired  exception if the tests timeout
+        out = run_command(self._pg_regress, args, no_err=True, cwd=self._regress_path, timeout=timeout)
 
         if '# All' in out:  # all tests passed, return
             logging.info('Regression tests completed successfully')
@@ -193,7 +219,7 @@ class Test:
         os.rename(os.path.join(self._regress_path, 'regression.diffs'), os.path.join(self._regress_path, 'regression.diff.' + suffix))
 
 
-    def start_proxy(self) -> None:
+    def start_proxy(self, manual_proxy : bool = False) -> None:
         """Start the proxy"""
         # start the proxy
         logging.debug('Starting the proxy')
@@ -201,16 +227,38 @@ class Test:
         # override the proxy type to 'primary'
         os.environ['SPRINGTAIL_PROPERTIES'] = 'proxy.mode=primary'
 
-        factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props.get_pid_path())
-        proxy = factory.create_proxy()
-        if proxy.is_running():
-            if not proxy.shutdown():
-                raise ValueError("Failed to stop the proxy")
-        if not proxy.start():
-            raise ValueError("Failed to start the proxy")
+        # remove logs from previous runs
+        if os.path.exists(os.path.join(self._props.get_log_path(), 'proxy.log')):
+            os.remove(os.path.join(self._props.get_log_path(), 'proxy.log'))
+
+        # start proxy
+        if manual_proxy:
+            # wait for user input before continuing
+            while True:
+                print('\nPress enter once proxy is started and running:')
+                input()
+                (pids, not_running) = running_pids(['proxy'])
+                if not pids:
+                    print("Can't find running proxy process")
+                else:
+                    break
+        else:
+            # create proxy component
+            factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props.get_pid_path())
+            proxy = factory.create_proxy()
+
+            if proxy.is_running():
+                if not proxy.shutdown():
+                    raise ValueError("Failed to stop the proxy")
+
+            if not proxy.start():
+                raise ValueError("Failed to start the proxy")
+
+            # wait for the proxy to start
+            time.sleep(2)
 
 
-    def run_regress(self) -> None:
+    def run_regress(self, schedule: str, manual_proxy: bool = False) -> None:
         """Run the regression tests"""
         # make sure postgres is running
         if not check_postgres_running():
@@ -228,7 +276,7 @@ class Test:
         self.setup_regress_files()
 
         # run the regression tests first against normal postgres
-        self.run_regress_cmd(self._primary_port, 'pg.out')
+        self.run_regress_cmd(self._primary_port, schedule, 'pg.out')
 
         # rename the expected dir
         os.rename(self._expected_path, self._expected_path + '.pg')
@@ -243,12 +291,12 @@ class Test:
         self.reset_db()
 
         # start the proxy
-        self.start_proxy()
+        self.start_proxy(manual_proxy)
 
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
         # self.run_regress_cmd(self._primary_port, '.proxy')
-        self.run_regress_cmd(self._proxy_config['port'], 'proxy.out')
+        self.run_regress_cmd(self._proxy_config['port'], schedule, 'proxy.out')
 
 
     def cleanup(self):
@@ -261,12 +309,27 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run Springtail Proxy tests")
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
+    parser.add_argument('-m', '--manual', action='store_true', default=False, help='Run the proxy manually')
+    parser.add_argument('-s', '--schedule', type=str, default='postgres_all', help='Path to the schedule file')
+    parser.add_argument('-l', '--list', action='store_true', default=False, help='List all schedules')
     return parser.parse_args()
 
 ## main()
 if __name__ == "__main__":
     # parse the command line arguments
     args = parse_arguments()
+
+    if args.list:
+        # list all the schedules
+        schedules = glob.glob(os.path.join(os.getcwd(), 'tests/schedules/*'))
+        for s in schedules:
+            print(os.path.basename(s))
+        sys.exit(0)
+
+    if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
+        raise ValueError(f"Schedule file not found: {args.schedule}")
+
+
 
     # set the log level and format
     handlers = []
@@ -285,11 +348,11 @@ if __name__ == "__main__":
     test = Test(yaml_config['system_json_path'], yaml_config['install_dir'], yaml_config['external_dir'])
 
     try:
-        test.run_regress()
+        test.run_regress(args.schedule, args.manual)
     except Exception as e:
         logging.error(f'Failed to run the regression tests: {e}')
         # cleanup the regression tmp dir on exception
-        # test.cleanup()
+        test.cleanup()
         raise e
 
 

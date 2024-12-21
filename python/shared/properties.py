@@ -3,6 +3,7 @@ import redis
 import sys
 import os
 import time
+import logging
 from common import parse_bool
 
 class Properties:
@@ -301,6 +302,16 @@ class Properties:
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
+    def set_db_state(self, dbname : str, state :str ):
+        """Set the state of a database, use cautiously."""
+        db_configs = self.get_db_configs()
+        for db in db_configs:
+            if db['name'] == dbname:
+                key = self.db_instance_id + ':instance_state'
+                self.redis.hset(key, db['id'], state)
+                return
+        logging.error(f"Database {dbname} not found, setting state failed")
+
     def add_database(self, dbname : str):
         """Add a database to the database instance."""
         # check if the database already exists
@@ -332,5 +343,8 @@ class Properties:
         db_ids.append(new_id)
         self.redis.hset(instance_key, 'database_ids', json.dumps(db_ids))
         self.cache.pop('db_instance_config', None)
+
+        # set the state to initialize
+        self.redis.hset(self.db_instance_id + ':instance_state', new_id, 'initialize')
 
 

@@ -166,6 +166,7 @@ namespace pg_proxy {
             }
             lock.unlock();
             conn.clear();
+            conn.disconnect();
 
             sleep(_sleep_interval);
         }
