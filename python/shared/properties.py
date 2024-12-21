@@ -7,7 +7,7 @@ import logging
 from common import parse_bool
 
 class Properties:
-    def __init__(self, config_file=None, load_redis=False):
+    def __init__(self, config_file=None, load_redis=False) -> None:
         """Initialize the properties object."""
         self.init(config_file)
 
@@ -17,7 +17,7 @@ class Properties:
             except KeyError as e:
                 raise Exception(f'JSON key error while loading redis, missing key: {e}')
 
-    def init(self, config_file=None):
+    def init(self, config_file=None) -> None:
         """Initialize the properties object."""
         self.cache = {}
 
@@ -93,7 +93,7 @@ class Properties:
         self.redis = redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db, ssl=self.redis_ssl,
                                        username=self.redis_user, password=self.redis_password, encoding="utf-8", decode_responses=True)
 
-    def get_db_configs(self):
+    def get_db_configs(self) -> list[dict]:
         """Return a json array of database instance id:name pairs.
            return: [{"id":, "name":, "replication_slot":, "publication_name": }, ...]
         """
@@ -117,7 +117,7 @@ class Properties:
 
         return dbs
 
-    def get_db_instance_config(self):
+    def get_db_instance_config(self) -> dict:
         """Return the primary db instance configuration as an object.
         return: {"host":, "port":, "replication_user":, "password":}
         """
@@ -131,7 +131,7 @@ class Properties:
 
         return config
 
-    def get_fdw_config(self):
+    def get_fdw_config(self) -> dict:
         """Return a config object for foreign data wrapper configuration."""
         key = str(self.db_instance_id) + ':fdw'
         if 'fdw_config' in self.cache:
@@ -143,7 +143,7 @@ class Properties:
 
         return config
 
-    def get_proxy_config(self):
+    def get_proxy_config(self) -> dict:
         """Return the proxy configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
         if 'proxy_config' in self.cache:
@@ -155,7 +155,7 @@ class Properties:
 
         return proxy_config
 
-    def get_system_config(self):
+    def get_system_config(self) -> dict:
         """Return the system configuration as an object."""
         key = str(self.db_instance_id) + ':instance_config'
         if 'system_config' in self.cache:
@@ -166,29 +166,29 @@ class Properties:
 
         return config
 
-    def get_mount_path(self):
+    def get_mount_path(self) -> str:
         """Return the mount point for the file system."""
         return os.environ.get('MOUNT_POINT')
 
-    def get_fdw_id(self):
+    def get_fdw_id(self) -> str:
         """Return the foreign data wrapper id."""
         return self.fdw_id
 
-    def get_db_instance_id(self):
+    def get_db_instance_id(self) -> str:
         """Return the database instance id."""
         return self.db_instance_id
 
-    def get_liveness_hash(self):
+    def get_liveness_hash(self) -> str:
         """Return the liveness hash key."""
         # see common/redis_types.hh HASH_LIVENESS
         return self.db_instance_id + ':hash:liveness'
 
-    def get_liveness_notification_pubsub(self):
+    def get_liveness_notification_pubsub(self) -> str:
         """Return the liveness notification pubsub channel."""
         # see common/redis_types.hh PUBSUB_LIVENESS_NOTIFY
         return self.db_instance_id + ':pubsub:liveness_notify'
 
-    def __load_redis(self, config_file=None):
+    def __load_redis(self, config_file=None) -> None:
         """Load redis based on a system.json file.
         :param config_file: the system.json file to load, if None
         then use SPRINGTAIL_PROPERTIES_FILE
@@ -261,7 +261,7 @@ class Properties:
             self.redis.hset(fdw_key, fdw_id, fdw_json_str)
             self.redis.sadd(fdw_key + '_ids', fdw_id)
 
-    def wait_for_state(self, state, id, timeout=600):
+    def wait_for_state(self, state, id, timeout=600) -> None:
         """Wait for the database state to reach the desired state.
         :param state: the state to wait for
         :param id: the database id to check
@@ -279,7 +279,7 @@ class Properties:
         if timeout != 0:
             raise TimeoutError('Timed out waiting for state')
 
-    def get_pid_path(self):
+    def get_pid_path(self) -> str:
         """Return the path to the pid file."""
         system_config = self.get_system_config()
         if 'pid_path' not in system_config['logging']:
@@ -287,8 +287,7 @@ class Properties:
         pid_path = system_config['logging']['pid_path']
         return pid_path
 
-
-    def get_log_path(self):
+    def get_log_path(self) -> str:
         """Return the path to the log file."""
         system_config = self.get_system_config()
         if 'log_path' not in system_config['logging']:
@@ -296,13 +295,13 @@ class Properties:
         log_path = os.path.dirname(system_config['logging']['log_path'])
         return log_path
 
-    def get_data_redis(self):
+    def get_data_redis(self) -> redis.StrictRedis:
         """Return the data redis object."""
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
-    def set_db_state(self, dbname : str, state :str ):
+    def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""
         db_configs = self.get_db_configs()
         for db in db_configs:
@@ -312,7 +311,7 @@ class Properties:
                 return
         logging.error(f"Database {dbname} not found, setting state failed")
 
-    def add_database(self, dbname : str):
+    def add_database(self, dbname : str) -> None:
         """Add a database to the database instance."""
         # check if the database already exists
         db_configs = self.get_db_configs()
@@ -323,6 +322,7 @@ class Properties:
             if db['name'] == dbname:
                 return
 
+        # create a new database id
         new_id = str(max_id+1)
 
         # add the database config
@@ -335,6 +335,8 @@ class Properties:
                 'schemas': ['*']
             }
         }))
+
+        # clear the cache
         self.cache.pop('db_configs', None)
 
         # add the database to the database instance
