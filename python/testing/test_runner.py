@@ -3,10 +3,7 @@ import jinja2
 import logging
 from lxml import etree
 import os
-import psycopg2
-import springtail
 import sys
-import time
 import yaml
 
 from test_case import TestCase
@@ -101,7 +98,7 @@ def generate_report(test_cases: list) -> None:
         <p>Total tests: {{ total_tests }}</p>
         <p>Passed: {{ passed_tests }}</p>
         <p>Failed: {{ failed_tests }}</p>
-        
+
         <h2>Test Cases</h2>
         <table>
             <tr>
@@ -119,7 +116,7 @@ def generate_report(test_cases: list) -> None:
             </tr>
             {% endfor %}
         </table>
-        
+
     </body>
     </html>
     ''')
@@ -141,7 +138,7 @@ def generate_report(test_cases: list) -> None:
     total_tests = len(results)
     passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
     failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
-    
+
     report = template.render(
         total_tests=total_tests,
         passed_tests=passed_tests,

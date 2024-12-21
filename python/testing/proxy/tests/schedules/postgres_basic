@@ -1,0 +1,2 @@
+test: test_setup
+test: name line float4 float8 bit numeric strings

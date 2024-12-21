@@ -453,12 +453,12 @@ namespace springtail::pg_proxy {
         if (_login == nullptr) {
             throw ProxyAuthError();
         }
-        _login->_salt = salt;
+        _login->salt = salt;
 
         char md5[MD5_PASSWD_LEN+1];
         // calculate md5 hash; skip the 'md5' prefix on the password; add salt and compute
-        assert(_login->_password.starts_with("md5"));
-        if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
+        assert(_login->password.starts_with("md5"));
+        if (!pg_md5_encrypt(_login->password.c_str()+3, reinterpret_cast<char*>(&_login->salt), 4, md5)) {
             SPDLOG_ERROR("Failed to calculate MD5 hash");
             throw ProxyAuthError();
         }
@@ -657,6 +657,7 @@ namespace springtail::pg_proxy {
         assert (_state == DEPENDENCIES);
         assert (!error);
 
+        assert(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
 
         // add dependency to cache
@@ -691,7 +692,9 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_query_error()
     {
+        assert (!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
+
         // pop the query from the queue, and issue response
         _pending_queue.pop();
         query_status->msg->set_msg_response(false, query_status->query_complete_count);
@@ -721,7 +724,10 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_ready_for_query_response(char xact_status)
     {
-        QueryStatusPtr query_status = _pending_queue.front();
+        QueryStatusPtr query_status = nullptr;
+        if (!_pending_queue.empty()) {
+            query_status = _pending_queue.front();
+        }
 
         if (_state == DEPENDENCIES) {
             // we are in dependency checking state,
@@ -766,6 +772,7 @@ namespace springtail::pg_proxy {
         assert (_state == QUERY);
 
         // no error, mark query as complete
+        assert(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
         query_status->query_complete_count++;
 

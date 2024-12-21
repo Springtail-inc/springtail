@@ -1,0 +1,3 @@
+sql/       - contains .sql (tests) and .out (expected result) files
+data/      - contains .data files (for copy data)
+schedules/ - contains parallel schedule files indicating the subset of tests (.sql) to run

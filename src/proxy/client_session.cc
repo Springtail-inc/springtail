@@ -350,7 +350,7 @@ namespace springtail::pg_proxy {
 
         BufferPtr buffer = BufferPool::get_instance()->get(128);
 
-        switch(_login->_type) {
+        switch(_login->type) {
             case TRUST:
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] User {} authenticated with trust", _id, _user->username());
                 _create_server_session(Session::Type::PRIMARY, seq_id);
@@ -403,7 +403,7 @@ namespace springtail::pg_proxy {
 
             PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Auth continue: msg_length={}, seq_id={}", _id, msg_length, seq_id);
 
-            switch(_login->_type) {
+            switch(_login->type) {
                 case MD5: {
                     char md5[MD5_PASSWD_LEN + 1];
 
@@ -414,7 +414,7 @@ namespace springtail::pg_proxy {
                     }
 
                     // calculate md5 hash; skip the 'md5' prefix on the password
-                    if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
+                    if (!pg_md5_encrypt(_login->password.c_str()+3, reinterpret_cast<char*>(&_login->salt), 4, md5)) {
                         SPDLOG_ERROR("Failed to calculate MD5 hash");
                         throw ProxyAuthError();
                     }
@@ -491,7 +491,7 @@ namespace springtail::pg_proxy {
         delete[] raw;
 
         // note: some code inside of here could be optimized based on how the password is stored
-        if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->_password.c_str())) {
+        if (!build_server_first_message(&_login->scram_state, _user->username().c_str(), _login->password.c_str())) {
             SPDLOG_ERROR("Failed to build server first message");
             throw ProxyAuthError();
         }
@@ -659,7 +659,7 @@ namespace springtail::pg_proxy {
         buffer->put('R');
         buffer->put32(12); // length
         buffer->put32(5);  // 5 == md5
-        buffer->put_bytes(reinterpret_cast<char*>(&_login->_salt), 4);
+        buffer->put_bytes(reinterpret_cast<char*>(&_login->salt), 4);
     }
 
     void
@@ -1119,6 +1119,7 @@ namespace springtail::pg_proxy {
                 // TODO: handle change of associated session type
             }
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
+            set_waiting_on_session(true);
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Using associated session: id={}", _id, session->id());
             return session;
         }
@@ -1127,6 +1128,7 @@ namespace springtail::pg_proxy {
 
         if (type == PRIMARY && !_primary_session.expired()) {
             // use primary session
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Using primary session; setting associated session", _id);
             session = _primary_session.lock();
             set_associated_session(session);
             return session;
@@ -1134,6 +1136,7 @@ namespace springtail::pg_proxy {
 
         if (type == REPLICA && !_replica_session.expired()) {
             // use replica session
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Using replica session; setting associated session", _id);
             session = _replica_session.lock();
             assert (!_shadow_mode);
             set_associated_session(session);
