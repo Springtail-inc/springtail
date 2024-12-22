@@ -80,7 +80,8 @@
         "cert_path": null,
         "key_path": null,
         "mode": "normal",
-        "shadow_log_path": null
+        "shadow_log_path": null,
+        "log_level": 3
     },
     "org": {
         "NOTE": "this section is for testing only, in production env vars are used",

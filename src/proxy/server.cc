@@ -29,7 +29,7 @@
 namespace springtail::pg_proxy {
 
     /** Default log level for the proxy server */
-    LogLevel proxy_log_level = LOG_LEVEL_DEBUG4;
+    LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
 
     ProxyServer::ProxyServer(int proxy_port,
                              int thread_pool_size,
@@ -103,6 +103,12 @@ namespace springtail::pg_proxy {
         UserMgr::get_instance()->init(USER_MGR_SLEEP_INTERVAL_SECS);
 
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
+    }
+
+    void
+    ProxyServer::set_log_level(int log_level)
+    {
+        proxy_log_level = static_cast<LogLevel>(log_level);
     }
 
     /** Callback to get more info about what is going on in SSL */
