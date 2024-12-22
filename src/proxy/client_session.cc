@@ -120,6 +120,11 @@ namespace springtail::pg_proxy {
                 _stmt_cache.commit_statement(msg->data(), msg->completed());
                 break;
 
+            case SessionMsg::MSG_SERVER_CLIENT_COPY_READY:
+                // enable the client session to receive copy data (and unblock)
+                set_waiting_on_session(false);
+                break;
+
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got ready from server session: status={}",
                             _id, msg->status().transaction_status);

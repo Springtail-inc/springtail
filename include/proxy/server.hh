@@ -102,6 +102,9 @@ namespace springtail::pg_proxy {
             return _mode;
         }
 
+        /** Set the global log level */
+        void set_log_level(int loglevel);
+
     private:
         int _socket;   ///< server socket
         int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write

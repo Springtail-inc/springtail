@@ -176,7 +176,14 @@ namespace springtail::pg_proxy {
             case 'D': // Data row
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
+            case 'd': // Copy data
                 _stream_to_remote_session(code, msg_length, _seq_id);
+
+                if (code == 'G') {
+                    // send message to client session to unblock it
+                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_COPY_READY);
+                    queue_msg(msg);
+                }
                 return;
         }
 

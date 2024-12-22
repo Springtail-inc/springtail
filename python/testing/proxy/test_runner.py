@@ -173,6 +173,8 @@ class Test:
                 timeout = 60
                 pass
 
+        if self._notimeout:
+            timeout = None
 
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
@@ -258,7 +260,7 @@ class Test:
             time.sleep(2)
 
 
-    def run_regress(self, schedule: str, manual_proxy: bool = False) -> None:
+    def run_regress(self, schedule: str, manual_proxy: bool = False, notimeout: bool = False) -> None:
         """Run the regression tests"""
         # make sure postgres is running
         if not check_postgres_running():
@@ -274,6 +276,8 @@ class Test:
 
         # setup the regression files
         self.setup_regress_files()
+
+        self._notimeout = notimeout
 
         # run the regression tests first against normal postgres
         self.run_regress_cmd(self._primary_port, schedule, 'pg.out')
@@ -312,6 +316,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-m', '--manual', action='store_true', default=False, help='Run the proxy manually')
     parser.add_argument('-s', '--schedule', type=str, default='postgres_all', help='Path to the schedule file')
     parser.add_argument('-l', '--list', action='store_true', default=False, help='List all schedules')
+    parser.add_argument('-t', '--notimeout', action='store_true', default=False, help='Disable timeouts')
     return parser.parse_args()
 
 ## main()
@@ -328,8 +333,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
         raise ValueError(f"Schedule file not found: {args.schedule}")
-
-
 
     # set the log level and format
     handlers = []
@@ -348,7 +351,7 @@ if __name__ == "__main__":
     test = Test(yaml_config['system_json_path'], yaml_config['install_dir'], yaml_config['external_dir'])
 
     try:
-        test.run_regress(args.schedule, args.manual)
+        test.run_regress(args.schedule, args.manual, args.notimeout)
     except Exception as e:
         logging.error(f'Failed to run the regression tests: {e}')
         # cleanup the regression tmp dir on exception
