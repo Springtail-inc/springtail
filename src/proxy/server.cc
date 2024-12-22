@@ -29,7 +29,7 @@
 namespace springtail::pg_proxy {
 
     /** Default log level for the proxy server */
-    LogLevel proxy_log_level = LOG_LEVEL_DEBUG1;
+    LogLevel proxy_log_level = LOG_LEVEL_DEBUG4;
 
     ProxyServer::ProxyServer(int proxy_port,
                              int thread_pool_size,
