@@ -11,7 +11,7 @@ using namespace springtail;
 namespace {
     class RedisPubSub_Test : public testing::TestWithParam<bool> {
     protected:
-        void SetUp() override {
+        static void SetUpTestSuite() {
             springtail_init();
 
             // See if redis is enabled
@@ -22,7 +22,8 @@ namespace {
                 GTEST_SKIP() << "Redis is not running, skipping test";
             }
         }
-        void TearDown() override {
+        static void TearDownTestSuite() {
+            RedisMgr::get_instance()->shutdown();
         }
     protected:
         std::mutex _data_mutex;
@@ -84,10 +85,7 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
             fmt::format(redis::PUBSUB_FDW_CHANGES, "5050"),
             fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, "5050"),
             fmt::format(redis::PUBSUB_DB_STATE_CHANGES, "5050"),
-            fmt::format(redis::QUEUE_PG_TRANSACTIONS, "5050"),
-            fmt::format(redis::SET_PG_OID_XIDS, "5050", "4242"),
             fmt::format(redis::QUEUE_GC_XID_READY, "5050"),
-            fmt::format(redis::QUEUE_GC_PARSER_NOTIFY, "5050"),
             fmt::format(redis::QUEUE_DDL_XID, "5050", "4242", "2222"),
             fmt::format(redis::HASH_DDL_PRECOMMIT, "5050"),
             fmt::format(redis::QUEUE_DDL_FDW, "5050", "4242"),
@@ -110,7 +108,6 @@ TEST_P(RedisPubSub_Test, SingleSubscriberTest) {
                 [this, &received_msg, channel, &initial_msg](const std::string &msg) {
                     SPDLOG_DEBUG("Received message : {}, on channel: {}", msg, *channel);
                     std::unique_lock data_lock(_data_mutex);
-                    // initial_message = received_msg;
                     ASSERT_EQ(received_msg, initial_msg);
                     received_msg = msg;
                     _data_cv.notify_one();

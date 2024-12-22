@@ -1,6 +1,9 @@
+#include "common/constants.hh"
+#include <sys_tbl_mgr/system_tables.hh>
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
+#include <common/environment.hh>
 #include <common/object_cache.hh>
 #include <common/threaded_test.hh>
 
@@ -14,13 +17,34 @@
 using namespace springtail;
 
 namespace {
+    struct CacheSize {
+        uint64_t data_cache_size;
+        uint64_t page_cache_size;
+        uint64_t btree_cache_size;
+        uint64_t max_extent_per_page;
+    };
+
+    void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
+        // Customize the output here as needed
+        if (cacheSize.data_cache_size == 32) {
+            *os << "small_cache";
+        } else {
+            *os << "large_cache";
+        }
+    }
 
     /**
      * Framework for Table and MutableTable testing.
      */
-    class Table_Test : public testing::Test {
+    class Table_Test : public testing::TestWithParam<CacheSize> {
     protected:
         void SetUp() override {
+            // set the cache size from the parameters
+            CacheSize sizes = GetParam();
+            std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
+                                                sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
+            ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
+
             springtail_init();
             _services.init(true);
 
@@ -40,7 +64,6 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-            _secondary_keys = { std::vector<std::string>({"table_id"}) };
 
             _base_dir = std::filesystem::temp_directory_path() / "test_table";
             std::filesystem::remove_all(_base_dir);
@@ -65,32 +88,59 @@ namespace {
         FieldArrayPtr _fields, _csv_fields;
 
         std::vector<std::string> _primary_keys;
-        std::vector<std::vector<std::string>> _secondary_keys;
 
         std::filesystem::path _base_dir;
         uint64_t _db_id = 1;
 
+        // secondary keys
+        std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
+        {
+            int i = 0;
+            std::vector<Index> keys;
+            for (auto const& v: roots) {
+                if (v.index_id == constant::INDEX_PRIMARY) {
+                    continue;
+                }
+                
+                Index idx;
+                idx.id = v.index_id;
+                idx.table_id = table_id;
+                idx.name=_schema->column_order()[i];
+                idx.is_unique = false;
+                idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+                idx.columns.emplace_back(0, i+1);
+                keys.push_back(idx);
+                ++i;
+            }
+            return keys;
+        }
+
         TablePtr
-        _create_table(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_table(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            auto keys = _make_keys(table_id, roots);
+
             return std::make_shared<Table>(_db_id, table_id, xid, _base_dir,
-                                           _primary_keys, _secondary_keys,
+                                           _primary_keys, keys,
                                            tbl_meta, _schema);
         }
 
         MutableTablePtr
-        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<uint64_t> &roots)
+        _create_mtable(uint64_t table_id, uint64_t xid, const std::vector<TableRoot> &roots)
         {
             TableMetadata tbl_meta;
             tbl_meta.roots = roots;
             tbl_meta.snapshot_xid = 1;
 
+            auto keys = _make_keys(table_id, roots);
+
+
             return std::make_shared<MutableTable>(_db_id, table_id, xid - 1, xid, _base_dir,
-                                                  _primary_keys, _secondary_keys,
+                                                  _primary_keys, keys,
                                                   tbl_meta, _schema);
         }
 
@@ -157,12 +207,12 @@ namespace {
         typedef std::shared_ptr<Request> RequestPtr;
     };
 
-    TEST_F(Table_Test, CreateEmpty) {
+    TEST_P(Table_Test, CreateEmpty) {
         uint64_t access_xid = 1, target_xid = 1;
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1000, target_xid, metadata.roots);
 
         // finalize the empty table
@@ -181,15 +231,16 @@ namespace {
         ASSERT_TRUE(table->primary_lookup(key) == constant::UNKNOWN_EXTENT);
         ASSERT_TRUE(table->lower_bound(key) == table->end());
         ASSERT_TRUE(table->begin() == table->end());
-        ASSERT_TRUE(table->index(1)->begin() == table->index(1)->end());
+        ASSERT_TRUE(table->index(0)->begin() == table->index(0)->end());
     }
 
-    TEST_F(Table_Test, Inserts) {
+    TEST_P(Table_Test, Inserts) {
         uint64_t access_xid = 1, target_xid = 2;
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
+
         auto mtable = _create_mtable(1001, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -232,12 +283,12 @@ namespace {
         ASSERT_EQ(count, 5000);
     }
 
-    TEST_F(Table_Test, SingleXactMutations) {
+    TEST_P(Table_Test, SingleXactMutations) {
         uint64_t access_xid = 2, target_xid = 3;
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = {{0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}};
         auto mtable = _create_mtable(1002, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -328,7 +379,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        // verify the secondary index
         auto secondary = table->index(1);
 
         count = 0;
@@ -343,12 +393,12 @@ namespace {
         ASSERT_EQ(count, 5000);
     }
 
-    TEST_F(Table_Test, MultiXactMutations) {
+    TEST_P(Table_Test, MultiXactMutations) {
         uint64_t access_xid = 3, target_xid = 4;
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1003, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -420,7 +470,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // verify the secondary index
         auto secondary = table->index(1);
 
         count = 0;
@@ -505,7 +554,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000 - 10); // removed 10
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -594,7 +642,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 10, upserted 10
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -691,7 +738,6 @@ namespace {
         }
         ASSERT_EQ(count, 5000); // removed 5, upserted 5
 
-        // verify the secondary index
         secondary = table->index(1);
 
         count = 0;
@@ -706,12 +752,12 @@ namespace {
     }
 
 
-    TEST_F(Table_Test, MultiThreadMutations) {
+    TEST_P(Table_Test, MultiThreadMutations) {
         uint64_t access_xid = 8, target_xid = 9;
 
         // create a mutable table
         TableMetadata metadata;
-        metadata.roots = { constant::UNKNOWN_EXTENT, constant::UNKNOWN_EXTENT };
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
         auto mtable = _create_mtable(1004, target_xid, metadata.roots);
 
         // insert a number of rows
@@ -779,7 +825,6 @@ namespace {
             }
             ASSERT_EQ(count, 5000);
 
-            // verify the secondary index
             auto secondary = table->index(1);
 
             count = 0;
@@ -799,4 +844,93 @@ namespace {
         tester.run(4);
     }
 
+    TEST_P(Table_Test, SecondaryIndex) {
+        uint64_t access_xid = 1, target_xid = 2;
+
+        // create a mutable table
+        TableMetadata metadata;
+    
+        // this will create two indexes on the first and second columns
+        metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT} };
+
+        auto mtable = _create_mtable(1001, target_xid, metadata.roots);
+
+        // insert a number of rows
+        _populate_table(mtable, target_xid);
+
+        // finalize the table
+        metadata = mtable->finalize();
+        sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+
+        // create an access table
+        access_xid = target_xid;
+        auto table = _create_table(1001, access_xid, metadata.roots);
+
+        // ensure that it has all of the inserted rows through both the primary and secondary index
+        // and that everything else works as expected (find, lower_bound, etc)
+        int counter = 0;
+        std::string prev = "";
+        for (auto &row : *table) {
+            if (prev != "") {
+                ASSERT_GT(_fields->at(1)->get_text(row), prev);
+            }
+
+            prev = _fields->at(1)->get_text(row);
+            ++counter;
+        }
+        ASSERT_EQ(counter, 5000);
+
+        // test the first index
+        {
+            //define a test set
+            int set_size = 0;
+            uint64_t test_value = 20;
+
+            for (auto &row : *table) {
+                auto value = _fields->at(0)->get_uint64(row);
+                if (value >= test_value) {
+                    ++set_size;
+                }
+            }
+
+            // use the secondary index to iterate over the same set
+            auto k = std::make_shared<ConstTypeField<uint64_t>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 1);
+            auto end_it = table->end(1);
+
+            int count = 0;
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto value = _fields->at(0)->get_uint64(row);
+                ASSERT_LE(test_value, value);
+                ++count;
+            }
+            ASSERT_EQ(count, set_size);
+        }
+
+        // test the second index
+        {
+            std::string test_value = "f";
+
+            auto k = std::make_shared<ConstTypeField<std::string>>(test_value);
+            std::vector<ConstFieldPtr> v({ k });
+            auto key = std::make_shared<ValueTuple>(v);
+
+            auto it = table->lower_bound(key, 2);
+            auto end_it = table->end(1);
+            for (; it != end_it; ++it) {
+                auto row = *it;
+                auto txt = _fields->at(1)->get_text(row);
+                ASSERT_LE(test_value[0], txt[0]);
+            }
+        }
+    }
+
+    INSTANTIATE_TEST_CASE_P(Table_Test,
+                            Table_Test,
+                            ::testing::Values(CacheSize{ 16384, 16384, 512, 16 },
+                                              CacheSize{ 32, 32, 8, 4 }));
 }

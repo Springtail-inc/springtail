@@ -10,6 +10,12 @@ set(PG_FDW_SOURCES
     pg_fdw_mgr_wrap.cc
 )
 
+# For postgres regression tests
+add_library(regress SHARED regress.c)
+target_include_directories(regress
+    PRIVATE ${PostgreSQL_INCLUDE_DIRS}
+)
+
 add_library(springtail_pg_fdw SHARED ${PG_FDW_SOURCES})
 target_include_directories(springtail_pg_fdw
     PUBLIC ${PROJECT_SOURCE_DIR}/include
@@ -20,8 +26,15 @@ if(${LINUX})
     target_link_options(springtail_pg_fdw
         PRIVATE -Wl,--unresolved-symbols=ignore-all
     )
+    target_link_options(regress
+        PRIVATE -Wl,--unresolved-symbols=ignore-all
+    )
 else()
     target_link_options(springtail_pg_fdw
+        PRIVATE -Wl,-undefined,dynamic_lookup
+        PRIVATE -Wl,-bundle
+    )
+    target_link_options(regress
         PRIVATE -Wl,-undefined,dynamic_lookup
         PRIVATE -Wl,-bundle
     )
@@ -116,6 +129,7 @@ install(TARGETS
 # install shared library to lib directory
 install(TARGETS
     springtail_pg_fdw
+    regress
     LIBRARY DESTINATION lib
 )
 

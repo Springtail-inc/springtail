@@ -37,7 +37,7 @@ namespace springtail {
         uint64_t xid = 0;
         uint64_t lsn = 0;
         std::string name;
-        uint32_t position;  ///< position and postgres column ID, can have holes
+        int32_t position;  ///< position and postgres column ID, can have holes
         SchemaType type;
         int32_t pg_type;
         bool exists;
@@ -51,7 +51,7 @@ namespace springtail {
         SchemaColumn(uint64_t xid,
                      uint64_t lsn,
                      const std::string_view &name,
-                     uint32_t position,
+                     int32_t position,
                      SchemaType type,
                      int32_t pg_type,
                      bool exists,
@@ -71,7 +71,7 @@ namespace springtail {
         { }
 
         SchemaColumn(const std::string_view &name,
-                     uint32_t position,
+                     int32_t position,
                      SchemaType type,
                      int32_t pg_type,
                      bool nullable,
@@ -93,11 +93,29 @@ namespace springtail {
     };
 
     /**
+     * Object representing the table index.
+     */
+    struct Index {
+        struct Column {
+            uint32_t idx_position;
+            uint32_t position;
+        };
+        uint64_t id;
+        std::string schema;
+        std::string name;
+        uint64_t table_id;
+        bool is_unique;
+        uint8_t state;
+        std::vector<Column> columns;
+    };
+
+    /**
      * Object representing the metadata of a schema.
      */
     struct SchemaMetadata {
         std::vector<SchemaColumn> columns;
         std::vector<SchemaColumn> history;
+        std::vector<Index> indexes;
     };
     using SchemaMetadataPtr = std::shared_ptr<SchemaMetadata>;
 
@@ -119,6 +137,12 @@ namespace springtail {
 
         /** Returns a Tuple representing an ordered subset of the columns in the schema. */
         virtual std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const = 0;
+
+        /** Returns the sort keys of the schema -- represents the primary key.  Empty if none. */
+        virtual const std::vector<std::string> &get_sort_keys() const = 0;
+
+        /** Returns the columns in their order within the schema. */
+        virtual std::vector<std::string> column_order() const = 0;
     };
     typedef std::shared_ptr<Schema> SchemaPtr;
 
@@ -249,7 +273,7 @@ namespace springtail {
         /**
          * Return a list of field names that form the sort columns of this schema.
          */
-        const std::vector<std::string> &get_sort_keys() const {
+        const std::vector<std::string> &get_sort_keys() const override {
             return _sort_keys;
         }
 
@@ -276,9 +300,7 @@ namespace springtail {
         /**
          * Return the order of the columns in the schema.
          */
-        std::vector<std::string>
-        column_order() const
-        {
+        std::vector<std::string> column_order() const override {
             return _column_order;
         }
     };
@@ -342,11 +364,26 @@ namespace springtail {
          */
         std::shared_ptr<std::vector<FieldPtr>> get_fields(const std::vector<std::string> &columns) const override;
 
+        /**
+         * Returns the sort keys of the underlying ExtentSchema, since they must match -- a change
+         * in the sort order would result in a table resync and a VirtualSchema could not be
+         * constructed.
+         */
+        const std::vector<std::string> &get_sort_keys() const override {
+            return _extent_schema->get_sort_keys();
+        }
+
         /** Returns the fixed width for a single row of the underlying ExtentSchema. */
         uint32_t row_size() const {
             return _extent_schema->row_size();
         }
 
+        /**
+         * Return the order of the columns in the schema.
+         */
+        std::vector<std::string> column_order() const override {
+            return _column_order;
+        }
     };
     typedef std::shared_ptr<VirtualSchema> VirtualSchemaPtr;
 

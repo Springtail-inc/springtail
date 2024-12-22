@@ -10,12 +10,11 @@ class ComponentFactory:
     # NOTE: IDs must match the IDs used in the Redis queue defined
     # in src/common/coordinator.hh enum DaemonType
     LOG_MGR_ID = "1"
-    WRITE_CACHE_ID = "2"
-    XID_MGR_ID = "3"
-    DDL_ID = "4"
-    GC_ID = "5"
-    SYS_TBL_MGR_ID = "6"
-    PROXY_ID = "7"
+    XID_MGR_ID = "2"
+    DDL_ID = "3"
+    GC_ID = "4"
+    SYS_TBL_MGR_ID = "5"
+    PROXY_ID = "6"
     POSTGRES = "10"
 
     def __init__(self, install_dir : str, pid_dir : str):
@@ -61,16 +60,6 @@ class ComponentFactory:
             args=["--daemon"],
             path=self.install_dir,
             pid_path=os.path.join(self.pid_dir, 'sys_tbl_mgr.pid')
-        )
-
-    def create_write_cache_daemon(self) -> Component:
-        """Create a new write cache component."""
-        return Component(
-            name="write_cache_daemon",
-            id=self.WRITE_CACHE_ID,
-            args=["--daemon"],
-            path=self.install_dir,
-            pid_path=os.path.join(self.pid_dir, 'write_cache.pid')
         )
 
     def create_ddl_daemon(self, user: str, password: str) -> Component:

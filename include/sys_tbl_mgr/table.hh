@@ -1,10 +1,13 @@
 #pragma once
 
+#include "common/constants.hh"
+#include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
 #include <storage/mutable_btree.hh>
 
 #include <sys_tbl_mgr/schema_mgr.hh>
+#include <variant>
 
 namespace springtail {
 
@@ -16,10 +19,18 @@ namespace springtail {
     };
 
     /**
+     * Structure to hold table roots.
+     */
+    struct TableRoot {
+        uint64_t index_id = 0;
+        uint64_t extent_id = 0;
+    };
+
+    /**
      * Structure to hold table metadata required to record a table snapshot.
      */
     struct TableMetadata {
-        std::vector<uint64_t> roots;
+        std::vector<TableRoot> roots;
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
@@ -37,6 +48,123 @@ namespace springtail {
         class Iterator {
             friend Table;
 
+            /** 
+             * We use the same Iterator type for both primary and secondary indexes.
+             * However the way the indexes move around isn't the same.
+             * Tracker provides an abstraction for the various index types.
+             */
+            struct Tracker
+            {
+                explicit Tracker(const Table *table)
+                : _table(table)
+                {}
+
+                Tracker(const Table *table,
+                         BTreePtr btree, const BTree::Iterator &btree_i)
+                : _table(table),
+                  _btree(btree),
+                  _btree_i(btree_i)
+                {}
+
+                friend bool operator==(const Tracker& a, const Tracker& b) {
+                    assert(a._table == b._table);
+                    if (a._btree == nullptr && b._btree == nullptr) {
+                        return true;
+                    } else if (a._btree == nullptr || b._btree == nullptr) {
+                        return false;
+                    }
+                    return (a._btree_i == b._btree_i);
+                }
+
+                virtual void next() = 0;
+                virtual void prev() = 0;
+                virtual const Extent::Row & row() const = 0;
+
+                const Table *_table{}; ///< A pointer to the Table object this iterator is for.
+                BTreePtr _btree; ///< A pointer to the BTree of the primary index.
+                BTree::Iterator _btree_i; ///< An iterator into the BTree.
+            };
+
+            /**
+             * This is to iterate using the primary index.
+             */
+            struct Primary : Tracker
+            {
+                Primary(const Table *table,
+                        BTreePtr btree, const BTree::Iterator &btree_i,
+                        StorageCache::SafePagePtr page,
+                        const StorageCache::Page::Iterator &page_i )
+                    : Tracker{table, btree, btree_i},
+                    _page(std::move(page)),
+                    _page_i(page_i)
+                {}
+
+                explicit Primary(const Table *table) 
+                    :Tracker{table}
+                {}
+
+                Primary(Primary&&) noexcept = default;
+                virtual ~Primary() = default;
+
+                void next() override;
+                void prev() override;
+
+                const Extent::Row& row() const override 
+                {
+                    return *_page_i;
+                }
+
+                friend bool operator==(const Primary& a, const Primary& b) {
+                    const Tracker& ta = a;
+                    const Tracker& tb = b;
+                    
+                    if (ta == tb) {
+                        return (a._btree_i == a._btree->end() || a._page_i == b._page_i);
+                    }
+                    return false;
+                }
+
+                StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
+                StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            };
+
+            /**
+             * This is to iterate using the secondary index.
+             */
+            struct Secondary : Tracker
+            {
+                Secondary(const Table *table,
+                        BTreePtr btree, const BTree::Iterator &btree_i,
+                        ExtentSchemaPtr schema )
+                    : Tracker{table, btree, btree_i}
+                    , _index_schema{schema}
+                {
+                    if (_index_schema) {
+                        _extent_id_f = _index_schema->get_field(constant::INDEX_EID_FIELD);
+                        _row_id_f = _index_schema->get_field(constant::INDEX_RID_FIELD);
+                    }
+                }
+
+                Secondary(Secondary&&) = default;
+                virtual ~Secondary() = default;
+
+                void next() override;
+                void prev() override;
+                const Extent::Row& row() const override;
+
+                friend bool operator==(const Secondary& a, const Secondary& b) {
+                    const Tracker& ta = a;
+                    const Tracker& tb = b;
+                    return ta == tb;
+                }
+
+                ExtentSchemaPtr _index_schema;
+                FieldPtr _extent_id_f;
+                FieldPtr _row_id_f;
+            };
+
+            std::variant<std::monostate, Primary, Secondary> _tracker;
+
         public:
             using iterator_category = std::bidirectional_iterator_tag;
             using difference_type   = std::ptrdiff_t;
@@ -44,29 +172,16 @@ namespace springtail {
             using pointer           = const Extent::Row *;  // or also value_type*
             using reference         = const Extent::Row &;  // or also value_type&
 
-            reference operator*() const { return *(_page_i); }
-            pointer operator->() { return &(*(_page_i)); }
+            reference operator*() { 
+                return tracker().row();
+            }
+            pointer operator->() { return &*(*this); }
 
             /**
              * Move the iterator forward to the next row.
              */
             Iterator& operator++() {
-                // move to the next row in the data extent
-                ++_page_i;
-                if (_page_i != _page->end()) {
-                    return *this;
-                }
-
-                // no more rows in the extent, so need to move to the next data extent
-                ++_btree_i;
-                if (_btree_i == _btree->end()) {
-                    return *this;
-                }
-
-                // retrieve the data extent
-                _page = _table->_read_page_via_primary(_btree_i);
-                _page_i = _page->begin();
-
+                tracker().next();
                 return *this;
             }
 
@@ -74,29 +189,7 @@ namespace springtail {
              * Move the iterator backward to the previous row.
              */
             Iterator& operator--() {
-                // check if this is end()
-                if (_page.empty()) {
-                    // move to the final page referenced by the primary index
-                    assert(_btree_i == _btree->end());
-                    --_btree_i;
-
-                    // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
-                    _page_i = _page->end();
-                }
-
-                // check if we are on the first row
-                if (_page_i == _page->begin()) {
-                    // need to move to the previous page
-                    --_btree_i;
-
-                    // read the page and reference the end() of that page
-                    _page = _table->_read_page_via_primary(_btree_i);
-                    _page_i = _page->end();
-                }
-
-                // move to the previous row
-                --_page_i;
+                tracker().prev();
                 return *this;
             }
 
@@ -104,14 +197,17 @@ namespace springtail {
              * Compares two iterators for equality.
              */
             friend bool operator==(const Iterator& a, const Iterator& b) {
-                if (a._btree == nullptr && b._btree == nullptr) {
-                    return true;
-                } else if (a._btree == nullptr || b._btree == nullptr) {
-                    return false;
+                if (auto pa = std::get_if<Primary>(&a._tracker)) {
+                    auto pb =  std::get_if<Primary>(&b._tracker);
+                    assert(pb);
+                    return *pa == *pb;
+                } else if (auto pa = std::get_if<Secondary>(&a._tracker)) {
+                    auto pb =  std::get_if<Secondary>(&b._tracker);
+                    assert(pb);
+                    return *pa == *pb;
                 }
-
-                return (a._btree_i == b._btree_i &&
-                        (a._btree_i == a._btree->end() || a._page_i == b._page_i));
+                assert(false);
+                return false;
             }
 
             /**
@@ -119,42 +215,69 @@ namespace springtail {
              */
             friend bool operator!= (const Iterator& a, const Iterator& b) { return !(a == b); }
 
+
+            /** This will return the current extent id of the iterator.
+            */
+            uint64_t extent_id() const {
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return p->_page_i.extent_id();
+                }
+                throw std::runtime_error("Unsupported for secondary indexes");
+            }
+
         private:
             /** Specifically for the end() iterator of a vacant table. */
             Iterator(const Table *table)
-                : _table(table),
-                  _btree(nullptr),
-                  _page{}
-            { }
+            { 
+                _tracker.emplace<Primary>(table, 
+                        BTreePtr{}, 
+                        BTree::Iterator{}, 
+                        StorageCache::SafePagePtr{}, 
+                        StorageCache::Page::Iterator{});
+            }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, BTreePtr btree)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree->end()),
-                  _page{}
-            { }
+            Iterator(const Table *table, uint32_t index_id)
+            { 
+                if (index_id == constant::INDEX_PRIMARY) {
+                    _tracker.emplace<Primary>(table, table->_primary_index, 
+                            table->_primary_index->end(), 
+                            StorageCache::SafePagePtr{}, 
+                            StorageCache::Page::Iterator{});
+                } else {
+                    auto btree = table->index(index_id);
+                    _tracker.emplace<Secondary>(table, btree, 
+                            btree->end(), ExtentSchemaPtr{} );
+                }
+            }
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
                      BTreePtr btree, const BTree::Iterator &btree_i,
                      StorageCache::SafePagePtr page,
                      const StorageCache::Page::Iterator &page_i)
-                : _table(table),
-                  _btree(btree),
-                  _btree_i(btree_i),
-                  _page(std::move(page)),
-                  _page_i(page_i)
-            { }
+            { 
+                _tracker.emplace<Primary>(table, btree, btree_i, std::move(page), page_i);
+            }
 
-        private:
-            const Table *_table; ///< A pointer to the Table object this iterator is for.
+            Iterator(const Table *table,
+                     BTreePtr btree, const BTree::Iterator &btree_i,
+                     ExtentSchemaPtr index_schema)
+            { 
+                _tracker.emplace<Secondary>(table, btree, btree_i, index_schema);
+            }
 
-            BTreePtr _btree; ///< A pointer to the BTree of the primary index.
-            BTree::Iterator _btree_i; ///< An iterator into the BTree.
-
-            StorageCache::SafePagePtr _page; ///< A pointer to the data page currently being processed.
-            StorageCache::Page::Iterator _page_i; ///< An iterator into the Extent.
+            Tracker& tracker() 
+            {
+                if (auto p = std::get_if<Primary>(&_tracker)) {
+                    return *p;
+                } else if (auto p = std::get_if<Secondary>(&_tracker)) {
+                    return *p;
+                } else {
+                    assert(false);
+                }
+                throw std::runtime_error("Bad iterator tracker");
+            }
         };
 
     public:
@@ -166,7 +289,7 @@ namespace springtail {
               uint64_t xid,
               const std::filesystem::path &table_base,
               const std::vector<std::string> &primary_key,
-              const std::vector<std::vector<std::string>> &secondary_keys,
+              const std::vector<Index> &secondary,
               const TableMetadata &metadata,
               ExtentSchemaPtr schema);
 
@@ -204,13 +327,17 @@ namespace springtail {
             return _id;
         }
 
+        /** This will convert column positions to column names based on the table schema
+         */
+        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
+
         /**
          * Returns an iterator to the first row that is greater than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator lower_bound(TuplePtr search_key);
+        Iterator lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
-        Iterator upper_bound(TuplePtr search_key);
+        Iterator upper_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * Returns an iterator to the first row that is less than or equal to the provided search
@@ -226,13 +353,13 @@ namespace springtail {
         /**
          * An iterator to the end of the table.
          */
-        Iterator end()
+        Iterator end(uint32_t index_id = constant::INDEX_PRIMARY)
         {
             // check for vacant table
-            if (_primary_index == nullptr) {
+            if (index_id == constant::INDEX_PRIMARY && _primary_index == nullptr) {
                 return Iterator(this);
             }
-            return Iterator(this, _primary_index);
+            return Iterator(this, index_id);
         }
 
         /**
@@ -240,11 +367,11 @@ namespace springtail {
          * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
          * @return A BTree object of the requested index.
          */
-        BTreePtr index(uint32_t idx) {
+        BTreePtr index(uint32_t idx) const {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx - 1];
+            return _secondary_indexes.at(idx).first;
         }
 
         /**
@@ -277,6 +404,12 @@ namespace springtail {
          */
         StorageCache::SafePagePtr _read_page(uint64_t extent_id) const;
 
+        /**
+         * Creates read-only index of the table.
+         */
+        BTreePtr 
+        _create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns, uint64_t offset);
+
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -284,7 +417,6 @@ namespace springtail {
         uint64_t _xid; ///< The XID at which this table is being accessed.
         std::filesystem::path _table_dir; ///< The directory holding the table data.
         std::vector<std::string> _primary_key; ///< The primary index key columns.
-        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns for each secondary index.
         ExtentSchemaPtr _schema; ///< The schema of the data extents for this table.
 
         FieldArrayPtr _pkey_fields; ///< The field accessors for the primary index key columns within the primary index extents.
@@ -293,10 +425,17 @@ namespace springtail {
         /** The primary index of the table. */
         BTreePtr _primary_index;
 
-        std::vector<BTreePtr> _secondary_indexes; ///< The secondary indexes of the table.
+
+        /** A map of secondary indexes
+         * first is the index id
+         * second.first is btree
+         * second.second are the index columns
+         */
+        std::map<uint64_t, std::pair<BTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The secondary indexes of the table..
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         FieldPtr _roots_root_f; ///< The field accessor to read the root extent ID from each row in the "roots" file.
+        FieldPtr _roots_index_id_f; ///< The field accessor to read the root index ID from each row in the "roots" file.
 
         TableStats _stats; ///< The statistics for this table.
     };
@@ -316,7 +455,7 @@ namespace springtail {
                      uint64_t target_xid,
                      const std::filesystem::path &table_base,
                      const std::vector<std::string> &primary_key,
-                     const std::vector<std::vector<std::string>> &secondary_keys,
+                     const std::vector<Index> &secondary,
                      const TableMetadata &metadata,
                      ExtentSchemaPtr schema,
                      bool for_gc = false);
@@ -415,6 +554,28 @@ namespace springtail {
         uint64_t id() const {
             return _id;
         }
+
+        /** Create a btree that can be used for indexes.
+         * @param index_id PG index ID.
+         * @param index_columns Positions of the index columns.
+         */
+        MutableBTreePtr create_index_root(uint64_t index_id, const std::vector<uint32_t>& index_columns);
+
+        /**
+         * Returns the requested index BTree of the table based on the index ID in the "indexes" table.
+         * @param idx The id of the index to retrieve.  Note that 0 is the primary index.
+         * @return A BTree object of the requested index.
+         */
+        MutableBTreePtr index(uint32_t idx) {
+            if (idx == 0) {
+                return _primary_index;
+            }
+            return _secondary_indexes[idx].first;
+        }
+
+        /** This will convert column positions to column names based on the table schema
+         */
+        std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);
 
     private:
         /**
@@ -517,6 +678,11 @@ namespace springtail {
          */
         void _update_by_lookup(TuplePtr key, uint64_t xid);
 
+        /**
+         * Convert the schema of the page, if needed based on the target XID.
+         */
+        void _check_convert_page(StorageCache::SafePagePtr &page);
+
     private:
         uint64_t _db_id; ///< The ID of the database containing this table.
         uint64_t _id; ///< The ID of the table.
@@ -528,7 +694,6 @@ namespace springtail {
         std::filesystem::path _data_file; ///< The file containing the table data extents.
 
         std::vector<std::string> _primary_key; ///< The key columns of the primary index.
-        std::vector<std::vector<std::string>> _secondary_keys; ///< The key columns of each secondary index.
 
         /** A lookup version of the primary index.  Pinned to the most recent XID. */
         BTreePtr _primary_lookup;
@@ -536,17 +701,25 @@ namespace springtail {
 
         /** The primary index of the table. */
         MutableBTreePtr _primary_index; ///< The mutable primary index btree.
-        std::vector<MutableBTreePtr> _secondary_indexes; ///< The mutable secondary index btrees.
+        /** A map of secondary indexes
+         * first is the index id
+         * second.first is btree
+         * second.second are the index columns
+         */
+        std::map<uint64_t, std::pair<MutableBTreePtr, std::vector<uint32_t>>> _secondary_indexes; ///< The mutable secondary index btrees.
         ExtentSchemaPtr _schema; ///< The schema of the data extents of the table.
 
         ExtentSchemaPtr _roots_schema; ///< The schema of the "roots" file.
         MutableFieldPtr _roots_root_f; ///< The field accessor for the tree roots stored within each row of the "roots" file.
+        MutableFieldPtr _roots_index_id_f; ///< The field accessor for the tree roots index ids stored within each row of the "roots" file.
 
         std::unique_ptr<StorageCache::SafePagePtr> _empty_page; ///< Used to handle the empty table corner-case.
         TableStats _stats; ///< The stats for the table.
 
         bool _for_gc; ///< If this table is being used for the ingest pipeline.
+                      ///
     };
     typedef std::shared_ptr<MutableTable> MutableTablePtr;
+
 
 }

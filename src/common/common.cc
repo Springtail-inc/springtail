@@ -1,14 +1,22 @@
 #include <filesystem>
 #include <string>
+#include <atomic>
+#include <iostream>
+#include <optional>
 
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
+#include <common/tracing.hh>
 
 namespace springtail {
 
     namespace {
+
+        // flag to prevent init from being called multiple times
+        static std::atomic_flag init_lock = ATOMIC_FLAG_INIT;
+
         void
         daemonize(const std::string &pid_file)
         {
@@ -58,11 +66,18 @@ namespace springtail {
                          const std::optional<std::string> &daemon_pid,
                          const std::optional<uint32_t> &logging_mask)
     {
+        // prevent multiple calls to init
+        if (init_lock.test_and_set()) {
+            SPDLOG_WARN("Warning: springtail_init called multiple times");
+            return;
+        }
+
         // initialize the backtrace signal handling
         init_exception();
 
         // init system properties
-        Properties::init();
+        // only load redis from properties if no daemon pid is set
+        Properties::init(!daemon_pid.has_value());
 
         // if requested, daemonize the process
         if (daemon_pid) {
@@ -71,6 +86,9 @@ namespace springtail {
 
         // initialize the logging infrastructure
         init_logging(logging_mask, log_filename, daemon_pid.has_value());
+
+        // initialize the tracing infrastructure
+        tracing::init_tracing();
     }
 
     void springtail_init(const std::string &log_filename,

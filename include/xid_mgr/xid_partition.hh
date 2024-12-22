@@ -98,8 +98,8 @@ namespace springtail::xid_mgr {
 
         std::filesystem::path _path;     ///< base path
 
-        std::atomic<bool> _dirty;        ///< dirty flag
-        std::atomic<bool> _shutdown;     ///< shutdown flag
+        std::atomic<bool> _dirty{false};        ///< dirty flag
+        std::atomic<bool> _shutdown{false};     ///< shutdown flag
 
         std::mutex _file_mutex;          ///< mutex for file operations
         std::mutex _shutdown_mutex;      ///< mutex for shutdown

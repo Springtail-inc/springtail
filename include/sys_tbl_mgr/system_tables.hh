@@ -113,7 +113,6 @@ namespace springtail::sys_tbl {
             static constexpr uint32_t TABLE_ID = 0;
             static constexpr uint32_t INDEX_ID = 1;
             static constexpr uint32_t XID = 2;
-            static constexpr uint32_t EXTENT_ID = 3;
 
             static const std::vector<SchemaColumn> SCHEMA;
             static const std::vector<std::string> KEY;
@@ -315,16 +314,21 @@ namespace springtail::sys_tbl {
      */
     class IndexNames {
     public:
+        enum class State {
+            NOT_READY,
+            READY,
+            DELETED
+        };
         static constexpr uint32_t ID = 6;
 
         struct Data {
-            static constexpr uint32_t NAMESPACE = 0;
-            static constexpr uint32_t NAME = 1;
-            static constexpr uint32_t TABLE_ID = 2;
-            static constexpr uint32_t INDEX_ID = 3;
-            static constexpr uint32_t XID = 4;
-            static constexpr uint32_t LSN = 5;
-            static constexpr uint32_t EXISTS = 6;
+            static constexpr uint32_t TABLE_ID = 0;
+            static constexpr uint32_t INDEX_ID = 1;
+            static constexpr uint32_t XID = 2;
+            static constexpr uint32_t LSN = 3;
+            static constexpr uint32_t NAMESPACE = 4;
+            static constexpr uint32_t NAME = 5;
+            static constexpr uint32_t STATE = 6;
             static constexpr uint32_t IS_UNIQUE = 7;
 
             static const std::vector<SchemaColumn> SCHEMA;
@@ -336,7 +340,7 @@ namespace springtail::sys_tbl {
                   uint64_t index_id,
                   uint64_t xid,
                   uint64_t lsn,
-                  bool exists,
+                  State state,
                   bool is_unique)
             {
                 auto fields = std::make_shared<FieldArray>(8);
@@ -346,7 +350,7 @@ namespace springtail::sys_tbl {
                 fields->at(INDEX_ID) = std::make_shared<ConstTypeField<uint64_t>>(index_id);
                 fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);
                 fields->at(LSN) = std::make_shared<ConstTypeField<uint64_t>>(lsn);
-                fields->at(EXISTS) = std::make_shared<ConstTypeField<bool>>(exists);
+                fields->at(STATE) = std::make_shared<ConstTypeField<uint8_t>>(static_cast<uint8_t>(state));
                 fields->at(IS_UNIQUE) = std::make_shared<ConstTypeField<bool>>(is_unique);
                 return std::make_shared<FieldTuple>(fields, nullptr);
             }

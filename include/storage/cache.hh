@@ -390,7 +390,7 @@ namespace springtail {
                   _next_cache_id(0)
             { }
 
-            void validate() {
+            void validate() const {
                 assert(_dirty_cache.size() + _clean_cache.size() == _size);
                 assert(_dirty_lru.size() + _clean_lru.size() == _size);
             }
@@ -524,6 +524,14 @@ namespace springtail {
             void _gen_cache_id(CacheExtentPtr extent);
 
         private:
+            /** Structure for tracking IO condition variables. */
+            struct IoCv {
+                boost::condition_variable cv;
+                uint32_t counter = 1;
+                bool signaled = false;
+            };
+
+        private:
             boost::mutex _mutex; ///< Mutex on the cache object to maintain thread-safety.
 
             CleanCache _clean_cache; ///< The lookup cache of clean extents.
@@ -533,7 +541,7 @@ namespace springtail {
             ExtentLru _dirty_lru; ///< An LRU of the dirty extents.
 
             /** Map of condition variables used to block multiple callers reading the same extent from disk concurrently. */
-            std::map<CacheKey, std::shared_ptr<boost::condition_variable>> _io_map;
+            std::map<CacheKey, std::shared_ptr<IoCv>> _io_map;
 
             /** Map from cache ID to the most recent on-disk location of the extent. */
             std::map<uint64_t, CacheKey> _cache_id_map;
@@ -719,6 +727,12 @@ namespace springtail {
 
                 bool operator!=(const Iterator &rhs) { return !(*this == rhs); }
 
+                /** This will return the current extent id of the iterator.
+                 */
+                uint64_t extent_id() const {
+                    return _extent.get_ref().id();
+                }
+
             private:
                 Iterator(Page *page,
                          std::vector<ExtentRef>::iterator extent_i)
@@ -810,9 +824,8 @@ namespace springtail {
              * Page is based on.
              */
             ExtentHeader header() const {
-                assert(!_extents.empty());
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
-                return (*extent)->header();
+                boost::shared_lock lock(_mutex);
+                return _header();
             }
 
             /**
@@ -820,25 +833,15 @@ namespace springtail {
              * with no rows.
              */
             bool empty() const {
-                // if no extents, empty
-                if (_extents.empty()) {
-                    return true;
-                }
-
-                // if more than one extent, can't be empty
-                if (_extents.size() > 1) {
-                    return false;
-                }
-
-                // if one extent, and the extent is empty, then empty
-                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
-                return (*extent)->empty();
+                boost::shared_lock lock(_mutex);
+                return _empty();
             }
 
             /**
              * Returns the number of extents that are backing the Page.
              */
             uint32_t extent_count() const {
+                boost::shared_lock lock(_mutex);
                 return _extents.size();
             }
 
@@ -890,6 +893,36 @@ namespace springtail {
 
         private:
             // HELPER FUNCTIONS
+
+            /**
+             * Returns the Page object's extent header data.  It is based of the original extent the
+             * Page is based on.
+             */
+            ExtentHeader _header() const {
+                assert(!_extents.empty());
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                return (*extent)->header();
+            }
+
+            /**
+             * Checks if the Page object is empty -- either contains no extents, or a single extent
+             * with no rows.
+             */
+            bool _empty() const {
+                // if no extents, empty
+                if (_extents.empty()) {
+                    return true;
+                }
+
+                // if more than one extent, can't be empty
+                if (_extents.size() > 1) {
+                    return false;
+                }
+
+                // if one extent, and the extent is empty, then empty
+                SafeExtent extent{ _extents.front().make_safe_extent(_file) };
+                return (*extent)->empty();
+            }
 
             /**
              * Checks if the provided extent needs to be split and performs the split if needed.
@@ -1081,9 +1114,9 @@ namespace springtail {
              */
             void drop_file(const std::filesystem::path &file);
 
-            void validate() {
+            void validate() const {
                 uint32_t size = 0;
-                for (auto &entry : _cache) {
+                for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
                 assert(size == _lru.size());
@@ -1184,7 +1217,7 @@ namespace springtail {
          */
         void drop_for_truncate(const std::filesystem::path &file);
 
-        void validate() {
+        void validate() const {
             _data_cache->validate();
             _page_cache->validate();
         }

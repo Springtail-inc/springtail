@@ -2,6 +2,7 @@
 #include <common/properties.hh>
 
 #include <storage/cache.hh>
+#include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
 
@@ -611,7 +612,7 @@ namespace springtail {
         boost::shared_lock lock(_mutex);
 
         // check if the page is empty
-        if (empty()) {
+        if (_empty()) {
             return end();
         }
 
@@ -846,6 +847,7 @@ namespace springtail {
                                               [&schema](const Extent::Row &row) {
                                                   return FieldTuple(schema->get_sort_fields(), row);
                                               });
+        assert(row_i != (**extent).end());
 
         // note: row's key should match the tuple's key
         assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
@@ -934,7 +936,7 @@ namespace springtail {
         std::vector<ExtentRef> new_extents;
         for (auto &ref : _extents) {
             // get a new extent
-            ExtentHeader new_header(header().type, target_xid, target_schema->row_size());
+            ExtentHeader new_header(_header().type, target_xid, target_schema->row_size());
             auto new_extent = cache->_data_cache->get_empty(_file, new_header);
 
             // get the old extent
@@ -1458,8 +1460,14 @@ namespace springtail {
             boost::unique_lock lock(_mutex, boost::adopt_lock);
 
             // wait for the read to complete
-            auto cv = io_i->second;
-            cv->wait(lock, [this, &key](){ return _io_map.find(key) == _io_map.end(); });
+            auto entry = io_i->second;
+            entry->cv.wait(lock, [&entry](){ return entry->signaled; });
+
+            // see if we should remove the entry
+            --entry->counter;
+            if (entry->counter == 0) {
+                _io_map.erase(io_i);
+            }
 
             // note: try to retrieve from the cache again
             lock.release();
@@ -1467,8 +1475,8 @@ namespace springtail {
         }
 
         // add the condition variable to the IO map
-        auto cv = std::make_shared<boost::condition_variable>();
-        _io_map[key] = cv;
+        auto entry = std::make_shared<IoCv>();
+        _io_map[key] = entry;
 
         // make space for a new extent in the cache
         _make_extent_space();
@@ -1490,10 +1498,14 @@ namespace springtail {
         callback(extent);
 
         // notify the other callers waiting for this extent
-        cv->notify_all();
+        entry->cv.notify_all();
 
         // remove the condition variable from the map
-        _io_map.erase(key);
+        entry->signaled = true;
+        --entry->counter;
+        if (entry->counter == 0) {
+            _io_map.erase(key);
+        }
 
         return extent;
     }

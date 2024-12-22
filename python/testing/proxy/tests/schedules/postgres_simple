@@ -1,0 +1,2 @@
+test: test_setup
+test: boolean char varchar text int2 int4 int8 oid uuid money md5

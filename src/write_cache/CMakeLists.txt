@@ -20,15 +20,6 @@ target_link_libraries(springtail_write_cache
   PRIVATE nlohmann_json::nlohmann_json
   PRIVATE Boost::thread)
 
-# daemon executable
-add_executable(write_cache_daemon write_cache_daemon.cc)
-target_include_directories(write_cache_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
-target_link_libraries(write_cache_daemon
-  PUBLIC springtail_write_cache
-  PRIVATE Boost::program_options
-)
-add_dsymutil_command(write_cache_daemon)
-
 ## tests
 #add_executable(test_threaded test/write_cache_index_test.cc)
 #target_include_directories(test_threaded PRIVATE ${CMAKE_SOURCE_DIR}/include ${THRIFT_GEN_PATH})
@@ -58,6 +49,3 @@ add_dsymutil_command(test_extent_mapper)
 #gtest_discover_tests(test_threaded)
 gtest_discover_tests(test_extent_mapper)
 gtest_discover_tests(test_wc_index)
-
-# install daemon to install directory
-install(TARGETS write_cache_daemon RUNTIME DESTINATION bin/system)

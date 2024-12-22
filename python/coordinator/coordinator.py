@@ -22,6 +22,13 @@ from properties import Properties
 from component_factory import ComponentFactory
 from scheduler import Scheduler
 
+# import production utils
+from production import (
+    install_binaries,
+    install_pgfdw,
+    send_sns
+)
+
 def check_properties(props: Properties) -> None:
     """
     Check the properties; check paths exist.
@@ -130,9 +137,23 @@ if __name__ == "__main__":
     # Get the service type
     service_type = args.service
     if not service_type:
-        service_type = os.environ.get('SERVICE_TYPE')
+        service_type = os.environ.get('SERVICE_NAME')
         if not service_type:
             raise ValueError("Service type not provided")
+
+    # get install path
+    install_path = yaml_config.get('install_dir')
+
+    # Check the properties for production
+    if yaml_config.get('production'):
+        logger.debug("Checking properties for production")
+
+        # Install binaries
+        try:
+            install_binaries(install_path)
+        except Exception as e:
+            raise ValueError("Failed to install binaries: " + str(e))
+
 
     # Create scheduler
     logger.debug("Starting scheduler")
@@ -160,11 +181,16 @@ if __name__ == "__main__":
 
     if service_type == "ingestion":
         scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
-        scheduler.register_component(factory.create_write_cache_daemon(), 2)
-        scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 3)
-        scheduler.register_component(factory.create_gc_daemon(), 4)
-        scheduler.register_component(factory.create_log_mgr_daemon(), 5)
+        scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+        scheduler.register_component(factory.create_gc_daemon(), 3)
+        scheduler.register_component(factory.create_log_mgr_daemon(), 4)
+
     elif service_type == "fdw":
+        try:
+            install_pgfdw(install_path)
+        except Exception as e:
+            raise ValueError("Failed to install postgres_fdw: " + str(e))
+
         # startup postgres if not running
         postgres = factory.create_postgres()
         if not postgres.is_running():
@@ -174,10 +200,16 @@ if __name__ == "__main__":
         ddl_password = gen_random_string(16)
         postgres.create_user('ddl_user', ddl_password, True, True)
 
-        scheduler.register_component(postgres, 1)
-        scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 2)
+        # For testing uncomment lines below since they are needed for ddl daemon
+        # but in production they should be running elsewhere
+        # scheduler.register_component(factory.create_xid_mgr_daemon(), 1)
+        # scheduler.register_component(factory.create_sys_tbl_mgr_daemon(), 2)
+        scheduler.register_component(postgres, 3)
+        scheduler.register_component(factory.create_ddl_daemon('ddl_user', ddl_password), 4)
+
     elif service_type == "proxy":
         scheduler.register_component(factory.create_proxy(), 1)
+
     else:
         raise ValueError(f"Invalid service type: {service_type}; must be one of: ingestion, fdw, proxy")
 

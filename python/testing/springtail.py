@@ -6,6 +6,7 @@ import argparse
 import traceback
 import tempfile
 import time
+import logging
 from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extensions import quote_ident
@@ -53,16 +54,19 @@ FDW_SYSTEM_CATALOG = '__pg_springtail_catalog'
 CORE_DAEMONS = [
     ('xid_mgr_daemon', 'src/xid_mgr/xid_mgr_daemon', '-x,10'),
     ('sys_tbl_mgr_daemon', 'src/sys_tbl_mgr/sys_tbl_mgr_daemon'),
-    ('write_cache_daemon', 'src/write_cache/write_cache_daemon'),
-    ('gc_daemon', 'src/garbage_collector/gc_daemon'),
-    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon')
+    ('pg_log_mgr_daemon', 'src/pg_log_mgr/pg_log_mgr_daemon'),
+    ('gc_daemon', 'src/garbage_collector/gc_daemon')
 ]
 
 FDW_DAEMONS = [
     ('pg_ddl_daemon', 'src/pg_fdw/pg_ddl_daemon', '-s,/var/run/postgresql')
 ]
 
-ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS
+PROXY_DAEMONS = [
+    ('proxy', 'src/proxy/proxy')
+]
+
+ALL_DAEMONS = CORE_DAEMONS + FDW_DAEMONS + PROXY_DAEMONS
 
 ALL_DAEMONS_NAMES = [name[0] for name in ALL_DAEMONS]
 
@@ -77,7 +81,6 @@ def cleanup_filesystem(props : Properties) -> None:
     """Clear the file system data at the given mount path."""
     # Get the mount path
     mount_path = props.get_mount_path()
-    sys_config = props.get_system_config()
     log_path = props.get_log_path()
     pid_path = props.get_pid_path()
 
@@ -290,6 +293,13 @@ def fdw_import(props : Properties, build_dir : str, config_file : str) -> None:
     start_daemons(build_dir, daemons)
 
 
+def start_proxy(props : Properties, build_dir : str) -> None:
+    """Start the proxy."""
+    # Start the proxy
+    print("Starting proxy...")
+    start_daemons(build_dir, PROXY_DAEMONS)
+
+
 def wait_for_running(props : Properties) -> None:
     """Wait for the system to be in a running state."""
     # Wait for the system to be in a running state
@@ -341,6 +351,20 @@ def check_config(props : Properties) -> None:
     # if fdw_prefix is not set
     if (fdw_prefix is None or fdw_prefix == '') and (db_host == fdw_host and db_port == fdw_port):
         raise Exception("Primary DB and FDW cannot be on the same host and port.  Please set the 'db_prefix' in the FDW configuration.")
+
+    # Get the mount path
+    mount_path = props.get_mount_path()
+    log_path = props.get_log_path()
+    pid_path = props.get_pid_path()
+
+    # Create log path if it doesn't exist
+    makedir(log_path, '777')
+
+    # Create the mount path if it doesn't exist
+    makedir(mount_path, '755')
+
+    # Check that the pid path exists; if not try to create it
+    makedir(pid_path, '755')
 
 
 def check_log_writable(props : Properties) -> None:
@@ -646,6 +670,12 @@ if __name__ == "__main__":
     if not is_linux():
         print("This script only supports running on Linux.")
         sys.exit(1)
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(asctime)s.%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                            datefmt='%Y-%m-%d:%H:%M:%S',
+                            handlers=logging.StreamHandler(sys.stdout))
 
     try:
         if args.status:

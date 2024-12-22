@@ -23,7 +23,7 @@
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
-    /* static initialization must happen outside of class */
+     /* static initialization must happen outside of class */
     Client* Client::_instance {nullptr};
     std::mutex Client::_instance_mutex;
 
@@ -75,7 +75,7 @@ namespace springtail::sys_tbl_mgr {
     void
     Client::shutdown()
     {
-         std::scoped_lock<std::mutex> lock(_instance_mutex);
+        std::scoped_lock<std::mutex> lock(_instance_mutex);
 
         if (_instance != nullptr) {
             delete _instance;
@@ -150,8 +150,8 @@ namespace springtail::sys_tbl_mgr {
         request.index.table_id = msg.table_oid;
         for (const auto &col : msg.columns) {
             IndexColumn column;
-            column.name = col.column_name;
             column.position = col.position;
+            column.name = col.name;
             column.idx_position = col.idx_position;
             request.index.columns.push_back(column);
         }
@@ -222,12 +222,13 @@ namespace springtail::sys_tbl_mgr {
 
 
     std::string 
-    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg)
+    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
     {
         ThriftClient c = _get_client();
         DDLStatement result;
 
         auto &&request = _gen_index_request(db_id, xid, msg);
+        request.index.state=static_cast<int8_t>(state);
 
         c.client->create_index(result, request);
 
@@ -237,6 +238,43 @@ namespace springtail::sys_tbl_mgr {
 
         return result.statement;
     }
+
+    void
+    Client::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
+    {
+        ThriftClient c = _get_client();
+        Status result;
+
+        SetIndexStateRequest request;
+        _set_request_common(request, db_id, xid);
+
+        request.table_id = table_id;
+        request.index_id = index_id;
+        request.state = static_cast<uint8_t>(state);
+
+        c.client->set_index_state(result, request);
+
+        if (result.status != StatusCode::SUCCESS) {
+            throw SysTblMgrError(result.message);
+        }
+    }
+
+
+    IndexInfo 
+    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid)
+    {
+        ThriftClient c = _get_client();
+        IndexInfo result;
+
+        GetIndexInfoRequest request;
+        _set_request_common(request, db_id, xid);
+        request.index_id = index_id;
+
+        c.client->get_index_info(result, request);
+
+        return result;
+    }
+
 
     std::string 
     Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
@@ -272,7 +310,13 @@ namespace springtail::sys_tbl_mgr {
         request.db_id = db_id;
         request.xid = xid;
         request.table_id = table_id;
-        request.roots.insert(request.roots.end(), metadata.roots.begin(), metadata.roots.end());
+        for (auto const& [index_id, extent_id]: metadata.roots) {
+            sys_tbl_mgr::RootInfo ri;
+            ri.index_id = index_id;
+            ri.extent_id = extent_id;
+            request.roots.push_back(ri);
+        }
+
         request.stats.row_count = metadata.stats.row_count;
         request.snapshot_xid = metadata.snapshot_xid;
 
@@ -385,6 +429,22 @@ namespace springtail::sys_tbl_mgr {
                 }
 
                 metadata->history.push_back(value);
+            }
+
+            for (auto const& idx: result.indexes) {
+                Index info;
+                info.id = idx.id;
+                info.name = idx.name;
+                info.schema = idx.schema;
+                info.state = idx.state;
+                info.table_id = idx.table_id;
+                info.is_unique = idx.is_unique;
+                for (auto const& col: idx.columns) {
+                    info.columns.emplace_back(col.idx_position, col.position);
+                }
+                //sort by index position
+                std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
+                metadata.indexes.push_back(std::move(info));
             }
 
             return std::make_shared<SchemaValue>(result.access_start,

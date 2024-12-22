@@ -21,9 +21,10 @@ namespace springtail::pg_proxy {
                                  ProxyServerPtr server,
                                  UserPtr user,
                                  std::string database,
+                                 std::string prefix,
                                  DatabaseInstancePtr instance,
                                  Session::Type type)
-        : Session(instance, connection, server, user, database, type)
+        : Session(instance, connection, server, user, database, type), _db_prefix(prefix)
     {
         _state = STARTUP;
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
@@ -182,7 +183,7 @@ namespace springtail::pg_proxy {
         // if not handled above then read in full message
         // get a bufffer from the buffer pool
         BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
-        ssize_t n = _connection->read(buffer->data(), msg_length);
+        ssize_t n = _connection->read(buffer->data(), msg_length, msg_length);
         assert(n == msg_length);
         buffer->set_size(msg_length);
 
@@ -319,7 +320,7 @@ namespace springtail::pg_proxy {
         // Read startup ssl message from server in response to send_startup
         // Just one character: 'N' no ssl or 'S' yes ssl
         char ssl_response;
-        ssize_t n = _connection->read(&ssl_response, 1);
+        ssize_t n = _connection->read(&ssl_response, 1, 1);
         assert(n==1);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
@@ -371,14 +372,15 @@ namespace springtail::pg_proxy {
     void ServerSession::_send_startup_msg(uint64_t seq_id)
     {
         // Send startup message
-        int msg_len = 8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + _database.size() + 3; // length
+        std::string database_name = _db_prefix + _database;
+        int msg_len = 8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + database_name.size() + 3; // length
         BufferPtr buffer = BufferPool::get_instance()->get(msg_len + 4);
         buffer->put32(msg_len);
         buffer->put32(MSG_STARTUP_V3); // protocol version
         buffer->put_string("user");
         buffer->put_string(_user->username());
         buffer->put_string("database");
-        buffer->put_string(_database);
+        buffer->put_string(database_name);
         buffer->put_string("application_name");
         buffer->put_string("Springtail");
         buffer->put_string("client_encoding");
@@ -451,12 +453,12 @@ namespace springtail::pg_proxy {
         if (_login == nullptr) {
             throw ProxyAuthError();
         }
-        _login->_salt = salt;
+        _login->salt = salt;
 
         char md5[MD5_PASSWD_LEN+1];
         // calculate md5 hash; skip the 'md5' prefix on the password; add salt and compute
-        assert(_login->_password.starts_with("md5"));
-        if (!pg_md5_encrypt(_login->_password.c_str()+3, reinterpret_cast<char*>(&_login->_salt), 4, md5)) {
+        assert(_login->password.starts_with("md5"));
+        if (!pg_md5_encrypt(_login->password.c_str()+3, reinterpret_cast<char*>(&_login->salt), 4, md5)) {
             SPDLOG_ERROR("Failed to calculate MD5 hash");
             throw ProxyAuthError();
         }
@@ -518,7 +520,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_auth_scram_continue(BufferPtr buffer)
     {
-        std::string_view data = buffer->get_bytes(buffer->remaining());
+        int data_len = buffer->remaining();
+        std::string_view data = buffer->get_bytes(data_len);
 
         if (_login->scram_state.client_nonce == nullptr) {
             SPDLOG_ERROR("No client nonce set");
@@ -531,7 +534,9 @@ namespace springtail::pg_proxy {
         }
 
         int salt_len;
-        char *input = strdup(data.data());
+        char *input = new char[data_len + 1];
+        strncpy(input, data.data(), data_len);
+        input[data_len] = '\0';
 
         if (!read_server_first_message(&_login->scram_state, input,
                                        &_login->scram_state.server_nonce,
@@ -539,9 +544,10 @@ namespace springtail::pg_proxy {
                                        &salt_len,
                                        &_login->scram_state.iterations)) {
             SPDLOG_ERROR("Failed to read server first message");
-            free (input);
+            delete[] input;
             throw ProxyAuthError();
         }
+        delete[] input;
 
         PgUser user;
         user.scram_ClientKey = _login->scram_state.ClientKey;
@@ -550,8 +556,6 @@ namespace springtail::pg_proxy {
         char *client_final_message = build_client_final_message(&_login->scram_state,
 			&user, _login->scram_state.server_nonce,
 			_login->scram_state.salt, salt_len, _login->scram_state.iterations);
-
-        free(input);
 
         if (client_final_message == nullptr) {
             SPDLOG_ERROR("Failed to build client final message");
@@ -573,7 +577,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_auth_scram_complete(BufferPtr buffer)
     {
-        std::string_view data = buffer->get_bytes(buffer->remaining());
+        int data_len = buffer->remaining();
+        std::string_view data = buffer->get_bytes(data_len);
 
         // make sure we are in right flow
         if (_login->scram_state.server_first_message == nullptr) {
@@ -581,15 +586,18 @@ namespace springtail::pg_proxy {
             throw ProxyAuthError();
         }
 
-        char *input = strdup(data.data());
+        char *input = new char[data_len + 1];
+        strncpy(input, data.data(), data_len);
+        input[data_len] = '\0';
         char ServerSignature[SHA256_DIGEST_LENGTH];
 
         // decode the final message from server
         if (!read_server_final_message(input, ServerSignature)) {
             SPDLOG_ERROR("Failed to read server final message");
-            free(input);
+            delete[] input;
             throw ProxyAuthError();
         }
+        delete[] input;
 
         PgUser user;
         user.scram_ClientKey = _login->scram_state.ClientKey;
@@ -599,11 +607,8 @@ namespace springtail::pg_proxy {
         // last step, verify the server signature
         if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
             SPDLOG_ERROR("Failed to verify server signature");
-            free(input);
             throw ProxyAuthError();
         }
-
-        free(input);
     }
 
     void
@@ -652,6 +657,7 @@ namespace springtail::pg_proxy {
         assert (_state == DEPENDENCIES);
         assert (!error);
 
+        assert(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
 
         // add dependency to cache
@@ -686,7 +692,9 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_query_error()
     {
+        assert (!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
+
         // pop the query from the queue, and issue response
         _pending_queue.pop();
         query_status->msg->set_msg_response(false, query_status->query_complete_count);
@@ -716,7 +724,10 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_ready_for_query_response(char xact_status)
     {
-        QueryStatusPtr query_status = _pending_queue.front();
+        QueryStatusPtr query_status = nullptr;
+        if (!_pending_queue.empty()) {
+            query_status = _pending_queue.front();
+        }
 
         if (_state == DEPENDENCIES) {
             // we are in dependency checking state,
@@ -761,6 +772,7 @@ namespace springtail::pg_proxy {
         assert (_state == QUERY);
 
         // no error, mark query as complete
+        assert(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
         query_status->query_complete_count++;
 
@@ -921,12 +933,13 @@ namespace springtail::pg_proxy {
     ServerSession::create(ProxyServerPtr server,
                           UserPtr user,
                           const std::string &database,
+                          const std::string &prefix,
                           DatabaseInstancePtr instance,
                           Session::Type type)
     {
         if (instance == nullptr) {
             assert (type == Session::Type::PRIMARY);
-            instance = server->get_primary_instance();
+            instance = DatabaseMgr::get_instance()->get_primary_instance();
         }
 
         auto connection = instance->create_connection();
@@ -935,7 +948,7 @@ namespace springtail::pg_proxy {
             throw ProxyIOConnectionError();
         }
 
-        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, instance, type);
+        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, type);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         return session;

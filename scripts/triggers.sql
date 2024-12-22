@@ -29,7 +29,7 @@ BEGIN
                 'name', obj.object_name,
                 'identity', obj.object_identity);
 
-            RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
+            --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
 
             -- tag_name is DROP TABLE or DROP INDEX
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
@@ -58,7 +58,7 @@ BEGIN
         INTO table_relname, table_replident, table_persistence;
 
         IF table_persistence <> 'p' THEN
-            RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
+            --- RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
             RETURN;
         END IF;
 
@@ -98,7 +98,7 @@ BEGIN
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
+        --- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
@@ -120,10 +120,10 @@ CREATE OR REPLACE FUNCTION springtail_set_replica_identity(identity regclass, fu
         RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     IF full_ident THEN
-        RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
+        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
         EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', identity);
     ELSE
-        RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
+        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
         EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', identity);
     END IF;
 END;
@@ -133,7 +133,7 @@ CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
-    tab_obj record;
+    ind_obj record;
     msg text;
     json_columns json;
 BEGIN
@@ -145,30 +145,27 @@ BEGIN
                 c.oid AS table_oid,
                 c.relname AS table_name,
                 i.indisunique AS is_unique,
-                i.indisprimary AS primary_idx
+                i.indisprimary AS primary_idx,
+                i.indkey AS indkey
             FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-            WHERE i.indexrelid = %s', obj.objid) INTO tab_obj;
+            WHERE i.indexrelid = %s', obj.objid) INTO ind_obj;
 
-        IF tab_obj.primary_idx is true THEN
+        IF ind_obj.primary_idx is true THEN
             RETURN;
         END IF;
 
         -- get index columns
         SELECT json_agg(json_col)
         FROM (
-            SELECT json_build_object('name', column_name,
-                'position', ordinal_position,
-                'idx_position', array_position(pgi.indkey, pga.attnum)
+            SELECT json_build_object('name', pga.attname,
+                'position', pga.attnum,
+                'idx_position', array_position(ind_obj.indkey, pga.attnum)
             ) AS json_col
             FROM pg_attribute pga
-            JOIN information_schema.columns
-                ON column_name=pga.attname
-            LEFT OUTER JOIN pg_index pgi
-                ON pgi.indexrelid=obj.objid
-            WHERE pgi.indexrelid=obj.objid
-                AND pga.attrelid=pgi.indrelid
-                AND obj.object_type = 'index'
-                AND (array_position(pgi.indkey, pga.attnum) IS NOT NULL)
+            WHERE
+                pga.attrelid=ind_obj.table_oid
+                AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
+                AND attisdropped=false
         ) AS obj_select
         INTO json_columns;
 
@@ -179,15 +176,15 @@ BEGIN
             'obj', obj.object_type,
             'schema', obj.schema_name,
             'identity', obj.object_identity,
-            'table_oid', tab_obj.table_oid::bigint,
-            'table_name', tab_obj.table_name,
-            'is_unique', tab_obj.is_unique,
+            'table_oid', ind_obj.table_oid::bigint,
+            'table_name', ind_obj.table_name,
+            'is_unique', ind_obj.is_unique,
             'columns', json_columns);
 
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
+        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
     END LOOP;
 END;
 $$;
@@ -207,9 +204,86 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'ALTER INDEX', 'CREATE INDEX' )
+   WHEN TAG IN ( 'CREATE INDEX' )
    EXECUTE FUNCTION springtail_event_trigger_for_index_ddl();
 
 
+-- Select all users and their databases with access to springtail
+-- If springtail_user role exists, only users with that role are returned
+-- otherwise all users are returned
+CREATE OR REPLACE FUNCTION springtail_get_user_access()
+    RETURNS TABLE (username text, password text, databases text)
+    LANGUAGE plpgsql
+    SECURITY DEFINER AS $$
+DECLARE
+    user_record record;
+    db_record record;
+    db_list json;
+    has_springtail_role boolean;
+BEGIN
+    -- Check if springtail_user role exists
+    SELECT
+        EXISTS (
+            SELECT 1
+            FROM pg_roles
+            WHERE rolname = 'springtail_user'
+        )
+    INTO has_springtail_role;
 
+    -- If springtail_user role exists, only users with that role are returned
+    IF has_springtail_role THEN
+        RETURN QUERY SELECT
+            s.usename::text AS username,
+            s.passwd AS password,
+            json_agg(d.datname ORDER BY d.datname)::text AS databases
+        FROM pg_shadow s
+        JOIN pg_roles r ON s.usesysid = r.oid
+        CROSS JOIN pg_database d
+        WHERE (s.valuntil IS NULL OR s.valuntil > now())
+          AND s.passwd IS NOT NULL
+          AND (s.passwd ilike 'MD5%' OR s.passwd ilike 'SCRAM%')
+          AND r.rolcanlogin IS TRUE
+          AND has_database_privilege(s.usename, d.datname, 'CONNECT')
+          AND EXISTS ( SELECT 1
+            FROM pg_auth_members m
+            JOIN pg_roles r ON m.roleid = r.oid
+            WHERE m.member = s.usesysid
+            AND r.rolname = 'springtail_user' )
+        GROUP BY s.usename, s.passwd
+        ORDER BY s.usename;
+    ELSE
+        -- If springtail_user role does not exist, all users are returned
+        RETURN QUERY SELECT
+            s.usename::text AS username,
+            s.passwd AS password,
+            json_agg(d.datname ORDER BY d.datname)::text AS databases
+        FROM pg_shadow s
+        JOIN pg_roles r ON s.usesysid = r.oid
+        CROSS JOIN pg_database d
+        WHERE (s.valuntil IS NULL OR s.valuntil > now())
+          AND s.passwd IS NOT NULL
+          AND (s.passwd ilike 'MD5%' OR s.passwd ilike 'SCRAM%')
+          AND r.rolcanlogin IS TRUE
+          AND has_database_privilege(s.usename, d.datname, 'CONNECT')
+        GROUP BY s.usename, s.passwd
+        ORDER BY s.usename;
+    END IF;
+END;
+$$;
 
+-- Clean up function to drop the other functions and triggers
+CREATE OR REPLACE FUNCTION springtail_cleanup()
+    RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+    -- Drop event functions
+    DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops() CASCADE;
+    DROP FUNCTION IF EXISTS springtail_event_trigger_for_table_ddl() CASCADE;
+    DROP FUNCTION IF EXISTS springtail_set_replica_identity(identity regclass, full_ident boolean) CASCADE;
+    DROP FUNCTION IF EXISTS springtail_event_trigger_for_index_ddl() CASCADE;
+    DROP FUNCTION IF EXISTS springtail_get_user_access() CASCADE;
+    -- Drop event triggers
+    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
+    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
+    DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
+END;
+$$;

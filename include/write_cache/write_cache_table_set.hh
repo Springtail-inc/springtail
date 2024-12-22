@@ -3,7 +3,7 @@
 #include <map>
 #include <string>
 #include <memory>
-#include <optional>
+#include <set>
 #include <mutex>
 #include <shared_mutex>
 #include <cassert>
@@ -25,7 +25,7 @@ namespace springtail {
         /**
          * @brief Construct a new Write Cache Table Set object
          */
-        WriteCacheTableSet(int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
+        explicit WriteCacheTableSet(int row_table_paritions=DEFAULT_TABLE_PARTITIONS);
 
         /**
          * @brief Add extent to table set
@@ -55,6 +55,13 @@ namespace springtail {
          * @param xid springtail XID
          */
         void commit(uint64_t pg_xid, uint64_t xid);
+
+        /**
+         * @brief Add mapping from springtail XID to Postgres XID
+         * @param pg_xids Postgres XID
+         * @param xid springtail XID
+         */
+        void commit(std::vector<uint64_t> pg_xids, uint64_t xid);
 
         /**
          * @brief Get a list of table IDs
@@ -104,8 +111,8 @@ namespace springtail {
         /** root of tree, each level points to another set of ids sorted by max xid */
         WriteCacheIndexNodePtr _xid_root;
 
-        /** map of sp xid to pg_xid */
-        std::map<uint64_t, uint64_t> _xid_map;
+        /** map of sp xid to pg_xids (there may be multiple pg_xids due to subtransactions) */
+        std::unordered_multimap<uint64_t, uint64_t> _xid_map;
 
         /** mutex for _xid_map */
         std::shared_mutex _xid_map_mutex;
@@ -117,11 +124,11 @@ namespace springtail {
         void _dump(WriteCacheIndexNodePtr node);
 
         /**
-         * @brief Get mapping for a pg_xid
-         * @param pg_xid Postgres XID
-         * @return optional uint64_t springtail XID; none if not found
+         * @brief Get pg_xids that map to a springtail XID
+         * @param xid Springtail XID
+         * @return std::set<uint64_t> of springtail XIDs
          */
-            std::optional<uint64_t> lookup_pgxid(uint64_t pg_xid);
+            std::set<uint64_t> lookup_pgxid(uint64_t xid);
     };
     typedef std::shared_ptr<WriteCacheTableSet> WriteCacheTableSetPtr;
 }
