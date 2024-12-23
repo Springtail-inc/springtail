@@ -105,6 +105,12 @@ namespace springtail::pg_proxy {
         SPDLOG_INFO("Proxy server initialized and is listening on port={}", proxy_port);
     }
 
+    void
+    ProxyServer::set_log_level(int log_level)
+    {
+        proxy_log_level = static_cast<LogLevel>(log_level);
+    }
+
     /** Callback to get more info about what is going on in SSL */
     static void
     ssl_info_callback(const SSL *s, int where, int ret)

@@ -61,6 +61,9 @@ int main(int argc, char* argv[])
     Json::get_to<int>(json, "threads", num_threads, 4);
     Json::get_to<int>(json, "port", port, 8888);
 
+    int log_level;
+    Json::get_to<int>(json, "log_level", log_level, 1);
+
     // setup ssl config
     Json::get_to<bool>(json, "enable_ssl", enable_ssl, false);
     Json::get_to<std::filesystem::path>(json, "cert", certificate);
@@ -100,6 +103,7 @@ int main(int argc, char* argv[])
     }
 
     server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
+    server->set_log_level(log_level);
 
     server->run();
     server->cleanup();

@@ -1,0 +1,18 @@
+Simple transaction (begin/select/commit or rollback)
+>Q   (begin)
+<C/Z (Z in trans)
+>Q   (select)
+<T/D/D/D/C/Z  (Z in trans)
+>Q   (commit/rollback)
+<C/Z (Z idle)
+
+Copy In
+>Q    (copy from)
+<G
+>d/c
+<C/Z
+
+Copy Out
+>Q    (copy to)
+<H/d/d/d/c/C/Z
+
