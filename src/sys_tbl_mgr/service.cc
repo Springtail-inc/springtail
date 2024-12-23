@@ -1288,13 +1288,16 @@ namespace springtail::sys_tbl_mgr {
                                          const XidLsn &xid,
                                          std::map<uint32_t, TableColumn> &columns)
     {
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock ulock(_mutex);
 
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache[db_id].find(table_id);
         if (schema_i == _schema_cache[db_id].end()) {
             return;
         }
+
+        // can downgrade to a shared lock once we've guaranteed to create the _schema_cache entry
+        boost::shared_lock slock(std::move(ulock));
 
         // go through the history and apply any changes up through the provided XID/LSN
         for (auto &column : schema_i->second) {
@@ -1389,13 +1392,16 @@ namespace springtail::sys_tbl_mgr {
 
     {
         std::vector<ColumnHistory> history;
-        boost::shared_lock lock(_mutex);
+        boost::unique_lock ulock(_mutex);
 
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache[db_id].find(table_id);
         if (schema_i == _schema_cache[db_id].end()) {
             return history;
         }
+
+        // can downgrade to a shared lock once we've guaranteed to create the _schema_cache entry
+        boost::shared_lock slock(std::move(ulock));
 
         // go through the history and capture any changes up through the provided XID/LSN
         for (auto &column : schema_i->second) {
