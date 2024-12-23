@@ -31,7 +31,7 @@ namespace {
         static void SetUpTestSuite() {
             springtail_init();
 
-            _services.init(true);
+            _services.init();
         }
 
         static void TearDownTestSuite() {

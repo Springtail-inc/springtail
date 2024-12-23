@@ -19,15 +19,27 @@ namespace {
      */
     class TableMgr_Test : public testing::Test {
         void SetUp() override {
-            springtail_init();
-            _services.init(true);
+            struct Initializer
+            {
+                test::Services _s;
+
+                Initializer() : _s{true, true, false}
+                {
+                    springtail_init();
+                    _s.init();
+                }
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
         }
 
         void TearDown() override {
-            _services.shutdown();
         }
 
-        test::Services _services{true, true, false};
     };
 
     // Tests the schema modification paths

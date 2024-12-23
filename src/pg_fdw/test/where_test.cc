@@ -26,11 +26,24 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            // call springtail_init() here to avoid call in fdw_init()
-            springtail_init();
+            struct Initializer
+            {
+                test::Services _s;
 
-            PgFdwMgr::fdw_init();
-            _services.init(true);
+                Initializer() : _s{true, true, true}
+                {
+                    springtail_init();
+                    // call springtail_init() here to avoid call in fdw_init()
+                    PgFdwMgr::fdw_init();
+                    _s.init();
+                }
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
 
             _columns = {
                 {"col1", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
@@ -91,8 +104,6 @@ namespace {
 
         // Called once per testsuite.  Remove the table directories
         static void TearDownTestSuite() {
-            // remove any files created during the run
-           _services.shutdown();
         }
 
         // Pre test setup
@@ -120,8 +131,6 @@ namespace {
                 delete[] _attrs;
             }
         }
-
-        inline static test::Services _services{true, true, true};
 
         inline static uint64_t _db_id;
         inline static uint64_t _tid;

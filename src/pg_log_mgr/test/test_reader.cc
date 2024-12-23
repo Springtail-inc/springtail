@@ -64,8 +64,22 @@ namespace {
 
         void SetUp() override {
             // code here will execute just before the test ensues
-            springtail_init();
-            _services.init(true);
+            struct Initializer
+            {
+                test::Services _s;
+
+                Initializer() : _s{true, true, false}
+                {
+                    springtail_init();
+                    _s.init();
+                }
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
 
             // create a new log file
             _log_file = std::filesystem::path(LOG_FILE);
@@ -81,7 +95,6 @@ namespace {
         void TearDown() override {
             // code here will be called just after the test completes
             // ok to through exceptions from here if need be
-            _services.shutdown();
 
             // close the file
             if (_fp != nullptr) {
@@ -153,7 +166,6 @@ namespace {
         PgLogReader _log_reader{1, _queue}; // note: hard-codes DB ID as 1
         std::vector<PgTransactionPtr> _xact_list;
         std::shared_ptr<TestLogMgr> _log_mgr;
-        test::Services _services{true, true, false};
     };
 
     TEST_F(LogReader_Test, ProcessLog)
