@@ -1,0 +1,73 @@
+DROP TABLE IF EXISTS regress_1;
+NOTICE:  table "regress_1" does not exist, skipping
+CREATE table regress_1 (a int primary key, b text);
+INSERT INTO regress_1 VALUES
+    (1, 'one'),
+    (2, 'two'),
+    (3, 'three'),
+    (4, 'four'),
+    (5, 'five'),
+    (6, 'six'),
+    (7, 'seven'),
+    (8, 'eight'),
+    (9, 'nine'),
+    (10, 'ten');
+SELECT * FROM regress_1 ORDER BY a DESC;
+ a  |   b
+----+-------
+ 10 | ten
+  9 | nine
+  8 | eight
+  7 | seven
+  6 | six
+  5 | five
+  4 | four
+  3 | three
+  2 | two
+  1 | one
+(10 rows)
+
+BEGIN;
+INSERT INTO regress_1 VALUES (11, 'eleven');
+SELECT * FROM regress_1 where a > 5 ORDER BY a DESC;
+ a  |   b
+----+--------
+ 11 | eleven
+ 10 | ten
+  9 | nine
+  8 | eight
+  7 | seven
+  6 | six
+(6 rows)
+
+COMMIT;
+BEGIN;
+INSERT INTO regress_1 VALUES (12, 'twelve');
+SELECT * FROM regress_1 where a > 5 ORDER BY a DESC;
+ a  |   b
+----+--------
+ 12 | twelve
+ 11 | eleven
+ 10 | ten
+  9 | nine
+  8 | eight
+  7 | seven
+  6 | six
+(7 rows)
+
+ROLLBACK;
+SELECT * FROM regress_1 ORDER BY a DESC;
+ a  |   b
+----+--------
+ 11 | eleven
+ 10 | ten
+  9 | nine
+  8 | eight
+  7 | seven
+  6 | six
+  5 | five
+  4 | four
+  3 | three
+  2 | two
+  1 | one
+(11 rows)

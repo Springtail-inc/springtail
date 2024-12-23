@@ -29,7 +29,7 @@ BEGIN
                 'name', obj.object_name,
                 'identity', obj.object_identity);
 
-            RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
+            --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
 
             -- tag_name is DROP TABLE or DROP INDEX
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
@@ -58,7 +58,7 @@ BEGIN
         INTO table_relname, table_replident, table_persistence;
 
         IF table_persistence <> 'p' THEN
-            RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
+            --- RAISE NOTICE 'springtail: skipping operation %, on object %, with identity %, due to wrong persistence type: %', obj.command_tag, obj.object_type, obj.object_identity, table_persistence;
             RETURN;
         END IF;
 
@@ -98,7 +98,7 @@ BEGIN
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
+        --- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objid, table_replident;
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
@@ -120,10 +120,10 @@ CREATE OR REPLACE FUNCTION springtail_set_replica_identity(identity regclass, fu
         RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     IF full_ident THEN
-        RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
+        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
         EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', identity);
     ELSE
-        RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
+        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
         EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', identity);
     END IF;
 END;
@@ -162,7 +162,7 @@ BEGIN
                 'idx_position', array_position(ind_obj.indkey, pga.attnum)
             ) AS json_col
             FROM pg_attribute pga
-            WHERE 
+            WHERE
                 pga.attrelid=ind_obj.table_oid
                 AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
                 AND attisdropped=false
@@ -184,7 +184,7 @@ BEGIN
         -- command_tag is CREATE TABLE or ALTER TABLE
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
 
-        RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, ind_obj.primary_idx;
+        -- RAISE NOTICE 'springtail: % op, %, %, %', obj.command_tag, obj.object_identity, obj.objsubid, tab_obj.primary_idx;
     END LOOP;
 END;
 $$;

@@ -31,7 +31,7 @@ namespace pg_proxy {
      * Used by a session during authentication
      */
     struct UserLogin {
-        AuthType _type;
+        AuthType type;
 
         /** Scram state, freed in destructor */
         ScramState scram_state;
@@ -40,23 +40,28 @@ namespace pg_proxy {
          * for SCRAM - SCRAM-SHA-256$<iterations>:<salt>$<storedkey>:<serverkey>
          * for MD5 - md5<bytes>
          */
-        std::string _password;
-        uint32_t    _salt;
+        std::string password;
+        uint32_t    salt;
 
         UserLogin(AuthType type=TRUST)
-            : _type(type)
+            : type(type)
         {}
 
         UserLogin(AuthType type, const std::string &password, uint32_t salt=0)
-            : _type(type),
-              _password(password),
-              _salt(salt)
-        {}
+            : type(type),
+              password(password),
+              salt(salt)
+        {
+            if (type == SCRAM) {
+                memset(&scram_state, 0, sizeof(scram_state));
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "new userlogin scram state: {:p}", (void *)&scram_state);
+            }
+        }
 
         ~UserLogin() {
             // release the scram state pointers.  The keys are copied into the User object
-            if (_type == SCRAM) {
-                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Freeing scram state");
+            if (type == SCRAM) {
+                SPDLOG_DEBUG_MODULE(LOG_PROXY, "Freeing scram state: {:p}", (void *)&scram_state);
                 free_scram_state(&scram_state);
             }
         }

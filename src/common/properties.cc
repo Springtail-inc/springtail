@@ -279,6 +279,11 @@ namespace springtail {
         if (file != nullptr) {
             SPDLOG_INFO("Properties override file: {}", file);
 
+            const char *load_override = std::getenv(environment::LOAD_OVERRIDE);
+            if (load_override != nullptr) {
+                load_redis = common::to_bool(load_override);
+            }
+
             if (load_redis) {
                 // read the system properties from the configuration file
                 _load_redis(file);

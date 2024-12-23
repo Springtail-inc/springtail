@@ -1,0 +1,3 @@
+# timeout=2
+test: sp_simple
+test: sp_copy
