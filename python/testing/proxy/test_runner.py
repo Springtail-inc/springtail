@@ -151,7 +151,10 @@ class Test:
         primary_conn.close()
 
 
-    def run_regress_cmd(self, port : int, schedule : str, suffix : str) -> None:
+    def run_regress_cmd(self, port : int,
+                        schedule : str,
+                        test_files : list[str],
+                        suffix : str) -> None:
         """Run the regression test"""
         # remove all files in result directory
         for f in os.listdir(self._result_path):
@@ -169,7 +172,7 @@ class Test:
             try:
                 if 'timeout' in line:
                     timeout = float(line.split('=')[1].strip())
-            except:
+            except Exception as e:
                 timeout = 60
                 pass
 
@@ -183,7 +186,7 @@ class Test:
                 f'--user={self._primary_user}',
                 f'--schedule={os.path.join(self._regress_path, schedule)}',
                 '--max-connections=1',
-                '--use-existing']
+                '--use-existing'] + test_files
 
         logging.info(self._pg_regress + ' ' + ' '.join(args))
         logging.info(f"Timeout: {timeout} seconds")
@@ -258,11 +261,15 @@ class Test:
             time.sleep(2)
 
 
-    def run_regress(self, schedule: str, manual_proxy: bool = False) -> None:
+    def run_regress(self,
+                    schedule: str,
+                    test_files: list[str],
+                    manual_proxy: bool = False,
+                    notimeout: bool = False) -> None:
         """Run the regression tests"""
         # make sure postgres is running
         if not check_postgres_running():
-            start_postgres(self._props)
+            start_postgres()
             if not check_postgres_running():
                 raise ValueError("Failed to start postgres")
 
@@ -276,7 +283,7 @@ class Test:
         self.setup_regress_files()
 
         # run the regression tests first against normal postgres
-        self.run_regress_cmd(self._primary_port, schedule, 'pg.out')
+        self.run_regress_cmd(self._primary_port, schedule, test_files, 'pg.out')
 
         # rename the expected dir
         os.rename(self._expected_path, self._expected_path + '.pg')
@@ -296,7 +303,7 @@ class Test:
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
         # self.run_regress_cmd(self._primary_port, '.proxy')
-        self.run_regress_cmd(self._proxy_config['port'], schedule, 'proxy.out')
+        self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out')
 
 
     def cleanup(self):
@@ -310,8 +317,11 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Springtail Proxy tests")
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-m', '--manual', action='store_true', default=False, help='Run the proxy manually')
-    parser.add_argument('-s', '--schedule', type=str, default='postgres_all', help='Path to the schedule file')
+    parser.add_argument('-s', '--schedule', type=str, default=None, help='Path to the schedule file')
     parser.add_argument('-l', '--list', action='store_true', default=False, help='List all schedules')
+    parser.add_argument('-t', '--notimeout', action='store_true', default=False, help='Disable timeouts')
+    parser.add_argument('test_files', nargs="*", help="Individual test sql files (without .sql).")
+
     return parser.parse_args()
 
 ## main()
@@ -325,6 +335,9 @@ if __name__ == "__main__":
         for s in schedules:
             print(os.path.basename(s))
         sys.exit(0)
+
+    if not args.schedule and not args.test_files:
+        raise ValueError("No schedule or test files specified")
 
     if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
         raise ValueError(f"Schedule file not found: {args.schedule}")
@@ -348,7 +361,7 @@ if __name__ == "__main__":
     test = Test(yaml_config['system_json_path'], yaml_config['install_dir'], yaml_config['external_dir'])
 
     try:
-        test.run_regress(args.schedule, args.manual)
+        test.run_regress(args.schedule, args.test_files, args.manual, args.notimeout)
     except Exception as e:
         logging.error(f'Failed to run the regression tests: {e}')
         # cleanup the regression tmp dir on exception
