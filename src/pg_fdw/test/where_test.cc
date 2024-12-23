@@ -37,6 +37,8 @@ namespace {
                     PgFdwMgr::fdw_init();
                     _s.init();
                 }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
                 ~Initializer()
                 {
                     _s.shutdown();
@@ -100,10 +102,6 @@ namespace {
             TableMgr::get_instance()->update_roots(_db_id, _tid, target_xid, metadata);
 
             _table_xid = target_xid+1;
-        }
-
-        // Called once per testsuite.  Remove the table directories
-        static void TearDownTestSuite() {
         }
 
         // Pre test setup

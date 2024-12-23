@@ -37,6 +37,8 @@ namespace {
                     springtail_init();
                     _s.init();
                 }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
                 ~Initializer()
                 {
                     _s.shutdown();
@@ -58,9 +60,6 @@ namespace {
             if (err) {
                 GTEST_SKIP() << "Postgres load failure, skipping test";
             }
-        }
-
-        void TearDown() override {
         }
 
         uint64_t db_id = 1;

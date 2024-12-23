@@ -28,6 +28,8 @@ namespace {
                     springtail_init();
                     _s.init();
                 }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
                 ~Initializer()
                 {
                     _s.shutdown();
@@ -36,10 +38,6 @@ namespace {
             };
             static Initializer init;
         }
-
-        void TearDown() override {
-        }
-
     };
 
     // Tests the schema modification paths
