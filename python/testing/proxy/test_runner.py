@@ -176,6 +176,8 @@ class Test:
                 timeout = 60
                 pass
 
+        if self._notimeout:
+            timeout = None
 
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
@@ -282,6 +284,8 @@ class Test:
         # setup the regression files
         self.setup_regress_files()
 
+        self._notimeout = notimeout
+
         # run the regression tests first against normal postgres
         self.run_regress_cmd(self._primary_port, schedule, test_files, 'pg.out')
 
@@ -341,8 +345,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
         raise ValueError(f"Schedule file not found: {args.schedule}")
-
-
 
     # set the log level and format
     handlers = []
