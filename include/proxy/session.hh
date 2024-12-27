@@ -122,15 +122,20 @@ namespace springtail::pg_proxy {
 
         /** Set session to be associated with this session */
         void set_associated_session(std::shared_ptr<Session> remote_session) {
+            assert(remote_session != nullptr);
             _associated_session = remote_session;
             remote_session->_associated_session = shared_from_this();
-            _waiting_on_session = true;
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
+            if (_type == CLIENT) {
+                _waiting_on_session = true;
+            }
         }
 
         /** Clear associated session from this and remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
             assert(_waiting_on_session == true);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
             _waiting_on_session = false;
             _associated_session->_associated_session = nullptr;
             _associated_session = nullptr;
@@ -146,6 +151,7 @@ namespace springtail::pg_proxy {
         }
 
         void set_waiting_on_session(bool waiting) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Setting waiting on session: {}", (_type == CLIENT ? 'C': 'S'), _id, waiting);
             _waiting_on_session = waiting;
         }
 
@@ -201,6 +207,12 @@ namespace springtail::pg_proxy {
         void queue_msg(SessionMsgPtr msg, SessionPtr remote_session) {
             if (_associated_session == nullptr) {
                 set_associated_session(remote_session);
+            } else if (_associated_session != remote_session) {
+                SPDLOG_WARN("Associated session not cleared");
+                clear_associated_session();
+                set_associated_session(remote_session);
+            } else if (_type == Type::CLIENT) {
+                _waiting_on_session = true;
             }
             remote_session->_msg_queue.push(msg);
         }
@@ -255,6 +267,14 @@ namespace springtail::pg_proxy {
             return _type;
         }
 
+        /** Type string */
+        std::string type_str() const {
+            if (_type == Type::CLIENT) {
+                return "C";
+            }
+            return "S";
+        }
+
         /**
          * @brief Set shadow flag
          * @param shadow true if this is a shadow session
@@ -275,6 +295,8 @@ namespace springtail::pg_proxy {
     protected:
         ProxyConnectionPtr _connection;    ///< connection associated with this session
         ProxyServerPtr     _server;        ///< server associated with this session
+
+        std::mutex    _session_mutex;      ///< mutex for session
 
         State        _state = STARTUP;     ///< state of session, governs process()
         Type         _type;                ///< type of session
@@ -297,6 +319,9 @@ namespace springtail::pg_proxy {
         bool _in_transaction = false;      ///< is this session in a transaction
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
+
+        /** Process connection, entry from operator()() */
+        bool _process();
 
         /** Process messages for session connection,
          * must be implemented by derived class */

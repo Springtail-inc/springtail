@@ -144,6 +144,8 @@ namespace springtail::pg_proxy {
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
 
+        assert(msg_length < 100000); // sanity check
+
         // first handle messages where we just need to forward to client
         switch(code) {
             // responses to extended query protocol
@@ -634,14 +636,14 @@ namespace springtail::pg_proxy {
     ServerSession::_handle_error_code(BufferPtr buffer, uint64_t seq_id)
     {
         // Error response
-        SPDLOG_ERROR("Error response from server: seq_id: {}", seq_id);
-
         std::string severity;
         std::string text;
         std::string code;
         std::string message;
 
         ProxyProtoError::decode_error(buffer, severity, text, code, message);
+
+        SPDLOG_ERROR("Error response from server: seq_id: {}, text: {}", seq_id, text);
 
         // send error to client
         _send_to_remote_session('E', buffer->capacity(), buffer->data(), seq_id);

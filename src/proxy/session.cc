@@ -18,6 +18,9 @@ namespace springtail::pg_proxy {
     /** unique session id counter */
     static std::atomic<uint64_t> session_id(1);
 
+    /** thread local session variable */
+    thread_local Session* _current_session = nullptr;
+
     /** map of message type to string */
     const std::map<SessionMsg::Type, std::string> SessionMsg::type_map = {
             {MSG_CLIENT_SERVER_STARTUP, "MSG_CLIENT_SERVER_STARTUP"},
@@ -73,11 +76,41 @@ namespace springtail::pg_proxy {
     void
     Session::operator()()
     {
+        bool signal = true;
+
+        // set thread local session
+        _current_session = this;
+
+        std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
+        if (lock.try_lock()) {
+            // do actual processing
+            signal = _process();
+
+            // unlock prior to signalling server
+            lock.unlock();
+        } else {
+            // failed to lock, session is already running
+            SPDLOG_WARN("[{}:{}] Session already running", type_str(), _id);
+        }
+
+        _current_session = nullptr;
+
+        if (signal) {
+            // signal server to wait on this connection
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Adding connection to poll list: socket={}",
+                        type_str(), _id, _connection->get_socket());
+
+            _server->signal(_connection);
+        }
+    }
+
+    bool
+    Session::_process()
+    {
         // thread entry point from server
         bool has_data = false;
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing data", (_type == CLIENT ? 'C': 'S'), _id);
-
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing data (lock)", type_str(), _id);
         do {
             // thread entry point
             try {
@@ -96,7 +129,7 @@ namespace springtail::pg_proxy {
             // cleanup connection and remove from server list if closed or error
             if (_state == ERROR || _connection->closed()) {
                 _handle_error();
-                return;
+                return false;
             }
 
             // see if remote session has messages that need to be processed
@@ -116,12 +149,14 @@ namespace springtail::pg_proxy {
 
             if (_waiting_on_session) {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Waiting on external session", (_type == CLIENT ? 'C': 'S'), _id);
+                if (_type == CLIENT) {
+                    assert(_associated_session != nullptr);
+                }
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
                 // at that time it should be added back to the server poll list
-
-                return;
+                return false;
             }
 
             // check if we have messages pending that still need to be processed
@@ -133,14 +168,24 @@ namespace springtail::pg_proxy {
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Has data: {}", (_type == CLIENT ? 'C': 'S'), _id, has_data);
         } while (has_data);
 
-        // signal server to wait on this connection
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Adding connection to server poll list: socket={}", (_type == CLIENT ? 'C': 'S'), _id, _connection->get_socket());
-        _server->signal(_connection);
+
+        return true;
     }
 
     void
     Session::_internal_process_msgs(bool is_remote)
     {
+        std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
+        if (_current_session != this) {
+            // may be able to optimize this, but for now block locking if not current session
+            // this is called to pass a message from one session to another
+            // this is normally called with is_remote = true
+            lock.lock();
+
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Processing messages (lock), is_remote={}",
+                        (_type == CLIENT ? 'C': 'S'), _id, is_remote);
+        }
+
         while (_ready_for_message) {
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Looking for messages", (_type == CLIENT ? 'C': 'S'), _id);
 
@@ -175,6 +220,8 @@ namespace springtail::pg_proxy {
         if (is_remote) {
             _enable_processing();
         }
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] done with processing messages", (_type == CLIENT ? 'C': 'S'), _id);
     }
 
     void
@@ -212,6 +259,15 @@ namespace springtail::pg_proxy {
         // message length includes length field but not code byte
         // so really msg_length -= 4
         int32_t msg_length = recvint32(&buffer[1]) - 4;
+
+        if (msg_length > 100000) {
+            // dump buffer
+            std::string buf;
+            for (int i = 0; i < 5; i++) {
+                buf += fmt::format("{:02X}", i, buffer[i]);
+            }
+            SPDLOG_ERROR("Invalid message length: {}, buffer: {}", msg_length, buf);
+        }
 
         return {code, msg_length};
     }

@@ -46,8 +46,8 @@ namespace springtail::pg_proxy {
         }
 
         ServerSessionPtr get_shadow_session() {
-            if (_shadow_mode && !_replica_session.expired()) {
-                return _replica_session.lock();
+            if (_shadow_mode && _replica_session != nullptr) {
+                return _replica_session;
             }
             return nullptr;
         }
@@ -73,8 +73,8 @@ namespace springtail::pg_proxy {
         /** cache of statements, transaction history and session history */
         StatementCache _stmt_cache;
 
-        std::weak_ptr<ServerSession> _primary_session; ///< primary server session
-        std::weak_ptr<ServerSession> _replica_session; ///< replica server session
+        std::shared_ptr<ServerSession> _primary_session; ///< primary server session
+        std::shared_ptr<ServerSession> _replica_session; ///< replica server session
 
         std::string _default_schema = "public"; ///< default schema to be used for query parsing
 
@@ -134,9 +134,6 @@ namespace springtail::pg_proxy {
 
         /** Select a server session based on type */
         ServerSessionPtr _select_session(Type type, uint64_t seq_id);
-
-        /** Release server session back to session pool */
-        void _release_server_session();
 
         /** Send message to session, if session is null, select session first */
         void _send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session=nullptr);

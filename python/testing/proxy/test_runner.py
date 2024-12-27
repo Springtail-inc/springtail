@@ -151,6 +151,25 @@ class Test:
         primary_conn.close()
 
 
+    def extract_options(self, schedule : str) -> dict:
+        """Extract the options from the schedule file"""
+        options = {}
+        with open(schedule, 'r') as f:
+            line = f.readline()
+            if line.startswith('# options: '):
+                line = line.replace('# options: ', '')
+                options = { x.split('=')[0].strip() : x.split('=')[1].strip() for x in line.split(',') }
+
+        if 'timeout' in options:
+            try:
+                options['timeout'] = float(options['timeout'])
+            except ValueError as e:
+                options['timeout'] = 60
+                pass
+
+        return options
+
+
     def run_regress_cmd(self, port : int,
                         schedule : str,
                         test_files : list[str],
@@ -165,19 +184,18 @@ class Test:
             if os.path.exists(os.path.join(self._regress_path, f)):
                 os.remove(os.path.join(self._regress_path, f))
 
-        # see if there is a timeout in the schedule file
-        timeout = 60
-        with open(os.path.join(self._regress_path, schedule), 'r') as f:
-            line = f.readline()
-            try:
-                if 'timeout' in line:
-                    timeout = float(line.split('=')[1].strip())
-            except Exception as e:
-                timeout = 60
-                pass
+        # extract options from the schedule file
+        options = {}
+        if schedule:
+            schedule_path = os.path.join(self._regress_path, schedule)
+            options = self.extract_options(schedule_path)
 
         if self._notimeout:
             timeout = None
+        elif 'timeout' in options:
+            timeout = options['timeout']
+        else:
+            timeout = 60
 
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
@@ -186,15 +204,17 @@ class Test:
                 f'--host=localhost',
                 f'--port={port}',
                 f'--user={self._primary_user}',
-                f'--schedule={os.path.join(self._regress_path, schedule)}',
                 '--max-connections=1',
-                '--use-existing'] + test_files
+                '--use-existing']
+
+        if schedule:
+            args += [f'--schedule={schedule_path}']
 
         logging.info(self._pg_regress + ' ' + ' '.join(args))
         logging.info(f"Timeout: {timeout} seconds")
 
         # run the regression tests; throws a subprocess.TimeoutExpired  exception if the tests timeout
-        out = run_command(self._pg_regress, args, no_err=True, cwd=self._regress_path, timeout=timeout)
+        out = run_command(self._pg_regress, args + test_files, no_err=True, cwd=self._regress_path, timeout=timeout)
 
         if '# All' in out:  # all tests passed, return
             logging.info('Regression tests completed successfully')
@@ -265,7 +285,7 @@ class Test:
 
     def run_regress(self,
                     schedule: str,
-                    test_files: list[str],
+                    test_files: list[str] = [],
                     manual_proxy: bool = False,
                     notimeout: bool = False) -> None:
         """Run the regression tests"""
@@ -343,7 +363,7 @@ if __name__ == "__main__":
     if not args.schedule and not args.test_files:
         raise ValueError("No schedule or test files specified")
 
-    if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
+    if args.schedule and not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
         raise ValueError(f"Schedule file not found: {args.schedule}")
 
     # set the log level and format
