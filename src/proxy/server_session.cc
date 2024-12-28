@@ -155,7 +155,7 @@ namespace springtail::pg_proxy {
             case '2': // Bind complete (bind)
             case '3': // Close complete (close)
             case 's': // Portal suspended (execute)
-            case 'I': // Empty query response (execute)
+            case 'I': // Empty query response (execute, simple query)
             case 'C': // Command complete (execute, simple query)
             case 'n': // No data - response to (describe)
             case 'T': // Row description (describe)
@@ -816,12 +816,16 @@ namespace springtail::pg_proxy {
         if (qs->type == QueryStmt::Type::PREPARE) {
             // add prepared statement to cache
             _stmts.insert(qs->get_hashed_name());
+
         } else if (qs->type == QueryStmt::Type::SIMPLE_QUERY) {
-            assert (qs->children.size() >= query_status->query_complete_count);
-            qs = qs->children[query_status->query_complete_count-1];
-            if (qs->type == QueryStmt::Type::PREPARE) {
-                // add prepared statement to cache
-                _stmts.insert(qs->get_hashed_name());
+            // it is possible for children.size() == 0 when there is an empty query
+            if (qs->children.size() > 0) {
+                assert (qs->children.size() >= query_status->query_complete_count);
+                qs = qs->children[query_status->query_complete_count-1];
+                if (qs->type == QueryStmt::Type::PREPARE) {
+                    // add prepared statement to cache
+                    _stmts.insert(qs->get_hashed_name());
+                }
             }
         }
 

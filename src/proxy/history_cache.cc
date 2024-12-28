@@ -238,6 +238,11 @@ namespace pg_proxy {
         }
 
         // this is a simple query, we need to process each child statement
+        if (stmt->children.size() == 0) {
+            // no children, nothing to do (empty query)
+            return;
+        }
+
         assert (stmt->children.size() > 0);
         assert (completed <= stmt->children.size());
         for (int i = 0; i < completed; i++) {
