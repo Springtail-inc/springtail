@@ -384,9 +384,11 @@ namespace springtail::pg_proxy {
     {
         // Send startup message
         std::string database_name = _db_prefix + _database;
+
         // (msglen + protocol version) (8) + user (5) + database (9) + 3 null terminators (3)
         int msg_len = 8 + 5 + 9 + _user->username().size() + database_name.size() + 3;
 
+        // iterate over parameters to calculate message length
         for (const auto &param : _parameters) {
             if (param.first == "user" || param.first == "database") {
                 continue;
