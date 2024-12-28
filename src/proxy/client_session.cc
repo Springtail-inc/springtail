@@ -273,6 +273,8 @@ namespace springtail::pg_proxy {
                 username = value;
             } else if (key == "database") {
                 database = value;
+            } else {
+                _parameters[key] = value;
             }
         }
         // read last null byte
@@ -1168,7 +1170,7 @@ namespace springtail::pg_proxy {
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+            if ((session = instance->allocate_session(_server, _user, _database, _parameters)) == nullptr) {
                 SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
                 return nullptr;
             }
@@ -1193,6 +1195,7 @@ namespace springtail::pg_proxy {
 
         if (session->is_ready()) {
             // session is ready, we can use it
+            // XXX apply parameters to session if they don't match
             return session;
         }
 

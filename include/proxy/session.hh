@@ -98,6 +98,7 @@ namespace springtail::pg_proxy {
                 ProxyServerPtr server,
                 UserPtr user,
                 const std::string &database,
+                const std::unordered_map<std::string, std::string> &parameters,
                 Type type=PRIMARY);
 
         Session(const Session&) = delete;
@@ -320,8 +321,10 @@ namespace springtail::pg_proxy {
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
 
+        std::unordered_map<std::string, std::string> _parameters; ///< parameters for the session
+
         /** Process connection, entry from operator()() */
-        bool _process();
+        bool _process(std::unique_lock<std::mutex> &lock);
 
         /** Process messages for session connection,
          * must be implemented by derived class */

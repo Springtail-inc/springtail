@@ -23,8 +23,10 @@ namespace springtail::pg_proxy {
                                  std::string database,
                                  std::string prefix,
                                  DatabaseInstancePtr instance,
+                                 const std::unordered_map<std::string, std::string> &parameters,
                                  Session::Type type)
-        : Session(instance, connection, server, user, database, type), _db_prefix(prefix)
+
+        : Session(instance, connection, server, user, database, parameters, type), _db_prefix(prefix)
     {
         _state = STARTUP;
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
@@ -382,18 +384,33 @@ namespace springtail::pg_proxy {
     {
         // Send startup message
         std::string database_name = _db_prefix + _database;
-        int msg_len = 8 + 5 + 9 + 17 + 11 + 16 + 5 + _user->username().size() + database_name.size() + 3; // length
+        // (msglen + protocol version) (8) + user (5) + database (9) + 3 null terminators (3)
+        int msg_len = 8 + 5 + 9 + _user->username().size() + database_name.size() + 3;
+
+        for (const auto &param : _parameters) {
+            if (param.first == "user" || param.first == "database") {
+                continue;
+            }
+            msg_len += 1 + param.first.size() + 1 + param.second.size();
+        }
+
         BufferPtr buffer = BufferPool::get_instance()->get(msg_len + 4);
         buffer->put32(msg_len);
         buffer->put32(MSG_STARTUP_V3); // protocol version
+
         buffer->put_string("user");
         buffer->put_string(_user->username());
         buffer->put_string("database");
         buffer->put_string(database_name);
-        buffer->put_string("application_name");
-        buffer->put_string("Springtail");
-        buffer->put_string("client_encoding");
-        buffer->put_string("UTF8");
+
+        for (const auto &param : _parameters) {
+            if (param.first == "user" || param.first == "database") {
+                continue;
+            }
+            // XXX what about client encoding that is not UTF8?
+            buffer->put_string(param.first);
+            buffer->put_string(param.second);
+        }
         buffer->put(0); // null terminator
 
         _send_buffer(buffer, seq_id, '?');
@@ -944,7 +961,8 @@ namespace springtail::pg_proxy {
                           const std::string &database,
                           const std::string &prefix,
                           DatabaseInstancePtr instance,
-                          Session::Type type)
+                          Session::Type type,
+                          const std::unordered_map<std::string, std::string> &params)
     {
         if (instance == nullptr) {
             assert (type == Session::Type::PRIMARY);
@@ -957,7 +975,7 @@ namespace springtail::pg_proxy {
             throw ProxyIOConnectionError();
         }
 
-        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, type);
+        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, params, type);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         return session;

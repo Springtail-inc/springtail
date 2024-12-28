@@ -7,6 +7,8 @@ import glob
 import shutil
 import datetime
 import time
+import subprocess
+import threading
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -173,8 +175,15 @@ class Test:
     def run_regress_cmd(self, port : int,
                         schedule : str,
                         test_files : list[str],
-                        suffix : str) -> None:
+                        suffix : str,
+                        stop_on_error : bool = True) -> None:
         """Run the regression test"""
+        def monitor(process, timeout):
+            process.wait(timeout=timeout)
+            if process.poll() is None:  # Process is still running
+                print(f"Timeout reached ({timeout}s). Terminating process...")
+                process.terminate()
+
         # remove all files in result directory
         for f in os.listdir(self._result_path):
             os.remove(os.path.join(self._result_path, f))
@@ -199,7 +208,8 @@ class Test:
 
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
-        args = [f'--dbname={REGRESSION_DB}',
+        args = [self._pg_regress,
+                f'--dbname={REGRESSION_DB}',
                 f'--inputdir={self._regress_path}',
                 f'--host=localhost',
                 f'--port={port}',
@@ -210,14 +220,35 @@ class Test:
         if schedule:
             args += [f'--schedule={schedule_path}']
 
+        args += test_files
+
         logging.info(self._pg_regress + ' ' + ' '.join(args))
         logging.info(f"Timeout: {timeout} seconds")
 
-        # run the regression tests; throws a subprocess.TimeoutExpired  exception if the tests timeout
-        out = run_command(self._pg_regress, args + test_files, no_err=True, cwd=self._regress_path, timeout=timeout)
+        # run the regression tests
+        not_ok_count = 0
+        ok_count = 0
+        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self._regress_path)
+        monitor_thread = threading.Thread(target=monitor, args=(process, timeout))
+        monitor_thread.start()
 
-        if '# All' in out:  # all tests passed, return
-            logging.info('Regression tests completed successfully')
+        for line in iter(process.stdout.readline, ''):
+            print(line, end='')
+            if 'not ok' in line:
+                not_ok_count += 1
+                if stop_on_error:
+                    process.terminate()
+                    break
+
+            elif 'ok' in line:
+                ok_count += 1
+
+        monitor_thread.join()
+
+        return_code = process.returncode
+
+        if return_code == 0:  # all tests passed, return
+            logging.info(f'Regression tests completed successfully: {ok_count}')
             return
 
         if len(os.listdir(self._result_path)) == 0:
@@ -225,19 +256,7 @@ class Test:
             raise ValueError("No result files found in the results directory")
 
         # check for errors from logs
-        err_count = 0
-        total = 0
-        if os.path.exists(os.path.join(self._regress_path, 'regression.out')):
-            with open(os.path.join(self._regress_path, 'regression.out'), 'r') as f:
-                # for each line in the file
-                for line in f:
-                    if 'not ok' in line:
-                        err_count += 1
-                        total += 1
-                    elif 'ok' in line:
-                        total += 1
-
-            logging.info(f'Regression tests failed: {err_count} / {total}')
+        logging.info(f'Regression tests failed: {not_ok_count} / {(not_ok_count + ok_count)}')
 
         # rename regression output files
         os.rename(os.path.join(self._regress_path, 'regression.out'), os.path.join(self._regress_path, 'regression.out.' + suffix))
@@ -307,7 +326,7 @@ class Test:
         self._notimeout = notimeout
 
         # run the regression tests first against normal postgres
-        self.run_regress_cmd(self._primary_port, schedule, test_files, 'pg.out')
+        self.run_regress_cmd(self._primary_port, schedule, test_files, 'pg.out', False)
 
         # rename the expected dir
         os.rename(self._expected_path, self._expected_path + '.pg')
@@ -326,8 +345,8 @@ class Test:
 
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
-        # self.run_regress_cmd(self._primary_port, '.proxy')
-        self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out')
+
+        self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out', True)
 
 
     def cleanup(self):

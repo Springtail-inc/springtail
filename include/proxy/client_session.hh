@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 #include <proxy/session.hh>
 #include <proxy/server_session.hh>

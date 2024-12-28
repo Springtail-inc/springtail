@@ -55,6 +55,7 @@ namespace springtail::pg_proxy {
                      ProxyServerPtr server,
                      UserPtr user,
                      const std::string &database,
+                     const std::unordered_map<std::string, std::string> &parameters,
                      Type type)
         : _connection(connection),
           _server(server),
@@ -63,7 +64,8 @@ namespace springtail::pg_proxy {
           _user(user),
           _database(database),
           _instance(instance),
-          _id(session_id++)
+          _id(session_id++),
+          _parameters(parameters)
     {
         auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
         if (optional_db_id.has_value()) {
@@ -84,7 +86,7 @@ namespace springtail::pg_proxy {
         std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
         if (lock.try_lock()) {
             // do actual processing
-            signal = _process();
+            signal = _process(lock);
 
             // unlock prior to signalling server
             lock.unlock();
@@ -94,6 +96,12 @@ namespace springtail::pg_proxy {
         }
 
         _current_session = nullptr;
+
+        // check once more for any messages (with lock unlocked) and
+        // current session set to null to force lock
+        if (!_msg_queue.empty()) {
+            _internal_process_msgs(false);
+        }
 
         if (signal) {
             // signal server to wait on this connection
@@ -105,7 +113,7 @@ namespace springtail::pg_proxy {
     }
 
     bool
-    Session::_process()
+    Session::_process(std::unique_lock<std::mutex> &lock)
     {
         // thread entry point from server
         bool has_data = false;
@@ -114,6 +122,10 @@ namespace springtail::pg_proxy {
         do {
             // thread entry point
             try {
+                if (!_connection->has_pending()) {
+                    // if no data, return
+                    return true;
+                }
                 _process_connection();
             } catch (const ProxyIOError &e) {
                 SPDLOG_ERROR("ProxyIOError: {}", e.what());
@@ -134,7 +146,11 @@ namespace springtail::pg_proxy {
 
             // see if remote session has messages that need to be processed
             if (_associated_session != nullptr) {
-                _associated_session->_internal_process_msgs(true);
+                if (_associated_session->_ready_for_message && !_associated_session->is_msg_queue_empty()) {
+                    lock.unlock();
+                    _associated_session->_internal_process_msgs(true);
+                    lock.lock();
+                }
             }
 
             // if this is a client session with a shadow replica then process those messages
@@ -143,7 +159,9 @@ namespace springtail::pg_proxy {
                 ServerSessionPtr shadow = client->get_shadow_session();
                 assert (shadow == nullptr || shadow != _associated_session);
                 if (shadow != nullptr && shadow != _associated_session) {
+                    lock.unlock();
                     shadow->_internal_process_msgs(true);
+                    lock.lock();
                 }
             }
 
@@ -168,7 +186,6 @@ namespace springtail::pg_proxy {
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Has data: {}", (_type == CLIENT ? 'C': 'S'), _id, has_data);
         } while (has_data);
 
-
         return true;
     }
 
@@ -177,11 +194,11 @@ namespace springtail::pg_proxy {
     {
         std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
         if (_current_session != this) {
-            // may be able to optimize this, but for now block locking if not current session
             // this is called to pass a message from one session to another
-            // this is normally called with is_remote = true
+            // this is normally called with is_remote = true (if _current_session != this)
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Processing remote message, getting lock", (_type == CLIENT ? 'C': 'S'), _id);
+            // lock to process messages
             lock.lock();
-
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Processing messages (lock), is_remote={}",
                         (_type == CLIENT ? 'C': 'S'), _id, is_remote);
         }
