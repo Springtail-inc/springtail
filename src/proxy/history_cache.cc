@@ -221,8 +221,6 @@ namespace pg_proxy {
 
         if (!success) {
             _in_error = true;
-            // not sure if this is always true
-            assert(completed == 0);
         }
 
         // if this is not a simple query statement process directly; should be only 1
