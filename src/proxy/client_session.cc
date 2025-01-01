@@ -575,19 +575,6 @@ namespace springtail::pg_proxy {
         }
     }
 
-    bool
-    ClientSession::_primary_pool_exists()
-    {
-        DatabaseInstancePtr primary = DatabaseMgr::get_instance()->get_primary_instance();
-        assert (primary != nullptr);
-        DatabasePoolPtr pool = primary->get_pool(_db_id, _user->username());
-        if (pool == nullptr || pool->total_count() == 0) {
-            return false;
-        }
-
-        return true;
-    }
-
     void
     ClientSession::_handle_server_error(const std::string_view msg)
     {
@@ -1154,23 +1141,23 @@ namespace springtail::pg_proxy {
     ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
     {
         // get database instance from either primary or replica set
-        DatabaseInstancePtr instance = nullptr;
+        DatabaseSetPtr dbset = nullptr;
         if (type == PRIMARY) {
             // get a primary session
-            instance = DatabaseMgr::get_instance()->get_primary_instance();
+            dbset = DatabaseMgr::get_instance()->primary_set();
         } else {
             // get a replica session
             assert (_primary_mode == false);
-            instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
+            dbset = DatabaseMgr::get_instance()->replica_set();
         }
-        assert (instance != nullptr);
+        assert (dbset != nullptr);
 
         // get a session from the instance
-        ServerSessionPtr session = instance->get_session(_db_id, _user->username());
+        ServerSessionPtr session = dbset->get_session(_db_id, _user->username());
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            if ((session = instance->allocate_session(_server, _user, _database, _parameters)) == nullptr) {
+            if ((session = dbset->allocate_session(_server, _user, _db_id, _parameters)) == nullptr) {
                 SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
                 return nullptr;
             }
@@ -1189,6 +1176,8 @@ namespace springtail::pg_proxy {
             if (_shadow_mode) {
                 // set shadow mode on the session
                 session->set_shadow_mode(true);
+            } else {
+                session->set_shadow_mode(false);
             }
         }
         session->pin_client_session(shared_from_this());

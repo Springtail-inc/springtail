@@ -80,9 +80,14 @@ namespace springtail::pg_proxy {
             // usually things like copy data, etc.
             // write out the buffer
             _send_buffer(msg->buffer(), msg->seq_id());
-
             break;
         }
+
+        case SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN:
+            // shutdown the session
+            _send_shutdown();
+            _state = ERROR;
+            break;
 
         default:
             SPDLOG_WARN("Unknown message: {}", (int8_t)msg->type());
@@ -959,6 +964,16 @@ namespace springtail::pg_proxy {
         }
     }
 
+    void
+    ServerSession::_send_shutdown()
+    {
+        // send the shutdown message to the server
+        BufferPtr buffer = BufferPool::get_instance()->get(5);
+        buffer->put('X');
+        buffer->put32(4); // length
+
+        _send_buffer(buffer, _seq_id);
+    }
 
     /** factory to create session */
     ServerSessionPtr
@@ -970,10 +985,7 @@ namespace springtail::pg_proxy {
                           Session::Type type,
                           const std::unordered_map<std::string, std::string> &params)
     {
-        if (instance == nullptr) {
-            assert (type == Session::Type::PRIMARY);
-            instance = DatabaseMgr::get_instance()->get_primary_instance();
-        }
+        assert (instance != nullptr);
 
         auto connection = instance->create_connection();
         if (connection == nullptr) {

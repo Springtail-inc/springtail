@@ -48,7 +48,7 @@ namespace springtail::pg_proxy {
           _state(STARTUP),
           _type(type),
           _id(session_id++)
-    {}
+    { assert (Type::CLIENT == type); }
 
     Session::Session(DatabaseInstancePtr instance,
                      ProxyConnectionPtr connection,
@@ -422,11 +422,18 @@ namespace springtail::pg_proxy {
         if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
             // notify client session of error; treat this as an interrupt of sorts
             SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
-            _associated_session->_msg_queue.clear();
+
             _associated_session->_ready_for_message = true;
             queue_msg(msg);
             _associated_session->_internal_process_msgs(true);
         }
+
+        if (_type == Type::CLIENT) {
+            // notify server of error
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+
+        }
+
         SPDLOG_ERROR("Shutdown complete");
     }
 

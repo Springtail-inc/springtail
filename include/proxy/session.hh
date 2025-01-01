@@ -101,6 +101,15 @@ namespace springtail::pg_proxy {
                 const std::unordered_map<std::string, std::string> &parameters,
                 Type type=PRIMARY);
 
+        /** For test purposes */
+        Session(Type type,
+                uint64_t id,
+                uint64_t db_id,
+                const std::string &database,
+                const std::string &username)
+            : _type(type), _user(std::make_shared<User>(username)), _db_id(db_id), _database(database), _id(id)
+        {}
+
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;
 
@@ -291,6 +300,15 @@ namespace springtail::pg_proxy {
          */
         bool is_shadow() const {
             return _is_shadow;
+        }
+
+        /**
+         * @brief Does this session have a closed connection
+         * @return true if connection is closed
+         * @return false if connection is open
+         */
+        virtual bool is_connection_closed() const {
+            return _connection->closed();
         }
 
     protected:

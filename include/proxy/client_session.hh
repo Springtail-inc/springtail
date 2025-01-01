@@ -114,9 +114,6 @@ namespace springtail::pg_proxy {
 
         ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
 
-        /** Does primary server pool exist */
-        bool _primary_pool_exists();
-
         /**
          * @brief Parse a simple query and return type of server session that can handle it
          * @param buffer buffer holding original query

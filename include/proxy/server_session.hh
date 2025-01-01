@@ -52,6 +52,15 @@ namespace springtail::pg_proxy {
                       const std::unordered_map<std::string, std::string> &parameters,
                       Session::Type type=PRIMARY);
 
+        /** For test purposes */
+        ServerSession(Session::Type type,
+                      uint64_t id,
+                      uint64_t db_id,
+                      const std::string &database,
+                      const std::string &username)
+            : Session(type, id, db_id, database, username)
+        {}
+
         ~ServerSession() {};
 
         /**
@@ -92,8 +101,6 @@ namespace springtail::pg_proxy {
         bool _is_shadow = false;   ///< true if this is a shadow session, replica shadowing primary
         std::weak_ptr<ClientSession> _client_session; ///< client session
 
-        DatabaseInstancePtr _instance;             ///< database instance
-
         uint64_t _seq_id = 0;                      ///< sequence id for msg awaiting response
 
         // message state for current client query (for state=QUERY)
@@ -113,6 +120,9 @@ namespace springtail::pg_proxy {
 
         /** Wrapper around sending a buffer to the server */
         void _send_buffer(BufferPtr buffer, uint64_t seq_id, char code='\0');
+
+        /** Send shutdown to server */
+        void _send_shutdown();
 
         /**
          * Send required statements to fulfil dependency
@@ -168,4 +178,5 @@ namespace springtail::pg_proxy {
         void _handle_ready_for_query_response(char xact_status);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
+    using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;
 } // namespace springtail::pg_proxy
