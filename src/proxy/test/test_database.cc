@@ -234,8 +234,13 @@ namespace {
         EXPECT_EQ(session->username(), "user1");
 
         db_set->release_session(session, false);
+
+        EXPECT_EQ(db_set->pool_size(), 1);
+
         auto retrieved_session = db_set->get_session(1, "user1");
         EXPECT_EQ(retrieved_session, session);
+
+        EXPECT_EQ(db_set->pool_size(), 0);
     }
 
     TEST_F(DatabaseSetTest, AllocateMultipleSessions) {
@@ -255,6 +260,8 @@ namespace {
         db_set->release_session(retrieved_session1, true);
         db_set->release_session(retrieved_session2, true);
 
+        EXPECT_EQ(db_set->pool_size(), 0);
+
         auto null_session = db_set->get_session(1, "user1");
         EXPECT_EQ(null_session, nullptr);
     }
@@ -265,8 +272,11 @@ namespace {
         auto session3 = db_set->allocate_session(2, "user1", instance2);
         db_set->release_session(session1, false);
         db_set->release_session(session2, false);
+        db_set->release_session(session3, false);
 
+        EXPECT_EQ(db_set->pool_size(), 3);
         db_set->remove_instance(instance1);
+        EXPECT_EQ(db_set->pool_size(), 1);
 
         auto null_session1 = db_set->get_session(1, "user1");
         auto null_session2 = db_set->get_session(1, "user2");

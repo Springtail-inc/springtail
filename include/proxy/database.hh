@@ -220,6 +220,14 @@ namespace pg_proxy {
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) = 0;
 
+        /**
+         * @brief Get size of the free session pool
+         * @return int size of pool
+         */
+        int pool_size() const {
+            return _pool->size();
+        }
+
     protected:
 
         /**
