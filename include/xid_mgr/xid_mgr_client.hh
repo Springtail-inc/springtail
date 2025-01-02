@@ -92,5 +92,7 @@ namespace springtail {
             ThriftClient c = { _thrift_client_pool, client };
             return c;
         }
+
+        void _reconnect_client(ThriftClient &c);
     };
 } // namespace springtail

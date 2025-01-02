@@ -95,6 +95,7 @@ set(MODULES
   pg_log_mgr
   xid_mgr
   thrift
+  thrift_override
   proxy
   pg_fdw
   test

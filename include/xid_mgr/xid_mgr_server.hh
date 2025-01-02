@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include <common/singleton.hh>
+#include <thrift_override/concurrency/Thread.h>
 #include <thrift/server/TServer.h>
 
 #include <xid_mgr/xid_partition.hh>
@@ -62,7 +63,7 @@ namespace springtail::xid_mgr {
         /**
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
-         ~XidMgrServer() = default;
+         ~XidMgrServer() override = default;
 
         /** number of worker threads */
         int _worker_thread_count;

@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 
+#include <thrift_override/transport/TServerSocket.h>
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/protocol/TCompactProtocol.h>
@@ -57,16 +58,27 @@ namespace springtail {
         {
             // validate that the transport is connected
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
-            while (!proto->getTransport()->isOpen()) {
+            std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
+            apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+            std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
+            apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+
+            while (!socket->isOpen()) {
                 try {
-                    proto->getTransport()->open();
+                    socket->open();
                 } catch (const apache::thrift::transport::TTransportException& e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed to connect to thrift server: ", e.what());
                     ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
                 }
             }
-        }
+            int fd = socket->getSocketFD();
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "Acquired thrift client: fd = {}, client = {}", fd, (void *)client.get());
 
+        }
+        void put_cb(std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client) override
+        {
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "Releasing thrift client: {}", (void *)client.get());
+        }
     private:
         std::string _server;
         int _port;

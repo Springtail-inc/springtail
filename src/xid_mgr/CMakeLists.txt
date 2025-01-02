@@ -13,7 +13,7 @@ set(XID_MGR_SOURCES
 add_library(springtail_xid_mgr ${XID_MGR_SOURCES})
 target_include_directories(springtail_xid_mgr PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_xid_mgr
-    PUBLIC springtail_common
+    PUBLIC springtail_common springtail_thrift_override
     PRIVATE thrift_xid_mgr nlohmann_json::nlohmann_json
 )
 
@@ -21,6 +21,7 @@ add_executable(xid_mgr_daemon xid_mgr_daemon.cc)
 target_include_directories(xid_mgr_daemon PRIVATE ${CMAKE_SOURCE_DIR}/include ${VCPKG_INCLUDE_PATH})
 target_link_libraries(xid_mgr_daemon
     PUBLIC springtail_common
+           springtail_thrift_override
            springtail_xid_mgr
     PRIVATE Boost::program_options
 )
@@ -31,6 +32,7 @@ target_include_directories(threaded_test PRIVATE ${CMAKE_SOURCE_DIR}/include ${V
 target_link_libraries(threaded_test
     PUBLIC springtail_common
            springtail_xid_mgr
+           springtail_thrift_override
     PRIVATE Boost::program_options
             GTest::gtest_main
 )

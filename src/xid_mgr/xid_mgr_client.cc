@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 
+#include <thrift_override/transport/TServerSocket.h>
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/protocol/TCompactProtocol.h>
@@ -57,10 +58,21 @@ namespace springtail {
         _thrift_client_pool = std::make_shared<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>>(
             std::make_shared<XidMgrThriftObjectFactory>(server, port),
             max_connections/2,
-            max_connections
+            max_connections,
+            ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>::LIFO
         );
     }
 
+    void XidMgrClient::_reconnect_client(ThriftClient &c) {
+        std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
+        std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
+        apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+        std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
+        apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+        socket->close();
+        _thrift_client_pool->put(c.client);
+        c.client = _thrift_client_pool->get();
+    }
     // exposed client service interface below
 
     void
@@ -69,7 +81,16 @@ namespace springtail {
         ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        c.client->ping(result);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->ping(result);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call ping: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         std::cout << "Ping got: " << result.message << std::endl;
         return;
@@ -81,8 +102,16 @@ namespace springtail {
         ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        c.client->commit_xid(result, db_id, xid, has_schema_change);
-
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->commit_xid(result, db_id, xid, has_schema_change);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call commit_xid: ", e.what());
+                _reconnect_client(c);
+            }
+        }
     }
 
     void
@@ -91,8 +120,16 @@ namespace springtail {
         ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        c.client->record_ddl_change(result, db_id, xid);
-
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->record_ddl_change(result, db_id, xid);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call record_ddl_change: ", e.what());
+                _reconnect_client(c);
+            }
+        }
     }
 
     uint64_t
@@ -100,7 +137,18 @@ namespace springtail {
     {
         ThriftClient c = _get_client();
 
-        thrift::xid_mgr::xid_t xid = c.client->get_committed_xid(db_id, schema_xid);
+        thrift::xid_mgr::xid_t xid = 0;
+
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                xid = c.client->get_committed_xid(db_id, schema_xid);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_committed_xid: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         return xid;
     }

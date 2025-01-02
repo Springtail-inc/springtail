@@ -1,6 +1,7 @@
 #include <iostream>
 #include <mutex>
 
+#include <thrift_override/transport/TServerSocket.h>
 #include <thrift/transport/TSocket.h>
 
 #include <common/singleton.hh>

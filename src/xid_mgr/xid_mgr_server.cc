@@ -8,10 +8,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <thrift_override/concurrency/ThreadManager.h>
+#include <thrift_override/server/TThreadPoolServer.h>
+
+#include <thrift_override/transport/TServerSocket.h>
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/protocol/TCompactProtocol.h>
-#include <thrift/server/TThreadPoolServer.h>
+#include <thrift_override/server/TThreadPoolServer.h>
 
 #include <common/common.hh>
 #include <common/logging.hh>
@@ -61,17 +65,21 @@ namespace springtail::xid_mgr {
     XidMgrServer::startup()
     {
         // create a thread manager with right number of worker threads
+        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: creating thread manager with {} threads", _worker_thread_count);
+
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
           apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
 
-        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
+        // Use thread factory with attached threads
+        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>(false));
         threadManager->start();
 
-        auto socket =
-
+        std::shared_ptr<apache::thrift::transport::TServerSocket> server_socket = std::make_shared<apache::thrift::transport::TServerSocket>(_port);
+        // set timeout to close connection when no traffic is received
+        server_socket->setRecvTimeout(1000);
         _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
-            std::make_shared<apache::thrift::transport::TServerSocket>(_port),
+            server_socket,
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
             std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
             threadManager
@@ -129,13 +137,14 @@ namespace springtail::xid_mgr {
     void
     XidMgrServer::_internal_shutdown()
     {
+        // Stop the server before shutting partitions down
+        _server->stop();
         std::unique_lock lock(_mutex);
         // iterate over partitions and shutdown
         for (auto &partition : _partitions) {
             partition->shutdown();
         }
         lock.unlock();
-        _server->stop();
     }
 
     PartitionPtr
