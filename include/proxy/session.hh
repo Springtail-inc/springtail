@@ -52,6 +52,7 @@ namespace springtail::pg_proxy {
             DEPENDENCIES=6,   ///< waiting on dependencies
             QUERY=7,          ///< query in progress
             EXTENDED_ERROR=8, ///< extended message error state
+            RESET_SESSION=9,  ///< reset session state, e.g. after error
             ERROR=99          ///< fatal error state
         };
 
@@ -243,6 +244,18 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Queue a shutdown message on this session; higher priority than other messages
+         * Clears the message queue and sets the session to ready for message
+         * @param msg Message to queue
+         */
+        void queue_shutdown_msg(SessionMsgPtr msg)
+        {
+            _msg_queue.clear();
+            _msg_queue.push(msg);
+            _ready_for_message = true;
+        }
+
+        /**
          * @brief Check if message queue is empty
          * @return true if empty
          */
@@ -303,12 +316,44 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Has this session been shutdown
+         * @return true if shutdown
+         * @return false if not shutdown
+         */
+        bool is_shutdown() const {
+            return _shut_down_flag.test();
+        }
+
+        /**
+         * @brief Test and set atomic shutdown flag
+         * @return true if shutdown was set previously
+         * @return false if shutdown was not set previously
+         */
+        bool test_and_set_shutdown() {
+            return _shut_down_flag.test_and_set();
+        }
+
+        /**
          * @brief Does this session have a closed connection
          * @return true if connection is closed
          * @return false if connection is open
          */
         virtual bool is_connection_closed() const {
             return _connection->closed();
+        }
+
+        /**
+         * @brief Reset private session state
+         */
+        virtual void reset_session() {
+            _is_shadow = false;
+            _in_transaction = false;
+            _login.reset();
+            _associated_session.reset();
+            _waiting_on_session = false;
+            _msg_queue.clear();
+            _ready_for_message = true;
+            _state = RESET_SESSION;
         }
 
     protected:
@@ -382,11 +427,15 @@ namespace springtail::pg_proxy {
     private:
         /** client/server session associated with this one */
         std::shared_ptr<Session> _associated_session = nullptr;
+
         /** waiting on associated session for data -- _associated_session should be set */
         bool _waiting_on_session = false;
+
+        /** atomic shutdown flag */
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
-        bool _ready_for_message = true;  ///< ready to process messages
+        /** ready to process messages */
+        bool _ready_for_message = true;
 
         /** queue of messages to process */
         ConcurrentQueue<SessionMsg> _msg_queue;

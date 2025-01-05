@@ -99,7 +99,7 @@ namespace springtail::pg_proxy {
 
         // check once more for any messages (with lock unlocked) and
         // current session set to null to force lock
-        if (!_msg_queue.empty()) {
+        if (!is_msg_queue_empty()) {
             _internal_process_msgs(false);
         }
 
@@ -122,8 +122,9 @@ namespace springtail::pg_proxy {
         do {
             // thread entry point
             try {
-                if (!_connection->has_pending()) {
+                if (!has_data && !_connection->has_pending()) {
                     // if no data, return
+                    // !has_data is to prevent checking after we checked at the end of loop
                     return true;
                 }
                 _process_connection();
@@ -145,22 +146,31 @@ namespace springtail::pg_proxy {
             }
 
             // see if remote session has messages that need to be processed
-            if (_associated_session != nullptr) {
-                if (_associated_session->_ready_for_message && !_associated_session->is_msg_queue_empty()) {
+            // if this is a primary or replica session, check the client session
+            if (_type == PRIMARY || _type == REPLICA) {
+                // check if the client session has messages to process
+                ServerSession *server = static_cast<ServerSession*>(this);
+                SessionPtr client = server->get_client_session();
+                if (client && !client->is_msg_queue_empty()) {
                     lock.unlock();
-                    _associated_session->_internal_process_msgs(true);
+                    client->_internal_process_msgs(true);
                     lock.lock();
                 }
             }
 
-            // if this is a client session with a shadow replica then process those messages
+            // if this is a client session, check server sessions
             if (_type == CLIENT) {
                 ClientSession *client = static_cast<ClientSession*>(this);
-                ServerSessionPtr shadow = client->get_shadow_session();
-                assert (shadow == nullptr || shadow != _associated_session);
-                if (shadow != nullptr && shadow != _associated_session) {
+                ServerSessionPtr primary = client->get_primary_session();
+                if (primary && !primary->is_msg_queue_empty()) {
                     lock.unlock();
-                    shadow->_internal_process_msgs(true);
+                    primary->_internal_process_msgs(true);
+                    lock.lock();
+                }
+                ServerSessionPtr replica = client->get_replica_session();
+                if (replica && !replica->is_msg_queue_empty()) {
+                    lock.unlock();
+                    replica->_internal_process_msgs(true);
                     lock.lock();
                 }
             }
@@ -377,10 +387,15 @@ namespace springtail::pg_proxy {
     void
     Session::_send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id)
     {
+        if (_state == RESET_SESSION) {
+            // if we are in reset session state, we don't send any data
+            return;
+        }
+
         assert(_is_shadow || _associated_session != nullptr);
-        char buffer[5];
 
         // first write the header, add 4 to msg length for size of length field
+        char buffer[5];
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
 
@@ -401,37 +416,41 @@ namespace springtail::pg_proxy {
     void
     Session::_handle_error()
     {
-        bool shutting_down = _shut_down_flag.test_and_set();
-        if (shutting_down) {
+        // atomic set flag to true, if already set then return
+        if (test_and_set_shutdown()) {
             return;
         }
 
-        // general error handling
-        // cleanup this session and check for associated session
-        SPDLOG_ERROR("Error state, closing connection: type={} for session id={}",
+        SPDLOG_ERROR("Error state, closing connection: type={} for session id={}\n",
                      _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
-        std::cout << this << std::endl;
 
-        // close connection
-        _connection->close();
+        // general error handling, shutdown for both clients and servers
+        if (_type == Type::PRIMARY || _type == Type::REPLICA) {
+            // This is a server session, notify client session of error
+            ServerSession *server_session = static_cast<ServerSession *>(this);
+            server_session->shutdown_client_session();
 
-        // let server handle full cleanup
-        _server->shutdown_session(shared_from_this());
+            // on error, the server shuts down the connection and releases the session
+            // on clean shutdown (initiated by client), it is released back to the pool
+            _connection->close();
+            _server->shutdown_session(shared_from_this());
 
-        // check for associated client session, and notify of error
-        if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
-            // notify client session of error; treat this as an interrupt of sorts
-            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
+            // release the session, and deallocate it
+            server_session->release_session(true);
 
-            _associated_session->_ready_for_message = true;
-            queue_msg(msg);
-            _associated_session->_internal_process_msgs(true);
-        }
+            // the client will notify the other server session of the error
+            // when it comes through this code path
 
-        if (_type == Type::CLIENT) {
-            // notify server of error
-            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+        } else if (_type == Type::CLIENT) {
+            // This is a client session, notify server sessions of error
 
+            // first close connection and remove from server poll list
+            _connection->close();
+            _server->shutdown_session(shared_from_this());
+
+            // notify server replica/primary sessions via shutdown_server_sessions()
+            ClientSession *client = static_cast<ClientSession *>(this);
+            client->shutdown_server_sessions();
         }
 
         SPDLOG_ERROR("Shutdown complete");

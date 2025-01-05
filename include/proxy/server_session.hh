@@ -6,13 +6,18 @@
 #include <unordered_map>
 
 #include <proxy/session.hh>
+#include <proxy/client_session.hh>
 #include <proxy/session_msg.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/buffer_pool.hh>
 
 namespace springtail::pg_proxy {
 
-    class ClientSession; ///< forward declaration
+    class ProxyServer;
+    using ProxyServerPtr = std::shared_ptr<ProxyServer>;
+
+    class DatabaseInstance;
+    using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
 
     /**
      * @brief Internal state for a query that is being processed.
@@ -80,8 +85,61 @@ namespace springtail::pg_proxy {
             _is_pinned = true;
         }
 
+        /**
+         * @brief Get the client session object
+         * @return SessionPtr
+         */
+        SessionPtr get_client_session() {
+            SessionPtr client = _client_session.lock();
+            if (client == nullptr) {
+                client = get_associated_session();
+            }
+            return client;
+        }
+
+        /**
+         * @brief Shutdown the client session
+         */
+        void shutdown_client_session()
+        {
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
+            SessionPtr client = _client_session.lock();
+            if (client == nullptr) {
+                client = get_associated_session();
+                if (client == nullptr) {
+                    return;
+                }
+            }
+
+            client->queue_shutdown_msg(msg);
+        }
+
+        /**
+         * @brief Get shared pointer to this server session
+         * @return std::shared_ptr<ServerSession> shared pointer to this server session
+         */
         std::shared_ptr<ServerSession> shared_from_this() {
             return std::static_pointer_cast<ServerSession>(Session::shared_from_this());
+        }
+
+        /**
+         * @brief Helper to release the session
+         * @param deallocate if true it will deallocate the session and not add to the pool
+         */
+        void release_session(bool deallocate);
+
+        /**
+         * @brief Reset the session, override base session (and call it)
+         */
+        void reset_session() override {
+            _is_pinned = false;
+            _client_session.reset();
+            _stmts.clear();
+            while (!_pending_queue.empty()) {
+                _pending_queue.pop();
+            }
+            // reset base session
+            Session::reset_session();
         }
 
         /** factory to create session */
@@ -98,10 +156,8 @@ namespace springtail::pg_proxy {
         void _process_msg(SessionMsgPtr msg) override;
 
         bool _is_pinned = false;
-        bool _is_shadow = false;   ///< true if this is a shadow session, replica shadowing primary
-        std::weak_ptr<ClientSession> _client_session; ///< client session
 
-        uint64_t _seq_id = 0;                      ///< sequence id for msg awaiting response
+        std::weak_ptr<ClientSession> _client_session; ///< client session
 
         // message state for current client query (for state=QUERY)
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
@@ -123,6 +179,9 @@ namespace springtail::pg_proxy {
 
         /** Send shutdown to server */
         void _send_shutdown();
+
+        /** Send reset query cmds to reset session */
+        void _send_reset();
 
         /**
          * Send required statements to fulfil dependency
@@ -176,6 +235,12 @@ namespace springtail::pg_proxy {
 
         /** Handle ready for query message from server */
         void _handle_ready_for_query_response(char xact_status);
+
+        /** Handle shutdown message from client */
+        void _handle_shutdown();
+
+        /** Helper to read in message */
+        BufferPtr _read_message(int msg_length);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
     using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;

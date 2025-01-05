@@ -10,6 +10,7 @@
 
 #include <proxy/server_session.hh>
 #include <proxy/client_session.hh>
+#include <proxy/server_session.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/errors.hh>
@@ -44,13 +45,6 @@ namespace springtail::pg_proxy {
     ClientSession::~ClientSession()
     {
         SPDLOG_WARN("Client session being deallocated");
-    }
-
-    void
-    ClientSession::notify_server_available(SessionPtr server)
-    {
-        // called from pool indicating there is a server session available
-        assert(0);
     }
 
     void
@@ -1351,6 +1345,20 @@ namespace springtail::pg_proxy {
 
         qs->is_read_safe = is_read_safe;
         return qs;
+    }
+
+    void
+    ClientSession::shutdown_server_sessions()
+    {
+        if (_primary_session != nullptr) {
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+            _primary_session->queue_shutdown_msg(msg);
+        }
+
+        if (_replica_session != nullptr) {
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+            _replica_session->queue_shutdown_msg(msg);
+        }
     }
 
 } // namespace springtail::pg_proxy

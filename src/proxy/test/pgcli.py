@@ -38,10 +38,8 @@ def connect_to_postgres(host, port, username, password, database, requires_ssl):
     conn = socket.socket()
     conn.connect((host, port))
 
-    pglib.send_startup(conn, database)
-    code, length, salt = pglib.read_startup(conn)
-    pglib.send_md5(conn, username, password, salt)
-    ready_status = pglib.read_auth_response(conn)
+    pglib.send_startup(conn, username, database)
+    ready_status = pglib.read_auth_response(conn, username, password)
 
     return conn
 
@@ -50,11 +48,20 @@ def main():
     args = parse_arguments()
 
     # Connect to the PostgreSQL server
+    print("Connecting to PostgreSQL server...")
     conn = connect_to_postgres(args.hostname, args.port, args.username, args.password, args.database, args.requires_ssl)
     print("Connected to PostgreSQL server")
 
+    if args.filename:
+        process_file(conn, args.filename)
+    else:
+        cli(conn)
+
+
+def process_file(conn, filename):
+    print(f"Processing file: {filename}")
     # Read commands from json file
-    commands = read_commands_from_json(args.filename);
+    commands = read_commands_from_json(filename);
 
     # Process each command
     for command in commands:

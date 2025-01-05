@@ -16,15 +16,14 @@
 #include <common/logging.hh>
 #include <common/singleton.hh>
 
-#include <proxy/connection.hh>
-#include <proxy/server_session.hh>
-
 #include <redis/db_state_change.hh>
 #include <redis/redis_db_tables.hh>
 #include <redis/pubsub_thread.hh>
 
-namespace springtail {
-namespace pg_proxy {
+#include <proxy/connection.hh>
+#include <proxy/server_session.hh>
+
+namespace springtail::pg_proxy {
 
     /**
      * @brief Implements a simple pool of database sessions
@@ -150,9 +149,9 @@ namespace pg_proxy {
          * @return ServerSessionPtr session
          */
         virtual ServerSessionPtr allocate_session(ProxyServerPtr server,
-                                          UserPtr user,
-                                          uint64_t db_id,
-                                          const std::unordered_map<std::string, std::string> &parameters);
+            UserPtr user,
+            uint64_t db_id,
+            const std::unordered_map<std::string, std::string> &parameters);
 
     private:
         mutable std::shared_mutex _mutex;    ///< mutex for instance
@@ -681,5 +680,4 @@ namespace pg_proxy {
         void _remove_replicated_database(uint64_t db_id);
     };
 
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail:pg_proxy
