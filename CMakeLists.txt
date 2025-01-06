@@ -85,6 +85,7 @@ endif()
 
 ## source modules
 set(MODULES
+  benchmarks
   common
   redis
   storage
