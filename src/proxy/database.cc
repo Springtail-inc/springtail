@@ -2,6 +2,7 @@
 #include <shared_mutex>
 #include <memory>
 #include <format>
+#include <unordered_map>
 
 #include <common/counter.hh>
 #include <common/json.hh>
@@ -84,7 +85,8 @@ namespace springtail::pg_proxy {
     ServerSessionPtr
     DatabaseInstance::allocate_session(ProxyServerPtr server,
                                        UserPtr user,
-                                       const std::string &database)
+                                       const std::string &database,
+                                       const std::unordered_map<std::string, std::string> &parameters)
     {
         std::unique_lock lock(_mutex);
 
@@ -133,7 +135,7 @@ namespace springtail::pg_proxy {
         lock.unlock();
 
         // create a new session
-        session = ServerSession::create(server, user, database, prefix(), shared_from_this(), _type);
+        session = ServerSession::create(server, user, database, prefix(), shared_from_this(), _type, parameters);
 
         return session;
     }

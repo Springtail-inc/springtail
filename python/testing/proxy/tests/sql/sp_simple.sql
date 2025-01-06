@@ -24,4 +24,13 @@ INSERT INTO regress_1 VALUES (12, 'twelve');
 SELECT * FROM regress_1 where a > 5 ORDER BY a DESC;
 ROLLBACK;
 
+BEGIN;
+SELECT 1;
+SELECT 1/0;
+ROLLBACK;
+
+SELECT * FROM regress_1 WHERE a = 1; SELECT * FROM regress_1 WHERE a = 2;
+
 SELECT * FROM regress_1 ORDER BY a DESC;
+
+; -- empty query

@@ -194,6 +194,7 @@ namespace springtail::pg_proxy {
                 buffer += n;
                 max_size -= n;
                 at_least -= n;
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Read {} bytes from socket, remaining={}", n, at_least);
             } else if (n == 0) {
                 // Connection closed by the client
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Connection closed by client");
