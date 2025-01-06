@@ -318,7 +318,7 @@ int main(int argc, char* argv[]) {
         }
         timer.stop();
 
-        std::cout << "total writer time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
+        std::cout << "total writer time: " << fmt::format("{:d}ms", (int)timer.elapsed_ms().count()) << std::endl;
         std::cout << fmt::format("total writer iops: {:d}", std::reduce(writer_iops.begin(), writer_iops.end())) << std::endl;
 
         std::cout << "about to start readers" << std::endl;
@@ -343,7 +343,7 @@ int main(int argc, char* argv[]) {
         }
         timer.stop();
 
-        std::cout << "total reader time: " << fmt::format("{:d}", (int)timer.elapsed_ms().count()) << std::endl;
+        std::cout << "total reader time: " << fmt::format("{:d}ms", (int)timer.elapsed_ms().count()) << std::endl;
         std::cout << fmt::format("total reader iops: {:d}", std::reduce(reader_iops.begin(), reader_iops.end())) << std::endl;
 
 
