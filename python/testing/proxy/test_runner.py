@@ -7,6 +7,8 @@ import glob
 import shutil
 import datetime
 import time
+import subprocess
+import threading
 
 # Get the parent directory of the current script (i.e., the project root directory)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -151,8 +153,37 @@ class Test:
         primary_conn.close()
 
 
-    def run_regress_cmd(self, port : int, schedule : str, suffix : str) -> None:
+    def extract_options(self, schedule : str) -> dict:
+        """Extract the options from the schedule file"""
+        options = {}
+        with open(schedule, 'r') as f:
+            line = f.readline()
+            if line.startswith('# options: '):
+                line = line.replace('# options: ', '')
+                options = { x.split('=')[0].strip() : x.split('=')[1].strip() for x in line.split(',') }
+
+        if 'timeout' in options:
+            try:
+                options['timeout'] = float(options['timeout'])
+            except ValueError as e:
+                options['timeout'] = 60
+                pass
+
+        return options
+
+
+    def run_regress_cmd(self, port : int,
+                        schedule : str,
+                        test_files : list[str],
+                        suffix : str,
+                        stop_on_error : bool = True) -> None:
         """Run the regression test"""
+        def monitor(process, timeout):
+            process.wait(timeout=timeout)
+            if process.poll() is None:  # Process is still running
+                print(f"Timeout reached ({timeout}s). Terminating process...")
+                process.terminate()
+
         # remove all files in result directory
         for f in os.listdir(self._result_path):
             os.remove(os.path.join(self._result_path, f))
@@ -162,39 +193,62 @@ class Test:
             if os.path.exists(os.path.join(self._regress_path, f)):
                 os.remove(os.path.join(self._regress_path, f))
 
-        # see if there is a timeout in the schedule file
-        timeout = 60
-        with open(os.path.join(self._regress_path, schedule), 'r') as f:
-            line = f.readline()
-            try:
-                if 'timeout' in line:
-                    timeout = float(line.split('=')[1].strip())
-            except:
-                timeout = 60
-                pass
+        # extract options from the schedule file
+        options = {}
+        if schedule:
+            schedule_path = os.path.join(self._regress_path, schedule)
+            options = self.extract_options(schedule_path)
 
         if self._notimeout:
             timeout = None
+        elif 'timeout' in options:
+            timeout = options['timeout']
+        else:
+            timeout = 60
 
         # set up the run
         os.environ['PGPASSWORD'] = self._primary_pass
-        args = [f'--dbname={REGRESSION_DB}',
+        args = [self._pg_regress,
+                f'--dbname={REGRESSION_DB}',
                 f'--inputdir={self._regress_path}',
                 f'--host=localhost',
                 f'--port={port}',
                 f'--user={self._primary_user}',
-                f'--schedule={os.path.join(self._regress_path, schedule)}',
                 '--max-connections=1',
                 '--use-existing']
+
+        if schedule:
+            args += [f'--schedule={schedule_path}']
+
+        args += test_files
 
         logging.info(self._pg_regress + ' ' + ' '.join(args))
         logging.info(f"Timeout: {timeout} seconds")
 
-        # run the regression tests; throws a subprocess.TimeoutExpired  exception if the tests timeout
-        out = run_command(self._pg_regress, args, no_err=True, cwd=self._regress_path, timeout=timeout)
+        # run the regression tests
+        not_ok_count = 0
+        ok_count = 0
+        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=self._regress_path)
+        monitor_thread = threading.Thread(target=monitor, args=(process, timeout))
+        monitor_thread.start()
 
-        if '# All' in out:  # all tests passed, return
-            logging.info('Regression tests completed successfully')
+        for line in iter(process.stdout.readline, ''):
+            print(line, end='')
+            if 'not ok' in line:
+                not_ok_count += 1
+                if stop_on_error:
+                    process.terminate()
+                    break
+
+            elif 'ok' in line:
+                ok_count += 1
+
+        monitor_thread.join()
+
+        return_code = process.returncode
+
+        if return_code == 0:  # all tests passed, return
+            logging.info(f'Regression tests completed successfully: {ok_count}')
             return
 
         if len(os.listdir(self._result_path)) == 0:
@@ -202,19 +256,7 @@ class Test:
             raise ValueError("No result files found in the results directory")
 
         # check for errors from logs
-        err_count = 0
-        total = 0
-        if os.path.exists(os.path.join(self._regress_path, 'regression.out')):
-            with open(os.path.join(self._regress_path, 'regression.out'), 'r') as f:
-                # for each line in the file
-                for line in f:
-                    if 'not ok' in line:
-                        err_count += 1
-                        total += 1
-                    elif 'ok' in line:
-                        total += 1
-
-            logging.info(f'Regression tests failed: {err_count} / {total}')
+        logging.info(f'Regression tests failed: {not_ok_count} / {(not_ok_count + ok_count)}')
 
         # rename regression output files
         os.rename(os.path.join(self._regress_path, 'regression.out'), os.path.join(self._regress_path, 'regression.out.' + suffix))
@@ -260,11 +302,15 @@ class Test:
             time.sleep(2)
 
 
-    def run_regress(self, schedule: str, manual_proxy: bool = False, notimeout: bool = False) -> None:
+    def run_regress(self,
+                    schedule: str,
+                    test_files: list[str] = [],
+                    manual_proxy: bool = False,
+                    notimeout: bool = False) -> None:
         """Run the regression tests"""
         # make sure postgres is running
         if not check_postgres_running():
-            start_postgres(self._props)
+            start_postgres()
             if not check_postgres_running():
                 raise ValueError("Failed to start postgres")
 
@@ -280,7 +326,7 @@ class Test:
         self._notimeout = notimeout
 
         # run the regression tests first against normal postgres
-        self.run_regress_cmd(self._primary_port, schedule, 'pg.out')
+        self.run_regress_cmd(self._primary_port, schedule, test_files, 'pg.out', False)
 
         # rename the expected dir
         os.rename(self._expected_path, self._expected_path + '.pg')
@@ -299,8 +345,8 @@ class Test:
 
         # run the regression tests against the proxy
         logging.info('Running the regression tests against the proxy')
-        # self.run_regress_cmd(self._primary_port, '.proxy')
-        self.run_regress_cmd(self._proxy_config['port'], schedule, 'proxy.out')
+
+        self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out', True)
 
 
     def cleanup(self):
@@ -314,9 +360,11 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Springtail Proxy tests")
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the test configuration file')
     parser.add_argument('-m', '--manual', action='store_true', default=False, help='Run the proxy manually')
-    parser.add_argument('-s', '--schedule', type=str, default='postgres_all', help='Path to the schedule file')
+    parser.add_argument('-s', '--schedule', type=str, default=None, help='Path to the schedule file')
     parser.add_argument('-l', '--list', action='store_true', default=False, help='List all schedules')
     parser.add_argument('-t', '--notimeout', action='store_true', default=False, help='Disable timeouts')
+    parser.add_argument('test_files', nargs="*", help="Individual test sql files (without .sql).")
+
     return parser.parse_args()
 
 ## main()
@@ -331,7 +379,10 @@ if __name__ == "__main__":
             print(os.path.basename(s))
         sys.exit(0)
 
-    if not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
+    if not args.schedule and not args.test_files:
+        raise ValueError("No schedule or test files specified")
+
+    if args.schedule and not os.path.exists(os.path.join(os.getcwd(), f'tests/schedules/{args.schedule}')):
         raise ValueError(f"Schedule file not found: {args.schedule}")
 
     # set the log level and format
@@ -351,7 +402,7 @@ if __name__ == "__main__":
     test = Test(yaml_config['system_json_path'], yaml_config['install_dir'], yaml_config['external_dir'])
 
     try:
-        test.run_regress(args.schedule, args.manual, args.notimeout)
+        test.run_regress(args.schedule, args.test_files, args.manual, args.notimeout)
     except Exception as e:
         logging.error(f'Failed to run the regression tests: {e}')
         # cleanup the regression tmp dir on exception

@@ -10,6 +10,7 @@
 #include <utility>
 #include <list>
 #include <climits>
+#include <unordered_map>
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
@@ -188,11 +189,13 @@ namespace pg_proxy {
          * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param dbname std::string database name
+         * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
         ServerSessionPtr allocate_session(ProxyServerPtr server,
                                           UserPtr user,
-                                          const std::string &dbname);
+                                          const std::string &dbname,
+                                          const std::unordered_map<std::string, std::string> &parameters);
 
         /**
          * @brief Get total count of sessions associated with this instance.

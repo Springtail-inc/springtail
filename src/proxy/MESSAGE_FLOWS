@@ -2,9 +2,9 @@ Simple transaction (begin/select/commit or rollback)
 >Q   (begin)
 <C/Z (Z in trans)
 >Q   (select)
-<T/D/D/D/C/Z  (Z in trans)
+<T/D/D/D/C/Z  (Z in trans T)
 >Q   (commit/rollback)
-<C/Z (Z idle)
+<C/Z (Z idle I)
 
 Copy In
 >Q    (copy from)
@@ -16,3 +16,16 @@ Copy Out
 >Q    (copy to)
 <H/d/d/d/c/C/Z
 
+Error in transaction
+>Q   (begin)
+<C/Z (Z in trans)
+>Q   (select)
+<E
+<Z   (Z failure, in transaction, E)
+>Q   (commit/rollback)
+<C/Z (Z idle)
+
+Error in simple statement
+>Q
+<E
+<Z (Z idle)
