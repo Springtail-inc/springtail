@@ -9,10 +9,12 @@ namespace springtail {
      */
     class Timer {
     private:
-        std::chrono::time_point<std::chrono::system_clock> _begin; ///< Track when the timer started.
-        std::chrono::time_point<std::chrono::system_clock> _end; ///< Track when the timer stopped.
+        using clock = std::chrono::steady_clock;
+        using duration = clock::duration;
+        std::chrono::time_point<clock> _begin; ///< Track when the timer started.
+        std::chrono::time_point<clock> _end; ///< Track when the timer stopped.
 
-        std::chrono::milliseconds _total_elapsed; ///< Total time while the timer was active.
+        duration _total_elapsed; ///< Total time while the timer was active.
 
     public:
         Timer()
@@ -25,7 +27,7 @@ namespace springtail {
         void
         start()
         {
-            _begin = std::chrono::system_clock::now();
+            _begin = clock::now();
         }
 
         /**
@@ -34,8 +36,8 @@ namespace springtail {
         void
         stop()
         {
-            _end = std::chrono::system_clock::now();
-            _total_elapsed += std::chrono::duration_cast<std::chrono::milliseconds>(_end - _begin);
+            _end = clock::now();
+            _total_elapsed += _end - _begin;
         }
 
         /**
@@ -44,7 +46,7 @@ namespace springtail {
         void
         reset()
         {
-            _total_elapsed = std::chrono::milliseconds(0);
+            _total_elapsed = duration(0);
         }
 
         /**
@@ -55,7 +57,7 @@ namespace springtail {
         std::chrono::milliseconds
         elapsed_ms()
         {
-            return _total_elapsed;
+            return std::chrono::duration_cast<std::chrono::milliseconds>(_total_elapsed);
         }
     };
 
