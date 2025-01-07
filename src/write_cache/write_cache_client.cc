@@ -38,10 +38,8 @@ namespace springtail {
         }
 
         // init channel pool
-        int max_connections;
-        int port;
-        Json::get_to<int>(client_json, "connections", max_connections, 8);
-        Json::get_to<int>(server_json, "port", port, 55051);
+        int max_connections = Json::get_or<int>(client_json, "connections", 8);
+        int port = Json::get_or<int>(server_json, "port", 55051);
 
         std::string server = Properties::get_write_cache_hostname();
 

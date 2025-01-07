@@ -36,8 +36,8 @@ namespace springtail::xid_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
 
-        Json::get_to<int>(server_json, "port", _port, 55051);
-        Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
+        _port = Json::get_or<int>(server_json, "port", 55051);
+        _worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
 
         std::string base_path;
         Json::get_to<std::string>(server_json, "base_path", base_path);
