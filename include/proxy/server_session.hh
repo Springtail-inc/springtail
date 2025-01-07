@@ -1,5 +1,10 @@
 #pragma once
 
+#include <memory>
+#include <queue>
+#include <set>
+#include <unordered_map>
+
 #include <proxy/session.hh>
 #include <proxy/session_msg.hh>
 #include <proxy/user_mgr.hh>
@@ -44,6 +49,7 @@ namespace springtail::pg_proxy {
                       std::string database,
                       std::string prefix,
                       DatabaseInstancePtr instance,
+                      const std::unordered_map<std::string, std::string> &parameters,
                       Session::Type type=PRIMARY);
 
         ~ServerSession() {};
@@ -73,7 +79,9 @@ namespace springtail::pg_proxy {
         static std::shared_ptr<ServerSession>
         create(ProxyServerPtr server, UserPtr user, const std::string &database,
                const std::string &prefix,
-               DatabaseInstancePtr instance, Session::Type type);
+               DatabaseInstancePtr instance,
+               Session::Type type,
+               const std::unordered_map<std::string, std::string> &parameters);
 
     protected:
         void _process_connection() override;

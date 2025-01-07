@@ -88,8 +88,7 @@ namespace springtail {
         int config_db = redis_config["config_db"];
 
         // check if ssl is enabled
-        bool ssl_enabled;
-        Json::get_to<bool>(_json[REDIS_CONFIG], "ssl", ssl_enabled, false);
+        bool ssl_enabled = Json::get_or<bool>(_json[REDIS_CONFIG], "ssl", false);
 
         // create connection options for config db
         sw::redis::ConnectionOptions connect_options;
@@ -586,8 +585,7 @@ namespace springtail {
     Properties::get_pid_path()
     {
         nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
-        std::string pid_path;
-        Json::get_to<std::string>(props, Properties::PID_PATH, pid_path, "/var/springtail/pids");
+        std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
     }
 

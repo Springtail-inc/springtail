@@ -20,14 +20,13 @@ namespace {
 
             sw::redis::ConnectionOptions con_opt;
             nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-            int keep_alive_secs;
 
-            Json::get_to<std::string>(json, "host", con_opt.host, "localhost");
-            Json::get_to<std::string>(json, "user", con_opt.user, "user");
+            con_opt.host = Json::get_or<std::string>(json, "host", "localhost");
+            con_opt.user = Json::get_or<std::string>(json, "user", "user");
             Json::get_to<std::string>(json, "password", con_opt.password);
-            Json::get_to<int>(json, "port", con_opt.port, 6379);
-            Json::get_to<int>(json, "config_db", con_opt.db, RedisMgr::REDIS_CONFIG_DB);
-            Json::get_to<int>(json, "keep_alive_sec", keep_alive_secs, 30);
+            con_opt.port = Json::get_or<int>(json, "port", 6379);
+            con_opt.db = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_CONFIG_DB);
+            int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
 
             con_opt.keep_alive_s = std::chrono::seconds(keep_alive_secs);
             con_opt.keep_alive = true;

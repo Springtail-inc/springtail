@@ -262,7 +262,7 @@ namespace pg_proxy {
          * @param stmt The statement to commit
          * @param completed The number of completed sub statements
          */
-        void commit_statement(QueryStmtPtr stmt, int completed);
+        void commit_statement(QueryStmtPtr stmt, int completed, bool success=true);
 
         /**
          * @brief Reached a sync point; READY FOR QUERY, if not in xact then implicitly commit or rollback

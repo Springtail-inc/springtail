@@ -397,6 +397,8 @@ namespace springtail::pg_proxy {
             // queue the sessions that are now runnable
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session: [{}:{}]",
+                            session->type_str(), session->id());
                 _thread_pool.queue(session);
             }
         }
