@@ -28,9 +28,24 @@ namespace {
         std::filesystem::path _base_dir;
 
         void SetUp() override {
-            springtail_init();
+            struct Initializer
+            {
+                test::Services _s;
 
-            _services.init(true);
+                Initializer() : _s{true, true, true}
+                {
+                    springtail_init();
+                    _s.init();
+                }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
 
             nlohmann::json db_config = Properties::get_db_config(db_id);
             auto db_name = db_config["name"].get<std::string>();
@@ -47,13 +62,7 @@ namespace {
             }
         }
 
-        void TearDown() override {
-            _services.shutdown();
-        }
-
         uint64_t db_id = 1;
-
-        test::Services _services{true, true, true};
     };
 
     TEST_F(PgCopyTable_Test, CopyTable)
