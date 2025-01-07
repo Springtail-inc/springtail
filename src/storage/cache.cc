@@ -36,10 +36,9 @@ namespace springtail {
     StorageCache::StorageCache()
     {
         // get the cache size
-        uint64_t data_size, page_size;
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-        Json::get_to<uint64_t>(json, "data_cache_size", data_size, 16384);
-        Json::get_to<uint64_t>(json, "page_cache_size", page_size, 16384);
+        uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);
+        uint64_t page_size = Json::get_or<uint64_t>(json, "page_cache_size", 16384);
 
         _data_cache = std::make_shared<DataCache>(data_size);
         _page_cache = std::make_shared<PageCache>(page_size);

@@ -55,16 +55,11 @@ namespace logging {
         uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
 
         // configuration options
-        std::string log_path_str;
-        std::string log_level;
-        std::string pattern;
-        int max_size;
-        int max_files;
-        Json::get_to<std::string>(props, "log_path", log_path_str, "/tmp/springtail_log.txt");
-        Json::get_to<int>(props, "log_file_size", max_size, 1024 * 1024 * 5);
-        Json::get_to<int>(props, "log_file_count", max_files, 5);
-        Json::get_to<std::string>(props, "log_level", log_level, "trace");
-        Json::get_to<std::string>(props, "log_pattern", pattern, "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
+        std::string log_path_str = Json::get_or<std::string>(props, "log_path", "/tmp/springtail_log.txt");
+        int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
+        int max_files = Json::get_or<int>(props, "log_file_count", 5);
+        std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
+        std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
         // if the mask wasn't passed in then check if log_module is set in properties
         if (!module_mask_opt && props.contains("log_modules")) {
