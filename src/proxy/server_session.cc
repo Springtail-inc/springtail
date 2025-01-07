@@ -19,7 +19,7 @@
 
 namespace springtail::pg_proxy {
 
-    // reset query string; similar to rollback, discard all, set search path, but discard all can't be run with other statements
+    /** reset query string; similar to rollback, discard all, set search path, but discard all can't be run with other statements */
     constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT";
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
@@ -47,6 +47,28 @@ namespace springtail::pg_proxy {
         } else {
             DatabaseMgr::get_instance()->replica_set()->release_session(shared_from_this(), deallocate);
         }
+    }
+
+    bool
+    ServerSession::check_startup_params(const std::unordered_map<std::string, std::string> &parameters)
+    {
+        // check if the startup parameters match
+        for (const auto &param : parameters) {
+            // skip those that are fixed
+            if (EXCLUDED_STARTUP_PARAMS.contains(param.first)) {
+                // XXX may still want to check these
+                continue;
+            }
+
+            auto it = _parameters.find(param.first);
+            if (it == _parameters.end() || it->second != param.second) {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server startup parameter mismatch: {}={}; expected={}",
+                            _id, param.first, it->second, param.second);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     void
@@ -106,6 +128,15 @@ namespace springtail::pg_proxy {
             _handle_shutdown();
             break;
 
+        case SessionMsg::MSG_CLIENT_SERVER_INIT_PARAMS:
+            // got a session from the pool
+            // need to send the init params message to server
+            assert(_state == RESET_SESSION_READY);
+            _state = RESET_SESSION_PARAMS;
+            block_messages();
+            _send_buffer(msg->buffer(), msg->seq_id());
+            break;
+
         default:
             SPDLOG_WARN("Unknown message: {}", (int8_t)msg->type());
             break;
@@ -115,8 +146,8 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_shutdown()
     {
-        // atomic set flag to true, if already set then return
-        if (test_and_set_shutdown()) {
+        if (_state == RESET_SESSION || is_shutdown()) {
+            // if we are in reset session state, or shutdown return
             return;
         }
 
@@ -176,13 +207,20 @@ namespace springtail::pg_proxy {
             // ready for query, handle requests
             _handle_message_from_server();
             break;
+        case RESET_SESSION:
+        case RESET_SESSION_READY:
+        case RESET_SESSION_PARAMS:
+            // session is being or has just been reset
+            // mostly dropping messages or handling error waiting for client
+            _handle_reset_session_message();
+            break;
         default:
             SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
             _state = ERROR;
             break;
         }
 
-        if (is_ready()) {
+        if (_state == READY || _state == RESET_SESSION_READY) {
             // if we are ready, then we can process more messages
             enable_messages();
         }
@@ -192,11 +230,80 @@ namespace springtail::pg_proxy {
     ServerSession::_read_message(int msg_length)
     {
         // read in the message from connection
+        if (msg_length == 0) {
+            // no message to read
+            return nullptr;
+        }
         BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
         ssize_t n = _connection->read(buffer->data(), msg_length, msg_length);
         assert(n == msg_length);
         buffer->set_size(msg_length);
         return buffer;
+    }
+
+    void
+    ServerSession::_handle_reset_session_message()
+    {
+        // read just the header, the message length is the remaining bytes
+        auto [code, msg_length] = _read_hdr();
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
+        if (msg_length == 0) {
+            // no message to read
+            return;
+        }
+
+        BufferPtr buffer = _read_message(msg_length);
+
+        // log the buffer
+        _log_buffer(true, code, msg_length, buffer->data(), _seq_id);
+
+        switch (code) {
+            case 'Z': {
+                // Ready for query
+                // I - Idle, T - Transaction, E - Error in transaction
+                char status = buffer->get();
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
+
+                if (status == 'E') {
+                    // error in transaction, need to reset session
+                    SPDLOG_WARN("[S:{}] Error in transaction while resetting session", _id);
+                    _state = ERROR;
+                    return;
+                }
+
+                if (_state == RESET_SESSION) {
+                    // sent reset query, now ready to be added to pool
+                    assert(status == 'I');
+                    _seq_id = 0;
+                    _state = RESET_SESSION_READY;
+                    release_session(false);
+                    return;
+                }
+
+                if (_state == RESET_SESSION_PARAMS) {
+                    assert(status == 'I');
+                    // sent init params, now ready for queries, notify client
+                    _seq_id = 0;
+                    _state = READY;
+                    // emulate auth_done message to client
+                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
+                    queue_msg(msg);
+                    return;
+                }
+
+                break;
+            }
+            case 'E':
+                // Error response
+                _handle_error_code(buffer, _seq_id);
+                break;
+
+            default:
+                // ignore all other messages
+                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Reset session, dropping message: code={}, length={}", _id, code, msg_length);
+                break;
+        }
     }
 
     void
@@ -220,14 +327,6 @@ namespace springtail::pg_proxy {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
 
         assert(msg_length < 100000); // sanity check
-
-        if (_state == RESET_SESSION && code != 'Z' && code != 'E') {
-            // we are in reset session state waiting for 'Z' Ready for query
-            // if error, fall through, otherwise drop everything else
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Reset session, dropping message: code={}, length={}", _id, code, msg_length);
-            _read_message(msg_length);
-            return;
-        }
 
         // first handle messages where we just need to forward to client
         switch(code) {
@@ -269,6 +368,7 @@ namespace springtail::pg_proxy {
                     SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_COPY_READY);
                     queue_msg(msg);
                 }
+
                 return;
         }
 
@@ -365,14 +465,6 @@ namespace springtail::pg_proxy {
                     // the client session authentication
                     SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
                     queue_msg(msg);
-                    _seq_id = 0;
-                    break;
-                }
-
-                if (_state == RESET_SESSION) {
-                    // reset session complete, add session to pool
-                    release_session(false);
-                    _state = READY;
                     _seq_id = 0;
                     break;
                 }

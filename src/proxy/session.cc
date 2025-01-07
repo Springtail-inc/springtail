@@ -32,6 +32,8 @@ namespace springtail::pg_proxy {
             {MSG_CLIENT_SERVER_CLOSE, "MSG_CLIENT_SERVER_CLOSE"},
             {MSG_CLIENT_SERVER_SYNC, "MSG_CLIENT_SERVER_SYNC"},
             {MSG_CLIENT_SERVER_FORWARD, "MSG_CLIENT_SERVER_FORWARD"},
+            {MSG_CLIENT_SERVER_SHUTDOWN, "MSG_CLIENT_SERVER_SHUTDOWN"},
+            {MSG_CLIENT_SERVER_INIT_PARAMS, "MSG_CLIENT_SERVER_INIT_PARAMS"},
             {MSG_SERVER_CLIENT_AUTH_DONE, "MSG_SERVER_CLIENT_AUTH_DONE"},
             {MSG_SERVER_CLIENT_READY, "MSG_SERVER_CLIENT_READY"},
             {MSG_SERVER_CLIENT_MSG_SUCCESS, "MSG_SERVER_CLIENT_MSG_SUCCESS"},
@@ -122,12 +124,10 @@ namespace springtail::pg_proxy {
         do {
             // thread entry point
             try {
-                if (!has_data && !_connection->has_pending()) {
-                    // if no data, return
-                    // !has_data is to prevent checking after we checked at the end of loop
-                    return true;
+                if (has_data || _connection->has_pending()) {
+                    // if there is data then process it
+                    _process_connection();
                 }
-                _process_connection();
             } catch (const ProxyIOError &e) {
                 SPDLOG_ERROR("ProxyIOError: {}", e.what());
                 _state = ERROR;
@@ -141,8 +141,8 @@ namespace springtail::pg_proxy {
 
             // cleanup connection and remove from server list if closed or error
             if (_state == ERROR || _connection->closed()) {
-                _handle_error();
-                return false;
+                _handle_error();  // this will set shutdown flag
+                // don't return yet, let other session process pending msgs
             }
 
             // see if remote session has messages that need to be processed
@@ -173,6 +173,11 @@ namespace springtail::pg_proxy {
                     replica->_internal_process_msgs(true);
                     lock.lock();
                 }
+            }
+
+            // safe to return now if shutting down
+            if (is_shutdown()) {
+                return false;
             }
 
             if (_waiting_on_session) {
@@ -421,7 +426,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        SPDLOG_ERROR("Error state, closing connection: type={} for session id={}\n",
+        SPDLOG_WARN("Error state, closing connection: type={} for session id={}\n",
                      _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
 
         // general error handling, shutdown for both clients and servers
@@ -452,8 +457,6 @@ namespace springtail::pg_proxy {
             ClientSession *client = static_cast<ClientSession *>(this);
             client->shutdown_server_sessions();
         }
-
-        SPDLOG_ERROR("Shutdown complete");
     }
 
     void

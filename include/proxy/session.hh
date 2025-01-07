@@ -34,6 +34,15 @@ namespace springtail::pg_proxy {
     public:
         using SessionPtr = std::shared_ptr<Session>;
 
+        /** Startup parameters that can't be 'SET' after session startup */
+        const std::set<std::string> EXCLUDED_STARTUP_PARAMS = {
+            "user",
+            "database",
+            "application_name",
+            "client_encoding",  // maybe this can be sometimes...
+            "is_superuser",
+        };
+
         /** Type of session */
         enum Type : int8_t {
             CLIENT=0,
@@ -52,7 +61,13 @@ namespace springtail::pg_proxy {
             DEPENDENCIES=6,   ///< waiting on dependencies
             QUERY=7,          ///< query in progress
             EXTENDED_ERROR=8, ///< extended message error state
-            RESET_SESSION=9,  ///< reset session state, e.g. after error
+
+            // reset session states; states after this session is reset
+            // and released back to the session free pool
+            RESET_SESSION=9,         ///< reset session state, e.g. after error
+            RESET_SESSION_READY=10,  ///< reset session ready for allocation
+            RESET_SESSION_PARAMS=11, ///< reset session, sending startup parameters
+
             ERROR=99          ///< fatal error state
         };
 
@@ -207,7 +222,7 @@ namespace springtail::pg_proxy {
         }
 
         /** Check if session is in ready state or not */
-        bool is_ready() const {
+        virtual bool is_ready() const {
             return _state == READY;
         }
 

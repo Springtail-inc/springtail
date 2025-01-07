@@ -501,14 +501,12 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
-         *
          * @return std::optional<std::string> - name of a replicated database if found
          */
         std::optional<std::string> get_any_replicated_db_name();
 
         /**
          * @brief Get database id for given database name
-         *
          * @param db_name - database name
          * @return std::optional<uint64_t> - optional database id
          */
@@ -523,7 +521,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Verifies if the database is in the running state.
-         *
          * @param db_id - database id to verify
          * @return true - database is in running state
          * @return false - database is not in the running state
@@ -532,7 +529,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Check if a database is replicated
-         *
          * @param dbname - name of the database
          * @return true - replicated
          * @return false - not replicated
@@ -544,7 +540,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Set the primary database instance
-         *
          * @param instance_id - instance id
          * @param instance - database instance
          */
@@ -555,7 +550,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Set the secondary database instance
-         *
          * @param instance - database instance
          */
         void set_standby(DatabaseInstancePtr instance) {
@@ -564,7 +558,6 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Add replica database instance
-         *
          * @param instance - database instance
          */
         void add_replica(DatabaseInstancePtr instance) {
@@ -584,8 +577,54 @@ namespace springtail::pg_proxy {
         DatabaseReplicaSetPtr replica_set() { return _replica_set; }
 
         /**
+         * @brief Get a server session from pool
+         * @param type - session type, primary or replica
+         * @param db_id - database id
+         * @param username - username
+         * @return ServerSessionPtr - server session
+         */
+        ServerSessionPtr get_pooled_session(const Session::Type type,
+                                            const uint64_t db_id,
+                                            const std::string &username) {
+            if (type == Session::Type::PRIMARY) {
+                assert(_primary_set != nullptr);
+                return _primary_set->get_session(db_id, username);
+            } else if (type == Session::Type::REPLICA) {
+                assert(_replica_set != nullptr);
+                return _replica_set->get_session(db_id, username);
+            }
+            assert (0);
+            return nullptr;
+        }
+
+        /**
+         * @brief Allocate a new session from the database set
+         * @param type - session type
+         * @param db_id - database id
+         * @param username - username
+         * @param server - proxy server
+         * @param user - user
+         * @param parameters - startup parameters
+         * @return ServerSessionPtr
+         */
+        ServerSessionPtr allocate_session(ProxyServerPtr server,
+                                          const Session::Type type,
+                                          const uint64_t db_id,
+                                          UserPtr user,
+                                          const std::unordered_map<std::string, std::string> &parameters) {
+            if (type == Session::Type::PRIMARY) {
+                assert(_primary_set != nullptr);
+                return _primary_set->allocate_session(server, user, db_id, parameters);
+            } else if (type == Session::Type::REPLICA) {
+                assert(_replica_set != nullptr);
+                return _replica_set->allocate_session(server, user, db_id, parameters);
+            }
+            assert (0);
+            return nullptr;
+        }
+
+        /**
          * @brief Verify if the table is replicated for give database and schema
-         *
          * @param db_id - database id
          * @param default_schema - default schema name to use in case schema is empty
          * @param schema - schema name
@@ -679,5 +718,6 @@ namespace springtail::pg_proxy {
          */
         void _remove_replicated_database(uint64_t db_id);
     };
+
 
 } // namespace springtail:pg_proxy

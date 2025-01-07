@@ -130,6 +130,8 @@ namespace springtail::pg_proxy {
         void _encode_auth_ok(BufferPtr buffer);
         void _encode_auth_scram(BufferPtr buffer);
 
+        BufferPtr _encode_session_param_query();
+
         void _handle_request();
         void _handle_startup();
         void _handle_ssl_handshake();

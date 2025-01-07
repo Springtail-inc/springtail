@@ -44,7 +44,7 @@ namespace springtail::pg_proxy {
 
     ClientSession::~ClientSession()
     {
-        SPDLOG_WARN("Client session being deallocated");
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Client session being deallocated");
     }
 
     void
@@ -1131,31 +1131,53 @@ namespace springtail::pg_proxy {
         return session;
     }
 
+    BufferPtr
+    ClientSession::_encode_session_param_query()
+    {
+        std::ostringstream query;
+        for (const auto& [key, value] : _parameters) {
+            if (EXCLUDED_STARTUP_PARAMS.contains(key)) {
+                continue;
+            }
+            query << "SET " << key << "=" << value << ";";
+        }
+        std::string query_str = query.str();
+
+        // create a buffer for the query
+        // length = 4B len + query size + null terminator + code byte
+        int length = query_str.size() + 4 + 1 + 1;
+        BufferPtr buffer = BufferPool::get_instance()->get(length);
+
+        // create a query to set the session parameters
+        buffer->put('Q');
+        buffer->put32(length - 1); // subtract 1 for the code byte
+        buffer->put_string(query.str());
+
+        return buffer;
+    }
+
     ServerSessionPtr
     ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
     {
-        // get database instance from either primary or replica set
-        DatabaseSetPtr dbset = nullptr;
-        if (type == PRIMARY) {
-            // get a primary session
-            dbset = DatabaseMgr::get_instance()->primary_set();
-        } else {
-            // get a replica session
-            assert (_primary_mode == false);
-            dbset = DatabaseMgr::get_instance()->replica_set();
-        }
-        assert (dbset != nullptr);
+        DatabaseMgr *db_mgr = DatabaseMgr::get_instance();
 
-        // get a session from the instance
-        ServerSessionPtr session = dbset->get_session(_db_id, _user->username());
+        // get a session from the pool or allocate a new one
+        bool from_pool = true;
+        ServerSessionPtr session = db_mgr->get_pooled_session(type, _db_id, _user->username());
+
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            if ((session = dbset->allocate_session(_server, _user, _db_id, _parameters)) == nullptr) {
+
+            from_pool = false;
+
+            if ((session = db_mgr->allocate_session(_server, type, _db_id, _user, _parameters)) == nullptr) {
                 SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                assert(0);
                 return nullptr;
             }
         }
+
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 
         if (type == PRIMARY) {
@@ -1167,21 +1189,31 @@ namespace springtail::pg_proxy {
 
             // if client is in shadow mode, then the replica session
             // becomes a shadow session, not returning results to the client
-            if (_shadow_mode) {
-                // set shadow mode on the session
-                session->set_shadow_mode(true);
-            } else {
-                session->set_shadow_mode(false);
-            }
+            session->set_shadow_mode(_shadow_mode);
         }
         session->pin_client_session(shared_from_this());
 
-        if (session->is_ready()) {
-            // session is ready, we can use it
-            // XXX apply parameters to session if they don't match
+        // TODO: it is possible that the session got into an error state
+        // during allocation or just after prior to being pinned
+        // we should check for this and handle it
+
+        if (from_pool) {
+            // if session is ready and clean, we can use it
+            if (session->check_startup_params(_parameters)) {
+                session->set_ready();
+                return session;
+            }
+
+            // apply parameters to session if they don't match
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Applying session parameters to server session: id={}", _id, session->id());
+            BufferPtr buffer = _encode_session_param_query();
+            SessionMsgPtr param_msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_INIT_PARAMS, buffer, seq_id);
+            queue_msg(param_msg, session);
+
             return session;
         }
 
+        // this is a newly allocated session, we need to start it up
         // we need to do authentication and wait for session to become ready
         // register server session connection with server
         _server->register_session(session);

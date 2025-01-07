@@ -142,6 +142,22 @@ namespace springtail::pg_proxy {
             Session::reset_session();
         }
 
+        /**
+         * @brief Check if the session's startup params match the client's
+         * @param parameters client parameters
+         * @return true if match
+         * @return false if not a match
+         */
+        bool check_startup_params(const std::unordered_map<std::string, std::string> &parameters);
+
+        /**
+         * @brief Set the session to ready state
+         */
+        void set_ready() {
+            assert (_state == RESET_SESSION_READY);
+            _state = READY;
+        }
+
         /** factory to create session */
         static std::shared_ptr<ServerSession>
         create(ProxyServerPtr server, UserPtr user, const std::string &database,
@@ -238,6 +254,9 @@ namespace springtail::pg_proxy {
 
         /** Handle shutdown message from client */
         void _handle_shutdown();
+
+        /** Process response from server in reset session state */
+        void _handle_reset_session_message();
 
         /** Helper to read in message */
         BufferPtr _read_message(int msg_length);

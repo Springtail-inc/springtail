@@ -222,7 +222,7 @@ namespace springtail::pg_proxy
                                   int num_instances,
                                   bool deallocate)
     {
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Session being released: [S:{:d}]", session->id());
 
         // deallocate if connection is closed
         if (session->is_connection_closed()) {
@@ -233,9 +233,12 @@ namespace springtail::pg_proxy
 
         // if not deallocating the session then add it back to the pool
         if (!deallocate && (num_instances * _max_sessions_per_instance > _pool->size())) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Adding session back to pool: [S:{:d}]", session->id());
             _pool->add_session(session);
             return;
         }
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Deallocating session: [S:{:d}]", session->id());
 
         // otherwise, remove from the internal maps and deallocate
         auto instance_it = _sessions.find(session->get_instance());
@@ -326,6 +329,7 @@ namespace springtail::pg_proxy
     DatabaseReplicaSet::release_session(ServerSessionPtr session, bool deallocate)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Replica session released: [S:{:d}]", session->id());
+        assert(session->type() == Session::Type::REPLICA);
 
         std::shared_lock lock(_mutex);
 
@@ -365,6 +369,7 @@ namespace springtail::pg_proxy
     DatabasePrimarySet::release_session(ServerSessionPtr session, bool deallocate)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Primary Session released: [S:{:d}]", session->id());
+        assert(session->type() == Session::Type::PRIMARY);
 
         std::shared_lock lock(_mutex);
 
