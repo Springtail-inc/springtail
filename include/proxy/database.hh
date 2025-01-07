@@ -432,7 +432,7 @@ namespace springtail::pg_proxy {
          * @return true - replicated
          * @return false - not replicated
          */
-        bool has_schema_table(const std::string &db_schema, const std::string &db_table);
+        bool has_schema_table(const std::string &db_schema, const std::string &db_table) const;
 
         /**
          * @brief Set database state
@@ -447,7 +447,7 @@ namespace springtail::pg_proxy {
          * @brief Get database state
          * @return redis::db_state_change::DBState
          */
-        redis::db_state_change::DBState get_state() {
+        redis::db_state_change::DBState get_state() const {
             std::shared_lock storage_lock(_db_mutex);
             return _state;
         }
@@ -469,7 +469,7 @@ namespace springtail::pg_proxy {
         }
     private:
         std::map<std::string, std::set<std::string>> _schema_tables_map; ///< maps schema to a set of table names
-        std::shared_mutex _db_mutex;                    ///< mutex for accessing and modifying database data
+        mutable std::shared_mutex _db_mutex;            ///< mutex for accessing and modifying database data
         std::string _db_name;                           ///< database name
         uint64_t _db_id;                                ///< database id
         redis::db_state_change::DBState _state;         ///< database state
@@ -503,21 +503,21 @@ namespace springtail::pg_proxy {
          * @brief Get a name of an arbitrary replicated database for running a user query in UserMgr
          * @return std::optional<std::string> - name of a replicated database if found
          */
-        std::optional<std::string> get_any_replicated_db_name();
+        std::optional<std::string> get_any_replicated_db_name() const;
 
         /**
          * @brief Get database id for given database name
          * @param db_name - database name
          * @return std::optional<uint64_t> - optional database id
          */
-        std::optional<uint64_t> get_database_id(const std::string &db_name);
+        std::optional<uint64_t> get_database_id(const std::string &db_name) const;
 
         /**
          * @brief Get the database name object
          * @param db_id
          * @return std::optional<std::string>
          */
-        std::optional<std::string> get_database_name(const uint64_t db_id);
+        std::optional<std::string> get_database_name(const uint64_t db_id) const;
 
         /**
          * @brief Verifies if the database is in the running state.
@@ -525,7 +525,7 @@ namespace springtail::pg_proxy {
          * @return true - database is in running state
          * @return false - database is not in the running state
          */
-        bool is_database_ready(const uint64_t db_id);
+        bool is_database_ready(uint64_t db_id) const;
 
         /**
          * @brief Check if a database is replicated
@@ -533,7 +533,7 @@ namespace springtail::pg_proxy {
          * @return true - replicated
          * @return false - not replicated
          */
-        bool is_database_replicated(const std::string &dbname) {
+        bool is_database_replicated(const std::string &dbname) const {
             std::shared_lock lock(_db_mutex);
             return _db_name_rep_dbs.contains(dbname);
         }
@@ -635,7 +635,7 @@ namespace springtail::pg_proxy {
         bool is_table_replicated(const uint64_t db_id,
             const std::string &default_schema,
             const std::string &schema,
-            const std::string &table);
+            const std::string &table) const;
 
     protected:
         /**
@@ -652,9 +652,9 @@ namespace springtail::pg_proxy {
         DatabasePrimarySetPtr _primary_set; ///< set of primary database and standby database
         DatabaseReplicaSetPtr _replica_set; ///< set of replica databases
 
-        std::map<std::string, DatabasePtr> _db_name_rep_dbs;  ///< map of database names to database object
-        std::map<uint64_t, DatabasePtr> _db_id_rep_dbs;       ///< map of database ids to database object
-        std::shared_mutex _db_mutex;        ///< shared mutex for read/write access to the replicated databases map
+        std::map<std::string, DatabasePtr> _db_name_rep_dbs; ///< map of database names to database object
+        std::map<uint64_t, DatabasePtr> _db_id_rep_dbs;      ///< map of database ids to database object
+        mutable std::shared_mutex _db_mutex;                 ///< shared mutex for the replicated databases maps
 
         std::string _db_replica_prefix;     ///< prefix to be used for replica database (for testing)
 

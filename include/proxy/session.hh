@@ -87,16 +87,14 @@ namespace springtail::pg_proxy {
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
 
         /**
-         * @brief Construct a session with a connection and server ptr.
+         * @brief Construct a session with a connection and server ptr.  Type forced to client.
          * For client sessions.
          * @param connection connection
          * @param server     main server
-         * @param type       type of session (default=CLIENT)
          * @return Session object
          */
         Session(ProxyConnectionPtr connection,
-                ProxyServerPtr server,
-                Type type=CLIENT);
+                ProxyServerPtr server);
 
         /**
          * Construct a session with a database instance and user.

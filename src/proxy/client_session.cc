@@ -28,7 +28,7 @@ namespace springtail::pg_proxy {
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server)
 
-        : Session(connection, server, CLIENT),
+        : Session(connection, server),
           _stmt_cache(STATEMENT_CACHE_SIZE),
           _shadow_mode(server->mode() == ProxyServer::MODE::SHADOW),
           _primary_mode(server->mode() == ProxyServer::MODE::PRIMARY)

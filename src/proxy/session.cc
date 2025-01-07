@@ -43,14 +43,13 @@ namespace springtail::pg_proxy {
     };
 
     Session::Session(ProxyConnectionPtr connection,
-                     ProxyServerPtr server,
-                     Type type)
+                     ProxyServerPtr server)
         : _connection(connection),
           _server(server),
           _state(STARTUP),
-          _type(type),
+          _type(Type::CLIENT),
           _id(session_id++)
-    { assert (Type::CLIENT == type); }
+    {}
 
     Session::Session(DatabaseInstancePtr instance,
                      ProxyConnectionPtr connection,

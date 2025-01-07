@@ -477,7 +477,7 @@ namespace springtail::pg_proxy
     }
 
     bool
-    Database::has_schema_table(const std::string &db_schema, const std::string &db_table)
+    Database::has_schema_table(const std::string &db_schema, const std::string &db_table) const
     {
         std::shared_lock lock(_db_mutex);
 
@@ -723,7 +723,7 @@ namespace springtail::pg_proxy
     }
 
     std::optional<std::string>
-    DatabaseMgr::get_any_replicated_db_name()
+    DatabaseMgr::get_any_replicated_db_name() const
     {
         std::shared_lock lock(_db_mutex);
 
@@ -735,7 +735,7 @@ namespace springtail::pg_proxy
     }
 
     std::optional<uint64_t>
-    DatabaseMgr::get_database_id(const std::string &db_name)
+    DatabaseMgr::get_database_id(const std::string &db_name) const
     {
         std::shared_lock lock(_db_mutex);
 
@@ -747,7 +747,7 @@ namespace springtail::pg_proxy
     }
 
     std::optional<std::string>
-    DatabaseMgr::get_database_name(const uint64_t db_id)
+    DatabaseMgr::get_database_name(const uint64_t db_id) const
     {
         std::shared_lock lock(_db_mutex);
 
@@ -762,7 +762,7 @@ namespace springtail::pg_proxy
     DatabaseMgr::is_table_replicated(const uint64_t db_id,
                                      const std::string &default_schema,
                                      const std::string &schema,
-                                     const std::string &table)
+                                     const std::string &table) const
     {
         // get the database object by db_id
         std::shared_lock lock(_db_mutex);
@@ -770,23 +770,23 @@ namespace springtail::pg_proxy
         if (iter == _db_id_rep_dbs.end()) {
             return false;
         }
+        DatabasePtr db_object = iter->second;
         lock.unlock();
 
-        DatabasePtr db_object = iter->second;
         return db_object->has_schema_table((schema.empty()) ? default_schema : schema, table);
     }
 
     bool
-    DatabaseMgr::is_database_ready(const uint64_t db_id)
+    DatabaseMgr::is_database_ready(uint64_t db_id) const
     {
         std::shared_lock lock(_db_mutex);
         auto iter = _db_id_rep_dbs.find(db_id);
         if (iter == _db_id_rep_dbs.end()) {
             return false;
         }
+        DatabasePtr db_object = iter->second;
         lock.unlock();
 
-        DatabasePtr db_object = iter->second;
         // this may be a blocking redis call, so we unlock above
         return (db_object->get_state() == redis::db_state_change::DB_STATE_RUNNING);
     }
