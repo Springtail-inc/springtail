@@ -1,5 +1,6 @@
 #include "common/constants.hh"
 #include <memory>
+#include <span>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -1151,12 +1152,12 @@ namespace springtail {
         XidLsn access_xid(header.xid);
         XidLsn target_xid(_target_xid);
 
-        // convert this page to a new schema if needed
-        auto client = sys_tbl_mgr::Client::get_instance();
-        auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-        if (!meta.history.empty()) {
-            auto source_schema = std::make_shared<VirtualSchema>(meta);
-            page->convert(source_schema, _schema, _target_xid);
+        auto schema = SchemaMgr::get_instance()->get_schema(_db_id, _id, access_xid, target_xid);
+        auto virtual_schema = std::dynamic_pointer_cast<VirtualSchema>(schema);
+
+        // the schema has changed
+        if (virtual_schema) {
+            page->convert(virtual_schema, _schema, _target_xid);
         }
     }
 
