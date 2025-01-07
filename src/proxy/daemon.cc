@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
     if (vm.count("daemonize")) {
         pidfile = "proxy.pid";
     }
-    springtail_init("proxy", pidfile);
+    springtail_init("proxy", pidfile, LOG_PROXY);
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
