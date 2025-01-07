@@ -169,12 +169,12 @@ namespace springtail::pg_proxy {
     class DatabaseSet {
     public:
 
-        DatabaseSet(int max_sessions_per_instance) :
+        explicit DatabaseSet(int max_sessions_per_instance) :
             _max_sessions_per_instance(max_sessions_per_instance),
             _pool(std::make_shared<DatabasePool>())
         {}
 
-        virtual ~DatabaseSet() {}
+        virtual ~DatabaseSet() = default;
 
         /**
          * @brief Get a free session from the session pool if possible
@@ -349,7 +349,7 @@ namespace springtail::pg_proxy {
      */
     class DatabasePrimarySet : public DatabaseSet {
     public:
-        DatabasePrimarySet(int max_sessions_per_instance) :
+        explicit DatabasePrimarySet(int max_sessions_per_instance) :
             DatabaseSet(max_sessions_per_instance)
         {}
 
