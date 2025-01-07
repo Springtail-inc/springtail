@@ -120,6 +120,18 @@ target_link_libraries(test_logger
 )
 add_dsymutil_command(test_logger)
 
+# test database
+add_executable(test_database test/test_database.cc)
+target_include_directories(test_database
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_database
+    PUBLIC springtail_proxy
+    PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_database)
+gtest_discover_tests(test_database)
+
 # install proxy to install directory
 install(TARGETS
     proxy

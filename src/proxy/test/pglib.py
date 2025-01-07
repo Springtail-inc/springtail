@@ -1,6 +1,6 @@
 import hashlib
 
-def send_startup(conn, database):
+def send_startup(conn, username, database):
     bytes = bytearray()
     # Startup message
     # The first 4 bytes are the length of the message
@@ -11,11 +11,11 @@ def send_startup(conn, database):
     bytes.extend(v_maj.to_bytes(2, 'big'))
     bytes.extend(v_min.to_bytes(2, 'big'))
     bytes += b'user' + b'\x00'
-    bytes += b'test_md5' + b'\x00'
+    bytes.extend(username.encode('utf-8'))
+    bytes += b'\x00'
     bytes += b'database' + b'\x00'
     bytes.extend(database.encode('utf-8'))
     bytes += b'\x00'
-#    bytes += b'postgres' + b'\x00'
     bytes += b'client_encoding' + b'\x00'
     bytes += b'UTF8' + b'\x00'
     bytes += b'\x00'
@@ -125,7 +125,7 @@ def decode_execute_request(bytes):
     portal, end = decode_string(bytes[5:])
     return portal
 
-def read_auth_response(conn):
+def read_auth_response(conn, username, password):
     bytes = conn.recv(1000)
     pos = 0
 
@@ -138,6 +138,13 @@ def read_auth_response(conn):
         if (code == 'R'):
             auth_type = decode_auth_response(bytes[pos:])
             print("Auth type: ", auth_type_to_string(auth_type))
+            if auth_type == 5:
+                # MD5 authentication
+                salt = bytes[pos+9:pos+13]
+                send_md5(conn, username, password, salt)
+                bytes = conn.recv(1000)
+                pos = 0
+                continue
 
         if (code == 'S'):
             # decode the parameter status
@@ -315,6 +322,13 @@ def read_response(conn):
             print('Bind complete')
         elif code == 'n':
             print('No data')
+        elif code == 'N':
+            print('Notice response')
+            msgs = decode_notice(bytes[pos:])
+            print(f"Severity: {msgs['S']}")
+            print(f"Text:     {msgs['V']}")
+            print(f"Code:     {msgs['C']}")
+            print(f"Message:  {msgs['M']}")
         else:
             print('Unknown code: {}'.format(code))
 
@@ -336,6 +350,26 @@ def send_simple_query(conn, query: str):
     buf[1:5] = message_length.to_bytes(4, byteorder='big')
 
     conn.send(buf)
+
+def decode_notice(message):
+    offset = 0
+    # Convert message to bytearray for easier manipulation
+    message = bytearray(message)
+
+    message_type = chr(message[offset])
+    offset += 1
+    message_length = int.from_bytes(message[offset:offset+4], byteorder='big')
+    offset += 4
+
+    notice_strs = {}
+
+    while offset < message_length:
+        notice_str = message[offset:message.find(b'\x00', offset)].decode('utf-8')
+        # extract first character of notice string and add to dict
+        notice_strs[notice_str[0]] = notice_str[1:]
+        offset += len(notice_str) + 1
+
+    return notice_strs
 
 def decode_error(message):
     offset = 0

@@ -31,7 +31,9 @@ namespace springtail::pg_proxy {
             MSG_CLIENT_SERVER_EXECUTE=5,      ///< execute packet; data buffer
             MSG_CLIENT_SERVER_CLOSE=6,        ///< close packet; data buffer
             MSG_CLIENT_SERVER_SYNC=7,         ///< sync packet; data buffer
+            MSG_CLIENT_SERVER_SHUTDOWN=8,     ///< shutdown packet; no data
             MSG_CLIENT_SERVER_FORWARD=10,     ///< forward packet; data buffer
+            MSG_CLIENT_SERVER_INIT_PARAMS=11, ///< init params; data buffer
 
             ///// server to client messages
             MSG_SERVER_CLIENT_AUTH_DONE=50,   ///< auth complete; no data
