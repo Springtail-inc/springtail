@@ -31,7 +31,7 @@ namespace {
         static void SetUpTestSuite() {
             springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
-            _services.init(true);
+            _services.init();
         }
 
         static void TearDownTestSuite() {
