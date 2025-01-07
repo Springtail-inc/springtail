@@ -30,16 +30,13 @@ namespace springtail {
     {
         nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
 
-        int keep_alive_secs;
-        bool ssl_enabled;
-
-        Json::get_to<std::string>(json, "host", _connect_options.host, "localhost");
-        Json::get_to<std::string>(json, "user", _connect_options.user, "user");
-        Json::get_to<std::string>(json, "password", _connect_options.password);
-        Json::get_to<int>(json, "port", _connect_options.port, 6379);
-        Json::get_to<int>(json, "db", _connect_options.db, REDIS_DATA_DB);
-        Json::get_to<int>(json, "keep_alive_sec", keep_alive_secs, 30);
-        Json::get_to<bool>(json, "ssl", ssl_enabled, false);
+        _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
+        _connect_options.user = Json::get_or<std::string>(json, "user", "user");
+        _connect_options.password = Json::get_or<std::string>(json, "password", "");
+        _connect_options.port = Json::get_or<int>(json, "port", 6379);
+        _connect_options.db = Json::get_or<int>(json, "db", REDIS_DATA_DB);
+        int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
+        bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
 
         _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
         _connect_options.keep_alive = true;
@@ -52,12 +49,9 @@ namespace springtail {
             throw Error("Redis connection pool settings not found");
         }
 
-        int pool_size;
-        int max_idle_secs;
-        int max_connection_lifetime_secs;
-        Json::get_to(pool_json, "connections", pool_size, 30);
-        Json::get_to(pool_json, "max_idle_secs", max_idle_secs, 0);
-        Json::get_to(pool_json, "max_connection_lifetime_secs", max_connection_lifetime_secs, 0);
+        int pool_size = Json::get_or<int>(pool_json, "connections", 30);
+        int max_idle_secs = Json::get_or<int>(pool_json, "max_idle_secs", 0);
+        int max_connection_lifetime_secs = Json::get_or<int>(pool_json, "max_connection_lifetime_secs", 0);
 
         _pool_options.size = pool_size;
         _pool_options.connection_idle_time = std::chrono::seconds(max_idle_secs);
