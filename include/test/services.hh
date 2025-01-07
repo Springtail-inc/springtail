@@ -8,7 +8,8 @@ namespace springtail::test {
     public:
         Services(bool xid_mgr, bool sys_tbl_mgr, bool write_cache);
 
-        void init(bool reset);
+        void init();
+
         void shutdown();
 
     private:
