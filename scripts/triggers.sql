@@ -104,27 +104,30 @@ BEGIN
 
         -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
         IF table_replident <> 'f' AND has_pkey IS NULL THEN
-            PERFORM springtail_set_replica_identity(obj.object_identity, true);
+            PERFORM springtail_set_replica_identity(obj.schema_name, table_relname, true);
         END IF;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
         IF table_replident = 'f' AND has_pkey IS TRUE THEN
-            PERFORM springtail_set_replica_identity(obj.object_identity, false);
+            PERFORM springtail_set_replica_identity(obj.schema_namem, table_relname, false);
         END IF;
 
     END LOOP;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_set_replica_identity(identity regclass, full_ident boolean DEFAULT true)
+CREATE OR REPLACE FUNCTION springtail_set_replica_identity(schema_name text, table_name text, full_ident boolean DEFAULT true)
         RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+    ident text;
 BEGIN
+    ident := quote_ident(schema_name) || '.' || quote_ident(table_name);
     IF full_ident THEN
         --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', identity);
+        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', ident);
     ELSE
         --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', identity);
+        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', ident);
     END IF;
 END;
 $$;
