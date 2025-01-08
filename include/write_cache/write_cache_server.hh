@@ -7,29 +7,17 @@
 #include <string_view>
 
 #include <thrift/server/TServer.h>
+#include <thrift/concurrency/ThreadManager.h>
 
+#include <common/singleton.hh>
 #include <write_cache/write_cache_index.hh>
 
 namespace springtail {
 
-    class WriteCacheServer
+    class WriteCacheServer : public Singleton<WriteCacheServer>
     {
+        friend class Singleton<WriteCacheServer>;
     public:
-        /**
-         * @brief Get the singleton write cache server instance object
-         * @return WriteCacheServer *
-         */
-        static WriteCacheServer *get_instance() {
-            std::call_once(_init_flag, &WriteCacheServer::_init);
-            return _instance;
-        }
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown() {
-            std::call_once(_shutdown_flag, &WriteCacheServer::_shutdown);
-        }
-
         /**
          * @brief Startup server; does not return
          */
@@ -37,9 +25,11 @@ namespace springtail {
             // start the server
             auto server = get_instance();
             server->_startup();
+        }
 
-            // after shutdown() we delete the instance
-            delete _instance;
+        void stop() {
+            _server->stop();
+            _thread_manager->stop();
         }
 
         /**
@@ -68,27 +58,22 @@ namespace springtail {
         /**
          * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
          */
-         ~WriteCacheServer() {}
+         ~WriteCacheServer() override = default;
 
         /** init from get_instance, called once */
-        static WriteCacheServer *_init();
+        // static WriteCacheServer *_init();
 
         /** shutdown from shutdown(), called once */
-        static void _shutdown();
+        void _internal_shutdown();
 
         /** startup from startup(), called once */
         void _startup();
 
-        /** Singleton write cache server instance */
-        static WriteCacheServer *_instance;
-
-        /** init flag */
-        static std::once_flag _init_flag;
-        /** shutdown flag */
-        static std::once_flag _shutdown_flag;
-
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
+
+        /** thread manager that is used by the server */
+        std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
 
         /** number of worker threads */
         int _worker_thread_count;

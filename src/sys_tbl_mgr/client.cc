@@ -23,21 +23,6 @@
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
-     /* static initialization must happen outside of class */
-    Client* Client::_instance {nullptr};
-    std::mutex Client::_instance_mutex;
-
-    Client *
-    Client::get_instance()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new Client();
-        }
-
-        return _instance;
-    }
 
     Client::Client()
     {
@@ -68,20 +53,22 @@ namespace springtail::sys_tbl_mgr {
         _thrift_client_pool = std::make_shared<ObjectPool<ServiceClient>>(
             std::make_shared<ObjectFactory>(server, port),
             max_connections/2,
-            max_connections
+            max_connections,
+            ObjectPool<ServiceClient>::LIFO
         );
     }
 
-    void
-    Client::shutdown()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+    void Client::_reconnect_client(ThriftClient &c) {
+        std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
+        std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
+        apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+        std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
+        apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+        socket->close();
+        _thrift_client_pool->put(c.client);
+        c.client = _thrift_client_pool->get();
     }
+
 
     // exposed client service interface below
 
@@ -91,7 +78,16 @@ namespace springtail::sys_tbl_mgr {
         ThriftClient c = _get_client();
         Status result;
 
-        c.client->ping(result);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->ping(result);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call ping: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         std::cout << "Ping got: " << result.message << std::endl;
         return;
@@ -168,7 +164,16 @@ namespace springtail::sys_tbl_mgr {
 
         auto &&request = _gen_table_request(db_id, xid, msg);
 
-        c.client->create_table(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->create_table(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call create_table: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -186,7 +191,16 @@ namespace springtail::sys_tbl_mgr {
         DDLStatement result;
 
         auto &&request = _gen_table_request(db_id, xid, msg);
-        c.client->alter_table(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->alter_table(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call alter_table: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -211,7 +225,16 @@ namespace springtail::sys_tbl_mgr {
         request.schema = msg.schema;
         request.name = msg.table;
 
-        c.client->drop_table(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->drop_table(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call drop_table: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -221,7 +244,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
 
-    std::string 
+    std::string
     Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
     {
         ThriftClient c = _get_client();
@@ -230,7 +253,16 @@ namespace springtail::sys_tbl_mgr {
         auto &&request = _gen_index_request(db_id, xid, msg);
         request.index.state=static_cast<int8_t>(state);
 
-        c.client->create_index(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->create_index(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call create_index: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -252,7 +284,16 @@ namespace springtail::sys_tbl_mgr {
         request.index_id = index_id;
         request.state = static_cast<uint8_t>(state);
 
-        c.client->set_index_state(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->set_index_state(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call set_index_state: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -260,7 +301,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
 
-    IndexInfo 
+    IndexInfo
     Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid)
     {
         ThriftClient c = _get_client();
@@ -270,13 +311,22 @@ namespace springtail::sys_tbl_mgr {
         _set_request_common(request, db_id, xid);
         request.index_id = index_id;
 
-        c.client->get_index_info(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->get_index_info(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_index_info: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         return result;
     }
 
 
-    std::string 
+    std::string
     Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     {
         ThriftClient c = _get_client();
@@ -288,7 +338,16 @@ namespace springtail::sys_tbl_mgr {
         request.index_id = msg.oid;
         request.schema = msg.schema;
 
-        c.client->drop_index(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->drop_index(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call drop_index: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -320,7 +379,16 @@ namespace springtail::sys_tbl_mgr {
         request.stats.row_count = metadata.stats.row_count;
         request.snapshot_xid = metadata.snapshot_xid;
 
-        c.client->update_roots(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->update_roots(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call update_roots: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -338,7 +406,16 @@ namespace springtail::sys_tbl_mgr {
         request.db_id = db_id;
         request.xid = xid;
 
-        c.client->finalize(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->finalize(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call finalize: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -358,7 +435,16 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid;
         request.table_id = table_id;
 
-        c.client->get_roots(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->get_roots(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_roots: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         TableMetadata metadata;
         for (auto const &r: result.roots) {
@@ -384,7 +470,16 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid.xid;
         request.lsn = xid.lsn;
 
-        c.client->get_schema(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->get_schema(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_schema: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         SchemaMetadata metadata;
         for (auto column : result.columns) {
@@ -459,7 +554,16 @@ namespace springtail::sys_tbl_mgr {
         request.target_xid = target_xid.xid;
         request.target_lsn = target_xid.lsn;
 
-        c.client->get_target_schema(result, request);
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->get_target_schema(result, request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_target_schema: ", e.what());
+                _reconnect_client(c);
+            }
+        }
 
         SchemaMetadata metadata;
         for (auto column : result.columns) {
@@ -514,7 +618,19 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid.xid;
         request.lsn = xid.lsn;
 
-        return c.client->exists(request);
+        bool ret = false;
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                ret = c.client->exists(request);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call exists: ", e.what());
+                _reconnect_client(c);
+            }
+        }
+
+        return ret;
     }
 
     std::string
@@ -524,6 +640,16 @@ namespace springtail::sys_tbl_mgr {
         ThriftClient c = _get_client();
         DDLStatement result;
 
+        bool call_successful = false;
+        while (!call_successful) {
+            try {
+                c.client->swap_sync_table(result, create, roots);
+                call_successful = true;
+            } catch (const apache::thrift::transport::TTransportException &e) {
+                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call swap_sync_table: ", e.what());
+                _reconnect_client(c);
+            }
+        }
         c.client->swap_sync_table(result, create, roots);
         if (result.statement.empty()) {
             throw SysTblMgrError();

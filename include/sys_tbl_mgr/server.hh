@@ -7,27 +7,16 @@
 #include <string_view>
 
 #include <thrift/server/TServer.h>
+#include <thrift/concurrency/ThreadManager.h>
+
+#include <common/singleton.hh>
 
 namespace springtail::sys_tbl_mgr {
 
-    class Server
+    class Server : public Singleton<Server>
     {
+        friend class Singleton<Server>;
     public:
-        /**
-         * @brief Get the singleton write cache server instance object
-         * @return SysTblMgrServer *
-         */
-        static Server *get_instance() {
-            std::call_once(_init_flag, &Server::_init);
-            return _instance;
-        }
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown() {
-            std::call_once(_shutdown_flag, &Server::_shutdown);
-        }
-
         /**
          * @brief Startup server; does not return
          */
@@ -35,14 +24,12 @@ namespace springtail::sys_tbl_mgr {
             // start the server
             auto server = get_instance();
             server->_startup();
-
-            // after shutdown() we delete the instance
-            delete _instance;
         }
 
-        // delete copy constructor
-        Server(const Server &) = delete;
-        void operator=(const Server &)   = delete;
+        void stop() {
+            _server->stop();
+            _thread_manager->stop();
+        }
 
     private:
         /**
@@ -53,27 +40,19 @@ namespace springtail::sys_tbl_mgr {
         /**
          * @brief Destroy the Write Cache Server object; shouldn't be called directly use shutdown()
          */
-         ~Server() {}
-
-        /** init from get_instance, called once */
-        static Server *_init();
+         ~Server() override = default;
 
         /** shutdown from shutdown(), called once */
-        static void _shutdown();
+        void _internal_shutdown();
 
         /** startup from startup(), called once */
         void _startup();
 
-        /** Singleton write cache server instance */
-        static Server *_instance;
-
-        /** init flag */
-        static std::once_flag _init_flag;
-        /** shutdown flag */
-        static std::once_flag _shutdown_flag;
-
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
+
+        /** thread manager that is used by the server */
+        std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
 
         /** number of worker threads */
         int _worker_thread_count;

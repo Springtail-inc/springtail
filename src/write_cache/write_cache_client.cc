@@ -22,22 +22,6 @@
 #include <write_cache/write_cache_client_factory.hh>
 
 namespace springtail {
-    /* static initialization must happen outside of class */
-    WriteCacheClient* WriteCacheClient::_instance {nullptr};
-    std::mutex WriteCacheClient::_instance_mutex;
-
-    WriteCacheClient *
-    WriteCacheClient::get_instance()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new WriteCacheClient();
-        }
-
-        return _instance;
-    }
-
     WriteCacheClient::WriteCacheClient()
     {
         nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
@@ -67,19 +51,9 @@ namespace springtail {
         _thrift_client_pool = std::make_shared<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>>(
             std::make_shared<WriteCacheThriftObjectFactory>(server, port),
             max_connections/2,
-            max_connections
+            max_connections,
+            ObjectPool<thrift::write_cache::ThriftWriteCacheClient>::LIFO
         );
-    }
-
-    void
-    WriteCacheClient::shutdown()
-    {
-         std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
     }
 
     // exposed client service interface below

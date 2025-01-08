@@ -8,27 +8,6 @@
 
 namespace springtail {
 
-    ThriftWriteCacheService *ThriftWriteCacheService::_instance = nullptr;
-    std::once_flag ThriftWriteCacheService::_init_flag;
-    std::once_flag ThriftWriteCacheService::_shutdown_flag;
-
-    ThriftWriteCacheService *
-    ThriftWriteCacheService::_init() {
-        if (!_instance) {
-            _instance = new ThriftWriteCacheService();
-        }
-        return _instance;
-    }
-
-    void
-    ThriftWriteCacheService::_shutdown() {
-        if (_instance) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
-
     void
     ThriftWriteCacheService::ping(thrift::write_cache::Status& _return)
     {

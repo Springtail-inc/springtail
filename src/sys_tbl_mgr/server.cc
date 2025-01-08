@@ -4,10 +4,14 @@
 
 #include <nlohmann/json.hpp>
 
-#include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TCompactProtocol.h>
-#include <thrift/server/TThreadPoolServer.h>
+#include <thrift/server/TNonblockingServer.h>
+#include <thrift/transport/TNonblockingServerSocket.h>
+
+// #include <thrift/transport/TSocket.h>
+// #include <thrift/transport/TBufferTransports.h>
+// #include <thrift/protocol/TCompactProtocol.h>
+// #include <thrift/server/TThreadPoolServer.h>
 
 #include <common/common.hh>
 #include <common/logging.hh>
@@ -22,19 +26,6 @@
 namespace at = apache::thrift;
 
 namespace springtail::sys_tbl_mgr {
-
-    /* static initialization must happen outside of class */
-    Server* Server::_instance {nullptr};
-
-    std::once_flag Server::_init_flag;
-    std::once_flag Server::_shutdown_flag;
-
-    Server *
-    Server::_init()
-    {
-        _instance = new Server();
-        return _instance;
-    }
 
     Server::Server()
     {
@@ -56,29 +47,28 @@ namespace springtail::sys_tbl_mgr {
     void
     Server::_startup()
     {
-        // create a thread manager with right number of worker threads
-        std::shared_ptr<at::concurrency::ThreadManager> threadManager =
-            at::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
+        SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "Server: creating thread manager with {} threads", _worker_thread_count);
+        _thread_manager = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
 
-        threadManager->threadFactory(std::make_shared<at::concurrency::ThreadFactory>());
-        threadManager->start();
+        // use thread factory with attached threads
+        _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
+        _thread_manager->start();
 
-        _server = std::make_shared<at::server::TThreadPoolServer>(
+        std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
+
+        _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
             std::make_shared<ServiceProcessorFactory>(std::make_shared<ServiceCloneFactory>()),
-            std::make_shared<at::transport::TServerSocket>(_port),
-            std::make_shared<at::transport::TFramedTransportFactory>(),
-            std::make_shared<at::protocol::TCompactProtocolFactory>(),
-            threadManager
+            std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>(),
+            server_socket,
+            _thread_manager
         );
 
         _server->serve();
     }
 
     void
-    Server::_shutdown()
+    Server::_internal_shutdown()
     {
-        if (_instance != nullptr) {
-            _instance->_server->stop();
-        }
+        stop();
     }
 }

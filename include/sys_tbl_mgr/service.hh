@@ -1,4 +1,5 @@
 #include <boost/thread.hpp>
+
 #include <thrift/transport/TSocket.h>
 
 #include <common/logging.hh>
@@ -17,20 +18,9 @@ namespace springtail::sys_tbl_mgr {
      * cache any metadata once it's written to disk, instead relying on the StorageCache to keep
      * table extents in-memory for fast retrieval.
      */
-    class Service : public ServiceIf
+    class Service : public ServiceIf, public Singleton<Service>
     {
-    public:
-        /**
-         * @brief getInstance() of singleton; create if it doesn't exist.
-         * @return instance of ThriftSysTblMgrService
-         */
-        static Service *get_instance();
-
-        /**
-         * @brief Shutdown the singleton.
-         */
-        static void shutdown();
-
+        friend class Singleton<Service>;
     public:
         /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
@@ -84,6 +74,9 @@ namespace springtail::sys_tbl_mgr {
         void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
 
     private:
+        Service() = default;
+        ~Service() override = default;
+
         // CACHE FOR NAMES
 
         /**
@@ -320,9 +313,6 @@ namespace springtail::sys_tbl_mgr {
         void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
-        static Service *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;
 

@@ -1,4 +1,4 @@
-#pragma once 
+#pragma once
 
 #include <memory>
 #include <string>
@@ -20,7 +20,7 @@ namespace springtail {
         virtual ~ObjectPoolFactory() {}
 
         virtual std::shared_ptr<T> allocate()=0;
-        virtual void put_cb(std::shared_ptr<T> obj) {};        
+        virtual void put_cb(std::shared_ptr<T> obj) {};
         virtual void get_cb(std::shared_ptr<T> obj) {};
     };
 
@@ -31,24 +31,35 @@ namespace springtail {
     template <class T>
     class ObjectPool {
     public:
+
+
         /**
+         * Enum specifying queuing policy.
+         */
+        enum Policy {
+            FIFO,
+            LIFO
+        };
+
+         /**
          * @brief Construct an Object Pool object and populate with start objects
          * @param creator_fn   Function for creating objects of type T
-         * @param start        Starting sockets in pool
-         * @param max          Max sockets in pool
+         * @param start        Starting objects in pool
+         * @param max          Max objects in pool
+         * @param policy       Which queuing policy to use
          */
-        ObjectPool(std::shared_ptr<ObjectPoolFactory<T>> factory, int start, int max)
-            : _max(max), _outstanding(0), _factory(factory)
+        ObjectPool(std::shared_ptr<ObjectPoolFactory<T>> factory, int start, int max, Policy policy = FIFO)
+            : _max(max), _outstanding(0), _policy(policy), _factory(factory)
         {
             // initialize queue with starting set of channels
             for (int i = 0; i < start; i++) {
-                _queue.push(_factory->allocate());
-            }        
+                _queue.push_back(_factory->allocate());
+            }
         }
         /**
          * @brief Get object from pool (queue); block if none available (if outstanding >= max)
-         * @return std::shared_ptr<T> 
-         */    
+         * @return std::shared_ptr<T>
+         */
         std::shared_ptr<T> get()
         {
             std::shared_ptr<T> obj = _get(); // get obj
@@ -57,44 +68,44 @@ namespace springtail {
         }
 
         /**
-         * @brief Release socket back to queue
+         * @brief Release object back to queue
          * @param obj to release
          */
         void put(std::shared_ptr<T> obj)
         {
-            _put(obj);
             _factory->put_cb(obj);
+            _put(obj);
         }
 
     private:
         /**
          * @brief Get object from pool (queue); block if none available (if outstanding >= max)
-         * @return std::shared_ptr<T> 
+         * @return std::shared_ptr<T>
          */
         std::shared_ptr<T> _get()
         {
             std::unique_lock<std::mutex> queue_lock(_mutex);
-            
+
             // if queue is empty and are above or at max limit wait
             while (_queue.empty() && (_outstanding >= _max)) {
                 _cv.wait(queue_lock);
             }
 
-            // if queue is empty and we are below max, create socket
+            // if queue is empty and we are below max, create object
             if (_queue.empty() && _outstanding < _max) {
                 _outstanding++;
                 return _factory->allocate();
             }
 
-            // otherwise get a socket from the queue
+            // otherwise get an object from the queue
             std::shared_ptr<T> obj = _queue.front();
-            _queue.pop();
+            _queue.pop_front();
             _outstanding++;
             return obj;
         }
 
         /**
-         * @brief Release socket back to queue
+         * @brief Release object back to queue
          * @param obj to release
          * @returns true if object is requeued, false otherwise
          */
@@ -102,28 +113,34 @@ namespace springtail {
         {
             std::unique_lock<std::mutex> queue_lock(_mutex);
             assert(_outstanding + _queue.size() <= _max);
-            
-            _queue.push(obj);
+
+            if (_policy == FIFO) {
+                _queue.push_back(obj);
+            } else {
+                _queue.push_front(obj);
+            }
             _cv.notify_one();
             _outstanding--;
 
             return true;
         }
 
-        /** max number of sockets in pool */
+        /** max number of objects in pool */
         int _max;
-        /** number of outstanding sockets */
+        /** number of outstanding objects */
         int _outstanding;
+        /** queuing policy */
+        Policy _policy;
 
         /** factory for creating and destroying objects in the pool */
         std::shared_ptr<ObjectPoolFactory<T>> _factory;
-      
+
         /** mutex protecting queue cv */
         std::mutex _mutex;
         /** condition variable for blocking on queue */
         std::condition_variable _cv;
 
-        /** queue of sockets (socket pool)*/
-        std::queue<std::shared_ptr<T>> _queue;
+        /** queue of objects (object pool)*/
+        std::deque<std::shared_ptr<T>> _queue;
     };
 }

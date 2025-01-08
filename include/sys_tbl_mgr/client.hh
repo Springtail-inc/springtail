@@ -5,6 +5,7 @@
 #include <string>
 
 #include <common/object_pool.hh>
+#include <common/singleton.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <storage/xid.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -14,20 +15,10 @@
 
 namespace springtail::sys_tbl_mgr {
 
-    class Client
+    class Client : public Singleton<Client>
     {
+        friend class Singleton<Client>;
     public:
-        /**
-         * @brief Get the singleton write cache client instance object
-         * @return Client *
-         */
-        static Client *get_instance();
-
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown();
-
         /**
          * @brief Ping the server
          */
@@ -105,14 +96,7 @@ namespace springtail::sys_tbl_mgr {
          */
         std::string swap_sync_table(const TableRequest &create, const UpdateRootsRequest &roots);
 
-
-    protected:
-        /** Singleton write cache client instance */
-        static Client *_instance;
-
-        /** Mutex protecting _instance in get_instance() */
-        static std::mutex _instance_mutex;
-
+    private:
         /**
          * @brief Construct a new Write Cache Client object
          */
@@ -121,12 +105,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * @brief Destroy the Write Cache Client object; shouldn't be called directly use shutdown()
          */
-        ~Client() {}
-
-    private:
-        // delete copy constructor
-        Client(const Client &) = delete;
-        void operator=(const Client &)   = delete;
+        ~Client() override = default;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool
@@ -155,6 +134,12 @@ namespace springtail::sys_tbl_mgr {
             return c;
         }
 
+        /**
+         * @brief Helper function to reconnect thrift client to the server
+         *
+         * @param c - reference to thrift client object
+         */
+        void _reconnect_client(ThriftClient &c);
     };
 
 } // namespace springtail

@@ -8,13 +8,15 @@
 #include <iostream>
 
 #include <common/object_pool.hh>
+#include <common/singleton.hh>
 
 #include <thrift/write_cache/ThriftWriteCache.h> // generated file
 
 namespace springtail {
 
-    class WriteCacheClient
+    class WriteCacheClient : public Singleton<WriteCacheClient>
     {
+        friend class Singleton<WriteCacheClient>;
     public:
 
         struct WriteCacheExtent {
@@ -22,17 +24,6 @@ namespace springtail {
             uint64_t lsn;
             std::string data;
         };
-
-        /**
-         * @brief Get the singleton write cache client instance object
-         * @return WriteCacheClient *
-         */
-        static WriteCacheClient *get_instance();
-
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown();
 
         /**
          * @brief Ping the server
@@ -135,6 +126,7 @@ namespace springtail {
         /** Mutex protecting _instance in get_instance() */
         static std::mutex _instance_mutex;
 
+    private:
         /**
          * @brief Construct a new Write Cache Client object
          */
@@ -143,12 +135,7 @@ namespace springtail {
         /**
          * @brief Destroy the Write Cache Client object; shouldn't be called directly use shutdown()
          */
-        ~WriteCacheClient() {}
-
-    private:
-        // delete copy constructor
-        WriteCacheClient(const WriteCacheClient &) = delete;
-        void operator=(const WriteCacheClient &)   = delete;
+        ~WriteCacheClient() override = default;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool

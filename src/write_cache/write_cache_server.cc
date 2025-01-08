@@ -23,19 +23,6 @@
 
 namespace springtail {
 
-    /* static initialization must happen outside of class */
-    WriteCacheServer* WriteCacheServer::_instance {nullptr};
-
-    std::once_flag WriteCacheServer::_init_flag;
-    std::once_flag WriteCacheServer::_shutdown_flag;
-
-    WriteCacheServer *
-    WriteCacheServer::_init()
-    {
-        _instance = new WriteCacheServer();
-        return _instance;
-    }
-
     WriteCacheServer::WriteCacheServer()
     {
         nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
@@ -56,32 +43,34 @@ namespace springtail {
     void
     WriteCacheServer::_startup()
     {
+        SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "WriteCacheServer: creating thread manager with {} threads", _worker_thread_count);
+
         // initialize the index
         _indexes = {};
 
         // create a thread manager with right number of worker threads
-        std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
-          apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
+        _thread_manager = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
 
-        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
-        threadManager->start();
+        // use thread factory with attached threads
+        _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
+        _thread_manager->start();
+
+        std::shared_ptr<apache::thrift::transport::TServerSocket> server_socket = std::make_shared<apache::thrift::transport::TServerSocket>(_port);
 
         _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
             std::make_shared<thrift::write_cache::ThriftWriteCacheProcessorFactory>(std::make_shared<ThriftWriteCacheCloneFactory>()),
-            std::make_shared<apache::thrift::transport::TServerSocket>(_port),
+            server_socket,
             std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
             std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
-            threadManager
+            _thread_manager
         );
 
         _server->serve();
     }
 
     void
-    WriteCacheServer::_shutdown()
+    WriteCacheServer::_internal_shutdown()
     {
-        if (_instance != nullptr) {
-            _instance->_server->stop();
-        }
+        stop();
     }
 }

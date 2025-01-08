@@ -4,6 +4,7 @@
 #include <thrift/transport/TSocket.h>
 
 #include <common/logging.hh>
+#include <common/singleton.hh>
 
 #include <thrift/write_cache/ThriftWriteCache.h>
 
@@ -14,27 +15,10 @@ namespace springtail {
      *        from the .thrift file.  It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftWriteCacheService : public thrift::write_cache::ThriftWriteCacheIf
+    class ThriftWriteCacheService : public thrift::write_cache::ThriftWriteCacheIf, public Singleton<ThriftWriteCacheService>
     {
+        friend class Singleton<ThriftWriteCacheService>;
     public:
-        ThriftWriteCacheService() = default;
-
-        /**
-         * @brief Get the singleton write cache service instance object
-         * @return ThriftWriteCacheService *
-         */
-        static ThriftWriteCacheService *get_instance() {
-            std::call_once(_init_flag, &ThriftWriteCacheService::_init);
-            return _instance;
-        }
-
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown() {
-            std::call_once(_shutdown_flag, &ThriftWriteCacheService::_shutdown);
-        }
-
         void ping(thrift::write_cache::Status& _return) override;
         void evict_table(thrift::write_cache::Status& _return, const thrift::write_cache::EvictTableRequest& request) override;
         void evict_xid(thrift::write_cache::Status& _return, const thrift::write_cache::EvictXidRequest& request) override;
@@ -48,15 +32,8 @@ namespace springtail {
         void expire_map(thrift::write_cache::Status &_return, const thrift::write_cache::ExpireMapRequest &request) override;
 
     private:
-        static ThriftWriteCacheService *_instance; ///< singleton instance
-        static std::once_flag _init_flag;     ///< init flag
-        static std::once_flag _shutdown_flag; ///< shutdown flag
-
-        /** init from get_instance, called once */
-        static ThriftWriteCacheService *_init();
-
-        /** shutdown from shutdown(), called once */
-        static void _shutdown();
+        ThriftWriteCacheService() = default;
+        ~ThriftWriteCacheService() override = default;
     };
 
 

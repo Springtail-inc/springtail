@@ -56,14 +56,31 @@ namespace springtail {
         {
             // validate that the transport is connected
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
+            std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
+            apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+            std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
+            apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
             while (!proto->getTransport()->isOpen()) {
                 try {
                     proto->getTransport()->open();
                 } catch (const apache::thrift::transport::TTransportException& e) {
-                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed to connect to thrift server: ", e.what());
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "ThriftWriteCacheClient: Failed to connect to thrift server: ", e.what());
                     ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
                 }
             }
+
+            int fd = socket->getSocketFD();
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "ThriftWriteCacheClient: Acquired thrift client: fd = {}, client = {}", fd, (void *)client.get());
+        }
+
+        /**
+         * @brief Releasing callback from the object pool.
+         *
+         * @param client
+         */
+        void put_cb(std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client) override
+        {
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "ThriftWriteCacheClient: Releasing thrift client: {}", (void *)client.get());
         }
 
     private:

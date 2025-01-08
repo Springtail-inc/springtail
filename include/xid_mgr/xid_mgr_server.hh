@@ -8,7 +8,10 @@
 #include <filesystem>
 
 #include <common/singleton.hh>
+
 #include <thrift/server/TServer.h>
+#include <thrift/concurrency/ThreadManager.h>
+
 
 #include <xid_mgr/xid_partition.hh>
 
@@ -24,7 +27,12 @@ namespace springtail::xid_mgr {
         friend class Singleton<XidMgrServer>;
     public:
 
-       void startup();
+        void startup();
+
+        void stop() {
+            _server->stop();
+            _thread_manager->stop();
+        }
 
         // interfaces from thrift
 
@@ -62,7 +70,7 @@ namespace springtail::xid_mgr {
         /**
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
-         ~XidMgrServer() = default;
+         ~XidMgrServer() override = default;
 
         /** number of worker threads */
         int _worker_thread_count;
@@ -76,6 +84,9 @@ namespace springtail::xid_mgr {
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
 
+        /** thread manager that is used by the server */
+        std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
+
         std::shared_mutex _mutex;
 
         /** list of partitions */
@@ -83,8 +94,6 @@ namespace springtail::xid_mgr {
 
         /** map of db_id to partitions */
         std::map<uint64_t, PartitionPtr> _partition_map;
-
-        std::atomic<bool> _shutting_down = false;
 
         /**
          * @brief Get a partition based on a db_id, optionally create it

@@ -7,24 +7,16 @@
 #include <string_view>
 
 #include <common/object_pool.hh>
+#include <common/singleton.hh>
 
 #include <thrift/xid_mgr/ThriftXidMgr.h> // generated file
 
 namespace springtail {
 
-    class XidMgrClient
+    class XidMgrClient : public Singleton<XidMgrClient>
     {
+        friend class Singleton<XidMgrClient>;
     public:
-        // delete copy constructor
-        XidMgrClient(const XidMgrClient &) = delete;
-        void operator=(const XidMgrClient &) = delete;
-        void operator=(const XidMgrClient &&) = delete;
-
-        static XidMgrClient *get_instance() {
-            std::call_once(_init_flag, &XidMgrClient::init);
-            return _instance;
-        }
-
         // RPC interfaces below
 
         /**
@@ -57,15 +49,7 @@ namespace springtail {
 
     private:
         XidMgrClient();
-
-        /** Initializer for singleton, called once */
-        static void init();
-
-        /** singleton instance */
-        static XidMgrClient *_instance;
-
-        /** once flag for once initialization */
-        static std::once_flag _init_flag;
+        ~XidMgrClient() override = default;
 
         // the following is for handling cached thrift clients from the object pool
         // we wrap the client in a struct whose deallocator will release it back to the pool
@@ -92,5 +76,12 @@ namespace springtail {
             ThriftClient c = { _thrift_client_pool, client };
             return c;
         }
+
+        /**
+         * @brief Helper function to reconnect thrift client to the server
+         *
+         * @param c - reference to thrift client object
+         */
+        void _reconnect_client(ThriftClient &c);
     };
 } // namespace springtail

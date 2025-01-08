@@ -35,6 +35,7 @@ namespace {
         }
 
         static void TearDownTestSuite() {
+            // sys_tbl_mgr::Client::shutdown();
             _services.shutdown();
         }
 
@@ -189,18 +190,24 @@ namespace {
 
         // create the table
         _create_table(tid, "x");
+        std::cout << "_create_table() is done" << std::endl;
         _finalize();
-        
+        std::cout << "_finalize() is done" << std::endl;
+
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
+        std::cout << "_client->get_schema() is done" << std::endl;
 
         // must have a primary index
         ASSERT_EQ(schema_meta.indexes.size(), 1);
         ASSERT_EQ(schema_meta.indexes[0].columns.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x");
+        std::cout << "_create_index() is done" << std::endl;
         _finalize();
+        std::cout << "_finalize() is done" << std::endl;
 
         schema_meta = _client->get_schema(_db, tid, _xid);
+        std::cout << "_client->get_schema() is done" << std::endl;
         ASSERT_EQ(schema_meta.indexes.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
@@ -216,12 +223,16 @@ namespace {
         ASSERT_EQ(index_id, 1234);
 
         auto info = _client->get_index_info(_db, 1234, _xid);
+        std::cout << "_client->get_index_info() is done" << std::endl;
         ASSERT_EQ(info.id, 1234);
 
         // change the index to the ready state
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
+        std::cout << "_set_index_state() is done" << std::endl;
         _finalize();
+        std::cout << "_finalize() is done" << std::endl;
         schema_meta = _client->get_schema(_db, tid, _xid);
+        std::cout << "_client->get_schema() is done" << std::endl;
         ASSERT_EQ(schema_meta.indexes.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].columns.size(), 2);
         ASSERT_EQ(schema_meta.indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
@@ -232,8 +243,11 @@ namespace {
 
         // delete the index
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::DELETED);
+        std::cout << "_set_index_state() is done" << std::endl;
         _finalize();
+        std::cout << "_finalize() is done" << std::endl;
         schema_meta = _client->get_schema(_db, tid, _xid);
+        std::cout << "_client->get_schema() is done" << std::endl;
         ASSERT_EQ(schema_meta.indexes.size(), 1);
     }
 
@@ -244,7 +258,7 @@ namespace {
         // create the table
         _create_table(tid, "x");
         _finalize();
-        
+
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
 
         // must have a primary index
