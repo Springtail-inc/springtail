@@ -437,7 +437,7 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
-        SPDLOG_INFO("got drop_table()");
+        SPDLOG_INFO("got drop_table() {}@{}:{}", request.table_id, request.xid, request.lsn);
 
         // hold a shared lock to prevent a concurrent finalize()
         boost::shared_lock lock(_write_mutex);
