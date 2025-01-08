@@ -7,8 +7,9 @@
 #include <common/object_pool.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <storage/xid.hh>
-#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/schema_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 
@@ -160,10 +161,11 @@ namespace springtail::sys_tbl_mgr {
         }
 
         /** Cache for Schema objects. */
-        Cache<SchemaKey, SchemaValue<Schema>> _schema_cache;
+        std::shared_ptr<SchemaCache> _schema_cache;
+        // std::shared_ptr<Cache<SchemaKey, SchemaValue>> _schema_cache;
 
         /** Cache for table metadata. */
-        Cache<SchemeKey, SchemaValue<TableMetadata>> _meta_cache;
+        // std::shared_ptr<Cache<MetadataKey, MetadataValue>> _roots_cache;
     };
 
 } // namespace springtail

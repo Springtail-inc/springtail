@@ -91,14 +91,14 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
+        auto it = std::ranges::find_if(meta->indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
+        if (it != meta->indexes.end()) {
+            meta->indexes.erase(it);
         }
 
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), meta.indexes,
-                                       tbl_meta, schema);
+                                       schema->get_sort_keys(), meta->indexes,
+                                       *tbl_meta, schema);
     }
 
     bool
@@ -135,14 +135,14 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
+        auto it = std::ranges::find_if(meta->indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
+        if (it != meta->indexes.end()) {
+            meta->indexes.erase(it);
         }
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(), meta.indexes,
-                                              tbl_meta, schema, for_gc);
+                                              _table_base, schema->get_sort_keys(), meta->indexes,
+                                              *tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr

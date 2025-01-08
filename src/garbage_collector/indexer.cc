@@ -172,13 +172,13 @@ namespace springtail::gc {
         auto root = table->index(index_id);
         assert(root);
 
-        TableMetadata meta = client->get_roots(db_id, info.table_id, idx._xid);
-        auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {
+        auto meta = client->get_roots(db_id, info.table_id, idx._xid);
+        auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
                     return index_id == v.index_id;
                 });
-        assert(it != meta.roots.end());
-        meta.roots.erase(it);
-        client->update_roots(db_id, info.table_id, idx._xid, meta);
+        assert(it != meta->roots.end());
+        meta->roots.erase(it);
+        client->update_roots(db_id, info.table_id, idx._xid, *meta);
 
         root->truncate();
         root->finalize();
@@ -278,9 +278,9 @@ namespace springtail::gc {
         auto client = sys_tbl_mgr::Client::get_instance();
         if (!work_item._ddl.is_null()) {
             auto extent_id = root->finalize();
-            auto&& meta = client->get_roots(db_id, tid, idx._xid);
-            meta.roots.emplace_back(key.second, extent_id);
-            client->update_roots(db_id, tid, idx._xid, meta);
+            auto meta = client->get_roots(db_id, tid, idx._xid);
+            meta->roots.emplace_back(key.second, extent_id);
+            client->update_roots(db_id, tid, idx._xid, *meta);
         } else{
             // the index was deleted while we were building it
             root->truncate();

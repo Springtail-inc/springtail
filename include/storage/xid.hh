@@ -36,4 +36,26 @@ namespace springtail {
             return xid <=> rhs.xid;
         }
     };
+
+    struct XidRange {
+    public:
+        XidLsn start;
+        XidLsn end;
+
+        XidRange() = default;
+        XidRange(const XidLsn &start, const XidLsn &end)
+            : start(start), end(end)
+        { }
+
+        /** Checks if the provided XID is within the range of [start, end) */
+        bool contains(const XidLsn &xid) const {
+            return (start <= xid && xid < end);
+        }
+
+        // ordering is based on the end of the range
+        std::strong_ordering operator<=>(const XidRange &rhs) const
+        {
+            return end <=> rhs.end;
+        }
+    };
 }

@@ -355,6 +355,8 @@ namespace springtail::sys_tbl_mgr {
         ddl["schema"] = request.table.schema;
         ddl["table"] = request.table.name;
         ddl["tid"] = request.table.id;
+        ddl["xid"] = request.xid;
+        ddl["lsn"] = request.lsn;
         ddl["columns"] = nlohmann::json::array();
 
         // add table name
@@ -410,6 +412,8 @@ namespace springtail::sys_tbl_mgr {
 
         nlohmann::json ddl;
         ddl["tid"] = request.table.id;
+        ddl["xid"] = request.xid;
+        ddl["lsn"] = request.lsn;
         ddl["schema"] = request.table.schema;
         ddl["table"] = request.table.name;
 
@@ -483,6 +487,8 @@ namespace springtail::sys_tbl_mgr {
         nlohmann::json ddl;
         ddl["action"] = "drop";
         ddl["tid"] = request.table_id;
+        ddl["xid"] = request.xid;
+        ddl["lsn"] = request.lsn;
         ddl["schema"] = request.schema;
         ddl["table"] = request.name;
 
@@ -510,7 +516,9 @@ namespace springtail::sys_tbl_mgr {
 
         // remove all of the schema columns
         std::vector<ColumnHistory> changes;
-        for (auto &column : info->columns) {
+        for (const auto &entry : info->columns) {
+            const auto &column = entry.second;
+
             ColumnHistory change;
             change.xid = request.xid;
             change.lsn = request.lsn;
@@ -993,11 +1001,11 @@ namespace springtail::sys_tbl_mgr {
 
         // note: we always try to read data from disk up to the access_xid in case some of the data
         //       past the read_xid has already made it to disk
-        auto &&columns = _read_schema_columns(db_id, table_id, access_xid);
+        _read_schema_columns(info, db_id, table_id, access_xid);
 
         // if the requested access XID is ahead of the read XID, apply changes from the cache
         if (access_xid > read_xid) {
-            _apply_schema_cache_history(db_id, table_id, access_xid, columns);
+            _apply_schema_cache_history(info, db_id, table_id, access_xid);
         }
 
         info->indexes = _read_schema_indexes(db_id, table_id, access_xid);
@@ -1012,7 +1020,7 @@ namespace springtail::sys_tbl_mgr {
             index.table_id = table_id;
             index.schema = "public";
             index.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
-            for (auto const& [pos, col]: columns) {
+            for (auto const& [pos, col]: info->columns) {
                 if (col.__isset.pk_position) {
                     IndexColumn key;
                     key.name = col.name;
@@ -1030,21 +1038,20 @@ namespace springtail::sys_tbl_mgr {
             }
         }
 
-        // store the column data into the results
-        for (auto &entry : columns) {
-            info->columns.push_back(entry.second);
-        }
-
         // note: at this point we have the set of columns at the access_xid
         if (access_xid == target_xid) {
+            info->target_xid_start = info->access_xid_start;
+            info->target_lsn_start = info->access_lsn_start;
+            info->target_xid_end = info->access_xid_end;
+            info->target_lsn_end = info->access_lsn_end;
+
             return info;
         }
 
         // now collect any history between access_xid and target_xid
         // note: we read any history from the on-disk table since there might always be some history
         //       on disk if the on-disk data is ahead of the read_xid
-        auto &&history = _read_schema_history(db_id, table_id, access_xid, target_xid);
-        info->history.insert(info->history.end(), history.begin(), history.end());
+        _read_schema_history(info, db_id, table_id, access_xid, target_xid);
 
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from disk: {}", info->history.size());
 
@@ -1052,8 +1059,7 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid = std::max(access_xid, read_xid);
         if (target_xid > xid) {
             // read any history from the cache
-            auto &&history = _get_schema_cache_history(db_id, table_id, xid, target_xid);
-            info->history.insert(info->history.end(), history.begin(), history.end());
+            _get_schema_cache_history(info, db_id, table_id, xid, target_xid);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Tried to read history from memory: {}", info->history.size());
         }
@@ -1156,12 +1162,16 @@ namespace springtail::sys_tbl_mgr {
         return indexes;
     }
 
-    std::map<uint32_t, TableColumn>
-    Service::_read_schema_columns(uint64_t db_id,
+    void
+    Service::_read_schema_columns(SchemaInfoPtr info,
+                                  uint64_t db_id,
                                   uint64_t table_id,
                                   const XidLsn &access_xid)
     {
-        std::map<uint32_t, TableColumn> columns;
+        info->access_xid_start = 0;
+        info->access_lsn_start = 0;
+        info->access_xid_end = constant::LATEST_XID;
+        info->access_lsn_end = constant::MAX_LSN;
 
         // get an accessor for the schema table
         auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
@@ -1183,6 +1193,7 @@ namespace springtail::sys_tbl_mgr {
             if (tid != table_id) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table {} -- {}", table_id, tid);
                 // if we have read all of the entries for this table ID, stop processing
+                // note: this means that the last schema column we've constructed so far is current
                 break;
             }
 
@@ -1191,14 +1202,27 @@ namespace springtail::sys_tbl_mgr {
             uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
             if (access_xid < XidLsn(xid, lsn)) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid, lsn);
+                // note: this means the schema column is valid up to the found xid/lsn
+                if (xid < info->access_xid_end ||
+                    (xid == info->access_xid_end && lsn < info->access_lsn_end)) {
+                    info->access_xid_end = xid;
+                    info->access_lsn_end = lsn;
+                }
                 continue;
+            }
+
+            // note: this means the schema column is valid from the found xid/lsn
+            if (info->access_xid_start < xid ||
+                (info->access_xid_start ==  xid && info->access_lsn_start < lsn))  {
+                info->access_xid_start = xid;
+                info->access_lsn_start = lsn;
             }
 
             // remove the column if it doesn't exist
             auto position = fields->at(sys_tbl::Schemas::Data::POSITION)->get_uint32(row);
             bool exists = fields->at(sys_tbl::Schemas::Data::EXISTS)->get_bool(row);
             if (!exists) {
-                columns.erase(position);
+                info->columns.erase(position);
             } else {
                 // construct a column from the row
                 TableColumn column;
@@ -1214,15 +1238,15 @@ namespace springtail::sys_tbl_mgr {
                 }
                 // note: pk_position set via scan of Indexes system table later
 
-                columns[position] = column;
+                info->columns[position] = column;
             }
         }
 
         // if no schema (e.g., due to DROP TABLE) then return empty schema info
-        if (columns.empty()) {
+        if (info->columns.empty()) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found no columns for table {}@{}:{}",
                                 table_id, access_xid.xid, access_xid.lsn);
-            return columns;
+            return;
         }
 
         // retrieve the primary index data for the table at this XID/LSN
@@ -1239,7 +1263,7 @@ namespace springtail::sys_tbl_mgr {
         if (index_i == indexes_t->end()) {
             SPDLOG_WARN("Didn't find a primary index for the table: {}@{}:{}",
                         table_id, access_xid.xid, access_xid.lsn);
-            return columns;
+            return;
         }
 
         // determine the XID we found and only read those entries
@@ -1268,7 +1292,7 @@ namespace springtail::sys_tbl_mgr {
             // update the primary key details in the schema columns
             uint32_t column_id = fields->at(sys_tbl::Indexes::Data::COLUMN_ID)->get_uint32(row);
             uint32_t index_pos = fields->at(sys_tbl::Indexes::Data::POSITION)->get_uint32(row);
-            columns[column_id].__set_pk_position(index_pos);
+            info->columns[column_id].__set_pk_position(index_pos);
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found index row {} for table {}@{}:{}",
                                 column_id, table_id, access_xid.xid, access_xid.lsn);
@@ -1278,15 +1302,13 @@ namespace springtail::sys_tbl_mgr {
                 --index_i;
             }
         }
-
-        return columns;
     }
 
     void
-    Service::_apply_schema_cache_history(uint64_t db_id,
+    Service::_apply_schema_cache_history(SchemaInfoPtr info,
+                                         uint64_t db_id,
                                          uint64_t table_id,
-                                         const XidLsn &xid,
-                                         std::map<uint32_t, TableColumn> &columns)
+                                         const XidLsn &xid)
     {
         boost::unique_lock ulock(_mutex);
 
@@ -1300,29 +1322,46 @@ namespace springtail::sys_tbl_mgr {
         boost::shared_lock slock(std::move(ulock));
 
         // go through the history and apply any changes up through the provided XID/LSN
-        for (auto &column : schema_i->second) {
-            for (auto &history : column.second) {
+        for (const auto &column : schema_i->second) {
+            for (const auto &history : column.second) {
                 if (xid < XidLsn(history.xid, history.lsn)) {
+                    // note: the schema's validity must end at least at this point
+                    if (xid.xid < info->access_xid_end ||
+                        (xid.xid == info->access_xid_end && xid.lsn < info->access_lsn_end)) {
+                        info->access_xid_end = xid.xid;
+                        info->access_lsn_end = xid.lsn;
+                    }
                     break; // stop applying changes
+                }
+
+                // note: the schema's validity must start at least at this point
+                if (info->access_xid_start < xid.xid ||
+                    (info->access_xid_start ==  xid.xid && info->access_lsn_start < xid.lsn))  { 
+                    info->access_xid_start = xid.xid;
+                    info->access_lsn_start = xid.lsn;
                 }
 
                 // apply the recorded change
                 if (history.exists) {
-                    columns[history.column.position] = history.column;
+                    info->columns[history.column.position] = history.column;
                 } else {
-                    columns.erase(history.column.position);
+                    info->columns.erase(history.column.position);
                 }
             }
         }
     }
 
-    std::vector<ColumnHistory>
-    Service::_read_schema_history(uint64_t db_id,
+    void
+    Service::_read_schema_history(SchemaInfoPtr info,
+                                  uint64_t db_id,
                                   uint64_t table_id,
                                   const XidLsn &access_xid,
                                   const XidLsn &target_xid)
     {
-        std::vector<ColumnHistory> history;
+        info->target_xid_start = 0;
+        info->target_lsn_start = 0;
+        info->target_xid_end = constant::LATEST_XID;
+        info->target_lsn_end = constant::MAX_LSN;
 
         // get an accessor for the schema table
         auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
@@ -1357,8 +1396,13 @@ namespace springtail::sys_tbl_mgr {
 
             // don't capture changes that are beyond the target_xid
             if (target_xid < row_xid) {
+                info->target_xid_end = row_xid.xid;
+                info->target_lsn_end = row_xid.lsn;
                 continue;
             }
+
+            info->target_xid_start = row_xid.xid;
+            info->target_lsn_start = row_xid.lsn;
 
             // store the entry into the history
             ColumnHistory entry;
@@ -1378,26 +1422,24 @@ namespace springtail::sys_tbl_mgr {
                 entry.column.__isset.default_value = true;
             }
 
-            history.push_back(entry);
+            info->history.push_back(entry);
         }
-
-        return history;
     }
 
-    std::vector<ColumnHistory>
-    Service::_get_schema_cache_history(uint64_t db_id,
+    void
+    Service::_get_schema_cache_history(SchemaInfoPtr info,
+                                       uint64_t db_id,
                                        uint64_t table_id,
                                        const XidLsn &access_xid,
                                        const XidLsn &target_xid)
 
     {
-        std::vector<ColumnHistory> history;
         boost::unique_lock ulock(_mutex);
 
         // check the cache to see if it has entries for this table, if not, nothing to apply
         auto schema_i = _schema_cache[db_id].find(table_id);
         if (schema_i == _schema_cache[db_id].end()) {
-            return history;
+            return;
         }
 
         // can downgrade to a shared lock once we've guaranteed to create the _schema_cache entry
@@ -1413,14 +1455,16 @@ namespace springtail::sys_tbl_mgr {
                 }
 
                 if (target_xid < xid) {
+                    info->target_xid_end = xid.xid;
+                    info->target_lsn_end = xid.lsn;
                     break; // stop capturing changes
                 }
 
-                history.push_back(entry);
+                info->target_xid_start = xid.xid;
+                info->target_lsn_start = xid.lsn;
+                info->history.push_back(entry);
             }
         }
-
-        return history;
     }
 
     void
@@ -1561,7 +1605,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
     ColumnHistory
-    Service::_generate_update(const std::vector<TableColumn> &old_schema,
+    Service::_generate_update(const std::map<int32_t, TableColumn> &old_schema,
                               const std::vector<TableColumn> &new_schema,
                               const XidLsn &xid,
                               nlohmann::json &ddl)
@@ -1579,11 +1623,11 @@ namespace springtail::sys_tbl_mgr {
             }
 
             // find the missing column
-            for (auto &&old_entry : old_schema) {
-                auto &&new_i = lookup.find(old_entry.position);
+            for (const auto &old_entry : old_schema) {
+                auto new_i = lookup.find(old_entry.first);
                 if (new_i == lookup.end()) {
                     // copy the old column details
-                    update.__set_column(old_entry);
+                    update.__set_column(old_entry.second);
 
                     // mark as a REMOVE_COLUMN update
                     update.update_type = static_cast<int8_t>(SchemaUpdateType::REMOVE_COLUMN);
@@ -1603,15 +1647,10 @@ namespace springtail::sys_tbl_mgr {
 
         // if the old schema has fewer columns, then a column was added
         if (old_schema.size() < new_schema.size()) {
-            std::map<uint32_t, const TableColumn *> lookup;
-            for (auto &column : old_schema) {
-                lookup[column.position] = &column;
-            }
-
             // find the missing column
             for (auto &new_entry : new_schema) {
-                auto &&old_i = lookup.find(new_entry.position);
-                if (old_i == lookup.end()) {
+                auto old_i = old_schema.find(new_entry.position);
+                if (old_i == old_schema.end()) {
                     // if we added a column with a default value, then we need to resync the entire
                     // table to get the new column data
                     if (new_entry.__isset.default_value) {
@@ -1647,9 +1686,10 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // otherwise, compare each column to find the one with the difference
-        for (auto &entry : old_schema) {
+        for (const auto &map_entry : old_schema) {
             // find the same column in the new schema
-            auto new_i = lookup.find(entry.position);
+            auto new_i = lookup.find(map_entry.first);
+            const auto &entry = map_entry.second;
             auto &new_col = *(new_i->second);
 
             // it must exist or else the new and old schema are more than one modification apart

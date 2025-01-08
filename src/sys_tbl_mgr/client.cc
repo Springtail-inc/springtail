@@ -44,6 +44,7 @@ namespace springtail::sys_tbl_mgr {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
         nlohmann::json client_json;
         nlohmann::json server_json;
+        uint64_t cache_size;
 
         // fetch properties for the sys tbl mgr
         if (!Json::get_to(json, "client", client_json)) {
@@ -53,6 +54,15 @@ namespace springtail::sys_tbl_mgr {
         if (!Json::get_to(json, "server", server_json)) {
             throw Error("Sys tbl mgr server settings not found");
         }
+
+        if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
+            throw Error("Sys tbl mgr cache size settings not found");
+        }
+
+        // create the caches
+        //_schema_cache = std::make_shared<Cache<SchemaKey, SchemaValue>>(cache_size);
+        //_roots_cache = std::make_shared<Cache<MetadataKey, MetadataValue>>(cache_size);
+        _schema_cache = std::make_shared<SchemaCache>(cache_size, cache_size * 8);
 
         // init channel pool
         int max_connections;
@@ -350,9 +360,11 @@ namespace springtail::sys_tbl_mgr {
                       uint64_t table_id,
                       uint64_t xid)
     {
+        return nullptr;
+#if 0
         MetadataKey key{db_id, table_id, xid};
 
-        auto entry = _roots_cache.get(key, [](const MetadataKey &key) {
+        auto entry = _roots_cache->get(key, [this](const MetadataKey &key) {
             GetRootsRequest request;
             request.db_id = key.db;
             request.table_id = key.tid;
@@ -364,15 +376,19 @@ namespace springtail::sys_tbl_mgr {
             c.client->get_roots(result, request);
 
             auto metadata = std::make_shared<TableMetadata>();
-            metadata->roots.insert(metadata->roots.end(),
-                                   result.roots.begin(), result.roots.end());
+            for (const auto &root : result.roots) {
+                metadata->roots.push_back([](const RootInfo &root) {
+                    return TableRoot(root.index_id, root.extent_id);
+                }(root));
+            }
             metadata->stats.row_count = result.stats.row_count;
             metadata->snapshot_xid = result.snapshot_xid;
 
-            return std::make_shared<MetadataValue>(result.xid, metadata);
+            return std::make_shared<MetadataValue>(result.snapshot_xid, metadata);
         });
 
         return entry->metadata;
+#endif
     }
 
     SchemaMetadataPtr
@@ -380,22 +396,23 @@ namespace springtail::sys_tbl_mgr {
                        uint64_t table_id,
                        const XidLsn &xid)
     {
-        SchemaKey key{db_id, table_id, xid, xid};
+        SchemaCache::Key key{db_id, table_id, xid};
 
-        auto entry = _schema_cache.get(key, [](const SchemaKey &key) {
+        auto metadata = _schema_cache->get(key, [this](const SchemaCache::Key &key) {
             ThriftClient c = _get_client();
             GetSchemaResponse result;
 
             GetSchemaRequest request;
-            request.db_id = db_id;
-            request.table_id = table_id;
-            request.xid = xid.xid;
-            request.lsn = xid.lsn;
+            request.db_id = key.db;
+            request.table_id = key.tid;
+            request.xid = key.xid.xid;
+            request.lsn = key.xid.lsn;
 
             c.client->get_schema(result, request);
 
             auto metadata = std::make_shared<SchemaMetadata>();
-            for (auto column : result.columns) {
+            for (const auto &col_entry : result.columns) {
+                const auto &column = col_entry.second;
                 SchemaColumn value(column.name,
                                    column.position,
                                    static_cast<SchemaType>(column.type),
@@ -444,15 +461,25 @@ namespace springtail::sys_tbl_mgr {
                 }
                 //sort by index position
                 std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
-                metadata.indexes.push_back(std::move(info));
+                metadata->indexes.push_back(std::move(info));
             }
 
-            return std::make_shared<SchemaValue>(result.access_start,
-                                                 result.target_start,
-                                                 metadata);
+            XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
+                                static_cast<uint64_t>(result.access_lsn_start));
+            XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
+                              static_cast<uint64_t>(result.access_lsn_end));
+            XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
+                                static_cast<uint64_t>(result.target_lsn_start));
+            XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
+                              static_cast<uint64_t>(result.target_lsn_end));
+
+            metadata->access_range = XidRange(access_start, access_end);
+            metadata->target_range = XidRange(access_start, access_end);
+
+            return metadata;
         });
 
-        return entry->metadata;
+        return metadata;
     }
 
     SchemaMetadataPtr
@@ -461,24 +488,27 @@ namespace springtail::sys_tbl_mgr {
                               const XidLsn &access_xid,
                               const XidLsn &target_xid)
     {
-        SchemaKey key{db_id, table_id, xid, xid};
+        SchemaCache::Key access_key{db_id, table_id, access_xid};
+        SchemaCache::Key target_key{db_id, table_id, target_xid};
 
-        auto entry = _schema_cache.get(key, [](const SchemaKey &key) {
+        auto populate = [this](const SchemaCache::Key &access_key,
+                               const SchemaCache::Key &target_key) {
             ThriftClient c = _get_client();
             GetSchemaResponse result;
 
             GetTargetSchemaRequest request;
-            request.db_id = db_id;
-            request.table_id = table_id;
-            request.access_xid = access_xid.xid;
-            request.access_lsn = access_xid.lsn;
-            request.target_xid = target_xid.xid;
-            request.target_lsn = target_xid.lsn;
+            request.db_id = access_key.db;
+            request.table_id = access_key.tid;
+            request.access_xid = access_key.xid.xid;
+            request.access_lsn = access_key.xid.lsn;
+            request.target_xid = target_key.xid.xid;
+            request.target_lsn = target_key.xid.lsn;
 
             c.client->get_target_schema(result, request);
 
             auto metadata = std::make_shared<SchemaMetadata>();
-            for (auto column : result.columns) {
+            for (const auto &col_entry : result.columns) {
+                const auto &column = col_entry.second;
                 SchemaColumn value(column.name,
                                    column.position,
                                    static_cast<SchemaType>(column.type),
@@ -514,10 +544,22 @@ namespace springtail::sys_tbl_mgr {
                 metadata->history.push_back(value);
             }
 
-            return metadata;
-        });
+            XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
+                                static_cast<uint64_t>(result.access_lsn_start));
+            XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
+                              static_cast<uint64_t>(result.access_lsn_end));
+            XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
+                                static_cast<uint64_t>(result.target_lsn_start));
+            XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
+                              static_cast<uint64_t>(result.target_lsn_end));
 
-        return entry->metadata;
+            metadata->access_range = XidRange(access_start, access_end);
+            metadata->target_range = XidRange(access_start, access_end);
+
+            return metadata;
+        };
+
+        return _schema_cache->get_range(access_key, target_key, populate);
     }
 
     bool
@@ -556,7 +598,7 @@ namespace springtail::sys_tbl_mgr {
                                     uint64_t table_id,
                                     const XidLsn &xid)
     {
-        _scheme_cache.reinsert({ db_id, table_id, xid });
+        _schema_cache->reinsert(SchemaCache::Key{ db_id, table_id, xid });
     }
 
 } // namespace

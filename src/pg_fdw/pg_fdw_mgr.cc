@@ -1044,7 +1044,7 @@ namespace springtail::pg_fdw {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = std::move(meta.indexes);
+            indexes = std::move(meta->indexes);
         }
     }
 } // namespace springtail::pg_fdw

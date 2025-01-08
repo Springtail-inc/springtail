@@ -7,6 +7,7 @@
 #include <common/object_cache.hh>
 #include <storage/exception.hh>
 #include <storage/schema_type.hh>
+#include <storage/xid.hh>
 
 namespace springtail {
     // pre-declare field classes
@@ -113,6 +114,8 @@ namespace springtail {
      * Object representing the metadata of a schema.
      */
     struct SchemaMetadata {
+        XidRange access_range;
+        XidRange target_range;
         std::vector<SchemaColumn> columns;
         std::vector<SchemaColumn> history;
         std::vector<Index> indexes;

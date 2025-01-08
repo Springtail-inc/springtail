@@ -1148,8 +1148,8 @@ namespace springtail {
         // convert this page to a new schema if needed
         auto client = sys_tbl_mgr::Client::get_instance();
         auto &&meta = client->get_target_schema(_db_id, _id, access_xid, target_xid);
-        if (!meta.history.empty()) {
-            auto source_schema = std::make_shared<VirtualSchema>(meta);
+        if (!meta->history.empty()) {
+            auto source_schema = std::make_shared<VirtualSchema>(*meta);
             page->convert(source_schema, _schema, _target_xid);
         }
     }
