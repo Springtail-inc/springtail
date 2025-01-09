@@ -96,8 +96,12 @@ namespace thrift {
 
     };
 
-    // P - the class that is going to inherit from Client
-    // T - the class that represents generated thrift client, for example thrift::xid_mgr::ThriftXidMgrClient
+    /**
+     * @brief Thrift client class
+     *
+     * @tparam P - the class that is going to inherit from Client
+     * @tparam T - the class that represents generated thrift client
+     */
     template <typename P, typename T>
     class Client {
     protected:
