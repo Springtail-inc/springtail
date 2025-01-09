@@ -112,7 +112,7 @@ namespace {
                 _attrs[i] = new FormData_pg_attribute();
                 _attrs[i]->atttypid = INT4OID;
                 _attrs[i]->attnum = _columns[i].position;
-                strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN);
+                strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN - 1);
 
                 _target_list = lappend(_target_list, makeInteger(_attrs[i]->attnum));
             }
