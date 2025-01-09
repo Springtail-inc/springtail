@@ -216,7 +216,7 @@ namespace springtail {
                                            secondary_keys, tbl_meta, schema);
         }
         default:
-            assert(0);
+            CHECK(0);
         }
     }
 

@@ -500,7 +500,7 @@ namespace springtail {
         _current_offset += 4; // rel_id
 
         char type = _recvint8(); // old type
-        assert(type == 'K' || type == 'O');
+        CHECK(type == 'K' || type == 'O') << "type: " << type;
         _skip_tuple();
     }
 

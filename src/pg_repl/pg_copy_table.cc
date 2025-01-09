@@ -1,10 +1,11 @@
+#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <cassert>
 #include <vector>
 #include <algorithm>
 
-#include <bit>
+#include <absl/log/check.h>
 #include <fmt/core.h>
 
 // springtail includes
@@ -280,7 +281,7 @@ namespace springtail
                 // set the primary key position if available
                 auto pkey_pos = _connection.get_int32_optional(i, 6);
                 if (pkey_pos) {
-                    assert(is_pkey);
+                    CHECK(is_pkey);
                     column.pkey_position = (*pkey_pos);
                 }
 
