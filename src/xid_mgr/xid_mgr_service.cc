@@ -1,7 +1,4 @@
-
 #include <thrift/xid_mgr/ThriftXidMgr.h>
-
-// #include <xid_mgr/xid_mgr_service.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail {

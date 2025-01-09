@@ -6,7 +6,6 @@
 #include <string>
 #include <string_view>
 
-// #include <common/object_pool.hh>
 #include <common/singleton.hh>
 
 #include <thrift/xid_mgr/ThriftXidMgr.h> // generated file
@@ -53,5 +52,4 @@ namespace springtail {
         XidMgrClient();
         ~XidMgrClient() override = default;
     };
-
 } // namespace springtail
