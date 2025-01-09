@@ -1119,7 +1119,7 @@ namespace springtail {
                 for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
-                assert(size == _lru.size());
+                CHECK_EQ(size, _lru.size());
             }
 
         private:

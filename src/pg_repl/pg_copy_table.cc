@@ -547,37 +547,37 @@ namespace springtail
                 break;
 
             case (SchemaType::INT64):
-                assert(length == 8);
+                CHECK_EQ(length, 8);
                 fields->push_back(std::make_shared<ConstTypeField<int64_t>>(recvint64(row.data() + pos)));
                 pos += length;
                 break;
 
             case (SchemaType::INT32):
-                assert(length == 4);
+                CHECK_EQ(length, 4);
                 fields->push_back(std::make_shared<ConstTypeField<int32_t>>(recvint32(row.data() + pos)));
                 pos += length;
                 break;
 
             case (SchemaType::INT16):
-                assert(length == 2);
+                CHECK_EQ(length, 2);
                 fields->push_back(std::make_shared<ConstTypeField<int16_t>>(recvint16(row.data() + pos)));
                 pos += length;
                 break;
 
             case (SchemaType::INT8):
-                assert(length == 1);
+                CHECK_EQ(length, 1);
                 fields->push_back(std::make_shared<ConstTypeField<int8_t>>(recvint8(row.data() + pos)));
                 ++pos;
                 break;
 
             case (SchemaType::BOOLEAN):
-                assert(length == 1);
+                CHECK_EQ(length, 1);
                 fields->push_back(std::make_shared<ConstTypeField<bool>>(*(row.data() + pos) == 1));
                 ++pos;
                 break;
 
             case (SchemaType::FLOAT64): {
-                assert(length == 8);
+                CHECK_EQ(length, 8);
                 auto num = recvint64(row.data() + pos);
                 double d = std::bit_cast<double>(num);
                 fields->push_back(std::make_shared<ConstTypeField<double>>(d));
@@ -586,7 +586,7 @@ namespace springtail
             }
 
             case (SchemaType::FLOAT32): {
-                assert(length == 4);
+                CHECK_EQ(length, 4);
                 auto num = recvint32(row.data() + pos);
                 float f = std::bit_cast<float>(num);
                 fields->push_back(std::make_shared<ConstTypeField<float>>(f));

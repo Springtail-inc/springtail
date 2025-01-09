@@ -1210,8 +1210,8 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: the extent must be MUTABLE (not DIRTY) and not in-use by others when reinsert()'d
-        assert(extent->_state == CacheExtent::State::MUTABLE);
-        assert(extent->_use_count == 1);
+        CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
+        CHECK_EQ(extent->_use_count, 1);
 
         // find the cache extent
         auto dirty_i = _dirty_cache.find(extent->_cache_id);
@@ -1244,8 +1244,8 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: extent must be dirty for this to be a valid operation
-        assert(extent->_state == CacheExtent::State::DIRTY);
-        assert(extent->_use_count == 1);
+        CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
+        CHECK_EQ(extent->_use_count, 1);
 
         // evict the extent from the cache
         _dirty_cache.erase(extent->_cache_id);
@@ -1262,7 +1262,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: extent must be DIRTY with a mutation that caused the split
-        assert(extent->_state == CacheExtent::State::DIRTY);
+        CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
 
         // make space for two new extents
         _make_extent_space();
@@ -1414,7 +1414,7 @@ namespace springtail {
         if (extent->_state == CacheExtent::State::CLEAN) {
             _clean_cache.erase(extent->key());
         } else {
-            assert(extent->_state == CacheExtent::State::MUTABLE);
+            CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
             _dirty_cache.erase(extent->_cache_id);
         }
     }

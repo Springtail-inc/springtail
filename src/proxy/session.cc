@@ -283,7 +283,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[5];
         ssize_t n = _connection->read(buffer, 5, 5); // read at most 5B
-        assert(n == 5);
+        CHECK_EQ(n, 5);
 
         // op code
         char code = buffer[0];
@@ -341,7 +341,7 @@ namespace springtail::pg_proxy {
             BufferPtr tail = blist.buffers.back();
             int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
             tail->incr_size(rd);
-            assert(rd == offset-n);
+            CHECK_EQ(rd, offset-n);
         }
     }
 
@@ -410,7 +410,7 @@ namespace springtail::pg_proxy {
 
             // send data
             n = _associated_session->get_connection()->write(data, msg_length);
-            assert(n == msg_length);
+            CHECK_EQ(n, msg_length);
 
             // log the buffer as outgoing from associated session
             _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);

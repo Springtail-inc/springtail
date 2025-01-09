@@ -7,6 +7,7 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
+#include <absl/log/check.h>
 
 #include <common/common.hh>
 #include <common/logging.hh>
@@ -171,7 +172,7 @@ namespace springtail::pg_log_mgr {
             offset += 4;
         }
 
-        assert(offset == total_length);
+        CHECK_EQ(offset, total_length);
 
         // do the actual disk write
         int res = ::write(_fd, buffer, total_length);

@@ -3,6 +3,7 @@
 #include <memory>
 #include <cassert>
 
+#include <absl/log/check.h>
 #include <nlohmann/json.hpp>
 
 #include <thrift/transport/TSocket.h>
@@ -131,7 +132,7 @@ namespace springtail {
 
         c.client->get_extents(response, request);
 
-        assert(response.table_id == tid);
+        CHECK_EQ(response.table_id, tid);
         cursor = response.cursor;
 
         std::vector<WriteCacheExtent> extents;

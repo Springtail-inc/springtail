@@ -1,6 +1,8 @@
 ## library of functions using in testing
 set(TEST_SOURCES services.cc)
 
+find_package(absl REQUIRED)
+
 add_library(springtail_test ${TEST_SOURCES})
 target_include_directories(springtail_test
   PRIVATE ${CMAKE_SOURCE_DIR}/include

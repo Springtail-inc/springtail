@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <absl/log/check.h>
 #include <nlohmann/json.hpp>
 
 #include <common/exception.hh>
@@ -333,7 +334,7 @@ namespace springtail {
                     key = props.substr(start, token - start);
                     next_token = ";";
                 } else {
-                    assert(props[token] == '.');
+                    CHECK_EQ(props[token], '.');
                     key = props.substr(start, token - start);
                     item = &((*item)[key]);
                 }

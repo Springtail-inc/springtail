@@ -195,7 +195,7 @@ namespace springtail::gc {
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
 
-        assert(idx._ddl["action"] == "create_index");
+        CHECK_EQ(idx._ddl["action"], "create_index");
 
         // index column positions
         std::vector<uint32_t> idx_cols;
