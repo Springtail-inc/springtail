@@ -14,7 +14,6 @@
 #include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_client.hh>
-#include <xid_mgr/xid_mgr_client_factory.hh>
 
 namespace springtail {
 
@@ -41,26 +40,7 @@ namespace springtail {
 
         std::string server = Properties::get_xid_mgr_hostname();
 
-        // construct the thrift client pool.
-        // First argument is a factory object that constructs a thrift clients
-        // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>>(
-            std::make_shared<XidMgrThriftObjectFactory>(server, port),
-            max_connections/2,
-            max_connections,
-            ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>::LIFO
-        );
-    }
-
-    void XidMgrClient::_reconnect_client(ThriftClient &c) {
-        std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
-        std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
-        apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
-        std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
-        apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
-        socket->close();
-        _thrift_client_pool->put(c.client);
-        c.client = _thrift_client_pool->get();
+        init(server, port, max_connections);
     }
 
     // exposed client service interface below

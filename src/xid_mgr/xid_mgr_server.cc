@@ -8,16 +8,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/server/TNonblockingServer.h>
-#include <thrift/transport/TNonblockingServerSocket.h>
-
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
-
-#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
@@ -36,8 +30,10 @@ namespace springtail::xid_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
 
-        Json::get_to<int>(server_json, "port", _port, 55051);
-        Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
+        int port;
+        int worker_thread_count;
+        Json::get_to<int>(server_json, "port", port, 55051);
+        Json::get_to<int>(server_json, "worker_threads", worker_thread_count, 8);
 
         std::string base_path;
         Json::get_to<std::string>(server_json, "base_path", base_path);
@@ -51,33 +47,7 @@ namespace springtail::xid_mgr {
 
         // iterate over all files in the base path creating partitions
         _load_partitions();
-    }
-
-    /**
-     * Startup thrift threaded server; called by the static startup().
-     */
-    void
-    XidMgrServer::startup()
-    {
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: creating thread manager with {} threads", _worker_thread_count);
-
-        // create a thread manager with right number of worker threads
-        _thread_manager = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
-
-        // use thread factory with attached threads
-        _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
-        _thread_manager->start();
-
-        std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
-
-        _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
-            std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
-            std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>(),
-            server_socket,
-            _thread_manager
-        );
-
-        _server->serve();
+        init(worker_thread_count, port);
     }
 
     void

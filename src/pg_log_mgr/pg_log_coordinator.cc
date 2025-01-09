@@ -17,6 +17,8 @@ namespace springtail::pg_log_mgr {
         _config_sub_thread.shutdown();
 
         // shutdown the write cache thread
+        WriteCacheServer::get_instance()->stop();
+        _write_cache_thread.join();
         WriteCacheServer::shutdown();
 
         // shut down all log managers
@@ -58,12 +60,12 @@ namespace springtail::pg_log_mgr {
                 _handle_db_changes(msg);
             });
 
-         _config_sub_thread.start();
+        _config_sub_thread.start();
 
-         // create a thread for the write cache
-         _write_cache_thread = std::thread([](){
-             WriteCacheServer::startup();
-         });
+        // create a thread for the write cache
+        _write_cache_thread = std::thread([](){
+            WriteCacheServer::get_instance()->startup();
+        });
    }
 
     void

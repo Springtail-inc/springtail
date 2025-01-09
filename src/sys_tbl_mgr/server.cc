@@ -4,24 +4,12 @@
 
 #include <nlohmann/json.hpp>
 
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/server/TNonblockingServer.h>
-#include <thrift/transport/TNonblockingServerSocket.h>
-
-// #include <thrift/transport/TSocket.h>
-// #include <thrift/transport/TBufferTransports.h>
-// #include <thrift/protocol/TCompactProtocol.h>
-// #include <thrift/server/TThreadPoolServer.h>
-
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
 
-#include <thrift/sys_tbl_mgr/Service.h>
-
 #include <sys_tbl_mgr/server.hh>
-#include <sys_tbl_mgr/service.hh>
 
 namespace at = apache::thrift;
 
@@ -37,33 +25,12 @@ namespace springtail::sys_tbl_mgr {
             throw Error("SysTblMgr server settings not found");
         }
 
-        Json::get_to<int>(server_json, "port", _port, 55053);
-        Json::get_to<int>(server_json, "worker_threads", _worker_thread_count, 8);
-    }
+        int worker_thread_count;
+        int port;
+        Json::get_to<int>(server_json, "port", port, 55053);
+        Json::get_to<int>(server_json, "worker_threads", worker_thread_count, 8);
 
-    /**
-     * Startup thrift threaded server
-     */
-    void
-    Server::_startup()
-    {
-        SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "Server: creating thread manager with {} threads", _worker_thread_count);
-        _thread_manager = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
-
-        // use thread factory with attached threads
-        _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
-        _thread_manager->start();
-
-        std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
-
-        _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
-            std::make_shared<ServiceProcessorFactory>(std::make_shared<ServiceCloneFactory>()),
-            std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>(),
-            server_socket,
-            _thread_manager
-        );
-
-        _server->serve();
+        init(worker_thread_count, port);
     }
 
     void

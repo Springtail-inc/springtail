@@ -6,32 +6,24 @@
 #include <string>
 #include <string_view>
 
-#include <thrift/server/TServer.h>
-#include <thrift/concurrency/ThreadManager.h>
-
 #include <common/singleton.hh>
+
 #include <write_cache/write_cache_index.hh>
+#include <write_cache/write_cache_service.hh>
+#include <thrift/common/thrift_server.hh>
 
 namespace springtail {
 
-    class WriteCacheServer : public Singleton<WriteCacheServer>
+    class WriteCacheServer final :
+        public springtail::thrift::Server<WriteCacheServer,
+                                        thrift::write_cache::ThriftWriteCacheProcessorFactory,
+                                        ThriftWriteCacheService,
+                                        thrift::write_cache::ThriftWriteCacheIfFactory,
+                                        thrift::write_cache::ThriftWriteCacheIf>,
+        public Singleton<WriteCacheServer>
     {
         friend class Singleton<WriteCacheServer>;
     public:
-        /**
-         * @brief Startup server; does not return
-         */
-        static void startup() {
-            // start the server
-            auto server = get_instance();
-            server->_startup();
-        }
-
-        void stop() {
-            _server->stop();
-            _thread_manager->stop();
-        }
-
         /**
          * @brief Get the write cache index object
          * @return std::shared_ptr<WriteCacheIndex>
@@ -45,10 +37,6 @@ namespace springtail {
             return it->second;
         }
 
-        // delete copy constructor
-        WriteCacheServer(const WriteCacheServer &) = delete;
-        void operator=(const WriteCacheServer &)   = delete;
-
     private:
         /**
          * @brief Construct a new Write Cache Server object
@@ -60,25 +48,8 @@ namespace springtail {
          */
          ~WriteCacheServer() override = default;
 
-        /** init from get_instance, called once */
-        // static WriteCacheServer *_init();
-
         /** shutdown from shutdown(), called once */
         void _internal_shutdown();
-
-        /** startup from startup(), called once */
-        void _startup();
-
-        /** The thrift server. */
-        std::shared_ptr<apache::thrift::server::TServer> _server;
-
-        /** thread manager that is used by the server */
-        std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
-
-        /** number of worker threads */
-        int _worker_thread_count;
-        /** server port */
-        int _port;
 
         /** indexes mutex */
         std::mutex _mutex;

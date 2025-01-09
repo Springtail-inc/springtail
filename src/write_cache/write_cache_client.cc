@@ -19,7 +19,6 @@
 #include <thrift/write_cache/ThriftWriteCache.h>
 
 #include <write_cache/write_cache_client.hh>
-#include <write_cache/write_cache_client_factory.hh>
 
 namespace springtail {
     WriteCacheClient::WriteCacheClient()
@@ -45,15 +44,7 @@ namespace springtail {
 
         std::string server = Properties::get_write_cache_hostname();
 
-        // construct the thrift client pool.
-        // First argument is a factory object that constructs a thrift clients
-        // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>>(
-            std::make_shared<WriteCacheThriftObjectFactory>(server, port),
-            max_connections/2,
-            max_connections,
-            ObjectPool<thrift::write_cache::ThriftWriteCacheClient>::LIFO
-        );
+        init(server, port, max_connections);
     }
 
     // exposed client service interface below

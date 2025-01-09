@@ -1,7 +1,7 @@
+#pragma once
+
 #include <iostream>
 #include <mutex>
-
-#include <thrift/transport/TSocket.h>
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
@@ -15,7 +15,9 @@ namespace springtail {
      *        from the .thrift file.  It contains the service (handler) for actually
      *        implementing the remote procedure calls.
      */
-    class ThriftWriteCacheService : public thrift::write_cache::ThriftWriteCacheIf, public Singleton<ThriftWriteCacheService>
+    class ThriftWriteCacheService final :
+        public thrift::write_cache::ThriftWriteCacheIf,
+        public Singleton<ThriftWriteCacheService>
     {
         friend class Singleton<ThriftWriteCacheService>;
     public:
@@ -34,40 +36,5 @@ namespace springtail {
     private:
         ThriftWriteCacheService() = default;
         ~ThriftWriteCacheService() override = default;
-    };
-
-
-    /**
-     * @brief Private helper class to override handler creation;
-     *        can be used to store per connection state or log incoming connections
-     */
-    class ThriftWriteCacheCloneFactory : virtual public thrift::write_cache::ThriftWriteCacheIfFactory {
-        public:
-            ~ThriftWriteCacheCloneFactory() override = default;
-
-            /**
-             * @brief Override the thrift getHandler call, allows for logging
-             * @param connInfo Thrift connection info object
-             * @return thrift::write_cache::ThriftWriteCacheIf*
-             */
-            thrift::write_cache::ThriftWriteCacheIf*
-            getHandler(const apache::thrift::TConnectionInfo &connInfo) override
-            {
-                std::shared_ptr<apache::thrift::transport::TSocket> sock =
-                    std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
-
-                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Incoming connection\n");
-                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "\tSocketInfo: {}\n", sock->getSocketInfo());
-                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "\tPeerHost: {}\n", sock->getPeerHost());
-                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "\tPeerAddress: {}\n", sock->getPeerAddress());
-                SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "\tPeerPort: {}\n", sock->getPeerPort());
-
-                return ThriftWriteCacheService::get_instance();
-            }
-
-            void
-            releaseHandler(thrift::write_cache::ThriftWriteCacheIf *handler) override {
-                // delete handler;
-            }
     };
 }

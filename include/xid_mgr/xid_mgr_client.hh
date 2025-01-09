@@ -6,14 +6,17 @@
 #include <string>
 #include <string_view>
 
-#include <common/object_pool.hh>
+// #include <common/object_pool.hh>
 #include <common/singleton.hh>
 
 #include <thrift/xid_mgr/ThriftXidMgr.h> // generated file
+#include <thrift/common/thrift_client.hh>
 
 namespace springtail {
 
-    class XidMgrClient : public Singleton<XidMgrClient>
+    class XidMgrClient :
+        public thrift::Client<XidMgrClient, thrift::xid_mgr::ThriftXidMgrClient>,
+        public Singleton<XidMgrClient>
     {
         friend class Singleton<XidMgrClient>;
     public:
@@ -46,42 +49,9 @@ namespace springtail {
          * @return uint64_t latest committed xid
          */
         uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
-
     private:
         XidMgrClient();
         ~XidMgrClient() override = default;
-
-        // the following is for handling cached thrift clients from the object pool
-        // we wrap the client in a struct whose deallocator will release it back to the pool
-
-        /** Thrift client object pool */
-        std::shared_ptr<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>> _thrift_client_pool;
-
-        /** Struct to wrap the client pool and client object to ensure it gets release back */
-        struct ThriftClient {
-            std::shared_ptr<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>> pool;
-            std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client;
-            ~ThriftClient() {
-                pool->put(client);
-            }
-        };
-
-        /**
-         * @brief Helper function to fetch a thrift client from the object pool wrapped in
-         *        a struct to ensure its proper release to the pool
-         */
-        inline ThriftClient _get_client()
-        {
-            std::shared_ptr<thrift::xid_mgr::ThriftXidMgrClient> client = _thrift_client_pool->get();
-            ThriftClient c = { _thrift_client_pool, client };
-            return c;
-        }
-
-        /**
-         * @brief Helper function to reconnect thrift client to the server
-         *
-         * @param c - reference to thrift client object
-         */
-        void _reconnect_client(ThriftClient &c);
     };
+
 } // namespace springtail

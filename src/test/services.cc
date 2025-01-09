@@ -54,14 +54,14 @@ namespace springtail::test {
             }
 
             _threads.push_back(std::thread([] {
-                sys_tbl_mgr::Server::startup();
+                sys_tbl_mgr::Server::get_instance()->startup();
             }));
         }
 
         // start the Write Cache
         if (_write_cache) {
             _threads.push_back(std::thread([] {
-                WriteCacheServer::startup();
+                WriteCacheServer::get_instance()->startup();
             }));
         }
         // give everyting a chance to startup

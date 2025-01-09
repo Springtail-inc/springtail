@@ -9,11 +9,11 @@
 
 #include <common/singleton.hh>
 
-#include <thrift/server/TServer.h>
-#include <thrift/concurrency/ThreadManager.h>
-
+#include <thrift/xid_mgr/ThriftXidMgr.h>
+#include <thrift/common/thrift_server.hh>
 
 #include <xid_mgr/xid_partition.hh>
+#include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
 
@@ -22,18 +22,16 @@ namespace springtail::xid_mgr {
      * @brief This class represents a server for managing transaction IDs (XIDs).
      *        It provides functionality to allocate XID ranges, commit XIDs, and retrieve the latest committed XID.
      */
-    class XidMgrServer final : public Singleton<XidMgrServer>
+    class XidMgrServer final :
+            public springtail::thrift::Server<XidMgrServer,
+                                            thrift::xid_mgr::ThriftXidMgrProcessorFactory,
+                                            ThriftXidMgrService,
+                                            thrift::xid_mgr::ThriftXidMgrIfFactory,
+                                            thrift::xid_mgr::ThriftXidMgrIf>,
+            public Singleton<XidMgrServer>
     {
         friend class Singleton<XidMgrServer>;
     public:
-
-        void startup();
-
-        void stop() {
-            _server->stop();
-            _thread_manager->stop();
-        }
-
         // interfaces from thrift
 
         /**
@@ -72,20 +70,8 @@ namespace springtail::xid_mgr {
          */
          ~XidMgrServer() override = default;
 
-        /** number of worker threads */
-        int _worker_thread_count;
-
-        /** server port */
-        int _port;
-
         /** base path */
         std::filesystem::path _base_path;
-
-        /** The thrift server. */
-        std::shared_ptr<apache::thrift::server::TServer> _server;
-
-        /** thread manager that is used by the server */
-        std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
 
         std::shared_mutex _mutex;
 

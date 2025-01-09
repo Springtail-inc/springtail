@@ -19,7 +19,7 @@
 
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/client_factory.hh>
+
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
@@ -47,28 +47,8 @@ namespace springtail::sys_tbl_mgr {
 
         std::string server = Properties::get_sys_tbl_mgr_hostname();
 
-        // construct the thrift client pool.
-        // First argument is a factory object that constructs a thrift clients
-        // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<ServiceClient>>(
-            std::make_shared<ObjectFactory>(server, port),
-            max_connections/2,
-            max_connections,
-            ObjectPool<ServiceClient>::LIFO
-        );
+        init(server, port, max_connections);
     }
-
-    void Client::_reconnect_client(ThriftClient &c) {
-        std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
-        std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
-        apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
-        std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
-        apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
-        socket->close();
-        _thrift_client_pool->put(c.client);
-        c.client = _thrift_client_pool->get();
-    }
-
 
     // exposed client service interface below
 
