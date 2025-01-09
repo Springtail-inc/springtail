@@ -4,6 +4,8 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
+find_package(protobuf CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
 
 set(COMMON_LIB_SOURCES
   coordinator.cc
@@ -30,6 +32,8 @@ target_link_libraries(springtail_common
 	 opentelemetry-cpp::sdk
 	 opentelemetry-cpp::trace
 	 opentelemetry-cpp::ostream_span_exporter
+	 opentelemetry-cpp::otlp_grpc_client
+	 opentelemetry-cpp::otlp_grpc_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)
