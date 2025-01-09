@@ -11,6 +11,8 @@
 #include <poll.h>
 #include <signal.h>
 
+#include <absl/log/log.h>
+
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -239,6 +241,8 @@ namespace springtail::pg_proxy {
             case Session::Type::PRIMARY:
                 type = Logger::LogMsgType::FROM_PRIMARY;
                 break;
+            default:
+                LOG(FATAL) << "Invalid session type: " << session->type();
         }
 
         _logger->log_data(type, _id, session->id(), 0, '*', endpoint.length()+1, endpoint.c_str());
@@ -268,6 +272,8 @@ namespace springtail::pg_proxy {
             case Session::Type::PRIMARY:
                 type = Logger::LogMsgType::FROM_PRIMARY;
                 break;
+            default:
+                LOG(FATAL) << "Invalid session type: " << session->type();
         }
 
         _logger->log_data(type, _id, session->id(), 0, '!', 0, nullptr);

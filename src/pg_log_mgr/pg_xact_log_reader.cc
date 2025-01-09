@@ -50,9 +50,9 @@ namespace springtail::pg_log_mgr {
             uint8_t type = header[7];
 
             // verify magic
-            assert(magic[0] == PgXactLogWriter::PG_XLOG_MAGIC[0] &&
-                   magic[1] == PgXactLogWriter::PG_XLOG_MAGIC[1] &&
-                   magic[2] == PgXactLogWriter::PG_XLOG_MAGIC[2]);
+            CHECK(magic[0] == PgXactLogWriter::PG_XLOG_MAGIC[0] &&
+                  magic[1] == PgXactLogWriter::PG_XLOG_MAGIC[1] &&
+                  magic[2] == PgXactLogWriter::PG_XLOG_MAGIC[2]);
 
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Scan xact log: hdr msg_len={}, type={}\n", msg_len, (int)type);
 

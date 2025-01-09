@@ -1045,7 +1045,7 @@ namespace springtail {
             {}
 
         private:
-            PageCache* _c;
+            PageCache* _c = nullptr;
             PagePtr _p;
             FlushCb _cb;
 
