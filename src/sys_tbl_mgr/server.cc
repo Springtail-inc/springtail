@@ -25,10 +25,8 @@ namespace springtail::sys_tbl_mgr {
             throw Error("SysTblMgr server settings not found");
         }
 
-        int worker_thread_count;
-        int port;
-        Json::get_to<int>(server_json, "port", port, 55053);
-        Json::get_to<int>(server_json, "worker_threads", worker_thread_count, 8);
+        int worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
+        int port = Json::get_or<int>(server_json, "port", 55053);
 
         init(worker_thread_count, port);
     }

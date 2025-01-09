@@ -18,6 +18,9 @@ namespace springtail::pg_proxy {
     /** unique session id counter */
     static std::atomic<uint64_t> session_id(1);
 
+    /** thread local session variable */
+    thread_local Session* _current_session = nullptr;
+
     /** map of message type to string */
     const std::map<SessionMsg::Type, std::string> SessionMsg::type_map = {
             {MSG_CLIENT_SERVER_STARTUP, "MSG_CLIENT_SERVER_STARTUP"},
@@ -29,6 +32,8 @@ namespace springtail::pg_proxy {
             {MSG_CLIENT_SERVER_CLOSE, "MSG_CLIENT_SERVER_CLOSE"},
             {MSG_CLIENT_SERVER_SYNC, "MSG_CLIENT_SERVER_SYNC"},
             {MSG_CLIENT_SERVER_FORWARD, "MSG_CLIENT_SERVER_FORWARD"},
+            {MSG_CLIENT_SERVER_SHUTDOWN, "MSG_CLIENT_SERVER_SHUTDOWN"},
+            {MSG_CLIENT_SERVER_INIT_PARAMS, "MSG_CLIENT_SERVER_INIT_PARAMS"},
             {MSG_SERVER_CLIENT_AUTH_DONE, "MSG_SERVER_CLIENT_AUTH_DONE"},
             {MSG_SERVER_CLIENT_READY, "MSG_SERVER_CLIENT_READY"},
             {MSG_SERVER_CLIENT_MSG_SUCCESS, "MSG_SERVER_CLIENT_MSG_SUCCESS"},
@@ -38,12 +43,11 @@ namespace springtail::pg_proxy {
     };
 
     Session::Session(ProxyConnectionPtr connection,
-                     ProxyServerPtr server,
-                     Type type)
+                     ProxyServerPtr server)
         : _connection(connection),
           _server(server),
           _state(STARTUP),
-          _type(type),
+          _type(Type::CLIENT),
           _id(session_id++)
     {}
 
@@ -52,6 +56,7 @@ namespace springtail::pg_proxy {
                      ProxyServerPtr server,
                      UserPtr user,
                      const std::string &database,
+                     const std::unordered_map<std::string, std::string> &parameters,
                      Type type)
         : _connection(connection),
           _server(server),
@@ -60,7 +65,8 @@ namespace springtail::pg_proxy {
           _user(user),
           _database(database),
           _instance(instance),
-          _id(session_id++)
+          _id(session_id++),
+          _parameters(parameters)
     {
         auto optional_db_id = DatabaseMgr::get_instance()->get_database_id(_database);
         if (optional_db_id.has_value()) {
@@ -73,15 +79,54 @@ namespace springtail::pg_proxy {
     void
     Session::operator()()
     {
+        bool signal = true;
+
+        // set thread local session
+        _current_session = this;
+
+        std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
+        if (lock.try_lock()) {
+            // do actual processing
+            signal = _process(lock);
+
+            // unlock prior to signalling server
+            lock.unlock();
+        } else {
+            // failed to lock, session is already running
+            SPDLOG_WARN("[{}:{}] Session already running", type_str(), _id);
+        }
+
+        _current_session = nullptr;
+
+        // check once more for any messages (with lock unlocked) and
+        // current session set to null to force lock
+        if (!is_msg_queue_empty()) {
+            _internal_process_msgs(false);
+        }
+
+        if (signal) {
+            // signal server to wait on this connection
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Adding connection to poll list: socket={}",
+                        type_str(), _id, _connection->get_socket());
+
+            _server->signal(_connection);
+        }
+    }
+
+    bool
+    Session::_process(std::unique_lock<std::mutex> &lock)
+    {
         // thread entry point from server
         bool has_data = false;
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing data", (_type == CLIENT ? 'C': 'S'), _id);
-
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[{}:{}] Processing data (lock)", type_str(), _id);
         do {
             // thread entry point
             try {
-                _process_connection();
+                if (has_data || _connection->has_pending()) {
+                    // if there is data then process it
+                    _process_connection();
+                }
             } catch (const ProxyIOError &e) {
                 SPDLOG_ERROR("ProxyIOError: {}", e.what());
                 _state = ERROR;
@@ -95,33 +140,55 @@ namespace springtail::pg_proxy {
 
             // cleanup connection and remove from server list if closed or error
             if (_state == ERROR || _connection->closed()) {
-                _handle_error();
-                return;
+                _handle_error();  // this will set shutdown flag
+                // don't return yet, let other session process pending msgs
             }
 
             // see if remote session has messages that need to be processed
-            if (_associated_session != nullptr) {
-                _associated_session->_internal_process_msgs(true);
+            // if this is a primary or replica session, check the client session
+            if (_type == PRIMARY || _type == REPLICA) {
+                // check if the client session has messages to process
+                ServerSession *server = static_cast<ServerSession*>(this);
+                SessionPtr client = server->get_client_session();
+                if (client && !client->is_msg_queue_empty()) {
+                    lock.unlock();
+                    client->_internal_process_msgs(true);
+                    lock.lock();
+                }
             }
 
-            // if this is a client session with a shadow replica then process those messages
+            // if this is a client session, check server sessions
             if (_type == CLIENT) {
                 ClientSession *client = static_cast<ClientSession*>(this);
-                ServerSessionPtr shadow = client->get_shadow_session();
-                assert (shadow == nullptr || shadow != _associated_session);
-                if (shadow != nullptr && shadow != _associated_session) {
-                    shadow->_internal_process_msgs(true);
+                ServerSessionPtr primary = client->get_primary_session();
+                if (primary && !primary->is_msg_queue_empty()) {
+                    lock.unlock();
+                    primary->_internal_process_msgs(true);
+                    lock.lock();
                 }
+                ServerSessionPtr replica = client->get_replica_session();
+                if (replica && !replica->is_msg_queue_empty()) {
+                    lock.unlock();
+                    replica->_internal_process_msgs(true);
+                    lock.lock();
+                }
+            }
+
+            // safe to return now if shutting down
+            if (is_shutdown()) {
+                return false;
             }
 
             if (_waiting_on_session) {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Waiting on external session", (_type == CLIENT ? 'C': 'S'), _id);
+                if (_type == CLIENT) {
+                    assert(_associated_session != nullptr);
+                }
                 // note: this will not add the connection back to the server
                 // poll list. Once the associated session is done it will
                 // call back into this session to continue processing
                 // at that time it should be added back to the server poll list
-
-                return;
+                return false;
             }
 
             // check if we have messages pending that still need to be processed
@@ -133,14 +200,23 @@ namespace springtail::pg_proxy {
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Has data: {}", (_type == CLIENT ? 'C': 'S'), _id, has_data);
         } while (has_data);
 
-        // signal server to wait on this connection
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Adding connection to server poll list: socket={}", (_type == CLIENT ? 'C': 'S'), _id, _connection->get_socket());
-        _server->signal(_connection);
+        return true;
     }
 
     void
     Session::_internal_process_msgs(bool is_remote)
     {
+        std::unique_lock<std::mutex> lock(_session_mutex, std::defer_lock);
+        if (_current_session != this) {
+            // this is called to pass a message from one session to another
+            // this is normally called with is_remote = true (if _current_session != this)
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Processing remote message, getting lock", (_type == CLIENT ? 'C': 'S'), _id);
+            // lock to process messages
+            lock.lock();
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Processing messages (lock), is_remote={}",
+                        (_type == CLIENT ? 'C': 'S'), _id, is_remote);
+        }
+
         while (_ready_for_message) {
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Looking for messages", (_type == CLIENT ? 'C': 'S'), _id);
 
@@ -175,6 +251,8 @@ namespace springtail::pg_proxy {
         if (is_remote) {
             _enable_processing();
         }
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] done with processing messages", (_type == CLIENT ? 'C': 'S'), _id);
     }
 
     void
@@ -212,6 +290,15 @@ namespace springtail::pg_proxy {
         // message length includes length field but not code byte
         // so really msg_length -= 4
         int32_t msg_length = recvint32(&buffer[1]) - 4;
+
+        if (msg_length > 100000) {
+            // dump buffer
+            std::string buf;
+            for (int i = 0; i < 5; i++) {
+                buf += fmt::format("{:02X}", i, buffer[i]);
+            }
+            SPDLOG_ERROR("Invalid message length: {}, buffer: {}", msg_length, buf);
+        }
 
         return {code, msg_length};
     }
@@ -304,10 +391,15 @@ namespace springtail::pg_proxy {
     void
     Session::_send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id)
     {
+        if (_state == RESET_SESSION) {
+            // if we are in reset session state, we don't send any data
+            return;
+        }
+
         assert(_is_shadow || _associated_session != nullptr);
-        char buffer[5];
 
         // first write the header, add 4 to msg length for size of length field
+        char buffer[5];
         buffer[0] = code;
         sendint32(msg_length+4, buffer + 1);
 
@@ -328,33 +420,42 @@ namespace springtail::pg_proxy {
     void
     Session::_handle_error()
     {
-        bool shutting_down = _shut_down_flag.test_and_set();
-        if (shutting_down) {
+        // atomic set flag to true, if already set then return
+        if (test_and_set_shutdown()) {
             return;
         }
 
-        // general error handling
-        // cleanup this session and check for associated session
-        SPDLOG_ERROR("Error state, closing connection: type={} for session id={}",
+        SPDLOG_WARN("Error state, closing connection: type={} for session id={}\n",
                      _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
-        std::cout << this << std::endl;
 
-        // close connection
-        _connection->close();
+        // general error handling, shutdown for both clients and servers
+        if (_type == Type::PRIMARY || _type == Type::REPLICA) {
+            // This is a server session, notify client session of error
+            ServerSession *server_session = static_cast<ServerSession *>(this);
+            server_session->shutdown_client_session();
 
-        // let server handle full cleanup
-        _server->shutdown_session(shared_from_this());
+            // on error, the server shuts down the connection and releases the session
+            // on clean shutdown (initiated by client), it is released back to the pool
+            _connection->close();
+            _server->shutdown_session(shared_from_this());
 
-        // check for associated client session, and notify of error
-        if ((_type == Type::PRIMARY || _type == Type::REPLICA) && _associated_session != nullptr) {
-            // notify client session of error; treat this as an interrupt of sorts
-            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
-            _associated_session->_msg_queue.clear();
-            _associated_session->_ready_for_message = true;
-            queue_msg(msg);
-            _associated_session->_internal_process_msgs(true);
+            // release the session, and deallocate it
+            server_session->release_session(true);
+
+            // the client will notify the other server session of the error
+            // when it comes through this code path
+
+        } else if (_type == Type::CLIENT) {
+            // This is a client session, notify server sessions of error
+
+            // first close connection and remove from server poll list
+            _connection->close();
+            _server->shutdown_session(shared_from_this());
+
+            // notify server replica/primary sessions via shutdown_server_sessions()
+            ClientSession *client = static_cast<ClientSession *>(this);
+            client->shutdown_server_sessions();
         }
-        SPDLOG_ERROR("Shutdown complete");
     }
 
     void

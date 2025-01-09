@@ -4,9 +4,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 #include <proxy/session.hh>
-#include <proxy/server_session.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
 #include <proxy/auth/md5.h>
@@ -18,6 +18,9 @@ namespace springtail::pg_proxy {
 
     class ProxyServer;
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
+
+    class ServerSession;
+    using ServerSessionPtr = std::shared_ptr<ServerSession>;
 
     class ClientSession : public Session
     {
@@ -34,27 +37,65 @@ namespace springtail::pg_proxy {
 
         ~ClientSession();
 
-        /** notification from pool indicating server is free to use */
-        void notify_server_available(SessionPtr server);
-
+        /**
+         * @brief Is client session in shadow mode: sending to primary and replica,
+         * but not only logging replies from replica
+         * @return true if in shadow mode
+         * @return false if not in shadow mode
+         */
         bool is_shadow_mode() const {
             return _shadow_mode;
         }
 
+        /**
+         * @brief Is client session in primary mode: sending to primary only
+         * @return true if in primary mode
+         * @return false if not in primary mode
+         */
         bool is_primary_mode() const {
             return _primary_mode;
         }
 
+        /**
+         * @brief Get the shadow session
+         * @return ServerSessionPtr shadow session
+         */
         ServerSessionPtr get_shadow_session() {
-            if (_shadow_mode && !_replica_session.expired()) {
-                return _replica_session.lock();
+            if (_shadow_mode && _replica_session != nullptr) {
+                return _replica_session;
             }
             return nullptr;
         }
 
+        /**
+         * @brief Get the primary session
+         * @return ServerSessionPtr primary session
+         */
+        ServerSessionPtr get_primary_session() {
+            return _primary_session;
+        }
+
+        /**
+         * @brief Get the replica session
+         * @return ServerSessionPtr replica session
+         */
+        ServerSessionPtr get_replica_session() {
+            return _replica_session;
+        }
+
+
+        /**
+         * @brief Get a shared pointer to this client session
+         * @return std::shared_ptr<ClientSession> shared pointer to this client session
+         */
         std::shared_ptr<ClientSession> shared_from_this() {
             return std::static_pointer_cast<ClientSession>(Session::shared_from_this());
         }
+
+        /**
+         * @brief Shutdown the client session; send shutdown message to server sessions
+         */
+        void shutdown_server_sessions();
 
     protected:
 
@@ -73,8 +114,8 @@ namespace springtail::pg_proxy {
         /** cache of statements, transaction history and session history */
         StatementCache _stmt_cache;
 
-        std::weak_ptr<ServerSession> _primary_session; ///< primary server session
-        std::weak_ptr<ServerSession> _replica_session; ///< replica server session
+        ServerSessionPtr _primary_session; ///< primary server session
+        ServerSessionPtr _replica_session; ///< replica server session
 
         std::string _default_schema = "public"; ///< default schema to be used for query parsing
 
@@ -88,6 +129,8 @@ namespace springtail::pg_proxy {
         void _encode_auth_md5(BufferPtr buffer);
         void _encode_auth_ok(BufferPtr buffer);
         void _encode_auth_scram(BufferPtr buffer);
+
+        BufferPtr _encode_session_param_query();
 
         void _handle_request();
         void _handle_startup();
@@ -113,9 +156,6 @@ namespace springtail::pg_proxy {
 
         ServerSessionPtr _create_server_session(Session::Type type, uint64_t seq_id);
 
-        /** Does primary server pool exist */
-        bool _primary_pool_exists();
-
         /**
          * @brief Parse a simple query and return type of server session that can handle it
          * @param buffer buffer holding original query
@@ -134,9 +174,6 @@ namespace springtail::pg_proxy {
 
         /** Select a server session based on type */
         ServerSessionPtr _select_session(Type type, uint64_t seq_id);
-
-        /** Release server session back to session pool */
-        void _release_server_session();
 
         /** Send message to session, if session is null, select session first */
         void _send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session=nullptr);

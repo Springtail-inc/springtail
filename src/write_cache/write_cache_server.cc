@@ -26,10 +26,8 @@ namespace springtail {
             throw Error("Write cache server settings not found");
         }
 
-        int worker_thread_count;
-        int port;
-        Json::get_to<int>(server_json, "port", port, 55051);
-        Json::get_to<int>(server_json, "worker_threads", worker_thread_count, 8);
+        int worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
+        int port = Json::get_or<int>(server_json, "port", 55051);
 
         init(worker_thread_count, port);
     }

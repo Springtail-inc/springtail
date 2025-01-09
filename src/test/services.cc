@@ -15,7 +15,7 @@ namespace springtail::test {
     { }
 
     void
-    Services::init(bool reset)
+    Services::init()
     {
         // the XID mgr is needed for other services
         if (_sys_tbl_mgr || _write_cache) {
@@ -24,18 +24,16 @@ namespace springtail::test {
 
         // start the XID mgr
         if (_xid_mgr) {
-            if (reset) {
-                std::filesystem::path xid_dir;
+            std::filesystem::path xid_dir;
 
-                auto json = Properties::get(Properties::XID_MGR_CONFIG);
-                if (json.is_null() || !json.contains("server")) {
-                    throw Error("XID Mgr config incorrect");
-                }
-                json = json["server"];
-                Json::get_to<std::filesystem::path>(json, "base_path", xid_dir);
-                xid_dir = Properties::make_absolute_path(xid_dir);
-                std::filesystem::remove_all(xid_dir);
+            auto json = Properties::get(Properties::XID_MGR_CONFIG);
+            if (json.is_null() || !json.contains("server")) {
+                throw Error("XID Mgr config incorrect");
             }
+            json = json["server"];
+            Json::get_to<std::filesystem::path>(json, "base_path", xid_dir);
+            xid_dir = Properties::make_absolute_path(xid_dir);
+            std::filesystem::remove_all(xid_dir);
 
             _threads.push_back(std::thread([] {
                 xid_mgr::XidMgrServer::get_instance()->startup();
@@ -44,14 +42,12 @@ namespace springtail::test {
 
         // start the SysTbl mgr
         if (_sys_tbl_mgr) {
-            if (reset) {
-                std::filesystem::path table_dir;
+            std::filesystem::path table_dir;
 
-                auto json = Properties::get(Properties::STORAGE_CONFIG);
-                Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
-                table_dir = Properties::make_absolute_path(table_dir);
-                std::filesystem::remove_all(table_dir);
-            }
+            auto json = Properties::get(Properties::STORAGE_CONFIG);
+            Json::get_to<std::filesystem::path>(json, "table_dir", table_dir);
+            table_dir = Properties::make_absolute_path(table_dir);
+            std::filesystem::remove_all(table_dir);
 
             _threads.push_back(std::thread([] {
                 sys_tbl_mgr::Server::get_instance()->startup();
