@@ -6,6 +6,7 @@
 #include <fmt/core.h>
 
 #include <common/exception.hh>
+#include <common/logging.hh>
 
 namespace springtail {
     /**
@@ -65,10 +66,15 @@ namespace springtail {
         get(const nlohmann::json &json, const std::string &key)
         {
             if (json.is_null() || !json.contains(key) || json[key].is_null()) {
-                return {};
+                return std::nullopt;
             }
 
-            return json[key];
+            try {
+                return json[key].get<T>();
+            } catch (const nlohmann::json::type_error& e) {
+                SPDLOG_WARN("Bad conversion for key '{}' - {}", key, e.what());
+                return std::nullopt;  // Return nullopt on failed conversion
+            }
         }
 
     private:

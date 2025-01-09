@@ -11,6 +11,7 @@ namespace springtail::tracing {
     void init_tracing() {
         // check the otel properties
         auto json = Properties::get(Properties::OTEL_CONFIG);
+        SPDLOG_INFO("OTel: {}", json.dump());
         bool enabled = Json::get_or<bool>(json, "enabled", true);
 
         if (enabled) {
@@ -21,11 +22,13 @@ namespace springtail::tracing {
             auto log_exporter = std::make_unique<SpdlogExporter>();
             std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> log_processor =
                 std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(std::move(log_exporter));
+
+            SPDLOG_INFO("Enabling OTel logging");
             multi_processor->AddProcessor(std::move(log_processor));
 
             // check if we should send to an otlp server
             auto host = Json::get<std::string>(json, "host");
-            auto port = Json::get<int>(json, "host");
+            auto port = Json::get<int>(json, "port");
             if (host && port) {
                 opentelemetry::exporter::otlp::OtlpGrpcExporterOptions options;
                 options.endpoint = fmt::format("http://{}:{}", *host, *port);
@@ -35,6 +38,7 @@ namespace springtail::tracing {
                 std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor> otlp_processor =
                     std::make_unique<opentelemetry::sdk::trace::SimpleSpanProcessor>(std::move(otlp_exporter));
 
+                SPDLOG_INFO("Enabling OTel over gRPC");
                 multi_processor->AddProcessor(std::move(otlp_processor));
             }
 
@@ -44,6 +48,7 @@ namespace springtail::tracing {
             opentelemetry::trace::Provider::SetTracerProvider(provider);
         } else {
             // use the Noop provider to drop all collected metrics
+            SPDLOG_INFO("Disabling OTel via NoopTracerProvider");
             std::shared_ptr<opentelemetry::trace::TracerProvider> provider =
                 std::make_shared<opentelemetry::trace::NoopTracerProvider>();
             opentelemetry::trace::Provider::SetTracerProvider(std::move(provider));
