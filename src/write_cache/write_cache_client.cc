@@ -50,10 +50,11 @@ namespace springtail {
     void
     WriteCacheClient::ping()
     {
-        ThriftClient c = _get_client();
         thrift::write_cache::Status result;
 
-        c.client->ping(result);
+        _invoke_with_retries([&result](ThriftClient &c) {
+            c.client->ping(result);
+        });
 
         std::cout << "Ping got: " << result.message << std::endl;
         return;
@@ -62,8 +63,6 @@ namespace springtail {
     std::vector<uint64_t>
     WriteCacheClient::list_tables(uint64_t db_id, uint64_t xid, uint32_t count, uint64_t &cursor)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::ListTablesRequest request;
         thrift::write_cache::ListTablesResponse response;
 
@@ -72,7 +71,9 @@ namespace springtail {
         request.count = count;
         request.cursor = cursor;
 
-        c.client->list_tables(response, request);
+        _invoke_with_retries([&response, &request](ThriftClient &c) {
+            c.client->list_tables(response, request);
+        });
 
         cursor = response.cursor;
 
@@ -83,8 +84,6 @@ namespace springtail {
     WriteCacheClient::get_extents(uint64_t db_id, uint64_t tid, uint64_t xid,
                                   uint32_t count, uint64_t &cursor)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::GetExtentsRequest request;
         thrift::write_cache::GetExtentsResponse response;
 
@@ -94,7 +93,9 @@ namespace springtail {
         request.count = count;
         request.cursor = cursor;
 
-        c.client->get_extents(response, request);
+        _invoke_with_retries([&response, &request](ThriftClient &c) {
+            c.client->get_extents(response, request);
+        });
 
         assert(response.table_id == tid);
         cursor = response.cursor;
@@ -116,8 +117,6 @@ namespace springtail {
     void
     WriteCacheClient::evict_table(uint64_t db_id, uint64_t tid, uint64_t xid)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::EvictTableRequest request;
         thrift::write_cache::Status result;
 
@@ -125,7 +124,10 @@ namespace springtail {
         request.table_id = tid;
         request.xid = xid;
 
-        c.client->evict_table(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->evict_table(result, request);
+        });
+
         if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
@@ -136,15 +138,16 @@ namespace springtail {
     void
     WriteCacheClient::evict_xid(uint64_t db_id, uint64_t xid)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::EvictXidRequest request;
         thrift::write_cache::Status result;
 
         request.db_id = db_id;
         request.xid = xid;
 
-        c.client->evict_xid(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->evict_xid(result, request);
+        });
+
         if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
@@ -158,8 +161,6 @@ namespace springtail {
                                   uint64_t old_eid,
                                   const std::vector<uint64_t> &new_eids)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::AddMappingRequest request;
         thrift::write_cache::Status result;
 
@@ -171,7 +172,10 @@ namespace springtail {
         // note: performs a copy due to differing types
         std::copy(new_eids.begin(), new_eids.end(), std::back_inserter(request.new_eids));
 
-        c.client->add_mapping(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->add_mapping(result, request);
+        });
+
         if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
@@ -182,8 +186,6 @@ namespace springtail {
                                  uint64_t target_xid,
                                  uint64_t extent_id)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::SetLookupRequest request;
         thrift::write_cache::Status result;
 
@@ -192,7 +194,10 @@ namespace springtail {
         request.target_xid = target_xid;
         request.extent_id = extent_id;
 
-        c.client->set_lookup(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->set_lookup(result, request);
+        });
+
         if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }
@@ -203,8 +208,6 @@ namespace springtail {
                                   uint64_t target_xid,
                                   uint64_t extent_id)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::ForwardMapRequest request;
         thrift::write_cache::ExtentMapResponse result;
 
@@ -213,7 +216,9 @@ namespace springtail {
         request.target_xid = target_xid;
         request.extent_id = extent_id;
 
-        c.client->forward_map(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->forward_map(result, request);
+        });
 
         std::vector<uint64_t> extent_ids;
         extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
@@ -226,8 +231,6 @@ namespace springtail {
                                   uint64_t target_xid,
                                   uint64_t extent_id)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::ReverseMapRequest request;
         thrift::write_cache::ExtentMapResponse result;
 
@@ -237,7 +240,9 @@ namespace springtail {
         request.target_xid = target_xid;
         request.extent_id = extent_id;
 
-        c.client->reverse_map(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->reverse_map(result, request);
+        });
 
         std::vector<uint64_t> extent_ids;
         extent_ids.insert(extent_ids.end(), result.extent_ids.begin(), result.extent_ids.end());
@@ -248,8 +253,6 @@ namespace springtail {
     WriteCacheClient::expire_map(uint64_t db_id, uint64_t tid,
                                  uint64_t commit_xid)
     {
-        ThriftClient c = _get_client();
-
         thrift::write_cache::ExpireMapRequest request;
         thrift::write_cache::Status result;
 
@@ -257,7 +260,10 @@ namespace springtail {
         request.table_id = tid;
         request.commit_xid = commit_xid;
 
-        c.client->expire_map(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->expire_map(result, request);
+        });
+
         if (result.status != thrift::write_cache::StatusCode::SUCCESS) {
             throw Error("RPC failed");
         }

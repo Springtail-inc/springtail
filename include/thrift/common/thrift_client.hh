@@ -3,6 +3,7 @@
 #include <boost/core/demangle.hpp>
 
 #include <string>
+#include <functional>
 
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -188,6 +189,24 @@ namespace thrift {
                     ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
                 }
             }
+        }
+
+        void _invoke_with_retries(std::function<void (ThriftClient &)> api_call) {
+            ThriftClient c = _get_client();
+            // thrift::xid_mgr::Status result;
+
+            bool call_successful = false;
+            while (!call_successful) {
+                try {
+                    api_call(c);
+                    // c.client->ping(result);
+                    call_successful = true;
+                } catch (const apache::thrift::transport::TTransportException &e) {
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : ", _type_name, e.what());
+                    _reconnect_client(c);
+                }
+            }
+
         }
     };
 

@@ -46,20 +46,10 @@ namespace springtail {
     void
     XidMgrClient::ping()
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
-
-        bool call_successful = false;
-        while (!call_successful) {
-            try {
-                c.client->ping(result);
-                call_successful = true;
-            } catch (const apache::thrift::transport::TTransportException &e) {
-                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call ping: ", e.what());
-                _reconnect_client(c);
-            }
-        }
-
+        _invoke_with_retries([&result](ThriftClient &c) {
+            c.client->ping(result);
+        });
         std::cout << "Ping got: " << result.message << std::endl;
         return;
     }
@@ -67,55 +57,29 @@ namespace springtail {
     void
     XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_change)
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
-
-        bool call_successful = false;
-        while (!call_successful) {
-            try {
-                c.client->commit_xid(result, db_id, xid, has_schema_change);
-                call_successful = true;
-            } catch (const apache::thrift::transport::TTransportException &e) {
-                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call commit_xid: ", e.what());
-                _reconnect_client(c);
-            }
-        }
+        _invoke_with_retries([&result, db_id, xid, has_schema_change](ThriftClient &c) {
+            c.client->commit_xid(result, db_id, xid, has_schema_change);
+        });
     }
 
     void
     XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        bool call_successful = false;
-        while (!call_successful) {
-            try {
-                c.client->record_ddl_change(result, db_id, xid);
-                call_successful = true;
-            } catch (const apache::thrift::transport::TTransportException &e) {
-                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call record_ddl_change: ", e.what());
-                _reconnect_client(c);
-            }
-        }
+        _invoke_with_retries([&result, db_id, xid](ThriftClient &c) {
+            c.client->record_ddl_change(result, db_id, xid);
+        });
     }
 
     uint64_t
     XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     {
-        ThriftClient c = _get_client();
-
         thrift::xid_mgr::xid_t xid = 0;
-        bool call_successful = false;
-        while (!call_successful) {
-            try {
-                xid = c.client->get_committed_xid(db_id, schema_xid);
-                call_successful = true;
-            } catch (const apache::thrift::transport::TTransportException &e) {
-                SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "Failed API call get_committed_xid: ", e.what());
-                _reconnect_client(c);
-            }
-        }
+        _invoke_with_retries([&xid, db_id, schema_xid](ThriftClient &c) {
+            xid = c.client->get_committed_xid(db_id, schema_xid);
+        });
         return xid;
     }
 }
