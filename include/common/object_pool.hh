@@ -31,8 +31,6 @@ namespace springtail {
     template <class T>
     class ObjectPool {
     public:
-
-
         /**
          * Enum specifying queuing policy.
          */
