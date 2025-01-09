@@ -54,7 +54,6 @@ namespace springtail {
 
         ~SchemaMgr() override = default;
 
-    // private:
         /**
          * A key for the system schema cache.
          */
