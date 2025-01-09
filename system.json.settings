@@ -40,17 +40,17 @@
     "xid_mgr": {
         "server" : {
             "port" : 55052,
-            "worker_threads": 1,
+            "worker_threads": 32,
             "base_path": "xid_mgr"
         },
         "client": {
-            "connections": 2
+            "connections": 8
         }
     },
     "sys_tbl_mgr": {
         "server" : {
             "port" : 55053,
-            "worker_threads": 4
+            "worker_threads": 16
         },
         "client": {
             "connections": 8
