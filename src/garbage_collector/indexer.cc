@@ -170,7 +170,17 @@ namespace springtail::gc {
 
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
         auto root = table->index(index_id);
-        assert(root);
+        if (!root) {
+            if (table->schema()->column_order().empty()) {
+                // when dropping a table, PG generates DROP TABLE first
+                // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+                SPDLOG_INFO("Drop index not found: {}, {}", info.table_id, index_id);
+                return;
+            } else {
+                assert(root);
+            }
+        }
+
 
         TableMetadata meta = client->get_roots(db_id, info.table_id, idx._xid);
         auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {

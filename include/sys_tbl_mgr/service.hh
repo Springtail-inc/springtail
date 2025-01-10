@@ -275,7 +275,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Performs a drop_index() assuming that the correct locks are already held.
          */
-        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id);
+        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, uint64_t tid);
 
         /**
          * Performs a create_table() assuming that the correct locks are already held.
@@ -302,7 +302,7 @@ namespace springtail::sys_tbl_mgr {
 
         /** This doesn't return information about index columns
          */
-        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id, const XidLsn& xid);
+        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id, const XidLsn& xid, uint64_t tid);
 
         /**
          * Retrieve the current read XID for a db.

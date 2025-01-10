@@ -68,7 +68,7 @@ namespace springtail::sys_tbl_mgr {
     Service::_get_index_info(const GetIndexInfoRequest &request)
     {
         XidLsn xid(request.xid, request.lsn);
-        auto info = _find_index(request.db_id, request.index_id, xid);
+        auto info = _find_index(request.db_id, request.index_id, xid, 0);
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
                             request.db_id, request.xid, request.index_id);
@@ -227,20 +227,22 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
 
         // perform the CREATE INDEX
-        _drop_index(xid, request.db_id, request.index_id);
+        _drop_index(xid, request.db_id, request.index_id, 0);
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
     std::optional<std::pair<IndexInfo, XidLsn>> 
-    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid)
+    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid, uint64_t tid)
     {
-        auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
+                auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
+        // tid must be valid for INDEX_PRIMARY
+        assert(index_id != constant::INDEX_PRIMARY || tid);
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(tid, index_id, 0, 0);
 
         XidLsn index_xid;
         uint64_t table_id = 0;
@@ -271,8 +273,13 @@ namespace springtail::sys_tbl_mgr {
                     continue;
                 }
             }
+            auto found_tid  = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            if (tid && tid != found_tid) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id, index_id, tid, found_tid);
+                break;
+            }
 
-            table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            table_id = found_tid;
             is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
             name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
             schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
@@ -295,20 +302,23 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id)
+    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, uint64_t tid)
     {
         auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
-
         //find the last record for the index id
-        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0});
+        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0}, tid);
 
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}",
-                            db_id, xid.xid, index_id);
+                    db_id, xid.xid, index_id);
+            return;
+        }
+        if (static_cast<sys_tbl::IndexNames::State>(info->first.state) == sys_tbl::IndexNames::State::DELETED) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}",
+                    db_id, xid.xid, index_id);
             return;
         }
 
@@ -493,7 +503,7 @@ namespace springtail::sys_tbl_mgr {
         auto indexes = _read_schema_indexes(request.db_id, request.table_id, xid);
 
         for (auto const& idx: indexes) {
-            _drop_index(xid, request.db_id, idx.id); 
+            _drop_index(xid, request.db_id, idx.id, request.table_id); 
         }
 
         // mark the table as dropped in the table_names

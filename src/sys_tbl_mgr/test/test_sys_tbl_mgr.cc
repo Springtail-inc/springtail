@@ -280,7 +280,7 @@ namespace {
 
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop) {
-        uint64_t tid = 100000;
+        uint64_t tid = 100003;
 
         // create the table
         PgMsgTable &&msg = _create_table(tid, "x");
