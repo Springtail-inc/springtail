@@ -1021,7 +1021,7 @@ namespace springtail {
 
                 // update the reference with the details of the new extent
                 ref = e.get_ref();
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
+                SPDLOG_DEBUG_MODULE(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
             // extent should always be clean at this point
