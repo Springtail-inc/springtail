@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/constants.hh"
+#include <memory>
 #include <stdexcept>
 #include <storage/btree.hh>
 #include <storage/cache.hh>
@@ -136,11 +137,11 @@ namespace springtail {
                         BTreePtr btree, const BTree::Iterator &btree_i,
                         ExtentSchemaPtr schema )
                     : Tracker{table, btree, btree_i}
-                    , _index_schema{schema}
                 {
-                    if (_index_schema) {
-                        _extent_id_f = _index_schema->get_field(constant::INDEX_EID_FIELD);
-                        _row_id_f = _index_schema->get_field(constant::INDEX_RID_FIELD);
+                    if (schema) {
+                        _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
+                        _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
+                        reset_page();
                     }
                 }
 
@@ -157,9 +158,14 @@ namespace springtail {
                     return ta == tb;
                 }
 
-                ExtentSchemaPtr _index_schema;
                 FieldPtr _extent_id_f;
                 FieldPtr _row_id_f;
+
+                uint64_t _extent_id{};
+                std::unique_ptr<StorageCache::SafePagePtr> _page;
+                StorageCache::Page::Iterator _page_i;
+
+                void reset_page();
             };
 
             std::variant<std::monostate, Primary, Secondary> _tracker;
