@@ -12,7 +12,7 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         -- Check for table or index drops
-        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') AND obj.schema_name NOT LIKE 'pg_%' THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
