@@ -20,7 +20,7 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
     with:
-      builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
+      builder_image_version_tag: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:springtail-base-20250110-16-32
       num_procs: "${{ vars.NUM_PROCS }}"
     secrets:
       aws_role_arn: "${{ secrets.DEV_AWS_ROLE_ARN }}"
