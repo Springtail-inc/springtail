@@ -141,7 +141,7 @@ namespace springtail {
                     if (schema) {
                         _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
                         _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
-                        reset_page();
+                        update_page();
                     }
                 }
 
@@ -165,7 +165,7 @@ namespace springtail {
                 std::unique_ptr<StorageCache::SafePagePtr> _page;
                 StorageCache::Page::Iterator _page_i;
 
-                void reset_page();
+                void update_page();
             };
 
             std::variant<std::monostate, Primary, Secondary> _tracker;

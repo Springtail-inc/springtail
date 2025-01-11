@@ -1208,15 +1208,15 @@ namespace springtail {
             _page.reset();
             return;
         }
-        reset_page();
+        update_page();
     }
     void Table::Iterator::Secondary::prev()
     {
         --_btree_i;
-        reset_page();
+        update_page();
     }
 
-    void Table::Iterator::Secondary::reset_page()
+    void Table::Iterator::Secondary::update_page()
     {
         uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
         if (!_page || _extent_id != eid) {
