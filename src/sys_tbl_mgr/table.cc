@@ -474,12 +474,6 @@ namespace springtail {
 
         _primary_extent_id_f = primary_schema->get_field(constant::INDEX_EID_FIELD);
 
-        if (_schema->column_order().empty()) {
-            // TODO: investigate why this happens see SPR-457.
-            // The table has no columns. It could have been dropped already.
-            return;
-        }
-
         // deal with secondary indexes
         for (auto const& idx: secondary) {
             if (idx.state != static_cast<uint8_t>(sys_tbl::IndexNames::State::READY)) {

@@ -1,4 +1,5 @@
 #include <boost/thread.hpp>
+#include <optional>
 #include <thrift/transport/TSocket.h>
 
 #include <common/logging.hh>
@@ -274,8 +275,18 @@ namespace springtail::sys_tbl_mgr {
 
         /**
          * Performs a drop_index() assuming that the correct locks are already held.
+         * @param xid The XID/LSN at which the transaction occurred.
+         * @param db_id The database ID.
+         * @param index_id The index ID.
+         * @param tid The optional table ID that the index belongs to. When the index is dropped PG
+         *            trigger provides the index ID but there doesn't seem to be a way to extract the corresponding
+         *            table ID (see pg_event_trigger_dropped_objects). This should not be a problem because
+         *            the index ID's are guaranteed to be unique and so the table ID is optional.
+         *            There is a special case when tid is required. We construct primary indexes in create table
+         *            using the column attributes and assign the same index ID=constant::PRIMARY_INDEX to all primary
+         *            indexes and so tid is required for PRIMARY_INDEX.
          */
-        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, uint64_t tid);
+        void _drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, std::optional<uint64_t> tid=std::nullopt);
 
         /**
          * Performs a create_table() assuming that the correct locks are already held.
@@ -302,7 +313,8 @@ namespace springtail::sys_tbl_mgr {
 
         /** This doesn't return information about index columns
          */
-        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id, const XidLsn& xid, uint64_t tid);
+        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id,
+                const XidLsn& xid, std::optional<uint64_t> tid);
 
         /**
          * Retrieve the current read XID for a db.

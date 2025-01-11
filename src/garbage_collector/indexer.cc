@@ -168,18 +168,17 @@ namespace springtail::gc {
 
         SPDLOG_INFO("Drop index table id: {}", info.table_id);
 
+        auto exists = TableMgr::get_instance()->exists(db_id, info.table_id, xid.xid, xid.lsn);
+        if (!exists) {
+            // when dropping a table, PG generates DROP TABLE first
+            // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+            SPDLOG_INFO("Table doesn't exists: {}, {}", info.table_id, index_id);
+            return;
+        }
+
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
         auto root = table->index(index_id);
-        if (!root) {
-            if (table->schema()->column_order().empty()) {
-                // when dropping a table, PG generates DROP TABLE first
-                // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
-                SPDLOG_INFO("Drop index not found: {}, {}", info.table_id, index_id);
-                return;
-            } else {
-                assert(root);
-            }
-        }
+        assert(root);
 
 
         TableMetadata meta = client->get_roots(db_id, info.table_id, idx._xid);

@@ -68,7 +68,7 @@ namespace springtail::sys_tbl_mgr {
     Service::_get_index_info(const GetIndexInfoRequest &request)
     {
         XidLsn xid(request.xid, request.lsn);
-        auto info = _find_index(request.db_id, request.index_id, xid, 0);
+        auto info = _find_index(request.db_id, request.index_id, xid, request.table_id);
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
                             request.db_id, request.xid, request.index_id);
@@ -227,21 +227,25 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
 
         // perform the CREATE INDEX
-        _drop_index(xid, request.db_id, request.index_id, 0);
+        _drop_index(xid, request.db_id, request.index_id);
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
     std::optional<std::pair<IndexInfo, XidLsn>> 
-    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid, uint64_t tid)
+    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid, std::optional<uint64_t> optional_tid)
     {
-                auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
+        // All tables share the same primary index id, and the table id is required in this case.
+        // For other indexes we use PG OID that must be unique and tid is optional
+        assert( index_id != constant::INDEX_PRIMARY || optional_tid);
+
+        uint64_t tid = optional_tid? *optional_tid: 0;
+
+        auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        // tid must be valid for INDEX_PRIMARY
-        assert(index_id != constant::INDEX_PRIMARY || tid);
         auto search_key = sys_tbl::IndexNames::Primary::key_tuple(tid, index_id, 0, 0);
 
         XidLsn index_xid;
@@ -302,7 +306,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, uint64_t tid)
+    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, std::optional<uint64_t> tid)
     {
         auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
