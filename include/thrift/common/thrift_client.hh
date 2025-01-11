@@ -4,6 +4,7 @@
 
 #include <string>
 #include <functional>
+#include <atomic>
 
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -14,13 +15,13 @@
 
 constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
-namespace springtail {
-namespace thrift {
+namespace springtail::thrift {
     /**
      * @brief Object pool factory for thrift cache client objects
+     *
+     * @tparam P - the class that is going to inherit from Client
+     * @tparam T - the class that represents generated thrift client
      */
-    // P - the class that is going to inherit from Client
-    // T - the class that represents generated thrift client, for example thrift::xid_mgr::ThriftXidMgrClient
     template <typename P, typename T>
     class ObjectFactory : public ObjectPoolFactory<T>
     {
@@ -31,6 +32,10 @@ namespace thrift {
             }
 
         ~ObjectFactory() override = default;
+
+        void notify_shutdown() {
+            _shutting_down = true;
+        }
 
         /**
          * @brief Allocate a new client; transport is not connected
@@ -62,17 +67,20 @@ namespace thrift {
         void get_cb(std::shared_ptr<T> client) override
         {
             // validate that the transport is connected
-            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = client->getOutputProtocol();
-            std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
-            apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
-            std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
-            apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+            auto proto = client->getOutputProtocol();
+            auto trans = proto->getTransport();
+            auto *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+            auto another_transport = framed_transport->getUnderlyingTransport();
+            auto *socket = (apache::thrift::transport::TSocket *)another_transport.get();
             while (!proto->getTransport()->isOpen()) {
                 try {
                     socket->open();
                 } catch (const apache::thrift::transport::TTransportException& e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed to connect to thrift server: {}", _type_name, e.what());
                     ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
+                    if (_shutting_down) {
+                        throw e;
+                    }
                 }
             }
 
@@ -94,7 +102,7 @@ namespace thrift {
         std::string _type_name;
         std::string _server;
         int _port;
-
+        std::atomic<bool> _shutting_down = false;
     };
 
     /**
@@ -105,6 +113,13 @@ namespace thrift {
      */
     template <typename P, typename T>
     class Client {
+    public:
+        void notify_shutdown() {
+            _shutting_down = true;
+            if (_thrift_client_factory.get() != nullptr) {
+                _thrift_client_factory->notify_shutdown();
+            }
+        }
     protected:
         /**
          * @brief Construct a new Client object
@@ -132,8 +147,9 @@ namespace thrift {
             // construct the thrift client pool.
             // First argument is a factory object that constructs a thrift clients
             // using the host and port from above
+            _thrift_client_factory = std::make_shared<ObjectFactory<P, T>>(server, port);
             _thrift_client_pool = std::make_shared<ObjectPool<T>>(
-                std::make_shared<ObjectFactory<P, T>>(server, port),
+                _thrift_client_factory,
                 max_connections/2,
                 max_connections,
                 ObjectPool<T>::LIFO
@@ -145,9 +161,12 @@ namespace thrift {
 
         /** Thrift client object pool */
         std::shared_ptr<ObjectPool<T>> _thrift_client_pool;
+        std::shared_ptr<ObjectFactory<P, T>> _thrift_client_factory;
 
         /** Derived class name for logging */
         std::string _type_name;
+
+        std::atomic<bool> _shutting_down = false;
 
         /** Struct to wrap the client pool and client object to ensure it gets release back */
         struct ThriftClient {
@@ -177,7 +196,7 @@ namespace thrift {
         void _reconnect_client(ThriftClient &c) {
             std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
             std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
-            apache::thrift::transport::TFramedTransport *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+            apache::thrift::transport::TFramedTransport *framed_transport = dynamic_cast<apache::thrift::transport::TFramedTransport *>(trans.get());
             std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
             apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
             socket->close();
@@ -186,29 +205,36 @@ namespace thrift {
                     socket->open();
                 } catch (const apache::thrift::transport::TTransportException& e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed to connect to thrift server: {}", _type_name, e.what());
+                    if (_shutting_down) {
+                        throw e;
+                    }
                     ::usleep(RECONNECT_SLEEP_INTERVAL_USEC);
                 }
             }
         }
 
+        /**
+         * @brief Invokes a function that actually performs an API call. If thrift throws an exception,
+         *          it will be caught, and the client will attempt to reconnect and retry an API call.
+         *
+         * @param api_call - function that will perform an API call
+         */
         void _invoke_with_retries(std::function<void (ThriftClient &)> api_call) {
             ThriftClient c = _get_client();
-            // thrift::xid_mgr::Status result;
 
             bool call_successful = false;
             while (!call_successful) {
                 try {
                     api_call(c);
-                    // c.client->ping(result);
                     call_successful = true;
                 } catch (const apache::thrift::transport::TTransportException &e) {
                     SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : ", _type_name, e.what());
+                    if (_shutting_down) {
+                        throw e;
+                    }
                     _reconnect_client(c);
                 }
             }
-
         }
     };
-
-};
 };

@@ -11,8 +11,7 @@
 
 #include <common/logging.hh>
 
-namespace springtail {
-namespace thrift {
+namespace springtail::thrift {
 
     /**
      * @brief Private helper class to override handler creation;
@@ -168,5 +167,4 @@ namespace thrift {
         std::string _type_name;
     };
 
-};
 };
