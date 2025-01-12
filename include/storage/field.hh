@@ -347,7 +347,7 @@ namespace springtail {
         // set this field from the value of another field
         void set_field(const std::any &lhs, FieldPtr field, const std::any &rhs) {
             // field types must match
-            CHECK_EQ(this->get_type(), field->get_type());
+            DCHECK_EQ(this->get_type(), field->get_type());
 
             // handle undefined data cases
             if (this->can_be_undefined()) {
