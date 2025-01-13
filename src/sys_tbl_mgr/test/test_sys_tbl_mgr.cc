@@ -29,12 +29,13 @@ namespace {
     class SysTblMgr_Test : public testing::Test {
     public:
         static void SetUpTestSuite() {
-            springtail_init();
+            springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             _services.init();
         }
 
         static void TearDownTestSuite() {
+            sys_tbl_mgr::Client::shutdown();
             _services.shutdown();
         }
 
@@ -185,12 +186,12 @@ namespace {
 
     // Tests index create
     TEST_F(SysTblMgr_Test, CreateIndex) {
-        uint64_t tid = 100000;
+        uint64_t tid = 100003;
 
         // create the table
         _create_table(tid, "x");
         _finalize();
-        
+
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
 
         // must have a primary index
@@ -239,12 +240,12 @@ namespace {
 
     // Tests index drop
     TEST_F(SysTblMgr_Test, DropIndex) {
-        uint64_t tid = 100000;
+        uint64_t tid = 100004;
 
         // create the table
         _create_table(tid, "x");
         _finalize();
-        
+
         auto &&schema_meta = _client->get_schema(_db, tid, _xid);
 
         // must have a primary index
@@ -281,6 +282,7 @@ namespace {
     // Tests table create / alter / drop
     TEST_F(SysTblMgr_Test, CreateAlterDrop) {
         uint64_t tid = 100000;
+        uint64_t start_xid = _xid.xid;
 
         // create the table
         PgMsgTable &&msg = _create_table(tid, "x");
@@ -290,84 +292,84 @@ namespace {
         _alter_table(msg);
 
         // verify system table correctness before finalize
-        auto &&metadata = _client->get_roots(_db, tid, 0);
+        auto &&metadata = _client->get_roots(_db, tid, start_xid - 1);
         ASSERT_EQ(metadata.roots.size(), 0);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
-        auto &&schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        auto &&schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 0 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 0 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 1 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 3 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 3 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
         // verify correctness after finalize
         _finalize();
 
-        auto exists = _client->exists(_db, tid, { 1, 0 });
+        auto exists = _client->exists(_db, tid, { start_xid, 0 });
         ASSERT_TRUE(exists);
 
-        metadata = _client->get_roots(_db, tid, 1);
+        metadata = _client->get_roots(_db, tid, start_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
         ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 0 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 0 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 1 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
         // drop the table
         _drop_table(tid, "x");
 
         // verify system table correctness before finalize
-        metadata = _client->get_roots(_db, tid, 1);
+        metadata = _client->get_roots(_db, tid, start_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
         ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, 1 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, 1 });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 2, 0 });
+        schema_meta = _client->get_schema(_db, tid, { start_xid + 1, 0 });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
         // verify correctness after finalize
         _finalize();
 
-        schema_meta = _client->get_schema(_db, tid, { 0, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid - 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        schema_meta = _client->get_schema(_db, tid, { 1, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 2);
 
-        schema_meta = _client->get_schema(_db, tid, { 2, constant::MAX_LSN });
+        schema_meta = _client->get_schema(_db, tid, { start_xid + 1, constant::MAX_LSN });
         ASSERT_EQ(schema_meta.columns.size(), 0);
 
-        metadata = _client->get_roots(_db, tid, 1);
+        metadata = _client->get_roots(_db, tid, start_xid);
         ASSERT_EQ(metadata.roots.size(), 1);
         ASSERT_EQ(metadata.roots[0].extent_id, constant::UNKNOWN_EXTENT);
         ASSERT_EQ(metadata.stats.row_count, 0);
 
-        metadata = _client->get_roots(_db, tid, 2);
+        metadata = _client->get_roots(_db, tid, start_xid + 1);
         ASSERT_EQ(metadata.roots.size(), 0);
         ASSERT_EQ(metadata.stats.row_count, 0);
     }
@@ -534,7 +536,7 @@ namespace {
     // metadata retrievals
     TEST_F(SysTblMgr_Test, Threaded) {
         // initialize some schema history for two tables
-        std::vector<uint64_t> tids = { 100000, 200000 };
+        std::vector<uint64_t> tids = { 200000, 200001 };
 
         auto t1msg = _create_table(tids[0], "x");
         auto t2msg = _create_table(tids[1], "y");

@@ -1,5 +1,4 @@
-#include <boost/thread.hpp>
-#include <thrift/transport/TSocket.h>
+#pragma once
 
 #include <common/logging.hh>
 #include <sys_tbl_mgr/table.hh>
@@ -17,20 +16,9 @@ namespace springtail::sys_tbl_mgr {
      * cache any metadata once it's written to disk, instead relying on the StorageCache to keep
      * table extents in-memory for fast retrieval.
      */
-    class Service : public ServiceIf
+    class Service final: public ServiceIf, public Singleton<Service>
     {
-    public:
-        /**
-         * @brief getInstance() of singleton; create if it doesn't exist.
-         * @return instance of ThriftSysTblMgrService
-         */
-        static Service *get_instance();
-
-        /**
-         * @brief Shutdown the singleton.
-         */
-        static void shutdown();
-
+        friend class Singleton<Service>;
     public:
         /** Simple interface to help ensure that the server is still running. */
         void ping(Status& _return) override;
@@ -84,6 +72,9 @@ namespace springtail::sys_tbl_mgr {
         void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
 
     private:
+        Service() = default;
+        ~Service() override = default;
+
         // CACHE FOR NAMES
 
         /**
@@ -320,9 +311,6 @@ namespace springtail::sys_tbl_mgr {
         void _set_xids(uint64_t db_id, const XidLsn &read_xid, uint64_t write_xid);
 
         // VARIABLES
-        static Service *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /** To protect the internal data structures. */
         boost::shared_mutex _mutex;
 
@@ -382,40 +370,5 @@ namespace springtail::sys_tbl_mgr {
                  std::map<uint64_t,
                           std::map<uint32_t,
                                    std::vector<ColumnHistory>>>> _schema_cache;
-    };
-
-
-    /**
-     * @brief Private helper class to override handler creation;
-     *        can be used to store per connection state or log incoming connections
-     */
-    class ServiceCloneFactory : virtual public ServiceIfFactory {
-    public:
-        ~ServiceCloneFactory() override = default;
-
-        /**
-         * @brief Override the thrift getHandler call, allows for logging
-         * @param connInfo Thrift connection info object
-         * @return thrift::sys_tbl_mgr::ThriftSysTblMgrIf*
-         */
-        ServiceIf *
-        getHandler(const apache::thrift::TConnectionInfo &connInfo) override
-        {
-            std::shared_ptr<apache::thrift::transport::TSocket> sock =
-                std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
-
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "Incoming connection");
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tSocketInfo: {}", sock->getSocketInfo());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerHost: {}", sock->getPeerHost());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerAddress: {}", sock->getPeerAddress());
-            SPDLOG_DEBUG_MODULE(LOG_SYS_TBL_MGR, "\tPeerPort: {}", sock->getPeerPort());
-
-            return Service::get_instance();
-        }
-
-        void
-        releaseHandler(ServiceIf *handler) override {
-            // delete handler;
-        }
     };
 }

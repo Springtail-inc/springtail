@@ -17,7 +17,8 @@ namespace {
         trace.print(ss);
 
         SPDLOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
-        exit(-1);
+        signal(signo, SIG_DFL);
+        raise(signo);
     }
 }
 

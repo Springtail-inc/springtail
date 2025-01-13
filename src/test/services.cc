@@ -50,14 +50,14 @@ namespace springtail::test {
             std::filesystem::remove_all(table_dir);
 
             _threads.push_back(std::thread([] {
-                sys_tbl_mgr::Server::startup();
+                sys_tbl_mgr::Server::get_instance()->startup();
             }));
         }
 
         // start the Write Cache
         if (_write_cache) {
             _threads.push_back(std::thread([] {
-                WriteCacheServer::startup();
+                WriteCacheServer::get_instance()->startup();
             }));
         }
         // give everyting a chance to startup
@@ -69,23 +69,26 @@ namespace springtail::test {
     {
         // shut down the write_cache
         if (_write_cache) {
-            WriteCacheServer::shutdown();
+            WriteCacheServer::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();
+            WriteCacheServer::shutdown();
         }
 
         // shut down the sys_tbl_mgr
         if (_sys_tbl_mgr) {
-            sys_tbl_mgr::Server::shutdown();
+            sys_tbl_mgr::Server::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();
+            sys_tbl_mgr::Server::shutdown();
         }
 
         // shut down the xid_mgr
         if (_xid_mgr) {
-            xid_mgr::XidMgrServer::shutdown();
+            xid_mgr::XidMgrServer::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();
+            xid_mgr::XidMgrServer::shutdown();
         }
     }
 }

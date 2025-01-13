@@ -11,7 +11,7 @@ namespace {
     void
     handle_sigint(int signal)
     {
-        xid_mgr::XidMgrServer::shutdown();
+        xid_mgr::XidMgrServer::get_instance()->stop();
     }
 }
 
@@ -54,5 +54,7 @@ int main(int argc, char *argv[])
     // start the server
     xid_mgr::XidMgrServer::get_instance()->startup();
 
+    // shutdown the server
+    xid_mgr::XidMgrServer::shutdown();
     return 0;
 }
