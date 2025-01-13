@@ -236,7 +236,7 @@ namespace springtail::pg_proxy {
         }
         BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
         ssize_t n = _connection->read(buffer->data(), msg_length, msg_length);
-        assert(n == msg_length);
+        CHECK_EQ(n, msg_length);
         buffer->set_size(msg_length);
         return buffer;
     }

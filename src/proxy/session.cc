@@ -358,7 +358,7 @@ namespace springtail::pg_proxy {
         int n;
         if (!_is_shadow) {
             n = _associated_session->get_connection()->write(buffer, 5);
-            assert (n == 5);
+            CHECK_EQ(n, 5);
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
         }
 
@@ -369,14 +369,14 @@ namespace springtail::pg_proxy {
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
             int n = _connection->read(buffer, read_length, read_length);
-            assert (n == read_length);
+            CHECK_EQ(n, read_length);
 
             // log the buffer as incoming
             _log_buffer(true, code, n, buffer, seq_id, n == msg_length);
 
             if (!_is_shadow) {
                 int m = _associated_session->get_connection()->write(buffer, n);
-                assert (m == n);
+                CHECK_EQ(m, n);
 
                 // log the buffer as outgoing from associated session
                 _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
