@@ -3,6 +3,7 @@
 #include <any>
 #include <type_traits>
 #include <cassert>
+#include <bit>
 
 #include <pg_repl/pg_types.hh>
 #include <pg_repl/pg_repl_msg.hh>
@@ -604,7 +605,7 @@ namespace springtail {
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
             uint32_t value = recvint32(e_row.data() + _offset);
-            return *reinterpret_cast<float *>(&value);
+            return std::bit_cast<float>(value);
         }
 
         double get_float64(const std::any &row) const override {
@@ -614,7 +615,7 @@ namespace springtail {
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
             uint64_t value = recvint64(e_row.data() + _offset);
-            return *reinterpret_cast<double *>(&value);
+            return std::bit_cast<double>(value);
         }
 
         std::string_view get_text(const std::any &row) const override {
@@ -711,7 +712,7 @@ namespace springtail {
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint32_t cast_val = *reinterpret_cast<uint32_t *>(&val);
+            uint32_t cast_val = std::bit_cast<uint32_t>(val);
             sendint32(cast_val, e_row.data() + _offset);
         }
 
@@ -719,7 +720,7 @@ namespace springtail {
             assert(row.type() == typeid(Extent::Row));
 
             auto &&e_row = std::any_cast<Extent::Row>(row);
-            uint64_t cast_val = *reinterpret_cast<uint64_t *>(&val);
+            uint64_t cast_val = std::bit_cast<uint64_t>(val);
             sendint64(cast_val, e_row.data() + _offset);
         }
 
@@ -1538,7 +1539,7 @@ namespace springtail {
 
             // read in the binary data and convert to a 32-bit float
             int32_t value = recvint32(col.data.data());
-            return *reinterpret_cast<float *>(&value);
+            return std::bit_cast<float>(value);
         }
 
         double get_float64(const std::any &row) const override {
@@ -1555,7 +1556,7 @@ namespace springtail {
 
             // read in the binary data and convert to a 64-bit float
             int64_t value = recvint64(col.data.data());
-            return *reinterpret_cast<double *>(&value);
+            return std::bit_cast<double>(value);
         }
 
         std::string_view get_text(const std::any &row) const override {

@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 
+#include <bit>
 #include <fmt/core.h>
 
 // springtail includes
@@ -578,7 +579,7 @@ namespace springtail
             case (SchemaType::FLOAT64): {
                 assert(length == 8);
                 auto num = recvint64(row.data() + pos);
-                double d = *reinterpret_cast<double *>(&num);
+                double d = std::bit_cast<double>(num);
                 fields->push_back(std::make_shared<ConstTypeField<double>>(d));
                 pos += length;
                 break;
@@ -587,7 +588,7 @@ namespace springtail
             case (SchemaType::FLOAT32): {
                 assert(length == 4);
                 auto num = recvint32(row.data() + pos);
-                float f = *reinterpret_cast<float *>(&num);
+                float f = std::bit_cast<float>(num);
                 fields->push_back(std::make_shared<ConstTypeField<float>>(f));
                 pos += length;
                 break;

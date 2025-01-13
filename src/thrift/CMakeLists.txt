@@ -1,4 +1,5 @@
 find_package(Thrift CONFIG REQUIRED)
+include("${THRIFT_CMAKE_DIR}/thriftnbTargets.cmake")
 
 # the thrift rpc gen
 find_program(
@@ -85,7 +86,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
     # build the library
     add_library(${THRIFT_LIB_NAME} ${THRIFT_GEN_FILES})
     add_dependencies(${THRIFT_LIB_NAME} thrift_generated_${THRIFT_FILE_NAME})
-    target_link_libraries(${THRIFT_LIB_NAME} PRIVATE thrift::thrift)
+    target_link_libraries(${THRIFT_LIB_NAME} PRIVATE thrift::thrift thriftnb::thriftnb)
 
     # add the gen-cpp dir to the list of files to remove during 'make clean'
     set_target_properties(${THRIFT_LIB_NAME}

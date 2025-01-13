@@ -14,33 +14,6 @@
 
 
 namespace springtail::sys_tbl_mgr {
-    /* static member initialization must happen outside of class */
-    Service* Service::_instance {nullptr};
-    boost::mutex Service::_instance_mutex;
-
-    Service *
-    Service::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new Service();
-        }
-
-        return _instance;
-    }
-
-    void
-    Service::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
     void
     Service::ping(Status& _return)
     {
@@ -64,7 +37,7 @@ namespace springtail::sys_tbl_mgr {
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
-    IndexInfo 
+    IndexInfo
     Service::_get_index_info(const GetIndexInfoRequest &request)
     {
         XidLsn xid(request.xid, request.lsn);
@@ -144,7 +117,7 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    void 
+    void
     Service::get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request)
     {
         SPDLOG_INFO("got get_index_info()");
@@ -478,7 +451,7 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
-        SPDLOG_INFO("got drop_table()");
+        SPDLOG_INFO("got drop_table() {}@{}:{}", request.table_id, request.xid, request.lsn);
 
         // hold a shared lock to prevent a concurrent finalize()
         boost::shared_lock lock(_write_mutex);
@@ -503,7 +476,7 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
 
         // drop indexes
-        
+
         auto indexes = _read_schema_indexes(request.db_id, request.table_id, xid);
 
         for (auto const& idx: indexes) {
@@ -1075,7 +1048,7 @@ namespace springtail::sys_tbl_mgr {
         return info;
     }
 
-    std::vector<IndexInfo> 
+    std::vector<IndexInfo>
     Service::_read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid)
     {
         std::vector<IndexInfo> indexes;
