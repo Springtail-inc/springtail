@@ -161,7 +161,7 @@ namespace springtail {
                 FieldPtr _extent_id_f;
                 FieldPtr _row_id_f;
 
-                uint64_t _extent_id{};
+                uint64_t _extent_id = 0;
                 std::unique_ptr<StorageCache::SafePagePtr> _page;
                 StorageCache::Page::Iterator _page_i;
 
