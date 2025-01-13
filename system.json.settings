@@ -28,32 +28,29 @@
         }
     },
     "write_cache": {
-        "server" : {
-            "port" : 55051,
-            "worker_threads": 8,
-            "io_threads": 1
+        "rpc_config" : {
+            "server_port": 55051,
+            "server_worker_threads": 8,
+            "ssl": false,
+            "client_connections": 8
         },
-        "client": {
-            "connections": 8
-        }
+        "io_threads": 1
     },
     "xid_mgr": {
-        "server" : {
-            "port" : 55052,
-            "worker_threads": 32,
-            "base_path": "xid_mgr"
+        "rpc_config" : {
+            "server_port": 55052,
+            "server_worker_threads": 32,
+            "ssl": false,
+            "client_connections": 8
         },
-        "client": {
-            "connections": 8
-        }
+        "base_path": "xid_mgr"
     },
     "sys_tbl_mgr": {
-        "server" : {
-            "port" : 55053,
-            "worker_threads": 16
-        },
-        "client": {
-            "connections": 8
+        "rpc_config" : {
+            "server_port": 55053,
+            "server_worker_threads": 16,
+            "ssl": false,
+            "client_connections": 8
         }
     },
     "storage": {

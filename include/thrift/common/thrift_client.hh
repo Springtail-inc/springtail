@@ -7,11 +7,13 @@
 #include <atomic>
 
 #include <thrift/transport/TSocket.h>
+#include <thrift/transport/TSSLSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/protocol/TBinaryProtocol.h>
 
-#include <common/object_pool.hh>
+#include <common/json.hh>
 #include <common/logging.hh>
+#include <common/object_pool.hh>
 
 constexpr useconds_t RECONNECT_SLEEP_INTERVAL_USEC = 1000000;
 
@@ -26,13 +28,28 @@ namespace springtail::thrift {
     class ObjectFactory : public ObjectPoolFactory<T>
     {
     public:
-        ObjectFactory(const std::string &server, int port)
-            : _server(server), _port(port) {
+        /**
+         * @brief Construct a new Object Factory object
+         *
+         * @param server - server name
+         * @param port - server port
+         * @param ssl - should use ssl
+         */
+        ObjectFactory(const std::string &server, int port, bool ssl)
+            : _server(server), _port(port), _ssl(ssl) {
                 _type_name = boost::core::demangle(typeid(P).name());
             }
 
+        /**
+         * @brief Destroy the Object Factory object
+         *
+         */
         ~ObjectFactory() override = default;
 
+        /**
+         * @brief Method for turning on shutdown flag for breaking out of retry loop
+         *
+         */
         void notify_shutdown() {
             _shutting_down = true;
         }
@@ -99,9 +116,19 @@ namespace springtail::thrift {
         }
 
     protected:
+        /** type name of the client class */
         std::string _type_name;
+
+        /** server host */
         std::string _server;
+
+        /** server port */
         int _port;
+
+        /** Require SSL */
+        bool _ssl = false;
+
+        /** shutdown flag that allows to interrupt retry loop */
         std::atomic<bool> _shutting_down = false;
     };
 
@@ -114,6 +141,10 @@ namespace springtail::thrift {
     template <typename P, typename T>
     class Client {
     public:
+        /**
+         * @brief Method for turning on shutdown flag for breaking out of retry loop
+         *
+         */
         void notify_shutdown() {
             _shutting_down = true;
             if (_thrift_client_factory.get() != nullptr) {
@@ -130,6 +161,7 @@ namespace springtail::thrift {
 
             _type_name = boost::core::demangle(typeid(P).name());
         }
+
         /**
          * @brief Destroy the Client object
          *
@@ -143,11 +175,26 @@ namespace springtail::thrift {
          * @param port - port number to connect to
          * @param max_connections - maximum connection number
          */
-        void init(const std::string &server, int port, int max_connections) {
+        void init(const std::string &server, int port, int max_connections, bool ssl) {
             // construct the thrift client pool.
             // First argument is a factory object that constructs a thrift clients
             // using the host and port from above
-            _thrift_client_factory = std::make_shared<ObjectFactory<P, T>>(server, port);
+            _thrift_client_factory = std::make_shared<ObjectFactory<P, T>>(server, port, ssl);
+            _thrift_client_pool = std::make_shared<ObjectPool<T>>(
+                _thrift_client_factory,
+                max_connections/2,
+                max_connections,
+                ObjectPool<T>::LIFO
+            );
+        }
+
+        void init(const std::string &server, nlohmann::json &rpc_json) {
+            int max_connections = Json::get_or<int>(rpc_json, "client_connections", 8);
+            int port = 0;
+            Json::get_to<int>(rpc_json, "server_port", port);
+            int ssl = Json::get_or<bool>(rpc_json, "ssl", false);
+
+            _thrift_client_factory = std::make_shared<ObjectFactory<P, T>>(server, port, ssl);
             _thrift_client_pool = std::make_shared<ObjectPool<T>>(
                 _thrift_client_factory,
                 max_connections/2,

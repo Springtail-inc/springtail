@@ -27,25 +27,16 @@ namespace springtail::sys_tbl_mgr {
     Client::Client()
     {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
-        nlohmann::json client_json;
-        nlohmann::json server_json;
+        nlohmann::json rpc_json;
 
-        // fetch properties for the sys tbl mgr
-        if (!Json::get_to(json, "client", client_json)) {
-            throw Error("Sys tbl mgr client settings not found");
+        // fetch RPC properties for the sys_tbl_mgr client
+        if (!Json::get_to(json, "rpc_config", rpc_json)) {
+            throw Error("SysTblMgr RPC settings are not found");
         }
-
-        if (!Json::get_to(json, "server", server_json)) {
-            throw Error("Sys tbl mgr server settings not found");
-        }
-
-        // init channel pool
-        int max_connections = Json::get_or<int>(client_json, "connections", 8);
-        int port = Json::get_or<int>(server_json, "port", 55051);
 
         std::string server = Properties::get_sys_tbl_mgr_hostname();
 
-        init(server, port, max_connections);
+        init(server, rpc_json);
     }
 
     // exposed client service interface below

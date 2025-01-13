@@ -8,7 +8,10 @@
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/server/TNonblockingServer.h>
 #include <thrift/transport/TNonblockingServerSocket.h>
+#include <thrift/transport/TSSLSocket.h>
+#include <thrift/transport/TNonblockingSSLServerSocket.h>
 
+#include <common/json.hh>
 #include <common/logging.hh>
 
 namespace springtail::thrift {
@@ -106,9 +109,16 @@ namespace springtail::thrift {
          * @param worker_thread_count - number of threads to use for server thread pool
          * @param port - port number for the server to listen on
          */
-        void init(int worker_thread_count, int port) {
+        void init(int worker_thread_count, int port, bool ssl) {
             _worker_thread_count = worker_thread_count;
             _port = port;
+            _ssl = ssl;
+        }
+
+        void init(nlohmann::json &rpc_json) {
+            Json::get_to<int>(rpc_json, "server_port", _port);
+            Json::get_to<int>(rpc_json, "server_worker_threads", _worker_thread_count);
+            _ssl = Json::get_or<bool>(rpc_json, "ssl", false);
         }
 
     public:
@@ -154,14 +164,21 @@ namespace springtail::thrift {
         /** server port */
         int _port = 0;
 
+        /** Require SSL */
+        bool _ssl = false;
+
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
 
         /** thread manager that is used by the server */
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
 
+        /** default SSL socket factory */
+        std::shared_ptr<apache::thrift::transport::TSSLSocketFactory> _ssl_socket_factory = {nullptr};
+
         /** Demangled name of the class derived from Server */
         std::string _type_name;
+
     };
 
 };
