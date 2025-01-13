@@ -1002,8 +1002,9 @@ namespace springtail {
             }
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
-                assert(_p != other._p);
-                put();
+                if (_p != other._p) {
+                    put();
+                }
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;

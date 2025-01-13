@@ -1205,7 +1205,7 @@ namespace springtail {
     {
         ++_btree_i;
         if (_btree_i == _btree->end()) {
-            _page.reset();
+            _page = {};
             return;
         }
         update_page();
@@ -1219,13 +1219,12 @@ namespace springtail {
     void Table::Iterator::Secondary::update_page()
     {
         uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
-        if (!_page || _extent_id != eid) {
-            _page.reset();
+        if (_page.empty() || _extent_id != eid) {
             _extent_id = eid;
-            _page = std::make_unique<StorageCache::SafePagePtr>(_table->_read_page(_extent_id));
+            _page = _table->_read_page(_extent_id);
         }
         uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
-        _page_i = (*_page)->at(row_id);
+        _page_i = _page->at(row_id);
     }
 
     const Extent::Row& Table::Iterator::Secondary::row() const
