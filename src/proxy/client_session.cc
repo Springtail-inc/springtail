@@ -65,7 +65,7 @@ namespace springtail::pg_proxy {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
                 }
-                assert(_state == AUTH);
+                CHECK_EQ(_state, AUTH);
 
                 _send_auth_done(msg->seq_id());
 
@@ -203,7 +203,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[8];
         ssize_t n = _connection->read(buffer, 8, 8);
-        assert(n == 8);
+        CHECK_EQ(n, 8);
 
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
@@ -251,7 +251,7 @@ namespace springtail::pg_proxy {
 
         char buffer[remaining];
         ssize_t n = _connection->read(buffer, remaining, remaining);
-        assert(n == remaining);
+        CHECK_EQ(n, remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
         _log_buffer(true, '?', remaining, buffer, seq_id);
@@ -273,7 +273,7 @@ namespace springtail::pg_proxy {
         }
         // read last null byte
         char c = read_buffer.get();
-        assert(c == '\0');
+        CHECK_EQ(c, '\0');
 
         // get user info and store it
         _user = UserMgr::get_instance()->get_user(username, database);
@@ -362,7 +362,7 @@ namespace springtail::pg_proxy {
 
         // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log the buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
@@ -380,7 +380,7 @@ namespace springtail::pg_proxy {
         for (auto buffer: blist.buffers)
         {
             char code = buffer->get();
-            assert(code == 'p');
+            CHECK_EQ(code, 'p');
 
             int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
@@ -494,7 +494,7 @@ namespace springtail::pg_proxy {
                                  strlen(_login->scram_state.server_first_message));
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
@@ -552,7 +552,7 @@ namespace springtail::pg_proxy {
         free (server_final_message);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
@@ -606,7 +606,7 @@ namespace springtail::pg_proxy {
         buffer->put('I');
 
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);

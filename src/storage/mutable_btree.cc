@@ -28,7 +28,7 @@ namespace springtail {
     MutableBTree::init_empty()
     {
         // must not have already called init() or init_empty()
-        assert(_root == nullptr);
+        CHECK_EQ(_root, nullptr);
 
         // construct an empty extent
         auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
@@ -49,7 +49,7 @@ namespace springtail {
     MutableBTree::init(uint64_t root_offset)
     {
         // must not have already called init() or init_empty()
-        assert(_root == nullptr);
+        CHECK_EQ(_root, nullptr);
 
         // construct an empty page to populate
         _root = std::make_shared<Page>(this, root_offset);

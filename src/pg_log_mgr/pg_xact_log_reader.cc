@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <vector>
 
+#include <absl/log/check.h>
+
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/exception.hh>
@@ -197,7 +199,7 @@ namespace springtail::pg_log_mgr {
             offset += 4;
         }
 
-        assert(offset == msg_len);
+        CHECK_EQ(offset, msg_len);
 
         return xact;
     }

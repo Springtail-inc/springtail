@@ -66,7 +66,7 @@ namespace springtail {
                 {}
 
                 friend bool operator==(const Tracker& a, const Tracker& b) {
-                    assert(a._table == b._table);
+                    CHECK_EQ(a._table, b._table);
                     if (a._btree == nullptr && b._btree == nullptr) {
                         return true;
                     } else if (a._btree == nullptr || b._btree == nullptr) {

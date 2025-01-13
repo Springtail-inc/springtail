@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 
+#include <absl/log/check.h>
 #include <nlohmann/json.hpp>
 
 #include <common/common.hh>
@@ -433,7 +434,7 @@ namespace springtail {
             _skip_tuple();
             type = _recvint8(); // new type; should be N
         } else {
-            assert(type == 'N');
+            CHECK_EQ(type, 'N');
 
         }
         _skip_tuple(); // New tuple
@@ -480,7 +481,7 @@ namespace springtail {
             update.old_type = {};
         }
 
-        assert(update.new_type == 'N');
+        CHECK_EQ(update.new_type, 'N');
         _decode_tuple(update.new_tuple);
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::UPDATE);
@@ -699,7 +700,7 @@ namespace springtail {
         PgMsgCommit commit;
 
         int8_t flags = _recvint8();
-        assert(flags == 0);
+        CHECK_EQ(flags, 0);
 
         commit.commit_lsn = _recvint64();
         commit.xact_lsn = _recvint64();
@@ -876,7 +877,7 @@ namespace springtail {
         json["obj"].get_to(object_type);
         if (object_type != "index") {
             SPDLOG_INFO("Create index msg not for index object, for: {}\n", object_type);
-            assert(object_type == "index");
+            CHECK_EQ(object_type, "index");
             return {};
         }
 
@@ -994,7 +995,7 @@ namespace springtail {
         json["obj"].get_to(object_type);
         if (object_type != "table") {
             SPDLOG_INFO("Drop table not for table object, for: {}\n", object_type);
-            assert(object_type == "table");
+            CHECK_EQ(object_type, "table");
             return nullptr;
         }
 
