@@ -48,6 +48,8 @@ DECLARE
     table_persistence "char";
     table_replident "char";
     table_relname text;
+    full_ident boolean;
+    update_replica_ident text;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE')
@@ -102,35 +104,30 @@ BEGIN
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
+
+        full_ident := false;
+        update_replica_ident := NULL;
+
         -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
         IF table_replident <> 'f' AND has_pkey IS NULL THEN
-            PERFORM springtail_set_replica_identity(obj.schema_name, table_relname, true);
+            full_ident := true;
+            update_replica_ident := 'FULL';
         END IF;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
         IF table_replident = 'f' AND has_pkey IS TRUE THEN
-            PERFORM springtail_set_replica_identity(obj.schema_namem, table_relname, false);
+            full_ident := false;
+            update_replica_ident := 'DEFAULT';
+        END IF;
+
+        IF update_replica_ident IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), update_replica_ident);
         END IF;
 
     END LOOP;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_set_replica_identity(schema_name text, table_name text, full_ident boolean DEFAULT true)
-        RETURNS void LANGUAGE plpgsql AS $$
-DECLARE
-    ident text;
-BEGIN
-    ident := quote_ident(schema_name) || '.' || quote_ident(table_name);
-    IF full_ident THEN
-        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', ident);
-    ELSE
-        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', ident);
-    END IF;
-END;
-$$;
 
 CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
@@ -214,7 +211,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
 -- Select all users and their databases with access to springtail
 -- If springtail_user role exists, only users with that role are returned
 -- otherwise all users are returned
-CREATE OR REPLACE FUNCTION springtail_get_user_access()
+CREATE OR REPLACE FUNCTION public.springtail_get_user_access()
     RETURNS TABLE (username text, password text, databases text)
     LANGUAGE plpgsql
     SECURITY DEFINER AS $$
@@ -275,13 +272,12 @@ END;
 $$;
 
 -- Clean up function to drop the other functions and triggers
-CREATE OR REPLACE FUNCTION springtail_cleanup()
+CREATE OR REPLACE FUNCTION public.springtail_cleanup()
     RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     -- Drop event functions
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops() CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_table_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_set_replica_identity(identity regclass, full_ident boolean) CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_index_ddl() CASCADE;
     DROP FUNCTION IF EXISTS springtail_get_user_access() CASCADE;
     -- Drop event triggers
