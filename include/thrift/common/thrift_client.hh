@@ -69,9 +69,9 @@ namespace springtail::thrift {
             // validate that the transport is connected
             auto proto = client->getOutputProtocol();
             auto trans = proto->getTransport();
-            auto *framed_transport = (apache::thrift::transport::TFramedTransport *)trans.get();
+            auto framed_transport = std::dynamic_pointer_cast<apache::thrift::transport::TFramedTransport, apache::thrift::transport::TTransport>(trans);
             auto another_transport = framed_transport->getUnderlyingTransport();
-            auto *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+            auto socket = std::dynamic_pointer_cast<apache::thrift::transport::TSocket, apache::thrift::transport::TTransport>(another_transport);
             while (!proto->getTransport()->isOpen()) {
                 try {
                     socket->open();
@@ -166,6 +166,7 @@ namespace springtail::thrift {
         /** Derived class name for logging */
         std::string _type_name;
 
+        /** Shutting down flag for breaking out of the retry loop */
         std::atomic<bool> _shutting_down = false;
 
         /** Struct to wrap the client pool and client object to ensure it gets release back */
@@ -194,11 +195,11 @@ namespace springtail::thrift {
          * @param c - reference to thrift client object
          */
         void _reconnect_client(ThriftClient &c) {
-            std::shared_ptr<apache::thrift::protocol::TProtocol> proto = c.client->getOutputProtocol();
-            std::shared_ptr<apache::thrift::transport::TTransport> trans = proto->getTransport();
-            apache::thrift::transport::TFramedTransport *framed_transport = dynamic_cast<apache::thrift::transport::TFramedTransport *>(trans.get());
-            std::shared_ptr<apache::thrift::transport::TTransport> another_transport = framed_transport->getUnderlyingTransport();
-            apache::thrift::transport::TSocket *socket = (apache::thrift::transport::TSocket *)another_transport.get();
+            auto proto = c.client->getOutputProtocol();
+            auto trans = proto->getTransport();
+            auto framed_transport = std::dynamic_pointer_cast<apache::thrift::transport::TFramedTransport, apache::thrift::transport::TTransport>(trans);
+            auto another_transport = framed_transport->getUnderlyingTransport();
+            auto socket = std::dynamic_pointer_cast<apache::thrift::transport::TSocket, apache::thrift::transport::TTransport>(another_transport);
             socket->close();
             while (!proto->getTransport()->isOpen()) {
                 try {

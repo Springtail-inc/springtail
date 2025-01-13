@@ -47,8 +47,7 @@ namespace springtail::thrift {
         I*
         getHandler(const apache::thrift::TConnectionInfo &connInfo) override
         {
-            std::shared_ptr<apache::thrift::transport::TSocket> sock =
-                std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
+            auto sock = std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
 
             SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Incoming connection", _type_name);
             SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}:\tSocketInfo: {}", _type_name, sock->getSocketInfo());
@@ -66,7 +65,6 @@ namespace springtail::thrift {
          */
         void
         releaseHandler(I *handler) override {
-            // delete handler;
         }
     private:
         /** Name of the class that inherits from server */
@@ -128,8 +126,7 @@ namespace springtail::thrift {
             _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
             _thread_manager->start();
 
-            std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> server_socket =
-                std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
+            auto server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
 
             _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
                 std::make_shared<P>(std::make_shared<CloneFactory<T, S, F, I>>()),
