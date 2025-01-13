@@ -1191,13 +1191,13 @@ namespace springtail {
             PgMsgStreamHeader header(data.msg_length, data.starting_lsn, data.ending_lsn, data.proto_version);
             header.encode_header(buffer);
 
-            ::write(_fd, buffer, PgMsgStreamHeader::SIZE);
+            CHECK_EQ(::write(_fd, buffer, PgMsgStreamHeader::SIZE), PgMsgStreamHeader::SIZE);
             _current_offset += PgMsgStreamHeader::SIZE;
             _msg_end_offset = _current_offset + data.msg_length;
         }
 
         // write out message
-        ::write(_fd, data.buffer, data.length);
+        CHECK_EQ(::write(_fd, data.buffer, data.length), data.length);
         _current_offset += data.length;
 
         return _current_offset;

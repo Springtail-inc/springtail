@@ -315,7 +315,7 @@ namespace springtail::pg_proxy {
         // send signal to shutdown
         _shutdown = true;
         char buf[1] = {0};
-        write(_pipe[1], buf, 1);
+        std::ignore = write(_pipe[1], buf, 1);
 
         // other cleanup is down after while loop in run()
     }
@@ -442,7 +442,7 @@ namespace springtail::pg_proxy {
         lock.unlock();
 
         char buf[1] = {0};
-        write(_pipe[1], buf, 1);
+        std::ignore = write(_pipe[1], buf, 1);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", connection->get_socket());
     }
