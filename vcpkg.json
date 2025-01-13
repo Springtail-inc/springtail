@@ -1,5 +1,6 @@
 {
     "dependencies": [
+        "abseil",
         "libpq",
         "boost-program-options",
         "boost-container-hash",

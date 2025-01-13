@@ -28,7 +28,7 @@ namespace springtail {
     MutableBTree::init_empty()
     {
         // must not have already called init() or init_empty()
-        assert(_root == nullptr);
+        CHECK_EQ(_root, nullptr);
 
         // construct an empty extent
         auto cache_page = StorageCache::get_instance()->get(_file, constant::UNKNOWN_EXTENT, _xid);
@@ -49,7 +49,7 @@ namespace springtail {
     MutableBTree::init(uint64_t root_offset)
     {
         // must not have already called init() or init_empty()
-        assert(_root == nullptr);
+        CHECK_EQ(_root, nullptr);
 
         // construct an empty page to populate
         _root = std::make_shared<Page>(this, root_offset);
@@ -263,7 +263,7 @@ namespace springtail {
         for (auto &&i = new_pages.rbegin(); i != new_pages.rend(); i++) {
             auto &page = *i;
 
-            SPDLOG_INFO("Adding branch entry to child extent_id: {}", page->extent_id);
+            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Adding branch entry to child extent_id: {}", page->extent_id);
 
             // XXX need a better way to create a combined tuple
             auto value = std::make_shared<FieldArray>();
@@ -354,7 +354,7 @@ namespace springtail {
 
             auto page = std::make_shared<Page>(_btree, id, value_key, std::move(cache_page), _schema);
 
-            SPDLOG_INFO("Creating MutableBTree Page: {} {}", id, page->extent_id);
+            SPDLOG_DEBUG_MODULE(LOG_BTREE, "Creating MutableBTree Page: {} {}", id, page->extent_id);
 
             new_pages.push_back(page);
         }
@@ -851,7 +851,7 @@ namespace springtail {
             for (PagePtr child : new_pages) {
                 auto key = child->index_key();
 
-                SPDLOG_INFO("Adding root entry to child extent_id: {}", child->extent_id);
+                SPDLOG_DEBUG_MODULE(LOG_BTREE, "Adding root entry to child extent_id: {}", child->extent_id);
 
                 // XXX need a better way to populate this data
                 auto value = std::make_shared<FieldArray>();

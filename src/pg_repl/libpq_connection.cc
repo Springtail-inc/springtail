@@ -9,6 +9,7 @@
 #include <errno.h>
 
 #include <fmt/core.h>
+#include <absl/log/check.h>
 
 #include <pg_repl/libpq_connection.hh>
 #include <pg_repl/exception.hh>
@@ -187,7 +188,7 @@ namespace springtail {
             throw PgNotConnectedError();
         }
 
-        assert(_is_replication == false);
+        CHECK_EQ(_is_replication, false);
 
         // clear old result if there was one
         clear();

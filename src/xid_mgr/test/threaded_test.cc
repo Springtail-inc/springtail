@@ -53,11 +53,14 @@ namespace {
             for (auto &t : _threads) {
                 t.join();
             }
+            // shutdown client
+            XidMgrClient::shutdown();
             // shutdown server
             SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Shutting down server");
             XidMgrServer *server = XidMgrServer::get_instance();
-            server->shutdown();
+            server->stop();
             _server_thread.join();
+            server->shutdown();
         }
 
         static void run_clients(int thread_id, int iterations)

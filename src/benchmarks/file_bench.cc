@@ -28,18 +28,14 @@ writer(const std::filesystem::path &directory,
     // create the files for this writer thread
     std::vector<int> handles;
     for (int i = 0; i < file_count; i++) {
-        try {
-            std::string file_name = fmt::format("{:03d}", file_name_start + i);
+        std::string file_name = fmt::format("{:03d}", file_name_start + i);
 
-            // open a file handle
-            int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
-            if (handle < 0) {
-                std::cerr << "ERROR: creating file" << std::endl;
-            }
-            handles.push_back(handle);
-        } catch (std::exception &e) {
-            std::cerr << "Error: " << e.what() << std::endl;
+        // open a file handle
+        int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
+        if (handle < 0) {
+            std::cerr << "ERROR: creating file" << std::endl;
         }
+        handles.push_back(handle);
     }
 
     // create a block of data
@@ -131,17 +127,12 @@ concurrent_setup(const std::filesystem::path &directory,
                  int block_count,
                  int block_size)
 {
-    int handle;
-    try {
-        std::string file_name = "1";
+    std::string file_name = "1";
 
-        // open a file handle
-        handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
-        if (handle < 0) {
-            std::cerr << "Error opening: " << handle << std::endl;
-        }
-    } catch (std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+    // open a file handle
+    int handle = ::open((directory / file_name).c_str(), O_CREAT | O_RDWR, 00666);
+    if (handle < 0) {
+        std::cerr << "Error opening: " << handle << std::endl;
     }
 
     // create a block of data
@@ -171,19 +162,12 @@ concurrent_writer(const std::filesystem::path &directory,
                   int block_size,
                   int &iops)
 {
-    int handle;
-    try {
-        std::string file_name = "1";
-
-        // open a file handle
-        handle = ::open((directory / file_name).c_str(), O_APPEND | O_RDWR);
-        if (handle < 0) {
-            std::cerr << "ERROR: opening file for append" << std::endl;
-        }
-        ::lseek(handle, 0, SEEK_END);
-    } catch (std::exception &e) {
-        std::cerr << "ERROR: " << e.what() << std::endl;
+    std::string file_name = "1";
+    int handle = ::open((directory / file_name).c_str(), O_APPEND | O_RDWR);
+    if (handle < 0) {
+        std::cerr << "ERROR: opening file for append" << std::endl;
     }
+    ::lseek(handle, 0, SEEK_END);
 
     // create a block of data
     std::vector<char> buf(block_size);
@@ -215,18 +199,10 @@ concurrent_reader(const std::filesystem::path &directory,
                   int block_size,
                   int &iops)
 {
-    int handle;
-
-    try {
-        std::string file_name = "1";
-
-        // open a file handle
-        handle = ::open((directory / file_name).c_str(), O_RDONLY);
-        if (handle < 0) {
-            std::cerr << "ERROR: opening file for read" << std::endl;
-        }
-    } catch (std::exception &e) {
-        std::cerr << "ERROR: " << e.what() << std::endl;
+    std::string file_name = "1";
+    int handle = ::open((directory / file_name).c_str(), O_RDONLY);
+    if (handle < 0) {
+        std::cerr << "ERROR: opening file for read" << std::endl;
     }
 
     // create a block

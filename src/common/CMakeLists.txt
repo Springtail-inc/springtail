@@ -22,7 +22,8 @@ set(COMMON_LIB_SOURCES
 add_library(springtail_common ${COMMON_LIB_SOURCES})
 target_include_directories(springtail_common PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(springtail_common
-  PUBLIC cpptrace::cpptrace
+  PUBLIC absl::check
+         cpptrace::cpptrace
          spdlog::spdlog
          fmt::fmt
          redis++::redis++_static

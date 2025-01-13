@@ -2,6 +2,7 @@
 
 #include <boost/thread.hpp>
 
+#include <common/singleton.hh>
 #include <sys_tbl_mgr/table.hh>
 
 namespace springtail {
@@ -16,19 +17,9 @@ namespace springtail {
      * to the target XID as part of GC-1.  Then in GC-2 the system tables can be accessed via the
      * read-only Table interfaces using the target XID.
      */
-    class TableMgr {
+    class TableMgr : public Singleton<TableMgr> {
+        friend class Singleton<TableMgr>;
     public:
-        /**
-         * @brief getInstance() of singleton TableMgr; create if it doesn't exist.
-         * @return instance of TableMgr
-         */
-        static TableMgr *get_instance();
-
-        /**
-         * @brief Shutdown the TableMgr singleton.
-         */
-        static void shutdown();
-
         /**
          * Read the table metadata for the requested table ID.  Note that Table objects's are always
          * constructed at lsn == MAX_LSN within the provided xid.
@@ -85,13 +76,11 @@ namespace springtail {
         void finalize_metadata(uint64_t db_id, uint64_t xid);
 
     private:
-        static TableMgr *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
         /**
          * @brief Construct a new TableMgr object
          */
         TableMgr();
+        ~TableMgr() override = default;
 
         /**
          * Construct a system table.
@@ -102,11 +91,6 @@ namespace springtail {
          * Construct a mutable system table.
          */
         MutableTablePtr _get_mutable_system_table(uint64_t db_id, uint64_t table_id, uint64_t access_xid, uint64_t target_xid);
-
-    private:
-        // singleton; delete copy constructor
-        TableMgr(const TableMgr &) = delete;
-        void operator=(const TableMgr &) = delete;
 
         boost::shared_mutex _mutex; ///< Protects access to the table manager.
         std::filesystem::path _table_base; ///< The base directory for individual table directories.

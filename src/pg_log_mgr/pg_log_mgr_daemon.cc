@@ -5,6 +5,8 @@
 #include <common/properties.hh>
 
 #include <pg_log_mgr/pg_log_coordinator.hh>
+#include <xid_mgr/xid_mgr_client.hh>
+#include <sys_tbl_mgr/client.hh>
 
 using namespace springtail;
 
@@ -16,6 +18,8 @@ namespace {
         if (log_co != nullptr) {
             log_co->notify_shutdown();
         }
+        XidMgrClient::get_instance()->notify_shutdown();
+        sys_tbl_mgr::Client::get_instance()->notify_shutdown();
     }
 }
 
@@ -54,6 +58,8 @@ int main(int argc, char *argv[])
 
     log_co->wait_shutdown();
     pg_log_mgr::PgLogCoordinator::shutdown();
+    sys_tbl_mgr::Client::shutdown();
+    XidMgrClient::shutdown();
 
     return 0;
 }

@@ -9,6 +9,8 @@
 
 #include <xxhash.h>
 
+#include <absl/log/check.h>
+
 #include <storage/io_file.hh>
 #include <storage/io.hh>
 #include <storage/exception.hh>
@@ -104,7 +106,7 @@ namespace springtail {
         // lock file object
         std::unique_lock<std::mutex> lock(_mutex);
 
-        assert(fh->is_busy == true);
+        CHECK_EQ(fh->is_busy, true);
 
         fh->is_busy = false;
         _in_use_count--;
@@ -141,7 +143,7 @@ namespace springtail {
         // close all open FHs
         while (!_read_fhs.empty()) {
             std::shared_ptr<IOSysFH> fh = _read_fhs.back();
-            assert(fh->is_busy == false);
+            CHECK_EQ(fh->is_busy, false);
             _read_fhs.pop_back();
             fh->close();
         }
@@ -372,7 +374,7 @@ namespace springtail {
             request->complete(response, errno);
             return;
         }
-        assert(bytes_read == total_size);
+        CHECK_EQ(bytes_read, total_size);
 
         SPDLOG_DEBUG_MODULE(LOG_STORAGE, "IOSysFH::read bytes read={}, hdr_off={}", bytes_read, hdr_off);
 
@@ -501,7 +503,7 @@ namespace springtail {
         // do the write
         int bytes_written = ::pwritev(_fd, iov, count+1, offset);
         if (bytes_written > 0) {
-            assert(bytes_written == total_size);
+            CHECK_EQ(bytes_written, total_size);
         } else if (bytes_written < 0) {
             SPDLOG_ERROR("Recevied write error: errno={}", errno);
         }
@@ -555,7 +557,7 @@ namespace springtail {
     void
     IOSysFH::write(IORequestWrite * const request)
     {
-        assert(_is_compressed == false);
+        CHECK_EQ(_is_compressed, false);
 
         // default error response
         std::shared_ptr<IOResponseWrite> response = std::make_shared<IOResponseWrite>(request);
