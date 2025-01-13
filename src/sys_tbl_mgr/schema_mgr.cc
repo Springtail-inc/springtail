@@ -9,32 +9,6 @@
 #include <sys_tbl_mgr/table_mgr.hh>
 
 namespace springtail {
-    /* static member initialization must happen outside of class */
-    SchemaMgr* SchemaMgr::_instance {nullptr};
-    boost::mutex SchemaMgr::_instance_mutex;
-
-    SchemaMgr *
-    SchemaMgr::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new SchemaMgr();
-        }
-
-        return _instance;
-    }
-
-    void
-    SchemaMgr::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
 
     SchemaMgr::SchemaMgr()
     {
