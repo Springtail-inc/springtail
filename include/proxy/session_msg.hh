@@ -41,6 +41,7 @@ namespace springtail::pg_proxy {
             MSG_SERVER_CLIENT_MSG_SUCCESS=52, ///< message response; success
             MSG_SERVER_CLIENT_MSG_ERROR=53,   ///< message response; success
             MSG_SERVER_CLIENT_COPY_READY=54,  ///< ready to receive copy data; no data
+            MSG_SERVER_CLIENT_FORWARD=55,     ///< forward packet; data buffer
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
 
