@@ -14,33 +14,6 @@
 
 
 namespace springtail::sys_tbl_mgr {
-    /* static member initialization must happen outside of class */
-    Service* Service::_instance {nullptr};
-    boost::mutex Service::_instance_mutex;
-
-    Service *
-    Service::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new Service();
-        }
-
-        return _instance;
-    }
-
-    void
-    Service::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
-
     void
     Service::ping(Status& _return)
     {
@@ -64,11 +37,11 @@ namespace springtail::sys_tbl_mgr {
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
-    IndexInfo 
+    IndexInfo
     Service::_get_index_info(const GetIndexInfoRequest &request)
     {
         XidLsn xid(request.xid, request.lsn);
-        auto info = _find_index(request.db_id, request.index_id, xid);
+        auto info = _find_index(request.db_id, request.index_id, xid, request.table_id);
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
                             request.db_id, request.xid, request.index_id);
@@ -144,7 +117,7 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    void 
+    void
     Service::get_index_info(IndexInfo& _return, const GetIndexInfoRequest &request)
     {
         SPDLOG_INFO("got get_index_info()");
@@ -234,13 +207,19 @@ namespace springtail::sys_tbl_mgr {
     }
 
     std::optional<std::pair<IndexInfo, XidLsn>> 
-    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid)
+    Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid, std::optional<uint64_t> optional_tid)
     {
+        // All tables share the same primary index id, and the table id is required in this case.
+        // For other indexes we use PG OID that must be unique and tid is optional
+        assert( index_id != constant::INDEX_PRIMARY || optional_tid);
+
+        uint64_t tid = optional_tid? *optional_tid: 0;
+
         auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
+        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(tid, index_id, 0, 0);
 
         XidLsn index_xid;
         uint64_t table_id = 0;
@@ -271,8 +250,13 @@ namespace springtail::sys_tbl_mgr {
                     continue;
                 }
             }
+            auto found_tid  = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            if (tid && tid != found_tid) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found a dupoicate index id {} -- {}, {}/{}", db_id, index_id, tid, found_tid);
+                break;
+            }
 
-            table_id = names_fields->at(sys_tbl::IndexNames::Data::TABLE_ID)->get_uint64(row);
+            table_id = found_tid;
             is_unique = names_fields->at(sys_tbl::IndexNames::Data::IS_UNIQUE)->get_bool(row);
             name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
             schema = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE)->get_text(row);
@@ -295,20 +279,23 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id)
+    Service::_drop_index(const XidLsn& xid, uint64_t db_id, uint64_t index_id, std::optional<uint64_t> tid)
     {
         auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        auto search_key = sys_tbl::IndexNames::Primary::key_tuple(0, index_id, 0, 0);
-
         //find the last record for the index id
-        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0});
+        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0}, tid);
 
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}",
-                            db_id, xid.xid, index_id);
+                    db_id, xid.xid, index_id);
+            return;
+        }
+        if (static_cast<sys_tbl::IndexNames::State>(info->first.state) == sys_tbl::IndexNames::State::DELETED) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}",
+                    db_id, xid.xid, index_id);
             return;
         }
 
@@ -464,7 +451,7 @@ namespace springtail::sys_tbl_mgr {
     Service::drop_table(DDLStatement& _return,
                         const DropTableRequest &request)
     {
-        SPDLOG_INFO("got drop_table()");
+        SPDLOG_INFO("got drop_table() {}@{}:{}", request.table_id, request.xid, request.lsn);
 
         // hold a shared lock to prevent a concurrent finalize()
         boost::shared_lock lock(_write_mutex);
@@ -489,11 +476,11 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
 
         // drop indexes
-        
+
         auto indexes = _read_schema_indexes(request.db_id, request.table_id, xid);
 
         for (auto const& idx: indexes) {
-            _drop_index(xid, request.db_id, idx.id); 
+            _drop_index(xid, request.db_id, idx.id, request.table_id); 
         }
 
         // mark the table as dropped in the table_names
@@ -1061,7 +1048,7 @@ namespace springtail::sys_tbl_mgr {
         return info;
     }
 
-    std::vector<IndexInfo> 
+    std::vector<IndexInfo>
     Service::_read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid)
     {
         std::vector<IndexInfo> indexes;

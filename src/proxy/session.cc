@@ -283,7 +283,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[5];
         ssize_t n = _connection->read(buffer, 5, 5); // read at most 5B
-        assert(n == 5);
+        CHECK_EQ(n, 5);
 
         // op code
         char code = buffer[0];
@@ -341,7 +341,7 @@ namespace springtail::pg_proxy {
             BufferPtr tail = blist.buffers.back();
             int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
             tail->incr_size(rd);
-            assert(rd == offset-n);
+            CHECK_EQ(rd, offset-n);
         }
     }
 
@@ -358,7 +358,7 @@ namespace springtail::pg_proxy {
         int n;
         if (!_is_shadow) {
             n = _associated_session->get_connection()->write(buffer, 5);
-            assert (n == 5);
+            CHECK_EQ(n, 5);
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
         }
 
@@ -369,14 +369,14 @@ namespace springtail::pg_proxy {
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
             int n = _connection->read(buffer, read_length, read_length);
-            assert (n == read_length);
+            CHECK_EQ(n, read_length);
 
             // log the buffer as incoming
             _log_buffer(true, code, n, buffer, seq_id, n == msg_length);
 
             if (!_is_shadow) {
                 int m = _associated_session->get_connection()->write(buffer, n);
-                assert (m == n);
+                CHECK_EQ(m, n);
 
                 // log the buffer as outgoing from associated session
                 _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
@@ -410,7 +410,7 @@ namespace springtail::pg_proxy {
 
             // send data
             n = _associated_session->get_connection()->write(data, msg_length);
-            assert(n == msg_length);
+            CHECK_EQ(n, msg_length);
 
             // log the buffer as outgoing from associated session
             _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);

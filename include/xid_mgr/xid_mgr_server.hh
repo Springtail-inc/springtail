@@ -8,9 +8,12 @@
 #include <filesystem>
 
 #include <common/singleton.hh>
-#include <thrift/server/TServer.h>
+
+#include <thrift/xid_mgr/ThriftXidMgr.h>
+#include <thrift/common/thrift_server.hh>
 
 #include <xid_mgr/xid_partition.hh>
+#include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
 
@@ -19,13 +22,16 @@ namespace springtail::xid_mgr {
      * @brief This class represents a server for managing transaction IDs (XIDs).
      *        It provides functionality to allocate XID ranges, commit XIDs, and retrieve the latest committed XID.
      */
-    class XidMgrServer final : public Singleton<XidMgrServer>
+    class XidMgrServer final :
+            public springtail::thrift::Server<XidMgrServer,
+                                            thrift::xid_mgr::ThriftXidMgrProcessorFactory,
+                                            ThriftXidMgrService,
+                                            thrift::xid_mgr::ThriftXidMgrIfFactory,
+                                            thrift::xid_mgr::ThriftXidMgrIf>,
+            public Singleton<XidMgrServer>
     {
         friend class Singleton<XidMgrServer>;
     public:
-
-       void startup();
-
         // interfaces from thrift
 
         /**
@@ -62,19 +68,10 @@ namespace springtail::xid_mgr {
         /**
          * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
          */
-         ~XidMgrServer() = default;
-
-        /** number of worker threads */
-        int _worker_thread_count;
-
-        /** server port */
-        int _port;
+         ~XidMgrServer() override = default;
 
         /** base path */
         std::filesystem::path _base_path;
-
-        /** The thrift server. */
-        std::shared_ptr<apache::thrift::server::TServer> _server;
 
         std::shared_mutex _mutex;
 
@@ -83,8 +80,6 @@ namespace springtail::xid_mgr {
 
         /** map of db_id to partitions */
         std::map<uint64_t, PartitionPtr> _partition_map;
-
-        std::atomic<bool> _shutting_down = false;
 
         /**
          * @brief Get a partition based on a db_id, optionally create it

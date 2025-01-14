@@ -20,7 +20,7 @@ namespace {
 
     void PrintTo(const CacheSize& cacheSize, std::ostream* os) {
         // Customize the output here as needed
-        if (cacheSize.data_cache_size == 32) {
+        if (cacheSize.data_cache_size < 128) {
             *os << "small_cache";
         } else {
             *os << "large_cache";

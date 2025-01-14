@@ -5,6 +5,7 @@ find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(absl CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 find_package(Boost COMPONENTS thread REQUIRED)
 
@@ -16,7 +17,7 @@ target_include_directories(springtail_storage
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
-         springtail_write_cache)
+         springtail_write_cache absl::check)
 
 
 ## helpers

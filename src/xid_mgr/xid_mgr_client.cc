@@ -14,19 +14,8 @@
 #include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_client.hh>
-#include <xid_mgr/xid_mgr_client_factory.hh>
 
 namespace springtail {
-
-    std::once_flag XidMgrClient::_init_flag;
-
-    XidMgrClient *XidMgrClient::_instance {nullptr};
-
-    void
-    XidMgrClient::init()
-    {
-        _instance = new XidMgrClient();
-    }
 
     XidMgrClient::XidMgrClient()
     {
@@ -49,14 +38,7 @@ namespace springtail {
 
         std::string server = Properties::get_xid_mgr_hostname();
 
-        // construct the thrift client pool.
-        // First argument is a factory object that constructs a thrift clients
-        // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<thrift::xid_mgr::ThriftXidMgrClient>>(
-            std::make_shared<XidMgrThriftObjectFactory>(server, port),
-            max_connections/2,
-            max_connections
-        );
+        init(server, port, max_connections);
     }
 
     // exposed client service interface below
@@ -64,11 +46,10 @@ namespace springtail {
     void
     XidMgrClient::ping()
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
-
-        c.client->ping(result);
-
+        _invoke_with_retries([&result](ThriftClient &c) {
+            c.client->ping(result);
+        });
         std::cout << "Ping got: " << result.message << std::endl;
         return;
     }
@@ -76,30 +57,29 @@ namespace springtail {
     void
     XidMgrClient::commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_change)
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
-
-        c.client->commit_xid(result, db_id, xid, has_schema_change);
-
+        _invoke_with_retries([&result, db_id, xid, has_schema_change](ThriftClient &c) {
+            c.client->commit_xid(result, db_id, xid, has_schema_change);
+        });
     }
 
     void
     XidMgrClient::record_ddl_change(uint64_t db_id, uint64_t xid)
     {
-        ThriftClient c = _get_client();
         thrift::xid_mgr::Status result;
 
-        c.client->record_ddl_change(result, db_id, xid);
-
+        _invoke_with_retries([&result, db_id, xid](ThriftClient &c) {
+            c.client->record_ddl_change(result, db_id, xid);
+        });
     }
 
     uint64_t
     XidMgrClient::get_committed_xid(uint64_t db_id, uint64_t schema_xid)
     {
-        ThriftClient c = _get_client();
-
-        thrift::xid_mgr::xid_t xid = c.client->get_committed_xid(db_id, schema_xid);
-
+        thrift::xid_mgr::xid_t xid = 0;
+        _invoke_with_retries([&xid, db_id, schema_xid](ThriftClient &c) {
+            xid = c.client->get_committed_xid(db_id, schema_xid);
+        });
         return xid;
     }
 }

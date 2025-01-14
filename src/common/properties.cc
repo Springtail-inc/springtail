@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <absl/log/check.h>
 #include <nlohmann/json.hpp>
 
 #include <common/exception.hh>
@@ -167,6 +168,7 @@ namespace springtail {
         _json[ORG_CONFIG] = system_json["org"];
         _json[FS_CONFIG] = system_json["fs"];
         _json[PROXY_CONFIG] = system_json["proxy"];
+        _json[OTEL_CONFIG] = system_json["otel"];
 
         // get the redis client
         _create_redis_client();
@@ -333,7 +335,7 @@ namespace springtail {
                     key = props.substr(start, token - start);
                     next_token = ";";
                 } else {
-                    assert(props[token] == '.');
+                    CHECK_EQ(props[token], '.');
                     key = props.substr(start, token - start);
                     item = &((*item)[key]);
                 }

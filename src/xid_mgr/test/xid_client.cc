@@ -69,5 +69,6 @@ main(int argc, char **argv)
         xid_mgr->commit_xid(db_id, xid, false);
     }
 
+    XidMgrClient::shutdown();
     return 0;
 }

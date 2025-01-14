@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <mutex>
 
@@ -28,40 +30,5 @@ namespace springtail {
     private:
         ThriftXidMgrService() = default;
         ~ThriftXidMgrService() = default;
-    };
-
-
-    /**
-     * @brief Private helper class to override handler creation;
-     *        can be used to store per connection state or log incoming connections
-     */
-    class ThriftXidMgrCloneFactory : virtual public thrift::xid_mgr::ThriftXidMgrIfFactory {
-        public:
-            ~ThriftXidMgrCloneFactory() override = default;
-
-            /**
-             * @brief Override the thrift getHandler call, allows for logging
-             * @param connInfo Thrift connection info object
-             * @return thrift::xid_mgr::ThriftXidMgrIf*
-             */
-            thrift::xid_mgr::ThriftXidMgrIf*
-            getHandler(const apache::thrift::TConnectionInfo &connInfo) override
-            {
-                std::shared_ptr<apache::thrift::transport::TSocket> sock =
-                    std::dynamic_pointer_cast<apache::thrift::transport::TSocket>(connInfo.transport);
-
-                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "Incoming connection");
-                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tSocketInfo: {}", sock->getSocketInfo());
-                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerHost: {}", sock->getPeerHost());
-                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerAddress: {}", sock->getPeerAddress());
-                SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "\tPeerPort: {}", sock->getPeerPort());
-
-                return ThriftXidMgrService::get_instance();
-            }
-
-            void
-            releaseHandler(thrift::xid_mgr::ThriftXidMgrIf *handler) override {
-                // delete handler;
-            }
     };
 }

@@ -121,5 +121,8 @@
             "fdw_user": "springtail",
             "db_prefix": "replica_"
         }
+    },
+    "otel": {
+	"enabled": true
     }
 }

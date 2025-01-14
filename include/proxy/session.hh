@@ -158,7 +158,7 @@ namespace springtail::pg_proxy {
         /** Clear associated session from this and remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
-            assert(_waiting_on_session == true);
+            CHECK_EQ(_waiting_on_session, true);
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
             _waiting_on_session = false;
             _associated_session->_associated_session = nullptr;
@@ -214,7 +214,7 @@ namespace springtail::pg_proxy {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
-            assert(_associated_session == nullptr);
+            CHECK_EQ(_associated_session, nullptr);
             _state = ERROR;
             _handle_error();
         }
