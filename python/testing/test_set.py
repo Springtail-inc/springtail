@@ -178,7 +178,7 @@ class TestSet:
         """Generates a report about the test set"""
         results = [ self._tests[t].get_result() for t in self._tests ]
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
-        failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+        failed_tests = sum(1 for r in results if r['result'] == 'FAILED' or r['result'] == 'ERROR')
 
         print('\n')
         print(f'--- Test Summary: {os.path.basename(self._directory)} ---')
