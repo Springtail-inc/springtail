@@ -1,6 +1,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <absl/log/check.h>
+
 #include <proxy/logger.hh>
 
 using namespace springtail::pg_proxy;
@@ -21,7 +23,7 @@ int main(void) {
     uint64_t value;
     if (file.read(reinterpret_cast<char*>(&value), sizeof(value))) {
         std::cout << fmt::format("Read value: {:#X}\n", value);
-        assert(value == data);
+        CHECK_EQ(value, data);
     } else {
         std::cerr << "Failed to read value from file." << std::endl;
     }

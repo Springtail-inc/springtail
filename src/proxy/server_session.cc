@@ -86,7 +86,7 @@ namespace springtail::pg_proxy {
         // entry point for message processing from client session
         switch(msg->type()) {
         case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
-            assert(_state == STARTUP);
+            CHECK_EQ(_state, STARTUP);
 
             _seq_id = msg->seq_id();
 
@@ -438,7 +438,7 @@ namespace springtail::pg_proxy {
                 }
 
                 // done with auth, this should be last message
-                assert(_state == AUTH_DONE);
+                CHECK_EQ(_state, AUTH_DONE);
 
                 // auth response, at this point should be AUTH_OK
                 int32_t status =  buffer->get32();
@@ -476,7 +476,7 @@ namespace springtail::pg_proxy {
 
             case 'K':
                 // backend key data
-                assert(_state == AUTH_DONE);
+                CHECK_EQ(_state, AUTH_DONE);
                 // get the backend pid and key for cancel
                 _pid = buffer->get32();
                 _cancel_key = buffer->get32();
@@ -576,7 +576,7 @@ namespace springtail::pg_proxy {
         // Just one character: 'N' no ssl or 'S' yes ssl
         char ssl_response;
         ssize_t n = _connection->read(&ssl_response, 1, 1);
-        assert(n==1);
+        CHECK_EQ(n, 1);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
         if (ssl_response == 'S') {
@@ -1161,7 +1161,7 @@ namespace springtail::pg_proxy {
     {
         // send the buffer to the server
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log the buffer
         _log_buffer(false, code, buffer->size(), buffer->data(), seq_id);

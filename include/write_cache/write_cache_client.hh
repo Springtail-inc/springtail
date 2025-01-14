@@ -7,14 +7,19 @@
 #include <string_view>
 #include <iostream>
 
-#include <common/object_pool.hh>
+#include <common/singleton.hh>
 
 #include <thrift/write_cache/ThriftWriteCache.h> // generated file
+#include <thrift/common/thrift_client.hh>
+
 
 namespace springtail {
 
-    class WriteCacheClient
+    class WriteCacheClient :
+        public thrift::Client<WriteCacheClient, thrift::write_cache::ThriftWriteCacheClient>,
+        public Singleton<WriteCacheClient>
     {
+        friend class Singleton<WriteCacheClient>;
     public:
 
         struct WriteCacheExtent {
@@ -22,17 +27,6 @@ namespace springtail {
             uint64_t lsn;
             std::string data;
         };
-
-        /**
-         * @brief Get the singleton write cache client instance object
-         * @return WriteCacheClient *
-         */
-        static WriteCacheClient *get_instance();
-
-        /**
-         * @brief Shutdown cache
-         */
-        static void shutdown();
 
         /**
          * @brief Ping the server
@@ -135,6 +129,7 @@ namespace springtail {
         /** Mutex protecting _instance in get_instance() */
         static std::mutex _instance_mutex;
 
+    private:
         /**
          * @brief Construct a new Write Cache Client object
          */
@@ -143,39 +138,7 @@ namespace springtail {
         /**
          * @brief Destroy the Write Cache Client object; shouldn't be called directly use shutdown()
          */
-        ~WriteCacheClient() {}
-
-    private:
-        // delete copy constructor
-        WriteCacheClient(const WriteCacheClient &) = delete;
-        void operator=(const WriteCacheClient &)   = delete;
-
-        // the following is for handling cached thrift clients from the object pool
-        // we wrap the client in a struct whose deallocator will release it back to the pool
-
-        /** Thrift client object pool */
-        std::shared_ptr<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>> _thrift_client_pool;
-
-        /** Struct to wrap the client pool and client object to ensure it gets release back */
-        struct ThriftClient {
-            std::shared_ptr<ObjectPool<thrift::write_cache::ThriftWriteCacheClient>> pool;
-            std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client;
-            ~ThriftClient() {
-                pool->put(client);
-            }
-        };
-
-        /**
-         * @brief Helper function to fetch a thrift client from the object pool wrapped in
-         *        a struct to ensure its proper release to the pool
-         */
-        inline ThriftClient _get_client()
-        {
-            std::shared_ptr<thrift::write_cache::ThriftWriteCacheClient> client = _thrift_client_pool->get();
-            ThriftClient c = { _thrift_client_pool, client };
-            return c;
-        }
-
+        ~WriteCacheClient() override = default;
     };
 
 } // namespace springtail

@@ -3,6 +3,7 @@
 #include <boost/thread.hpp>
 
 #include <common/constants.hh>
+#include <common/singleton.hh>
 #include <storage/schema.hh>
 #include <storage/xid.hh>
 
@@ -13,18 +14,10 @@ namespace springtail {
     /** Interface for accessing all of the schemas for a specific table.  This includes retrieving
      *  the data schema, primary and secondary index schemas, and data in the write cache -- all at
      *  a specific XID. */
-    class SchemaMgr {
+    class SchemaMgr : public Singleton<SchemaMgr>
+    {
+        friend class Singleton<SchemaMgr>;
     public:
-        /**
-         * @brief getInstance() of singleton SchemaMgr; create if it doesn't exist.
-         * @return instance of SchemaMgr
-         */
-        static SchemaMgr *get_instance();
-
-        /**
-         * @brief Shutdown the SchemaMgr singleton.
-         */
-        static void shutdown();
 
         /**
          * Retrieve the column metadata for a given table at a given XID/LSN.
@@ -53,16 +46,14 @@ namespace springtail {
          */
         std::shared_ptr<ExtentSchema> get_extent_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
-    protected:
-        static SchemaMgr *_instance; ///< static instance (singleton)
-        static boost::mutex _instance_mutex; ///< protects lookup/creation of singleton _instance
-
+    private:
         /**
          * @brief Construct a new SchemaMgr object
          */
         SchemaMgr();
 
-    private:
+        ~SchemaMgr() override = default;
+
         /**
          * A key for the system schema cache.
          */

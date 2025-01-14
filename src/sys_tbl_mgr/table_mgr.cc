@@ -20,7 +20,7 @@ namespace springtail {
 
         uint32_t idx_position = 0;
         for (auto const& col: Table::Secondary::KEY) {
-            // find the 
+            // find the
             auto it = std::ranges::find_if(Table::Data::SCHEMA, [&](auto const& v)
                     {
                     return col == v.name;
@@ -32,33 +32,6 @@ namespace springtail {
         }
         keys.push_back(idx);
         return keys;
-    }
-
-    /* static member initialization must happen outside of class */
-    TableMgr* TableMgr::_instance {nullptr};
-    boost::mutex TableMgr::_instance_mutex;
-
-    TableMgr *
-    TableMgr::get_instance()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new TableMgr();
-        }
-
-        return _instance;
-    }
-
-    void
-    TableMgr::shutdown()
-    {
-        boost::unique_lock lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
     }
 
     TableMgr::TableMgr()
@@ -243,7 +216,7 @@ namespace springtail {
                                            secondary_keys, tbl_meta, schema);
         }
         default:
-            assert(0);
+            CHECK(0);
         }
     }
 

@@ -197,7 +197,7 @@ namespace springtail::pg_proxy {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
-            assert(_associated_session == nullptr);
+            CHECK_EQ(_associated_session, nullptr);
             _state = ERROR;
             _handle_error();
         }

@@ -8,17 +8,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <thrift/transport/TSocket.h>
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TCompactProtocol.h>
-#include <thrift/server/TThreadPoolServer.h>
-
 #include <common/common.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
-
-#include <thrift/xid_mgr/ThriftXidMgr.h>
 
 #include <xid_mgr/xid_mgr_server.hh>
 #include <xid_mgr/xid_mgr_service.hh>
@@ -37,8 +30,8 @@ namespace springtail::xid_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
 
-        _port = Json::get_or<int>(server_json, "port", 55051);
-        _worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
+        int port = Json::get_or<int>(server_json, "port", 55051);
+        int worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
 
         std::string base_path;
         Json::get_to<std::string>(server_json, "base_path", base_path);
@@ -52,32 +45,7 @@ namespace springtail::xid_mgr {
 
         // iterate over all files in the base path creating partitions
         _load_partitions();
-    }
-
-    /**
-     * Startup thrift threaded server; called by the static startup().
-     */
-    void
-    XidMgrServer::startup()
-    {
-        // create a thread manager with right number of worker threads
-        std::shared_ptr<apache::thrift::concurrency::ThreadManager> threadManager =
-          apache::thrift::concurrency::ThreadManager::newSimpleThreadManager(_worker_thread_count);
-
-        threadManager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
-        threadManager->start();
-
-        auto socket =
-
-        _server = std::make_shared<apache::thrift::server::TThreadPoolServer>(
-            std::make_shared<thrift::xid_mgr::ThriftXidMgrProcessorFactory>(std::make_shared<ThriftXidMgrCloneFactory>()),
-            std::make_shared<apache::thrift::transport::TServerSocket>(_port),
-            std::make_shared<apache::thrift::transport::TFramedTransportFactory>(),
-            std::make_shared<apache::thrift::protocol::TCompactProtocolFactory>(),
-            threadManager
-        );
-
-        _server->serve();
+        init(worker_thread_count, port);
     }
 
     void
@@ -129,13 +97,13 @@ namespace springtail::xid_mgr {
     void
     XidMgrServer::_internal_shutdown()
     {
+        stop();
         std::unique_lock lock(_mutex);
         // iterate over partitions and shutdown
         for (auto &partition : _partitions) {
             partition->shutdown();
         }
         lock.unlock();
-        _server->stop();
     }
 
     PartitionPtr

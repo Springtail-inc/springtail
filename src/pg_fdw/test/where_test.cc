@@ -295,6 +295,7 @@ namespace {
                             valid = data >= value;
                             break;
                         default:
+                            CHECK(false) << "Invalid operator";
                             break;
                     }
                     row_valid &= valid;
