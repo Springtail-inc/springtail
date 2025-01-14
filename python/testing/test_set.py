@@ -178,7 +178,7 @@ class TestSet:
         """Generates a report about the test set"""
         results = [ self._tests[t].get_result() for t in self._tests ]
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
-        failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+        failed_tests = sum(1 for r in results if r['result'] == 'FAILED' or r['result'] == 'ERROR')
         skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
 
         print('\n')
