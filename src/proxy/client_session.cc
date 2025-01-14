@@ -739,18 +739,10 @@ namespace springtail::pg_proxy {
                 }
                 // fall through if we have an associated session
                 // to forward the message
-                {
-                    char *bp = buffer->current_data();
-                    std::string str={};
-                    for (int i = 0; i < std::min(10,len); i++) {
-                        str += fmt::format("{}", bp[i]);
-                        bp++;
-                    }
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}, data={}", _id, code, len, str);
-                }
             case 'H':  // flush
             case 'f':  // copy fail
                 // forward to server, should have associated server session
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
                 _forward_to_server(buffer, seq_id);
                 break;
 
