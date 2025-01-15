@@ -32,6 +32,8 @@ namespace pg_proxy {
         "set_config"
     };
 
+    /* NOTE: removed lo_* functions for managing large objects,
+     * some of these functions are readonly but large objects are only stored on primary */
     static const std::set<std::string> proxy_safe_functions = {
         "abbrev",
         "abs",
@@ -906,13 +908,6 @@ namespace pg_proxy {
         "line_send",
         "line_vertical",
         "ln",
-        "lo_close",
-        "lo_lseek",
-        "lo_lseek64",
-        "lo_tell",
-        "lo_tell64",
-        "lo_truncate",
-        "lo_truncate64",
         "log",
         "log10",
         "loread",

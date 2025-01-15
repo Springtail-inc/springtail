@@ -80,7 +80,9 @@ namespace springtail::pg_proxy {
          * @brief Pin this session to a client session
          * @param client_session client session to pin
          */
-        void pin_client_session(std::weak_ptr<ClientSession> client_session) {
+        void pin_client_session(std::shared_ptr<ClientSession> client_session) {
+            // internally the session.cc code uses the associated session
+            set_associated_session(client_session);
             _client_session = client_session;
             _is_pinned = true;
         }
@@ -223,7 +225,7 @@ namespace springtail::pg_proxy {
         void _handle_message_from_server();
 
         /** Handle error code 'E' */
-        void _handle_error_code(BufferPtr buffer, uint64_t seq_id);
+        void _decode_error_buffer(BufferPtr buffer, uint64_t seq_id);
 
         /** Handle md5 auth send response */
         void _handle_auth_md5(BufferPtr buffer);
@@ -258,8 +260,13 @@ namespace springtail::pg_proxy {
         /** Process response from server in reset session state */
         void _handle_reset_session_message();
 
-        /** Helper to read in message */
-        BufferPtr _read_message(int msg_length);
+        /** Helper to read in message; buffer contains header (code, msg_length), points past hdr */
+        BufferPtr _read_message(char code, int msg_length);
+
+        /** Helper to read data and drop it */
+        void _read_and_drop_message(int msg_length);
+
+        QueryStmt::Type _get_pending_query_type();
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
     using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;
