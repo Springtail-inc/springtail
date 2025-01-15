@@ -2407,7 +2407,8 @@ CREATE TABLE owned_by_me (
 ) PARTITION BY LIST (a);
 ALTER TABLE owned_by_me ATTACH PARTITION not_owned_by_me FOR VALUES IN (1);
 RESET SESSION AUTHORIZATION;
-DROP TABLE owned_by_me, not_owned_by_me;
+DROP TABLE owned_by_me;
+DROP TABLE not_owned_by_me;
 DROP ROLE regress_test_not_me;
 DROP ROLE regress_test_me;
 
