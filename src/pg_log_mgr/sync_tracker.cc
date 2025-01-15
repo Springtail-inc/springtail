@@ -85,6 +85,7 @@ namespace springtail::pg_log_mgr {
         // get the map for this database
         auto db_i = _sync_map.find(db_id);
         if (db_i == _sync_map.end()) {
+            SPDLOG_DEBUG_MODULE(LOG_GC, "didn't find db {} pg_xid {}", db_id, pg_xid);
             return {}; // no ongoing sync
         }
 
@@ -107,6 +108,7 @@ namespace springtail::pg_log_mgr {
 
         // if nothing is completed, then we have to wait to swap/commit
         if (completed.empty()) {
+            SPDLOG_DEBUG_MODULE(LOG_GC, "no completed db {} pg_xid {}", db_id, pg_xid);
             return {};
         }
 
