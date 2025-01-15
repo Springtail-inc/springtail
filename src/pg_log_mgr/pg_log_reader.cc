@@ -573,9 +573,39 @@ namespace springtail::pg_log_mgr {
                 _process_ddl(index_msg.oid, index_msg.xid, msg->is_streaming, msg);
                 break;
             }
+        case PgMsgEnum::COPY_SYNC:
+            {
+                const auto &sync_msg = std::get<PgMsgCopySync>(msg->msg);
+                _check_sync_commit(_db_id, sync_msg.pg_xid, sync_msg.target_xid);
+                break;
+            }
+
         default:
             SPDLOG_WARN("Unknown message type: {}", static_cast<uint8_t>(msg->msg_type));
             break;
+        }
+    }
+
+    void
+    PgLogReader::_check_sync_commit(uint64_t db_id,
+                                    int32_t pg_xid,
+                                    uint64_t xid)
+    {
+        // check if we need to perform a table swap / commit before proceeding
+        auto &&xid_msg = SyncTracker::get_instance()->check_commit(db_id, pg_xid);
+        if (xid_msg) {
+            // connect to the committer queue
+            RedisQueue<gc::XidReady>
+                committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,
+                                            Properties::get_db_instance_id()));
+
+            // synchronously issue the swap/commit at the GC-2 prior to processing this xid
+            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", db_id, xid);
+            committer_queue.push(*xid_msg);
+
+            // once the swap/commit is complete, we can clear the entry from the sync
+            // tracker and continue processing
+            SyncTracker::get_instance()->clear_tables(db_id, *xid_msg);
         }
     }
 
@@ -626,22 +656,7 @@ namespace springtail::pg_log_mgr {
                                         Properties::get_db_instance_id()));
 
         // check if we need to perform a table swap / commit before proceeding
-        auto &&xid_msg = SyncTracker::get_instance()->check_commit(_db_id, xact->xid);
-        if (xid_msg) {
-            // synchronously issue the swap/commit at the GC-2 prior to processing this xid
-            SPDLOG_DEBUG_MODULE(LOG_GC, "Issue TABLE_SYNC_COMMIT on {} @ {}", _db_id, xid);
-            committer_queue.push(*xid_msg);
-
-            // block until the Committer notifies us that the swap/commit is complete
-            // XXX We could optimistically continue and only block if we attempt to
-            //     mutate a table being swapped prior to the TABLE_SYNC_COMMIT
-            //     completing.
-            // _parser_notify.pop_and_commit();
-
-            // once the swap/commit is complete, we can clear the entry from the sync
-            // tracker and continue processing
-            SyncTracker::get_instance()->clear_tables(_db_id, *xid_msg);
-        }
+        _check_sync_commit(_db_id, xact->xid, xid);
 
         // message the Committer
         SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
