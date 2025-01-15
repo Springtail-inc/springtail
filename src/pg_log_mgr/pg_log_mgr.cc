@@ -351,6 +351,8 @@ namespace springtail::pg_log_mgr {
             PgXactMsg redis_xact(_db_id, r);
 
             bool sync_start = SyncTracker::get_instance()->add_sync(std::get<pg_log_mgr::PgXactMsg::TableSyncMsg>(redis_xact.msg));
+
+            // notify the Committer to stop committing XIDs
             if (sync_start) {
                 RedisQueue<gc::XidReady>
                     committer_queue(fmt::format(redis::QUEUE_GC_XID_READY,

@@ -241,5 +241,9 @@ namespace springtail::pg_log_mgr {
 
         /** Process ddl change message; add oid to xact oid set */
         void _process_ddl(uint32_t oid, int32_t xid, bool is_streaming, PgMsgPtr msg);
+
+        /** Check if we need to perform a table swap / commit and notify the Committer if so. */
+        void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
+
     };
 } // namespace springtail::pg_log_mgr
