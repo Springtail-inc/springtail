@@ -228,14 +228,17 @@ namespace springtail::sys_tbl_mgr {
     }
 
 
-    IndexInfo
-    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid)
+    IndexInfo 
+    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
     {
         IndexInfo result;
 
         GetIndexInfoRequest request;
         _set_request_common(request, db_id, xid);
         request.index_id = index_id;
+        if (tid) {
+            request.__set_table_id(*tid);
+        }
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->get_index_info(result, request);

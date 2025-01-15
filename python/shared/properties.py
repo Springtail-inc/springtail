@@ -240,6 +240,7 @@ class Properties:
         sys_config_json['log_mgr'] = system_json['log_mgr']
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
+        sys_config_json['otel'] = system_json['otel']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 

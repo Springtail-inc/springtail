@@ -1046,7 +1046,7 @@ namespace springtail {
             {}
 
         private:
-            PageCache* _c;
+            PageCache* _c = nullptr;
             PagePtr _p;
             FlushCb _cb;
 
@@ -1120,7 +1120,7 @@ namespace springtail {
                 for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
-                assert(size == _lru.size());
+                CHECK_EQ(size, _lru.size());
             }
 
         private:
