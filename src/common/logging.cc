@@ -9,6 +9,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 
+#include <absl/log/log_sink.h>
+#include <absl/log/log_sink_registry.h>
+
 #include <nlohmann/json.hpp>
 
 #include <common/logging.hh>
@@ -29,6 +32,39 @@ namespace logging {
     }
 } // namespace logging
 
+namespace {
+class SpdlogSink : public absl::LogSink {
+public:
+    void Send(const absl::LogEntry& entry) override {
+        spdlog::level::level_enum spdlog_level;
+        switch (entry.log_severity()) {
+            case absl::LogSeverity::kInfo:
+                spdlog_level = spdlog::level::info;
+                break;
+            case absl::LogSeverity::kWarning:
+                spdlog_level = spdlog::level::warn;
+                break;
+            case absl::LogSeverity::kError:
+                spdlog_level = spdlog::level::err;
+                break;
+            case absl::LogSeverity::kFatal:
+                spdlog_level = spdlog::level::critical;
+                break;
+            default:
+                spdlog_level = spdlog::level::debug;
+                break;
+        }
+
+        spdlog::log(
+            spdlog_level,
+            "[{}:{}] {}",
+            entry.source_filename(),
+            entry.source_line(),
+            entry.text_message());
+    }
+};
+
+}
     static void set_level(auto &logger, const std::string &level)
     {
         if (level == "debug") {
@@ -123,5 +159,8 @@ namespace logging {
 
         spdlog::set_default_logger(logger);
         spdlog::flush_every(std::chrono::seconds(3));
+
+        static SpdlogSink spdlog_sink;
+        absl::AddLogSink(&spdlog_sink);
     }
 } // namespace springtail

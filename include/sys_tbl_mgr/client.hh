@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <common/singleton.hh>
@@ -54,8 +55,12 @@ namespace springtail::sys_tbl_mgr {
 
         /**
          * Call get_index_info() on the SysTblMgr.
+         * @param tid The optional table ID that the index belongs to. Usually index ID's are unique is tid is optional
+         *            There is a special case when tid is required. We construct primary indexes in create table
+         *            using the column attributes and assign the same index ID=constant::PRIMARY_INDEX to all primary
+         *            indexes and so tid is required for PRIMARY_INDEX.
          */
-        IndexInfo get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid);
+        IndexInfo get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid=std::nullopt);
 
 
         /**

@@ -54,8 +54,8 @@ namespace springtail::pg_proxy {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got message from server session: {}, waiting={}",
-                    _id, msg->type_str(), is_waiting_on_session());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got message from server session: {}",
+                    _id, msg->type_str());
 
         // entry point for messages from server session
         switch(msg->type()) {
@@ -65,7 +65,7 @@ namespace springtail::pg_proxy {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
                 }
-                assert(_state == AUTH);
+                CHECK_EQ(_state, AUTH);
 
                 _send_auth_done(msg->seq_id());
 
@@ -96,9 +96,15 @@ namespace springtail::pg_proxy {
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_COPY_READY:
-                // enable the client session to receive copy data (and unblock)
-                set_waiting_on_session(false);
+            case SessionMsg::MSG_SERVER_CLIENT_FORWARD: {
+                BufferPtr buffer = msg->buffer();
+                assert (buffer != nullptr);
+                // forward the message to the client
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding message to client: code={}, length={}",
+                            _id, buffer->data()[0], buffer->size());
+                _connection->write(buffer->data(), buffer->size());
                 break;
+            }
 
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got ready from server session: status={}",
@@ -115,13 +121,6 @@ namespace springtail::pg_proxy {
                     // could track transaction error state and avoid server round trips
                     // until we get a rollback...
                     _in_transaction = true;
-
-                    // no longer waiting on associated session, but
-                    // we still want to keep the same session until the transaction
-                    // is complete
-                    if (is_msg_queue_empty()) {
-                        set_waiting_on_session(false);
-                    }
                 }
 
                 _stmt_cache.sync_transaction(status.transaction_status);
@@ -139,8 +138,8 @@ namespace springtail::pg_proxy {
             enable_messages();
         }
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session done with msg, in_transaction={}, waiting={}, empty={}",
-                    _id, _in_transaction, is_waiting_on_session(), is_msg_queue_empty());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session done with msg, in_transaction={}, empty={}",
+                    _id, _in_transaction, is_msg_queue_empty());
 
         // release server session if not in a transaction
         if (!_in_transaction && is_msg_queue_empty()) {
@@ -203,7 +202,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[8];
         ssize_t n = _connection->read(buffer, 8, 8);
-        assert(n == 8);
+        CHECK_EQ(n, 8);
 
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
@@ -251,7 +250,7 @@ namespace springtail::pg_proxy {
 
         char buffer[remaining];
         ssize_t n = _connection->read(buffer, remaining, remaining);
-        assert(n == remaining);
+        CHECK_EQ(n, remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
         _log_buffer(true, '?', remaining, buffer, seq_id);
@@ -273,7 +272,7 @@ namespace springtail::pg_proxy {
         }
         // read last null byte
         char c = read_buffer.get();
-        assert(c == '\0');
+        CHECK_EQ(c, '\0');
 
         // get user info and store it
         _user = UserMgr::get_instance()->get_user(username, database);
@@ -362,7 +361,7 @@ namespace springtail::pg_proxy {
 
         // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log the buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
@@ -380,7 +379,7 @@ namespace springtail::pg_proxy {
         for (auto buffer: blist.buffers)
         {
             char code = buffer->get();
-            assert(code == 'p');
+            CHECK_EQ(code, 'p');
 
             int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
@@ -494,7 +493,7 @@ namespace springtail::pg_proxy {
                                  strlen(_login->scram_state.server_first_message));
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
@@ -552,7 +551,7 @@ namespace springtail::pg_proxy {
         free (server_final_message);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
@@ -593,6 +592,9 @@ namespace springtail::pg_proxy {
         _encode_parameter_status(buffer, "server_encoding", "UTF8");
         _encode_parameter_status(buffer, "client_encoding", "UTF8");
         _encode_parameter_status(buffer, "server_version", SERVER_VERSION);
+        _encode_parameter_status(buffer, "standard_conforming_strings", "on");
+        _encode_parameter_status(buffer, "integer_datetimes", "on");
+        _encode_parameter_status(buffer, "session_authorization", _user->username());
 
         // backend key data -- for cancellation
         buffer->put('K');
@@ -606,7 +608,7 @@ namespace springtail::pg_proxy {
         buffer->put('I');
 
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
@@ -653,7 +655,11 @@ namespace springtail::pg_proxy {
         buffer->put('S');
         buffer->put32(key.size() + value.size() + 6); // 4B len + 2B nulls
         buffer->put_string(key);
-        buffer->put_string(value);
+        if (value.empty()) {
+            buffer->put(0);
+        } else {
+            buffer->put_string(value);
+        }
     }
 
     void
@@ -662,12 +668,14 @@ namespace springtail::pg_proxy {
         BufferList blist;
         _read_msg(blist);
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client handle request: buffers={}", _id, blist.buffers.size());
+        int i = 0;
         for (auto buffer: blist.buffers) {
             char code = buffer->get();
             int32_t len = buffer->get32();
             uint64_t seq_id = _gen_seq_id();
 
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client got request code: {}, seq_id: {}", _id, code, seq_id);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client, buf={}, got request code: {}, seq_id: {}", _id, i++, code, seq_id);
 
             // log buffer, skipping the header
             _log_buffer(true, code, len, buffer->current_data(), seq_id);
@@ -723,12 +731,18 @@ namespace springtail::pg_proxy {
 
             case 'c': // copy done
             case 'd': // copy data
-                    // copy data, client needs to wait for copy complete and ready
-                    set_waiting_on_session(true);
-                    // fall through
-            case 'H': // flush
-            case 'f': // copy fail
+                if (get_associated_session() == nullptr) {
+                    SPDLOG_WARN("[C:{}] No associated server session", _id);
+                    // a c/d could come after an error message after ready for query
+                    // in this case we drop it.
+                    break;
+                }
+                // fall through if we have an associated session
+                // to forward the message
+            case 'H':  // flush
+            case 'f':  // copy fail
                 // forward to server, should have associated server session
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
                 _forward_to_server(buffer, seq_id);
                 break;
 
@@ -782,8 +796,8 @@ namespace springtail::pg_proxy {
         });
 
         // Create a query statement object
-        QueryStmt::Type qs_type = _remap_parse_type(parse_contexts[0]);
-        bool is_read_safe = parse_contexts[0]->is_read_safe;
+        QueryStmt::Type qs_type = parse_contexts.empty() ? QueryStmt::Type::PREPARE : _remap_parse_type(parse_contexts[0]);
+        bool is_read_safe = parse_contexts.empty() ? true : parse_contexts[0]->is_read_safe;
         QueryStmtPtr query_stmt = std::make_shared<QueryStmt>(QueryStmt::Type::PREPARE, buffer, is_read_safe, stmt.data());
         query_stmt->extended_type = qs_type;
 
@@ -1223,8 +1237,6 @@ namespace springtail::pg_proxy {
         queue_msg(startup_msg, session);
 
         // at this point we'll return through process()
-        // most likely with _waiting_on_session set, in which case this
-        // session will be removed from the server poll list
 
         return session;
     }

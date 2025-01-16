@@ -240,6 +240,7 @@ class Properties:
         sys_config_json['log_mgr'] = system_json['log_mgr']
         sys_config_json['sys_tbl_mgr'] = system_json['sys_tbl_mgr']
         sys_config_json['proxy'] = system_json['proxy']
+        sys_config_json['otel'] = system_json['otel']
 
         self.redis.hset(db_instance_key, 'system_settings', json.dumps(sys_config_json))
 
@@ -308,6 +309,7 @@ class Properties:
             if db['name'] == dbname:
                 key = self.db_instance_id + ':instance_state'
                 self.redis.hset(key, db['id'], state)
+                self.redis.publish(self.db_instance_id + ':pubsub:db_state_changes', str(db['id']) + ':' + state)
                 return
         logging.error(f"Database {dbname} not found, setting state failed")
 

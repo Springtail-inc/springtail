@@ -248,7 +248,7 @@ namespace springtail::pg_log_mgr {
                 const auto &table_sync_end_msg = std::get<TableSyncEndMsg>(msg);
                 return static_cast<std::string>(table_sync_end_msg) + ":E";
             } else {
-                assert(false);
+                CHECK(false);
             }
         }
 

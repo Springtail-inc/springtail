@@ -1002,8 +1002,9 @@ namespace springtail {
             }
 
             SafePagePtr& operator=(SafePagePtr &&other) noexcept {
-                assert(_p != other._p);
-                put();
+                if (_p != other._p) {
+                    put();
+                }
                 _p = other._p;
                 _c = other._c;
                 _cb = other._cb;
@@ -1045,7 +1046,7 @@ namespace springtail {
             {}
 
         private:
-            PageCache* _c;
+            PageCache* _c = nullptr;
             PagePtr _p;
             FlushCb _cb;
 
@@ -1119,7 +1120,7 @@ namespace springtail {
                 for (const auto &entry : _cache) {
                     size += entry.second.size();
                 }
-                assert(size == _lru.size());
+                CHECK_EQ(size, _lru.size());
             }
 
         private:

@@ -39,7 +39,8 @@ namespace springtail::pg_proxy {
             {MSG_SERVER_CLIENT_MSG_SUCCESS, "MSG_SERVER_CLIENT_MSG_SUCCESS"},
             {MSG_SERVER_CLIENT_MSG_ERROR, "MSG_SERVER_CLIENT_MSG_ERROR"},
             {MSG_SERVER_CLIENT_FATAL_ERROR, "MSG_SERVER_CLIENT_FATAL_ERROR"},
-            {MSG_SERVER_CLIENT_COPY_READY, "MSG_SERVER_CLIENT_COPY_READY"}
+            {MSG_SERVER_CLIENT_COPY_READY, "MSG_SERVER_CLIENT_COPY_READY"},
+            {MSG_SERVER_CLIENT_FORWARD, "MSG_SERVER_CLIENT_FORWARD"}
     };
 
     Session::Session(ProxyConnectionPtr connection,
@@ -179,18 +180,6 @@ namespace springtail::pg_proxy {
                 return false;
             }
 
-            if (_waiting_on_session) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Waiting on external session", (_type == CLIENT ? 'C': 'S'), _id);
-                if (_type == CLIENT) {
-                    assert(_associated_session != nullptr);
-                }
-                // note: this will not add the connection back to the server
-                // poll list. Once the associated session is done it will
-                // call back into this session to continue processing
-                // at that time it should be added back to the server poll list
-                return false;
-            }
-
             // check if we have messages pending that still need to be processed
             _internal_process_msgs(false);
 
@@ -258,13 +247,6 @@ namespace springtail::pg_proxy {
     void
     Session::_enable_processing()
     {
-        if (_waiting_on_session) {
-            // if we are waiting on a session, we should not be processing
-            // incoming data from our connection
-            assert(_associated_session != nullptr);
-            return;
-        }
-
         // add session connection to server poll list
         _server->signal(_connection);
     }
@@ -283,7 +265,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[5];
         ssize_t n = _connection->read(buffer, 5, 5); // read at most 5B
-        assert(n == 5);
+        CHECK_EQ(n, 5);
 
         // op code
         char code = buffer[0];
@@ -341,7 +323,7 @@ namespace springtail::pg_proxy {
             BufferPtr tail = blist.buffers.back();
             int rd = _connection->read(tail->data() + tail->size(), offset-n, offset-n);
             tail->incr_size(rd);
-            assert(rd == offset-n);
+            CHECK_EQ(rd, offset-n);
         }
     }
 
@@ -358,7 +340,7 @@ namespace springtail::pg_proxy {
         int n;
         if (!_is_shadow) {
             n = _associated_session->get_connection()->write(buffer, 5);
-            assert (n == 5);
+            CHECK_EQ(n, 5);
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Streamed header to remote session: code={}, msg_length={}", (_type == CLIENT ? 'C': 'S'), _id, code, msg_length);
         }
 
@@ -369,14 +351,14 @@ namespace springtail::pg_proxy {
             // throws exception on error
             int read_length = std::min(msg_length, 4096);
             int n = _connection->read(buffer, read_length, read_length);
-            assert (n == read_length);
+            CHECK_EQ(n, read_length);
 
             // log the buffer as incoming
             _log_buffer(true, code, n, buffer, seq_id, n == msg_length);
 
             if (!_is_shadow) {
                 int m = _associated_session->get_connection()->write(buffer, n);
-                assert (m == n);
+                CHECK_EQ(m, n);
 
                 // log the buffer as outgoing from associated session
                 _associated_session->_log_buffer(false, code, n, buffer, seq_id, n == msg_length);
@@ -389,7 +371,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    Session::_send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id)
+    Session::_send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id)
     {
         if (_state == RESET_SESSION) {
             // if we are in reset session state, we don't send any data
@@ -398,22 +380,15 @@ namespace springtail::pg_proxy {
 
         assert(_is_shadow || _associated_session != nullptr);
 
-        // first write the header, add 4 to msg length for size of length field
-        char buffer[5];
-        buffer[0] = code;
-        sendint32(msg_length+4, buffer + 1);
-
         if (!_is_shadow) {
-            // send header
-            int n = _associated_session->get_connection()->write(buffer, 5);
-            assert (n == 5);
-
             // send data
-            n = _associated_session->get_connection()->write(data, msg_length);
-            assert(n == msg_length);
+            ssize_t n = _associated_session->get_connection()->write(buffer->data(), buffer->size());
+            CHECK_EQ(n, buffer->size());
 
             // log the buffer as outgoing from associated session
-            _associated_session->_log_buffer(false, code, msg_length, data, seq_id, true);
+            // adjust buffer size and data to remove code and length (5B)
+            assert(buffer->size() >= 5);
+            _associated_session->_log_buffer(false, code, buffer->size() - 5, buffer->data() + 5, seq_id, true);
         }
     }
 

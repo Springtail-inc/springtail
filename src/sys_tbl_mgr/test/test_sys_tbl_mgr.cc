@@ -1,6 +1,7 @@
 /*
  * Tests the interfaces of the SysTblMgr service.
  */
+#include "common/constants.hh"
 #include "sys_tbl_mgr/system_tables.hh"
 #include <algorithm>
 #include <barrier>
@@ -51,7 +52,7 @@ namespace {
         PgMsgTable _create_table(uint64_t tid, const std::string &name);
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
-        PgMsgIndex _create_index(uint64_t tid, const std::string& name);
+        PgMsgIndex _create_index(uint64_t tid, const std::string& name, uint64_t index_id);
         PgMsgDropIndex _drop_index(uint64_t index_id);
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
@@ -117,7 +118,7 @@ namespace {
         return msg;
     }
 
-    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name) {
+    PgMsgIndex SysTblMgr_Test::_create_index(uint64_t tid, const std::string& name, uint64_t index_id) {
         auto xid = _next_lsn();
 
         std::vector<PgMsgSchemaIndexColumn> columns;
@@ -129,7 +130,7 @@ namespace {
         msg.index = name;
         msg.is_unique = true;
         msg.table_oid = tid;
-        msg.oid = 1234;
+        msg.oid = index_id;
 
         msg.columns.push_back({"col2", 2, 0});
         msg.columns.push_back({"col1", 1, 1});
@@ -187,6 +188,7 @@ namespace {
     // Tests index create
     TEST_F(SysTblMgr_Test, CreateIndex) {
         uint64_t tid = 100003;
+        uint64_t index_id = 5000;
 
         // create the table
         _create_table(tid, "x");
@@ -198,7 +200,7 @@ namespace {
         ASSERT_EQ(schema_meta.indexes.size(), 1);
         ASSERT_EQ(schema_meta.indexes[0].columns.size(), 1);
 
-        PgMsgIndex &&msg = _create_index(tid, "x");
+        PgMsgIndex &&msg = _create_index(tid, "x", index_id);
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
@@ -213,11 +215,17 @@ namespace {
         ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
         ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
 
-        auto index_id = schema_meta.indexes[1].id;
-        ASSERT_EQ(index_id, 1234);
+        ASSERT_EQ(schema_meta.indexes[1].id, index_id);
 
-        auto info = _client->get_index_info(_db, 1234, _xid);
-        ASSERT_EQ(info.id, 1234);
+        auto info = _client->get_index_info(_db, index_id, _xid);
+        ASSERT_EQ(info.id, index_id);
+
+        // use optional table ID
+        info = _client->get_index_info(_db, index_id, _xid, tid);
+        ASSERT_EQ(info.id, index_id);
+
+        info = _client->get_index_info(_db, constant::INDEX_PRIMARY, _xid, tid);
+        ASSERT_EQ(info.id, constant::INDEX_PRIMARY);
 
         // change the index to the ready state
         _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
@@ -241,6 +249,7 @@ namespace {
     // Tests index drop
     TEST_F(SysTblMgr_Test, DropIndex) {
         uint64_t tid = 100004;
+        uint64_t index_id = 5001;
 
         // create the table
         _create_table(tid, "x");
@@ -252,7 +261,7 @@ namespace {
         ASSERT_EQ(schema_meta.indexes.size(), 1);
         ASSERT_EQ(schema_meta.indexes[0].columns.size(), 1);
 
-        PgMsgIndex &&msg = _create_index(tid, "x");
+        PgMsgIndex &&msg = _create_index(tid, "x", index_id);
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
@@ -267,11 +276,10 @@ namespace {
         ASSERT_EQ(schema_meta.indexes[1].columns[1].idx_position, 1);
         ASSERT_EQ(schema_meta.indexes[1].columns[1].position, 1);
 
-        auto index_id = schema_meta.indexes[1].id;
-        ASSERT_EQ(index_id, 1234);
+        ASSERT_EQ(schema_meta.indexes[1].id, index_id);
 
         //drop index
-        _drop_index(1234);
+        _drop_index(index_id);
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
@@ -378,12 +386,13 @@ namespace {
     TEST_F(SysTblMgr_Test, Complex) {
         uint64_t check_xid = _xid.xid;
         uint64_t tid = 100001;
+        uint64_t index_id = 5003;
 
         // create table
         PgMsgTable &&msg = _create_table(tid, "x");
 
         // "add data" to the table
-        _create_index(tid, "x");
+        _create_index(tid, "x", index_id);
         _client->update_roots(_db, tid, _xid.xid, {{{ 0, 0 }}, {15}});
         _finalize();
 

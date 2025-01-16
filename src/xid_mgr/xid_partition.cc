@@ -1,5 +1,6 @@
 #include <xid_mgr/xid_partition.hh>
 
+#include <absl/log/check.h>
 #include <common/common.hh>
 #include <common/logging.hh>
 
@@ -86,8 +87,8 @@ namespace springtail::xid_mgr {
         std::unique_lock file_lock(_file_mutex);
 
         ::lseek(_fd, 0, SEEK_SET);
-        ::write(_fd, buffer, len);
-        ::fsync(_fd);
+        CHECK_EQ(::write(_fd, buffer, len), len);
+        CHECK_EQ(::fsync(_fd), 0);
     }
 
     void

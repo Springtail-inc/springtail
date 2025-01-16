@@ -1205,19 +1205,30 @@ namespace springtail {
     {
         ++_btree_i;
         if (_btree_i == _btree->end()) {
+            _page = {};
             return;
         }
+        update_page();
     }
     void Table::Iterator::Secondary::prev()
     {
         --_btree_i;
+        update_page();
+    }
+
+    void Table::Iterator::Secondary::update_page()
+    {
+        uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
+        if (_page.empty() || _extent_id != eid) {
+            _extent_id = eid;
+            _page = _table->_read_page(_extent_id);
+        }
+        uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
+        _page_i = _page->at(row_id);
     }
 
     const Extent::Row& Table::Iterator::Secondary::row() const
     {
-        uint64_t extent_id = _extent_id_f->get_uint64(*_btree_i);
-        uint64_t row_id = _row_id_f->get_uint32(*_btree_i);
-        auto page = _table->_read_page(extent_id);
-        return *page->at(row_id);
+        return *_page_i;
     }
 }

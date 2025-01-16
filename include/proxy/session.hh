@@ -148,20 +148,13 @@ namespace springtail::pg_proxy {
         void set_associated_session(std::shared_ptr<Session> remote_session) {
             assert(remote_session != nullptr);
             _associated_session = remote_session;
-            remote_session->_associated_session = shared_from_this();
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
-            if (_type == CLIENT) {
-                _waiting_on_session = true;
-            }
         }
 
-        /** Clear associated session from this and remote session */
+        /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
-            assert(_waiting_on_session == true);
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
-            _waiting_on_session = false;
-            _associated_session->_associated_session = nullptr;
             _associated_session = nullptr;
         }
 
@@ -172,16 +165,6 @@ namespace springtail::pg_proxy {
 
         Type associated_session_type() const {
             return _associated_session->_type;
-        }
-
-        void set_waiting_on_session(bool waiting) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[{}:{}] Setting waiting on session: {}", (_type == CLIENT ? 'C': 'S'), _id, waiting);
-            _waiting_on_session = waiting;
-        }
-
-        /** Is this session blocked waiting for another session to complete */
-        bool is_waiting_on_session() const {
-            return _waiting_on_session;
         }
 
         /** Set database name for this session */
@@ -214,7 +197,7 @@ namespace springtail::pg_proxy {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
-            assert(_associated_session == nullptr);
+            CHECK_EQ(_associated_session, nullptr);
             _state = ERROR;
             _handle_error();
         }
@@ -235,8 +218,6 @@ namespace springtail::pg_proxy {
                 SPDLOG_WARN("Associated session not cleared");
                 clear_associated_session();
                 set_associated_session(remote_session);
-            } else if (_type == Type::CLIENT) {
-                _waiting_on_session = true;
             }
             remote_session->_msg_queue.push(msg);
         }
@@ -251,9 +232,6 @@ namespace springtail::pg_proxy {
             }
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
-            if (_type == Type::CLIENT) {
-                assert (_waiting_on_session == true);
-            }
         }
 
         /**
@@ -363,7 +341,6 @@ namespace springtail::pg_proxy {
             _in_transaction = false;
             _login.reset();
             _associated_session.reset();
-            _waiting_on_session = false;
             _msg_queue.clear();
             _ready_for_message = true;
             _state = RESET_SESSION;
@@ -431,8 +408,8 @@ namespace springtail::pg_proxy {
         /** Stream data from one connection directly to the other */
         void _stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id);
 
-        /** Send data to remote session */
-        void _send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id);
+        /** Send data to remote session, assumes buffer contains code and length */
+        void _send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id);
 
         /** Log buffer */
         void _log_buffer(bool incoming, char code, int32_t data_length, const char *data, uint64_t seq_id, bool final=true);
@@ -440,9 +417,6 @@ namespace springtail::pg_proxy {
     private:
         /** client/server session associated with this one */
         std::shared_ptr<Session> _associated_session = nullptr;
-
-        /** waiting on associated session for data -- _associated_session should be set */
-        bool _waiting_on_session = false;
 
         /** atomic shutdown flag */
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;

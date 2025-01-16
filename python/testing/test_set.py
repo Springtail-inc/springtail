@@ -178,7 +178,8 @@ class TestSet:
         """Generates a report about the test set"""
         results = [ self._tests[t].get_result() for t in self._tests ]
         passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
-        failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+        failed_tests = sum(1 for r in results if r['result'] == 'FAILED' or r['result'] == 'ERROR')
+        skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
 
         print('\n')
         print(f'--- Test Summary: {os.path.basename(self._directory)} ---')
@@ -186,6 +187,7 @@ class TestSet:
         print(f'Total tests run: {passed_tests + failed_tests}')
         print(f'Tests passed: {passed_tests}')
         print(f'Tests failed: {failed_tests}')
+        print(f'Tests skipped: {skipped_tests}')
 
         print('Test durations:')
         for result in results:

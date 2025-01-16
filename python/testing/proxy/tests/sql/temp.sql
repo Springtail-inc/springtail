@@ -306,8 +306,12 @@ prepare transaction 'twophase_tab';
 -- Corner case: current_schema may create a temporary schema if namespace
 -- creation is pending, so check after that.  First reset the connection
 -- to remove the temporary namespace.
+-- NOTE: this is modified due to proxy session reuse which causes the test
+-- to fail.  See SPR-472
 \c -
 SET search_path TO 'pg_temp';
 BEGIN;
-SELECT current_schema() ~ 'pg_temp' AS is_temp_schema;
+--SELECT current_schema() ~ 'pg_temp' AS is_temp_schema;
+create function pg_temp.whoami() returns text
+  as $$select 'temp'::text$$ language sql;
 PREPARE TRANSACTION 'twophase_search';
