@@ -19,7 +19,13 @@
 
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_ddl_mgr.hh>
+
+// clang-format off
+// This #include must come last, as it ends up including postgres
+// files that end up doing a #define ERROR, and the side effects
+// of this define break other c++ headers from being includable.
 #include <pg_fdw/pg_fdw_common.h>
+// clang-format on
 
 namespace springtail::pg_fdw {
 
