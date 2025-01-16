@@ -17,11 +17,10 @@ int main(int argc, char *argv[])
     uint64_t start_offset = 0;
 
     po::options_description desc("Options");
-    desc.add_options()
-        ("help,h", "Print help message")
-        ("file,f", po::value<std::string>(&file), "File to scan")
-        ("offset,o", po::value<uint64_t>(&start_offset)->default_value(0), "Start offset")
-        ("all,a", "Scan all files");
+    desc.add_options()("help,h", "Print help message");
+    desc.add_options()("file,f", po::value<std::string>(&file), "File to scan");
+    desc.add_options()("offset,o", po::value<uint64_t>(&start_offset)->default_value(0), "Start offset");
+    desc.add_options()("all,a", "Scan all files");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);

@@ -241,20 +241,27 @@ int main(int argc, char* argv[]) {
     std::filesystem::path directory;
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("concurrent,x", boost::program_options::value<std::string>(&run_concurrent)->default_value("no"), "Run the concurrent read/write test -- no,setup,write,read,cleanup,all")
-        ("count,n", boost::program_options::value<int>(&block_count)->default_value(1024*1024), "Number of blocks to write")
-        ("size,s", boost::program_options::value<int>(&block_size)->default_value(64*1024), "Size of a block")
-        ("files,f", boost::program_options::value<int>(&file_count)->default_value(16), "Number of files to distribute the blocks over")
-        ("writers,w", boost::program_options::value<int>(&writer_count)->default_value(4), "Number of writer threads")
-        ("readers,r", boost::program_options::value<int>(&reader_count)->default_value(4), "Number of reader threads")
-        ("dir,d", boost::program_options::value<std::filesystem::path>(&directory)->default_value("benchmark"), "Directory to store files in");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("concurrent,x", po::value<std::string>(&run_concurrent)->default_value("no"),
+                        "Run the concurrent read/write test -- no,setup,write,read,cleanup,all");
+    desc.add_options()("count,n", po::value<int>(&block_count)->default_value(1024 * 1024),
+                       "Number of blocks to write");
+    desc.add_options()("size,s", po::value<int>(&block_size)->default_value(64 * 1024),
+                        "Size of a block");
+    desc.add_options()("files,f", po::value<int>(&file_count)->default_value(16),
+                        "Number of files to distribute the blocks over");
+    desc.add_options()("writers,w", po::value<int>(&writer_count)->default_value(4),
+                        "Number of writer threads");
+    desc.add_options()("readers,r", po::value<int>(&reader_count)->default_value(4),
+                        "Number of reader threads");
+    desc.add_options()("dir,d", po::value<std::filesystem::path>(&directory)->default_value("benchmark"),
+                        "Directory to store files in");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

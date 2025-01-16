@@ -71,17 +71,17 @@ int main(int argc, char* argv[]) {
     std::string credentials_file;
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("creds,c", boost::program_options::value<std::string>(&credentials_file)->default_value("credentials.json"), "MinIO credentials file.");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("creds,c", po::value<std::string>(&credentials_file)->default_value("credentials.json"), "MinIO credentials file.");
     // XXX number of files
     // XXX size of files
     // XXX number of concurrent threads
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

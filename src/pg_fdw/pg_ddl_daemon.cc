@@ -30,24 +30,23 @@ int main(int argc, char *argv[])
     std::string password;
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("daemonize", "Start the server as a daemon")
-        ("username,u", boost::program_options::value<std::string>(&username)->required(), "DDL Postgres username")
-        ("password,p", boost::program_options::value<std::string>(&password)->required(), "DDL Postgres password")
-        ("socket,s", boost::program_options::value<std::string>(&socket_host_str), "Unix domain socket path for Postgresql")
-    ;
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("daemonize", "Start the server as a daemon");
+    desc.add_options()("username,u", po::value<std::string>(&username)->required(), "DDL Postgres username");
+    desc.add_options()("password,p", po::value<std::string>(&password)->required(), "DDL Postgres password");
+    desc.add_options()("socket,s", po::value<std::string>(&socket_host_str), "Unix domain socket path for Postgresql");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
     }
-    boost::program_options::notify(vm);
+    po::notify(vm);
 
     if (!socket_host_str.empty()) {
         socket_hostname = socket_host_str;
