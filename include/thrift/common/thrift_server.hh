@@ -20,20 +20,19 @@ namespace springtail::thrift {
      * @brief Private helper class to override handler creation;
      *        can be used to store per connection state or log incoming connections
      *
-     * @tparam T - derived Server class
      * @tparam S - service class that implements I
      * @tparam F - service interface factory class
      * @tparam I - service interface class
      */
-   template <typename T, typename S, typename F, typename I >
+   template <typename S, typename F, typename I >
     class CloneFactory : virtual public F {
     public:
         /**
          * @brief Construct a new Clone Factory object
+         * @param type_name - server class type name
          *
          */
-        CloneFactory() {
-            _type_name = boost::core::demangle(typeid(T).name());
+        CloneFactory(const std::string &type_name) : _type_name(type_name) {
         }
 
         /**
@@ -67,8 +66,7 @@ namespace springtail::thrift {
          * @param handler - service implementation handler
          */
         void
-        releaseHandler(I *handler) override {
-        }
+        releaseHandler(I *handler) override {}
     private:
         /** Name of the class that inherits from server */
         std::string _type_name;
@@ -100,6 +98,7 @@ namespace springtail::thrift {
 
             _type_name = boost::core::demangle(typeid(T).name());
         }
+
         /**
          * @brief Destroy the Server object
          *
@@ -170,7 +169,7 @@ namespace springtail::thrift {
             }
 
             _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
-                std::make_shared<P>(std::make_shared<CloneFactory<T, S, F, I>>()),
+                std::make_shared<P>(std::make_shared<CloneFactory<S, F, I>>(_type_name)),
                 std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>(),
                 server_socket,
                 _thread_manager

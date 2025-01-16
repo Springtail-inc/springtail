@@ -31,8 +31,14 @@
         "rpc_config" : {
             "server_port": 55051,
             "server_worker_threads": 8,
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
+            "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
             "ssl": false,
-            "client_connections": 8
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
+            "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         },
         "io_threads": 1
     },
@@ -40,13 +46,13 @@
         "rpc_config" : {
             "server_port": 55052,
             "server_worker_threads": 32,
-            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf1_intermediate.pem",
-            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf1.key",
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
             "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
             "ssl": false,
             "client_connections": 8,
-            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf2_intermediate.pem",
-            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf2.key",
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
             "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         },
         "base_path": "xid_mgr"
@@ -55,8 +61,14 @@
         "rpc_config" : {
             "server_port": 55053,
             "server_worker_threads": 16,
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
+            "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
             "ssl": false,
-            "client_connections": 8
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
+            "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         }
     },
     "storage": {
