@@ -124,6 +124,9 @@ namespace {
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 
+        auto &&metadata = client->get_roots(db_id, oid, xid);
+        ASSERT_EQ(metadata.stats.row_count, 5000);
+
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)
         int count = 0;

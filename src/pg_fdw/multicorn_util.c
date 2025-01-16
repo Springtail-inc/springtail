@@ -878,7 +878,7 @@ multicorn_getForeignPaths(PlannerInfo *root,
 
     /* Extract a friendly version of the pathkeys. */
     /* Returns a List of a Lists<attnum, rows> */
-    List	            *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
+    List *possiblePaths = fdw_get_path_keys(planstate); // see pathKeys()
 
     /* Try to find parameterized paths */
     paths = findPaths(root, baserel, possiblePaths, SPRINGTAIL_STARTUP_COST,

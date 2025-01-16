@@ -347,7 +347,7 @@ namespace springtail {
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin();
+        Iterator begin(uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * An iterator to the end of the table.

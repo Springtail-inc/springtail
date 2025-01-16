@@ -100,7 +100,7 @@ namespace springtail {
         less_than(const std::any &lhs_row,
                   std::shared_ptr<Field> rhs,
                   const std::any &rhs_row,
-                  bool nulls_last=false) const
+                  bool nulls_last=true) const
         {
             // types must match
             assert(this->get_type() == rhs->get_type());
@@ -1189,11 +1189,11 @@ namespace springtail {
         virtual FieldPtr field(int idx) const = 0;
         virtual FieldArrayPtr fields() const = 0;
 
-        bool less_than(std::shared_ptr<Tuple> rhs, bool nulls_last=false) const {
+        bool less_than(std::shared_ptr<Tuple> rhs, bool nulls_last=true) const {
             return this->less_than(*rhs, nulls_last);
         }
 
-        bool less_than(const Tuple &rhs, bool nulls_last=false) const {
+        bool less_than(const Tuple &rhs, bool nulls_last=true) const {
             // use the minimum size of the two tuples for comparison
             int size = std::min(this->size(), rhs.size());
 

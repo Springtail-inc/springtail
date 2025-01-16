@@ -46,11 +46,15 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(Index const& idx, List const& qual_list) {
+    _get_index_quals(Index const& idx, List const* qual_list) {
+
+        if (!qual_list) {
+            return {};
+        }
 
         auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
-            foreach(lc, &qual_list) {
+            foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
                         qual->base.isArray == false &&  
@@ -174,27 +178,18 @@ namespace springtail::pg_fdw {
                                 attno, state->columns[attno].name);
         }
 
-        // init sort group vector
-        foreach(lc, sortgroup) {
-            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-            PgFdwSortGroupPtr pathkey_ptr = std::make_shared<PgFdwSortGroup>(pathkey);
-            state->sort_columns.push_back(pathkey_ptr);
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Sort group column: {}:{}", pathkey_ptr->attnum, pathkey_ptr->attname);
-        }
-
         // init quals
-        if (qual_list != nullptr) {
-            _init_quals(state, qual_list);
+        CHECK_EQ(state->filtered_quals.empty(), true);
+        _init_quals(state, qual_list);
 
-            // note: it is possible state->filtered_quals is empty if no quals are usable
-            // go through qual columns and make sure they are part of the target columns
-            i = state->target_columns.size();
-            for (int j = 0; j < state->filtered_quals.size(); j++) {
-                int attno = state->filtered_quals[j]->base.varattno;
-                if (!state->target_columns.contains(attno)) {
-                    target_colnames.push_back(state->columns[attno].name);
-                    state->target_columns.insert({attno, i++});
-                }
+        // note: it is possible state->filtered_quals is empty if no quals are usable
+        // go through qual columns and make sure they are part of the target columns
+        i = state->target_columns.size();
+        for (int j = 0; j < state->filtered_quals.size(); j++) {
+            int attno = state->filtered_quals[j]->base.varattno;
+            if (!state->target_columns.contains(attno)) {
+                target_colnames.push_back(state->columns[attno].name);
+                state->target_columns.insert({attno, i++});
             }
         }
 
@@ -246,11 +241,19 @@ namespace springtail::pg_fdw {
         // we could scan down for reverse sort but would need to switch start/end iterators
         state->scan_up = true;
 
-        if (state->qual_fields == nullptr) {
-            // full table scan
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan");
-            state->iter_start.emplace(state->table->begin());
-            state->iter_end.emplace(state->table->end());
+        if (state->filtered_quals.empty()) {
+            // no quals, we do a full table scan of full index scan if it is present.
+            // Usually the index is defined by sortgroup in this case.
+            if (state->index.has_value()) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}", state->index->id);
+                state->iter_start.emplace(state->table->begin(state->index->id));
+                state->iter_end.emplace(state->table->end(state->index->id));
+            } else {
+                // full table scan
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan");
+                state->iter_start.emplace(state->table->begin());
+                state->iter_end.emplace(state->table->end());
+            }
             return;
         }
 
@@ -262,6 +265,10 @@ namespace springtail::pg_fdw {
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
                             qual->base.opname, tuple->to_string());
+
+        if (state->index.has_value()) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Use scan index: {}", state->index->id);
+        }
 
         // set up the start iterator based on first key op
         QualOpName op = qual->base.op;
@@ -288,13 +295,13 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_init_quals(PgFdwState *state, List *qual_list)
     {
-        //select the best index to use
-        {
+        if (!state->sortgroup_index) {
+            // If the sortgroup index isn't set, select the best index to use from quals.
             std::optional<Index> best_index;
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto index_quals = _get_index_quals(idx, *qual_list);
+                auto index_quals = _get_index_quals(idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -312,6 +319,14 @@ namespace springtail::pg_fdw {
             }
             state->index = std::move(best_index);
             state->filtered_quals = std::move(best);
+        } else {
+            // Always use the sortgroup index
+            state->index = *state->sortgroup_index;
+
+            auto index_quals = _get_index_quals(*state->sortgroup_index, qual_list);
+            if (!index_quals.empty()) {
+                state->filtered_quals = std::move(index_quals);
+            }
         }
 
         // note: just because we have some quals doesn't mean we can use them
@@ -457,54 +472,96 @@ namespace springtail::pg_fdw {
     List *
     PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
     {
-        List       *result = NULL;
-        ListCell   *lc;
-
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
 
-        // build up a list of pathkeys that match the sortgroup from the primary key
-        // in order, stop when no more matches found
-        int i = 0;
-        foreach(lc, sortgroup) {
-            // check if there are any more primary keys
-            if (!pg_state->index.has_value() || i >= pg_state->index->columns.size()) {
-                break;
+        // verify that the sort order is the same for all attributes
+        // and null_first/reverse combination is supported
+        {
+            int i = 0;
+            ListCell   *lc;
+            bool reversed = false;
+            foreach(lc, sortgroup) {
+                DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+
+                if (i == 0) {
+                    reversed = pathkey->reversed;
+                } else if (reversed != pathkey->reversed) {
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
+                    return {};
+                }
+                // TODO: enable reverse scan support
+                if (reversed) {
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Reverse sort isn't supported currently");
+                    return {};
+                }
+
+                bool condition = pathkey->nulls_first? pathkey->reversed: !pathkey->reversed;
+                if (!condition) {
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
+                            pathkey->nulls_first, pathkey->reversed);
+                    return {};
+                }
             }
-
-            // get the next path key and check if it is next in primary key list
-            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-            int attnum = pathkey->attnum;
-
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Checking pathkey attnum: {} against pkey id: {}",
-                                attnum, pg_state->index->columns[i].position);
-
-            // check if this attnum matches next id in primary key id list, and sort order matches
-            // XXX ignore collation for now
-            if (pathkey->nulls_first || pathkey->reversed ||
-                attnum != pg_state->index->columns[i].position) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
-                break;
-            }
-
-            // add to result
-            result = lappend(result, pathkey);
-
-            i++;
         }
 
-        return result;
+        auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
+            int i = 0;
+            ListCell   *lc;
+            std::vector<DeparsedSortGroup*> keys;
+            foreach(lc, sortgroup) {
+                DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+                int attnum = pathkey->attnum;
+
+                if (attnum != idx.columns[i].position) {
+                    return {};
+                }
+
+                keys.push_back(pathkey);
+                i++;
+            }
+
+            List *r = nullptr;
+            for (auto pk: keys) {
+                r = lappend(r, pk);
+            }
+            return r;
+        };
+
+
+        // try the primary index first
+        auto it = std::find_if(pg_state->indexes.begin(), pg_state->indexes.end(),
+                [](auto const& idx) {
+                    return idx.id == constant::INDEX_PRIMARY;
+                });
+        if (it != pg_state->indexes.end()) {
+            List* p = check_index(*it, sortgroup);
+            if (p) {
+                pg_state->sortgroup_index = *it;
+                return p;
+            }
+        }
+
+        for (auto const& idx: pg_state->indexes) {
+            if (idx.id == constant::INDEX_PRIMARY) {
+                // we already checked the primary index
+                continue;
+            }
+            List* p = check_index(idx, sortgroup);
+            if (p) {
+                pg_state->sortgroup_index = idx;
+                return p;
+            }
+        }
+
+        return {};
     }
 
     List *
     PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *state)
     {
         List      *result = NULL;
-        List      *attnums = NULL;
-        List      *item = NULL;
-
-        double rows = 1; // number of rows with unique key
 
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
@@ -512,17 +569,25 @@ namespace springtail::pg_fdw {
 
         // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
-        
-        if (pg_state->index.has_value()) {
-            for (const auto col: pg_state->index->columns) {
+
+        for (auto const& idx: pg_state->indexes) {
+            List      *attnums = NULL;
+            List      *item = NULL;
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding index path: {}", idx.id);
+            for (const auto col: idx.columns) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
+            item = lappend(item, attnums);
+            
+            double rows = 1; // number of rows with unique key
+            if (!idx.is_unique) {
+                rows = 100; //just some number to indicate different cost
+            }
+            item = lappend(item, makeConst(INT4OID,
+                        -1, InvalidOid, 4, rows, false, true));
+            result = lappend(result, item);
         }
-        item = lappend(item, attnums);
-        item = lappend(item, makeConst(INT4OID,
-                                       -1, InvalidOid, 4, rows, false, true));
-        result = lappend(result, item);
 
         return result;
     }
