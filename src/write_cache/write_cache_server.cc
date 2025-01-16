@@ -19,17 +19,14 @@ namespace springtail {
     WriteCacheServer::WriteCacheServer()
     {
         nlohmann::json json = Properties::get(Properties::WRITE_CACHE_CONFIG);
-        nlohmann::json client_json;
-        nlohmann::json server_json;
+        nlohmann::json rpc_json;
 
-        if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
-            throw Error("Write cache server settings not found");
+        // fetch RPC properties for the write cache server
+        if (!Json::get_to(json, "rpc_config", rpc_json)) {
+            throw Error("Write cache RPC settings are not found");
         }
 
-        int worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
-        int port = Json::get_or<int>(server_json, "port", 55051);
-
-        init(worker_thread_count, port);
+        init(rpc_json);
     }
 
     void
