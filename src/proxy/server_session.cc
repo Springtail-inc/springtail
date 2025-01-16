@@ -227,18 +227,40 @@ namespace springtail::pg_proxy {
     }
 
     BufferPtr
-    ServerSession::_read_message(int msg_length)
+    ServerSession::_read_message(char code, int msg_length)
     {
+        // create buffer to read message, add 5 for code and length
+        BufferPtr buffer = BufferPool::get_instance()->get(msg_length + 5);
+        buffer->put(code);
+        buffer->put32(msg_length + 4);  // add 4B for length field
+
         // read in the message from connection
+        ssize_t n = _connection->read(buffer->current_data(), msg_length, msg_length);
+        assert(n == msg_length);
+        buffer->set_size(msg_length + 5);
+
+        // log the data, current_data points past header
+        _log_buffer(true, code, msg_length, buffer->current_data(), _seq_id);
+
+        return buffer;
+    }
+
+    void
+    ServerSession::_read_and_drop_message(int msg_length)
+    {
+        // read in the message from connection and drop it
         if (msg_length == 0) {
             // no message to read
-            return nullptr;
+            return;
         }
-        BufferPtr buffer = BufferPool::get_instance()->get(msg_length);
-        ssize_t n = _connection->read(buffer->data(), msg_length, msg_length);
-        CHECK_EQ(n, msg_length);
-        buffer->set_size(msg_length);
-        return buffer;
+
+        char buffer[1024];
+        while (msg_length > 0) {
+            int to_read = std::min(msg_length, 1024);
+            ssize_t n = _connection->read(buffer, to_read, to_read);
+            assert(n == to_read);
+            msg_length -= n;
+        }
     }
 
     void
@@ -253,14 +275,11 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        BufferPtr buffer = _read_message(msg_length);
-
-        // log the buffer
-        _log_buffer(true, code, msg_length, buffer->data(), _seq_id);
-
         switch (code) {
-            case 'Z': {
-                // Ready for query
+            case 'Z': {                 // Ready for query
+                // read buffer and log it
+                BufferPtr buffer = _read_message(code, msg_length);
+
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
@@ -294,13 +313,18 @@ namespace springtail::pg_proxy {
 
                 break;
             }
-            case 'E':
-                // Error response
-                _handle_error_code(buffer, _seq_id);
+            case 'E': {                // Error response
+                // read buffer and log it
+                BufferPtr buffer = _read_message(code, msg_length);
+
+                // decode the error, may set the state to ERROR, if not fatal we ignore for now
+                _decode_error_buffer(buffer, _seq_id);
                 break;
+            }
 
             default:
                 // ignore all other messages
+                _read_and_drop_message(msg_length);
                 PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Reset session, dropping message: code={}, length={}", _id, code, msg_length);
                 break;
         }
@@ -324,13 +348,25 @@ namespace springtail::pg_proxy {
         // read just the header, the message length is the remaining bytes
         auto [code, msg_length] = _read_hdr();
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
 
-        assert(msg_length < 100000); // sanity check
+        assert(msg_length < 1000000); // sanity check
 
         // first handle messages where we just need to forward to client
         switch(code) {
             // responses to extended query protocol
+            case 'T': // Row description (describe)
+                // 'T' can be a response to a simple query for a select or for a describe
+                if (_get_pending_query_type() == QueryStmt::Type::SIMPLE_QUERY) {
+                    // simple query, not a completion
+                    assert (_state == QUERY);
+                    // forward to client
+                    _stream_to_remote_session(code, msg_length, _seq_id);
+                    return;
+                }
+
+                // fall through if not a simple query
+
             case '1': // Parse complete (parse)
             case '2': // Bind complete (bind)
             case '3': // Close complete (close)
@@ -338,45 +374,59 @@ namespace springtail::pg_proxy {
             case 'I': // Empty query response (execute, simple query)
             case 'C': // Command complete (execute, simple query)
             case 'n': // No data - response to (describe)
-            case 'T': // Row description (describe)
             case 't': // Parameter description (describe)
-                if (_state == QUERY) {
-                    // we are in query state, continue with query responses
-                    _handle_query_response();
-                }
+            {
                 if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
                     _handle_dependency_response(false);
+
+                    // drop data
+                    _read_and_drop_message(msg_length);
+
+                    return;
                 }
-                assert (_state != EXTENDED_ERROR);
 
-                // fall through
+                if (_state == QUERY) {
+                    // we are in query state, continue with query responses
+                    // this may send a message to the client
+                    _handle_query_response();
+                } else {
+                    assert (_state != EXTENDED_ERROR);
+                }
 
+                // otherwise we read in the data and forward it to the client
+                BufferPtr buffer = _read_message(code, msg_length);
+                queue_msg(std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id));
+
+                return;
+            }
+
+            case 'G': {
+                // Copy in response; forward message to client
+                BufferPtr buffer = _read_message(code, msg_length);
+                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_COPY_READY, buffer, _seq_id);
+                queue_msg(msg);
+                return;
+            }
+
+            case 'V': // Function call response
             case 'f': // Copy fail
             case 'c': // Copy done
-            case 'G': // Copy in response
             case 'H': // Copy out response
             case 'W': // Copy both response
-            case 'D': // Data row
+            case 'D': // Data row -- this may be large
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
             case 'd': // Copy data
+                // no need to forward these messages to client
                 _stream_to_remote_session(code, msg_length, _seq_id);
-
-                if (code == 'G') {
-                    // send message to client session to unblock it
-                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_COPY_READY);
-                    queue_msg(msg);
-                }
-
                 return;
         }
 
         // if not handled above then read in full message
-        BufferPtr buffer = _read_message(msg_length);
-
-        // log the buffer
-        _log_buffer(true, code, msg_length, buffer->data(), _seq_id);
+        // buffer contains the header (code, msg_length)
+        // current_data() points past the header
+        BufferPtr buffer = _read_message(code, msg_length);
 
         switch(code) {
             case 'R': {
@@ -414,11 +464,12 @@ namespace springtail::pg_proxy {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}", _id, key, value);
 
                 if (_state <= AUTH_DONE) {
-                    // still in auth negotiation state
-                    // XXX may want to send these to client
+                    // XXX still in auth negotiation state, if primary we should save these for the client
                     break;
                 }
-                _send_to_remote_session(code, msg_length, buffer->data(), _seq_id);
+
+                // this is a result of a SET operation
+                _send_to_remote_session(code, buffer, _seq_id);
 
                 break;
             }
@@ -435,18 +486,31 @@ namespace springtail::pg_proxy {
                 // Error response
                 // handle the error code, this determines if error is fatal
                 // it also sends the error response to the client
-                _handle_error_code(buffer, _seq_id);
+                _decode_error_buffer(buffer, _seq_id);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
                 if (_state == ERROR) {
+                    // TODO: possible this is a dependency error, which for now will be fatal
+                    // fatal error, send error to client
+                    _send_to_remote_session(code, buffer, _seq_id);
                     return;
                 }
 
-                // non-fatal error
+                // non-fatal error -- check which state we are in
                 if (_state == QUERY) {
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error in query state, forwarding", _id);
                     // error during query
                     _handle_query_error();
-                } else if (_state == DEPENDENCIES) {
+                    // forward to client
+                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id);
+                    queue_msg(msg);
+                } else {
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error not forwarding", _id);
+                }
+
+                if (_state == DEPENDENCIES) {
                     // error during dependency checking, shouldn't happen
                     _handle_dependency_response(true);
+                    // drop the buffer
                 }
 
                 break;
@@ -469,14 +533,17 @@ namespace springtail::pg_proxy {
                     break;
                 }
 
-                if (_state != DEPENDENCIES) {
-                    // send ready for query to client
-                    _send_to_remote_session(code, 1, &status, _seq_id);
-                }
-
                 // handle the ready for query response
                 // regardless of state
                 _handle_ready_for_query_response(status);
+
+                if (_state == DEPENDENCIES) {
+                    return;
+                }
+
+                // forward to client
+                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id);
+                queue_msg(msg);
 
                 break;
             }
@@ -829,7 +896,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_handle_error_code(BufferPtr buffer, uint64_t seq_id)
+    ServerSession::_decode_error_buffer(BufferPtr buffer, uint64_t seq_id)
     {
         // Error response
         std::string severity;
@@ -839,10 +906,7 @@ namespace springtail::pg_proxy {
 
         ProxyProtoError::decode_error(buffer, severity, text, code, message);
 
-        SPDLOG_ERROR("Error response from server: seq_id: {}, text: {}", seq_id, text);
-
-        // send error to client
-        _send_to_remote_session('E', buffer->capacity(), buffer->data(), seq_id);
+        SPDLOG_ERROR("Error response from server: seq_id: {}, {}, {}, {}", seq_id, text, code, message);
 
         // depending on error, behavior is different
         // if text is "FATAL" or "PANIC" we should stop, sever connection
@@ -969,6 +1033,16 @@ namespace springtail::pg_proxy {
             _state = READY;
             _seq_id = 0;
         }
+    }
+
+    QueryStmt::Type
+    ServerSession::_get_pending_query_type()
+    {
+        if (_pending_queue.empty()) {
+            return QueryStmt::Type::NONE;
+        }
+        QueryStatusPtr query_status = _pending_queue.front();
+        return query_status->msg->data()->type;
     }
 
     void

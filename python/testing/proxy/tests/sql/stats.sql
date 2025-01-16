@@ -412,10 +412,14 @@ SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables
 -----
 
 -- Test that sessions is incremented when a new session is started in pg_stat_database
-SELECT sessions AS db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database()) \gset
-\c
-SELECT pg_stat_force_next_flush();
-SELECT sessions > :db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database());
+-- NOTE: commented out as the proxy re-uses sessions so you won't get a different stat count
+-- See SPR-472
+--SELECT sessions AS db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database()) \gset
+-- \c
+--SELECT pg_stat_force_next_flush();
+--SELECT sessions > :db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database());
+
+DISCARD TEMP;
 
 -- Test pg_stat_bgwriter checkpointer-related stats, together with pg_stat_wal
 SELECT checkpoints_req AS rqst_ckpts_before FROM pg_stat_bgwriter \gset
@@ -668,8 +672,10 @@ DROP TABLE test_io_shared;
 -- Set temp_buffers to its minimum so that we can trigger writes with fewer
 -- inserted tuples. Do so in a new session in case temporary tables have been
 -- accessed by previous tests in this session.
+-- NOTE: test modified, see SPR-472
 \c
-SET temp_buffers TO 100;
+RESET temp_buffers;
+-- SET temp_buffers TO 100;
 CREATE TEMPORARY TABLE test_io_local(a int, b TEXT);
 SELECT sum(extends) AS extends, sum(evictions) AS evictions, sum(writes) AS writes
   FROM pg_stat_io
@@ -677,9 +683,9 @@ SELECT sum(extends) AS extends, sum(evictions) AS evictions, sum(writes) AS writ
 -- Insert tuples into the temporary table, generating extends in the stats.
 -- Insert enough values that we need to reuse and write out dirty local
 -- buffers, generating evictions and writes.
-INSERT INTO test_io_local SELECT generate_series(1, 5000) as id, repeat('a', 200);
+INSERT INTO test_io_local SELECT generate_series(1, 40000) as id, repeat('a', 200);
 -- Ensure the table is large enough to exceed our temp_buffers setting.
-SELECT pg_relation_size('test_io_local') / current_setting('block_size')::int8 > 100;
+-- SELECT pg_relation_size('test_io_local') / current_setting('block_size')::int8 > 100;
 
 SELECT sum(reads) AS io_sum_local_before_reads
   FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation' \gset

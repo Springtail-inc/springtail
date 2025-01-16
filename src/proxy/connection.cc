@@ -110,6 +110,10 @@ namespace springtail::pg_proxy {
     ssize_t
     ProxyConnection::read(char *buffer, int max_size, int at_least)
     {
+        if (max_size == 0) {
+            return 0;
+        }
+
         if (_ssl != nullptr) {
             return _ssl_read(buffer, max_size, at_least);
         } else {

@@ -29,8 +29,7 @@ from common import (
     running_pids
 )
 from sysutils import (
-    check_postgres_running,
-    start_postgres,
+    restart_postgres
 )
 
 from component_factory import ComponentFactory
@@ -131,11 +130,13 @@ class Test:
 
     def reset_db(self) -> None:
         """Reset the database"""
+        restart_postgres()
+
         # connect and drop the tablespace
         logging.debug('Connecting to the primary db')
         primary_conn = springtail.connect_db_instance(self._props, "postgres")
         execute_sql(primary_conn, f'DROP TABLESPACE IF EXISTS regress_tblspace')
-        execute_sql(primary_conn, f'DROP DATABASE IF EXISTS {REGRESSION_DB}')
+        execute_sql(primary_conn, f'DROP DATABASE IF EXISTS {REGRESSION_DB} WITH (FORCE)')
         execute_sql(primary_conn, f'CREATE DATABASE {REGRESSION_DB}')
         primary_conn.close()
 
@@ -257,6 +258,7 @@ class Test:
 
         # check for errors from logs
         logging.info(f'Regression tests failed: {not_ok_count} / {(not_ok_count + ok_count)}')
+        logging.info(f'Results can be found in {os.path.join(self._regress_path, 'regression.diff.proxy.out')}')
 
         # rename regression output files
         os.rename(os.path.join(self._regress_path, 'regression.out'), os.path.join(self._regress_path, 'regression.out.' + suffix))
@@ -308,12 +310,6 @@ class Test:
                     manual_proxy: bool = False,
                     notimeout: bool = False) -> None:
         """Run the regression tests"""
-        # make sure postgres is running
-        if not check_postgres_running():
-            start_postgres()
-            if not check_postgres_running():
-                raise ValueError("Failed to start postgres")
-
         # connect and drop the tablespace
         self.reset_db()
 

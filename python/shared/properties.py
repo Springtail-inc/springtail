@@ -309,6 +309,7 @@ class Properties:
             if db['name'] == dbname:
                 key = self.db_instance_id + ':instance_state'
                 self.redis.hset(key, db['id'], state)
+                self.redis.publish(self.db_instance_id + ':pubsub:db_state_changes', str(db['id']) + ':' + state)
                 return
         logging.error(f"Database {dbname} not found, setting state failed")
 

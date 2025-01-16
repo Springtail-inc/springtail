@@ -113,7 +113,7 @@ namespace pg_proxy {
             return _buffer + _offset;
         }
 
-        char *data() {
+        char *data() const {
             return _buffer;
         }
 
