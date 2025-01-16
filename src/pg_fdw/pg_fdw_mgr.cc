@@ -272,8 +272,10 @@ namespace springtail::pg_fdw {
 
         // set up the start iterator based on first key op
         QualOpName op = qual->base.op;
-        if (!state->index.has_value() || op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
+        if (!state->index.has_value()) {
             state->iter_start.emplace(state->table->begin());
+        } else if (op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
+            state->iter_start.emplace(state->table->begin(state->index->id));
         } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
             state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
         } else if (op == GREATER_THAN) {
