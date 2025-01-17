@@ -57,7 +57,7 @@ jobs:
         id: gen_reviewers
         env:
           MEMBER_ID_MAP: ${{ vars.MEMBER_ID_MAP }}
-        run: python3 -c "import sys, os, json; VAR_NAME='reviewers_mentions'; MEMBER_ID_MAP=json.loads(os.environ['MEMBER_ID_MAP']); reviewers=sys.argv[1].split(','); mentions=' '.join([f'<@{MEMBER_ID_MAP[n.strip()]}> ' for n in reviewers if n.strip() in MEMBER_ID_MAP]); print(f'{VAR_NAME}={mentions}', end="")" "${{ steps.info.outputs.reviewers }}" >> $GITHUB_OUTPUT
+        run: python3 -c "import sys, os, json; VAR_NAME='reviewers_mentions'; MEMBER_ID_MAP=json.loads(os.environ['MEMBER_ID_MAP']); reviewers=sys.argv[1].split(','); mentions=' '.join([f'<@{MEMBER_ID_MAP[n.strip()]}> ' for n in reviewers if n.strip() in MEMBER_ID_MAP]); print(f'{VAR_NAME}={mentions}', end='')" "${{ steps.info.outputs.reviewers }}" >> $GITHUB_OUTPUT
 
       - name: Send notification to Slack
         uses: slackapi/slack-github-action@v2.0.0
