@@ -516,7 +516,9 @@ namespace springtail::pg_fdw {
                 DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
                 int attnum = pathkey->attnum;
 
-                if (attnum != idx.columns[i].position) {
+                // must match sortgroup completely
+                // TODO: https://linear.app/springtail/issue/SPR-485/
+                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
                     return {};
                 }
 
@@ -530,7 +532,6 @@ namespace springtail::pg_fdw {
             }
             return r;
         };
-
 
         // try the primary index first
         auto it = std::find_if(pg_state->indexes.begin(), pg_state->indexes.end(),
