@@ -30,7 +30,7 @@ jobs:
             echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
             echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
             echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
-            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" 
+            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" \
               https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers \
               | jq -r '.users[].login' | sort | uniq | tr -d ' ' | tr '\n' ', ')
             echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
