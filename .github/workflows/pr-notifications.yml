@@ -30,17 +30,17 @@ jobs:
             echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
             echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
             echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
-            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" \
-              https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers \
-              | jq -r '.users[].login' | sort | uniq | tr -d ' ' | tr '\n' ', ')
+            url="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers"
+            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              $url | jq -r '.users[].login' | sort | uniq | tr -d ' ' | tr '\n' ', ' | sed 's/,$//')
             echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.review.state }}" == "approved" ]; then
             echo "event_type=pr_approved" >> $GITHUB_OUTPUT
             echo "event_name=PR Approved" >> $GITHUB_OUTPUT
             echo "reviewers_title=Approved By" >> $GITHUB_OUTPUT
-            approvers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" \
-              https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
-              | jq -r '.[] | select(.state == "APPROVED") | .user.login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
+            url="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews"
+            approvers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer  ${{ secrets.GITHUB_TOKEN }}" \
+              $url | jq -r '.[] | select(.state == "APPROVED") | .user.login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
             echo "reviewers=${approvers}" >> $GITHUB_OUTPUT
           fi
 
