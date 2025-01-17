@@ -8,7 +8,10 @@
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/server/TNonblockingServer.h>
 #include <thrift/transport/TNonblockingServerSocket.h>
+#include <thrift/transport/TSSLSocket.h>
+#include <thrift/transport/TNonblockingSSLServerSocket.h>
 
+#include <common/json.hh>
 #include <common/logging.hh>
 
 namespace springtail::thrift {
@@ -17,20 +20,19 @@ namespace springtail::thrift {
      * @brief Private helper class to override handler creation;
      *        can be used to store per connection state or log incoming connections
      *
-     * @tparam T - derived Server class
      * @tparam S - service class that implements I
      * @tparam F - service interface factory class
      * @tparam I - service interface class
      */
-   template <typename T, typename S, typename F, typename I >
+   template <typename S, typename F, typename I >
     class CloneFactory : virtual public F {
     public:
         /**
          * @brief Construct a new Clone Factory object
+         * @param type_name - server class type name
          *
          */
-        CloneFactory() {
-            _type_name = boost::core::demangle(typeid(T).name());
+        CloneFactory(const std::string &type_name) : _type_name(type_name) {
         }
 
         /**
@@ -64,8 +66,7 @@ namespace springtail::thrift {
          * @param handler - service implementation handler
          */
         void
-        releaseHandler(I *handler) override {
-        }
+        releaseHandler(I *handler) override {}
     private:
         /** Name of the class that inherits from server */
         std::string _type_name;
@@ -92,8 +93,12 @@ namespace springtail::thrift {
             static_assert(std::is_base_of<::apache::thrift::TProcessorFactory, P>::value, "type parameter of P must derive from ::apache::thrift::TProcessorFactory");
             static_assert(std::is_base_of<Server, T>::value, "type parameter of T must derive from Server");
 
+            // make sure the server is not terminated when the client abruptly disconnects
+            signal(SIGPIPE, SIG_IGN);
+
             _type_name = boost::core::demangle(typeid(T).name());
         }
+
         /**
          * @brief Destroy the Server object
          *
@@ -103,12 +108,42 @@ namespace springtail::thrift {
         /**
          * @brief Initialize server object
          *
-         * @param worker_thread_count - number of threads to use for server thread pool
-         * @param port - port number for the server to listen on
+         * @param rpc_json - rpc configuration json
          */
-        void init(int worker_thread_count, int port) {
-            _worker_thread_count = worker_thread_count;
-            _port = port;
+        void init(nlohmann::json &rpc_json) {
+            Json::get_to<int>(rpc_json, "server_port", _port);
+            Json::get_to<int>(rpc_json, "server_worker_threads", _worker_thread_count);
+            _ssl = Json::get_or<bool>(rpc_json, "ssl", false);
+            if (_ssl) {
+                _ssl_socket_factory = std::make_shared<apache::thrift::transport::TSSLSocketFactory>();
+                _ssl_socket_factory->authenticate(true);
+
+                std::string cert_file_path;
+                Json::get_to<std::string>(rpc_json, "server_cert", cert_file_path);
+                if (cert_file_path.empty() || !std::filesystem::exists(cert_file_path)) {
+                    SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Invalid configuration for certificate file {}", _type_name, cert_file_path);
+                    throw Error("Certificate file path is misconfigured");
+                }
+
+                std::string key_file_path;
+                Json::get_to<std::string>(rpc_json, "server_key", key_file_path);
+                if (key_file_path.empty() || !std::filesystem::exists(key_file_path)) {
+                    SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Invalid configuration for key file {}", _type_name, key_file_path);
+                    throw Error("Key file path is misconfigured");
+                }
+
+                std::string trusted_file_path;
+                Json::get_to<std::string>(rpc_json, "server_trusted", trusted_file_path);
+                if (trusted_file_path.empty() || !std::filesystem::exists(trusted_file_path)) {
+                    SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Invalid configuration for trusted certificates file {}", _type_name, trusted_file_path);
+                    throw Error("Trusted certificates file path is misconfigured");
+                }
+
+                _ssl_socket_factory->ciphers("ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+                _ssl_socket_factory->loadTrustedCertificates(trusted_file_path.c_str(), nullptr);
+                _ssl_socket_factory->loadCertificate(cert_file_path.c_str(), "PEM");
+                _ssl_socket_factory->loadPrivateKey(key_file_path.c_str(), "PEM");
+            }
         }
 
     public:
@@ -126,10 +161,15 @@ namespace springtail::thrift {
             _thread_manager->threadFactory(std::make_shared<apache::thrift::concurrency::ThreadFactory>());
             _thread_manager->start();
 
-            auto server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
+            std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> server_socket;
+            if (_ssl) {
+                server_socket = std::dynamic_pointer_cast<apache::thrift::transport::TNonblockingServerSocket, apache::thrift::transport::TNonblockingSSLServerSocket>(std::make_shared<apache::thrift::transport::TNonblockingSSLServerSocket>(_port, _ssl_socket_factory));
+            } else {
+                server_socket = std::make_shared<apache::thrift::transport::TNonblockingServerSocket>(_port);
+            }
 
             _server = std::make_shared<apache::thrift::server::TNonblockingServer>(
-                std::make_shared<P>(std::make_shared<CloneFactory<T, S, F, I>>()),
+                std::make_shared<P>(std::make_shared<CloneFactory<S, F, I>>(_type_name)),
                 std::make_shared<apache::thrift::protocol::TBinaryProtocolFactory>(),
                 server_socket,
                 _thread_manager
@@ -154,14 +194,21 @@ namespace springtail::thrift {
         /** server port */
         int _port = 0;
 
+        /** Require SSL */
+        bool _ssl = false;
+
         /** The thrift server. */
         std::shared_ptr<apache::thrift::server::TServer> _server;
 
         /** thread manager that is used by the server */
         std::shared_ptr<apache::thrift::concurrency::ThreadManager> _thread_manager = {nullptr};
 
+        /** default SSL socket factory */
+        std::shared_ptr<apache::thrift::transport::TSSLSocketFactory> _ssl_socket_factory = {nullptr};
+
         /** Demangled name of the class derived from Server */
         std::string _type_name;
+
     };
 
 };
