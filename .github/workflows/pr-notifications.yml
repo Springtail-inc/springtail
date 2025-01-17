@@ -30,7 +30,7 @@ jobs:
             echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
             echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
             echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
-            reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.[].login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
+            reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.requested_reviewers[].login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
             echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.review.state }}" == "approved" ]; then
             echo "event_type=pr_approved" >> $GITHUB_OUTPUT
@@ -48,8 +48,7 @@ jobs:
           webhook-type: incoming-webhook
           payload: |
             {
-              "text": "*${{ steps.info.outputs.event_name }}*",
-              "icon_emoji": ":face_holding_back_tears:",
+              "text": "*${{ steps.info.outputs.event_name }}*  :face_holding_back_tears: <@U06P66F7B51>",
               "attachments": [
                 {
                   "color": "#36a64f",
