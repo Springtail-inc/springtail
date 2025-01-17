@@ -1,0 +1,91 @@
+name: PR Notifications
+
+on:
+  pull_request:
+    types:
+      - review_requested
+  pull_request_review:
+    types:
+      - submitted
+
+jobs:
+  notify-slack:
+    name: Notify Slack
+    # Only run if the event is pull request review requested or pull request review approved
+    if: |
+      (github.event_name == 'pull_request' && github.event.action == 'review_requested') ||
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install jq
+        uses: dcarbone/install-jq-action@v3.0.1
+      - name: Get PR information
+        id: info
+        run: |
+          echo "repo_name=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "pr_title=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          echo "pr_author=${{ github.event.pull_request.user.login }}" >> $GITHUB_OUTPUT
+          echo "pr_url=${{ github.event.pull_request.html_url }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.action }}" == "review_requested" ]; then
+            echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
+            echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
+            echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
+            reviewers=$(echo "${{ github.event.pull_request.requested_reviewers[*].login }}" | tr ' ' ',')
+            echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.review.state }}" == "approved" ]; then
+            echo "event_type=pr_approved" >> $GITHUB_OUTPUT
+            echo "event_name=PR Approved" >> $GITHUB_OUTPUT
+            echo "reviewers_title=Approved By" >> $GITHUB_OUTPUT
+            approvers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" \
+              https://api.github.com/repos/Springtail-inc/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+              | jq -r '.[] | select(.state == "APPROVED") | .user.login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
+            echo "reviewers=${approvers}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send notification to Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "GitHub PR Notification",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Event",
+                      "value": "${{ steps.info.outputs.event_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Repository",
+                      "value": "${{ steps.info.outputs.repo_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "PR Title",
+                      "value": "${{ steps.info.outputs.pr_title }}",
+                      "short": false
+                    },
+                    {
+                      "title": "PR Author",
+                      "value": "${{ steps.info.outputs.pr_author }}",
+                      "short": true
+                    },
+                    {
+                      "title": "PR URL",
+                      "value": "${{ steps.info.outputs.pr_url }}",
+                      "short": false
+                    },
+                    {
+                      "title": "${{ steps.info.outputs.reviewers_title }}",
+                      "value": "${{ steps.info.outputs.reviewers }}",
+                      "short": true
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
