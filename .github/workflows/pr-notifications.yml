@@ -52,7 +52,7 @@ jobs:
       # This step will generate review mentions
       - name: Generate Reviewer Mentions
         id: gen_reviewers
-        run: python3 .github/workflows/gen_reviewers_mentions.py ${{ steps.info.outputs.reviewers }} >> $GITHUB_OUTPUT
+        run: python3 -c "import sys; VAR_NAME='reviewers_mentions'; MEMBER_ID_MAP={'arunreturns':'U086U81BPKR','clifffrey':'U085LGXFERJ','craigsoules':'U057KPPE0KB','curiosthoth':'U06P66F7B51','egladysh':'U07S4HBD553','ella-springtail':'U07ULFFS4GL','garthgoodson':'U05743KQR9B','georgeszundi':'U0579GF6XNY'}; print(f'{VAR_NAME}={' '.join([f'<@{MEMBER_ID_MAP[n.strip()]}> ' for n in sys.argv[1].split(',') if n.strip() in MEMBER_ID_MAP])}', end='')"  "${{ steps.info.outputs.reviewers }}" >> $GITHUB_OUTPUT
 
       - name: Send notification to Slack
         uses: slackapi/slack-github-action@v2.0.0
