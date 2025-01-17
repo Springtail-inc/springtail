@@ -107,6 +107,7 @@ struct GetIndexInfoRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 index_id,
+    5: optional i64 table_id
 }
 
 struct UpdateRootsRequest {

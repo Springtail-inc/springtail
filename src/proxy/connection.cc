@@ -110,6 +110,10 @@ namespace springtail::pg_proxy {
     ssize_t
     ProxyConnection::read(char *buffer, int max_size, int at_least)
     {
+        if (max_size == 0) {
+            return 0;
+        }
+
         if (_ssl != nullptr) {
             return _ssl_read(buffer, max_size, at_least);
         } else {
@@ -194,6 +198,7 @@ namespace springtail::pg_proxy {
                 buffer += n;
                 max_size -= n;
                 at_least -= n;
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Read {} bytes from socket, remaining={}", n, at_least);
             } else if (n == 0) {
                 // Connection closed by the client
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Connection closed by client");

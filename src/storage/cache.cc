@@ -1,7 +1,11 @@
+#include <storage/cache.hh>
+
+#include <absl/log/log.h>
+#include <absl/log/check.h>
+
 #include <common/json.hh>
 #include <common/properties.hh>
 
-#include <storage/cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
 namespace springtail {
@@ -36,10 +40,9 @@ namespace springtail {
     StorageCache::StorageCache()
     {
         // get the cache size
-        uint64_t data_size, page_size;
         nlohmann::json json = Properties::get(Properties::STORAGE_CONFIG);
-        Json::get_to<uint64_t>(json, "data_cache_size", data_size, 16384);
-        Json::get_to<uint64_t>(json, "page_cache_size", page_size, 16384);
+        uint64_t data_size = Json::get_or<uint64_t>(json, "data_cache_size", 16384);
+        uint64_t page_size = Json::get_or<uint64_t>(json, "page_cache_size", 16384);
 
         _data_cache = std::make_shared<DataCache>(data_size);
         _page_cache = std::make_shared<PageCache>(page_size);
@@ -57,7 +60,7 @@ namespace springtail {
                             file, extent_id, access_xid, target_xid);
 
         // note: target_xid must be at or beyond the access_xid
-        assert(target_xid >= access_xid);
+        CHECK_GE(target_xid, access_xid);
         if (target_xid == constant::LATEST_XID) {
             target_xid = access_xid;
         }
@@ -82,7 +85,7 @@ namespace springtail {
         }
 
         // note: from here forward, we know we are dealing with a roll-forward table data page
-        assert(0);
+        LOG(FATAL) << "Roll-forward table data page";
 
 #if 0
         // XXX take ownership of the roll-forward process, or block until it's complete
@@ -130,7 +133,7 @@ namespace springtail {
                                  uint64_t access_xid,
                                  uint64_t target_xid)
     {
-        assert(extent_id != constant::UNKNOWN_EXTENT);
+        CHECK(extent_id != constant::UNKNOWN_EXTENT);
 
         SPDLOG_DEBUG_MODULE(LOG_CACHE, "{}, {}, {}, {}", file, extent_id, access_xid, target_xid);
 
@@ -181,7 +184,7 @@ namespace springtail {
 
         if (page->_extent_id == constant::UNKNOWN_EXTENT) {
             // note: we cannot release a dirty page with no original extent ID back to the cache unless it has a flush callback
-            assert(!page->_is_dirty || page->_flush_callback);
+            CHECK(!page->_is_dirty || page->_flush_callback);
 
             // release the space back to the cache
             --_size;
@@ -234,13 +237,13 @@ namespace springtail {
                 lock.unlock();
 
                 // note: we currently assume that the page has a flush callback
-                assert(callback);
+                CHECK(callback);
 
                 // issue the flush callback
                 bool success = callback(page);
 
                 // note: we currently assume that the flush callback must succeed here
-                assert(success);
+                CHECK(success);
 
                 lock.lock();
 
@@ -296,8 +299,8 @@ namespace springtail {
             // clear the associated dirty extents from the cache
             for (auto &ref : page->_extents) {
                 auto extent = ref.lock_cached();
-                assert(extent); //must be in the dirty cache
-                assert(extent->state() == CacheExtent::State::DIRTY);
+                CHECK(extent); //must be in the dirty cache
+                CHECK_EQ(extent->state(), CacheExtent::State::DIRTY);
                 data_cache->drop_dirty(extent);
                 data_cache->put(extent);
             }
@@ -508,7 +511,7 @@ namespace springtail {
         _is_dirty = false;
 
         // note: page must be empty
-        assert(_extents.empty());
+        CHECK(_extents.empty());
 
         // create an empty extent
         auto extent = cache->_data_cache->get_empty(_file, header);
@@ -530,7 +533,7 @@ namespace springtail {
         _is_dirty = false;
 
         // note: if the page is empty, we should be calling flush_empty()
-        assert(!_extents.empty());
+        CHECK(!_extents.empty());
 
         // perform the usual flush()
         return _flush(header);
@@ -565,7 +568,7 @@ namespace springtail {
                                               });
 
         // note: shouldn't be possible to hit end() given the above lower_bound() check to find the extent
-        assert(row_i != (*extent)->end());
+        CHECK(row_i != (*extent)->end());
 
         return Iterator(this, extent_i, std::move(extent), row_i);
     }
@@ -601,7 +604,7 @@ namespace springtail {
                                               });
 
         // note: shouldn't be possible to hit end() given the above upper_bound() check to find the extent
-        assert(row_i != (*extent)->end());
+        CHECK(row_i != (*extent)->end());
 
         return Iterator(this, extent_i, std::move(extent), row_i);
     }
@@ -706,7 +709,7 @@ namespace springtail {
                                               });
 
         // note: row's key should *not* match the tuple's key
-        assert(row_i == (*extent)->end() ||
+        CHECK(row_i == (*extent)->end() ||
                !FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // insert the tuple into the extent
@@ -834,7 +837,7 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
-        assert(extent_i != _extents.end());
+        CHECK(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
         auto extent = extent_i->make_dirty_safe_extent(_file);
@@ -847,10 +850,10 @@ namespace springtail {
                                               [&schema](const Extent::Row &row) {
                                                   return FieldTuple(schema->get_sort_fields(), row);
                                               });
-        assert(row_i != (**extent).end());
+        CHECK(row_i != (**extent).end());
 
         // note: row's key should match the tuple's key
-        assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // update the existing row
         MutableTuple(schema->get_mutable_fields(), *row_i).assign(tuple);
@@ -873,7 +876,7 @@ namespace springtail {
                                              return FieldTuple(schema->get_sort_fields(), (*extent)->back()).less_than(key);
                                          });
         // note: key should exist
-        assert(extent_i != _extents.end());
+        CHECK(extent_i != _extents.end());
 
         // make sure that we've got a mutable version of the extent
         auto extent = extent_i->make_dirty_safe_extent(_file);
@@ -888,7 +891,7 @@ namespace springtail {
                                               });
 
         // note: row's key should match the tuple's key
-        assert(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
+        DCHECK(FieldTuple(schema->get_sort_fields(), *row_i).equal(*key));
 
         // remove the row
         (*extent)->remove(row_i);
@@ -1022,16 +1025,16 @@ namespace springtail {
 
                 // update the reference with the details of the new extent
                 ref = e.get_ref();
-                SPDLOG_INFO("Flushing extent {} -- new extent {}", _extent_id, ref.id());
+                SPDLOG_DEBUG_MODULE(LOG_CACHE, "Flushing extent {} -- new extent {}", _extent_id, ref.id());
             }
 
             // extent should always be clean at this point
-            assert(ref.is_clean());
+            CHECK(ref.is_clean());
             offsets.push_back(ref.id());
         }
 
         for (auto &ref : _extents) {
-            assert(ref.is_clean());
+            CHECK(ref.is_clean());
         }
 
         return offsets;
@@ -1083,7 +1086,7 @@ namespace springtail {
         if (dirty_i == _dirty_cache.end()) {
             // not in memory, so need to retrieve from disk
             auto key_i = _cache_id_map.find(cache_id);
-            assert(key_i != _cache_id_map.end());
+            CHECK(key_i != _cache_id_map.end());
 
             // note: no one should know about the cache ID except for the owning page, so this
             //       should never return nullptr since there should never be two concurrent readers
@@ -1115,7 +1118,7 @@ namespace springtail {
             // remove from the dirty_lru, if on it
             if (extent->_use_count == 0) {
                 // extent must be MUTABLE or DIRTY if being retrieved by cache ID
-                assert(extent->_state ==  CacheExtent::State::DIRTY ||
+                CHECK(extent->_state ==  CacheExtent::State::DIRTY ||
                        extent->_state ==  CacheExtent::State::MUTABLE);
 
                 if (extent->_state == CacheExtent::State::MUTABLE) {
@@ -1211,12 +1214,12 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: the extent must be MUTABLE (not DIRTY) and not in-use by others when reinsert()'d
-        assert(extent->_state == CacheExtent::State::MUTABLE);
-        assert(extent->_use_count == 1);
+        CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
+        CHECK_EQ(extent->_use_count, 1);
 
         // find the cache extent
         auto dirty_i = _dirty_cache.find(extent->_cache_id);
-        assert(dirty_i != _dirty_cache.end());
+        CHECK(dirty_i != _dirty_cache.end());
 
         // mark the extent CLEAN
         extent->_state = CacheExtent::State::CLEAN;
@@ -1245,8 +1248,8 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: extent must be dirty for this to be a valid operation
-        assert(extent->_state == CacheExtent::State::DIRTY);
-        assert(extent->_use_count == 1);
+        CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
+        CHECK_EQ(extent->_use_count, 1);
 
         // evict the extent from the cache
         _dirty_cache.erase(extent->_cache_id);
@@ -1263,7 +1266,7 @@ namespace springtail {
         boost::unique_lock lock(_mutex);
 
         // note: extent must be DIRTY with a mutation that caused the split
-        assert(extent->_state == CacheExtent::State::DIRTY);
+        CHECK_EQ(extent->_state, CacheExtent::State::DIRTY);
 
         // make space for two new extents
         _make_extent_space();
@@ -1415,7 +1418,7 @@ namespace springtail {
         if (extent->_state == CacheExtent::State::CLEAN) {
             _clean_cache.erase(extent->key());
         } else {
-            assert(extent->_state == CacheExtent::State::MUTABLE);
+            CHECK_EQ(extent->_state, CacheExtent::State::MUTABLE);
             _dirty_cache.erase(extent->_cache_id);
         }
     }
@@ -1429,7 +1432,7 @@ namespace springtail {
             return;
         }
 
-        assert(extent->_use_count);
+        CHECK(extent->_use_count);
 
         // reduce the use count
         --(extent->_use_count);
@@ -1440,7 +1443,7 @@ namespace springtail {
         }
 
         // note: shouldn't be possible to call _release() when FLUSHING
-        assert(extent->_state != CacheExtent::State::FLUSHING);
+        CHECK(extent->_state != CacheExtent::State::FLUSHING);
 
         // if the use count is zero, place into the appropriate LRU list
         if (extent->_state == CacheExtent::State::DIRTY) {
@@ -1563,7 +1566,7 @@ namespace springtail {
         }
 
         // sanity check that the extent is not in the dirty cache
-        assert(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
+        CHECK(_dirty_cache.find(extent->_cache_id) == _dirty_cache.end());
 
         // extract the extent from the clean cache into the dirty cache
         return _extract(extent);

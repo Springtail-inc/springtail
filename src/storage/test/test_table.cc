@@ -39,14 +39,32 @@ namespace {
     class Table_Test : public testing::TestWithParam<CacheSize> {
     protected:
         void SetUp() override {
+            struct Initializer
+            {
+                test::Services _s;
+
+                Initializer() : _s{true, true, false}
+                {
+                    springtail_init();
+                    _s.init();
+                }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
+
+
             // set the cache size from the parameters
             CacheSize sizes = GetParam();
             std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
 
-            springtail_init();
-            _services.init(true);
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -76,13 +94,9 @@ namespace {
         }
 
         void TearDown() override {
-            _services.shutdown();
-
             // remove any files created during the run
             std::filesystem::remove_all(_base_dir);
         }
-
-        test::Services _services{true, true, false};
 
         ExtentSchemaPtr _schema;
         FieldArrayPtr _fields, _csv_fields;

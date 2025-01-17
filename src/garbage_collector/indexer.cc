@@ -168,14 +168,22 @@ namespace springtail::gc {
 
         SPDLOG_INFO("Drop index table id: {}", info.table_id);
 
+        auto exists = TableMgr::get_instance()->exists(db_id, info.table_id, xid.xid, xid.lsn);
+        if (!exists) {
+            // when dropping a table, PG generates DROP TABLE first
+            // following by DROP INDEX. We ignore DROP INDEX after DROP TABLE.
+            SPDLOG_INFO("Table doesn't exists: {}, {}", info.table_id, index_id);
+            return;
+        }
+
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
         auto root = table->index(index_id);
         assert(root);
 
         auto meta = client->get_roots(db_id, info.table_id, idx._xid);
         auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
-                    return index_id == v.index_id;
-                });
+            return index_id == v.index_id;
+        });
         assert(it != meta->roots.end());
         meta->roots.erase(it);
         client->update_roots(db_id, info.table_id, idx._xid, *meta);
@@ -195,7 +203,7 @@ namespace springtail::gc {
         auto [db_id, index_id] = key;
         auto tid = idx._ddl["table_id"];
 
-        assert(idx._ddl["action"] == "create_index");
+        CHECK_EQ(idx._ddl["action"], "create_index");
 
         // index column positions
         std::vector<uint32_t> idx_cols;

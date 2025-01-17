@@ -12,7 +12,7 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         -- Check for table or index drops
-        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') AND obj.schema_name NOT LIKE 'pg_%' THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
@@ -42,12 +42,16 @@ CREATE OR REPLACE FUNCTION springtail_event_trigger_for_table_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
 DECLARE
     obj record;
+    ind_obj record;
     msg text;
     json_columns json;
+    index_columns json;
     has_pkey boolean;
     table_persistence "char";
     table_replident "char";
     table_relname text;
+    full_ident boolean;
+    update_replica_ident text;
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() AS cmd
         WHERE cmd.command_tag IN ('ALTER TABLE', 'CREATE TABLE')
@@ -102,32 +106,83 @@ BEGIN
 
         SELECT true WHERE json_columns::jsonb @> '[{"is_pkey": true}]'::jsonb INTO has_pkey;
 
+
+        full_ident := false;
+        update_replica_ident := NULL;
+
         -- If a table is created or altered, and it doesn't have a primary key, set REPLICA IDENTITY to FULL
         IF table_replident <> 'f' AND has_pkey IS NULL THEN
-            PERFORM springtail_set_replica_identity(obj.object_identity, true);
+            full_ident := true;
+            update_replica_ident := 'FULL';
         END IF;
 
         -- If a table is altered, and it has a primary key, set REPLICA IDENTITY to DEFAULT
         IF table_replident = 'f' AND has_pkey IS TRUE THEN
-            PERFORM springtail_set_replica_identity(obj.object_identity, false);
+            full_ident := false;
+            update_replica_ident := 'DEFAULT';
         END IF;
 
+        IF update_replica_ident IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE %s.%s REPLICA IDENTITY %s', quote_ident(obj.schema_name), quote_ident(table_relname), update_replica_ident);
+        END IF;
+
+        -- XXX To fix for ALTER TABLE later
+        IF obj.command_tag = 'CREATE TABLE' THEN
+            -- Runs a query to get the list of indexes on a table
+            -- Only retrieve the secondary indexes
+            FOR ind_obj IN SELECT
+                    n.nspname || '.' || ci.relname AS index_identity,
+                    n.nspname AS schema_name,
+                    i.indexrelid AS index_oid,
+                    c.oid AS table_oid,
+                    c.relname AS table_name,
+                    i.indisunique AS is_unique,
+                    i.indisprimary AS primary_idx,
+                    i.indkey AS indkey
+                FROM pg_index i
+                JOIN pg_class c ON c.oid = i.indexrelid
+                JOIN pg_class ci ON ci.oid = i.indrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE i.indisprimary IS FALSE
+                AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid) 
+            LOOP
+                -- get index columns
+                SELECT json_agg(json_col)
+                FROM (
+                    SELECT json_build_object('name', pga.attname,
+                        'position', pga.attnum,
+                        'idx_position', array_position(ind_obj.indkey, pga.attnum)
+                    ) AS json_col
+                    FROM pg_attribute pga
+                    WHERE
+                        pga.attrelid=obj.objid
+                        AND (array_position(ind_obj.indkey, pga.attnum) IS NOT NULL)
+                        AND attisdropped=false
+                ) AS obj_select
+                INTO index_columns;
+
+                -- Build the replication message object
+                msg := json_build_object(
+                    'xid', txid_current(),
+                    'cmd', 'CREATE INDEX',
+                    'oid', ind_obj.index_oid::bigint,
+                    'obj', 'index',
+                    'schema', ind_obj.schema_name,
+                    'identity', ind_obj.index_identity,
+                    'table_oid', ind_obj.table_oid::bigint,
+                    'table_name', ind_obj.table_name,
+                    'is_unique', ind_obj.is_unique,
+                    'columns', index_columns
+                );
+
+                -- command_tag is CREATE INDEX or ALTER INDEX ( XXX figure out the cmd tag for alter )
+                PERFORM pg_logical_emit_message(true, 'springtail:' || 'CREATE INDEX', msg::text);
+            END LOOP;
+        END IF;
     END LOOP;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION springtail_set_replica_identity(identity regclass, full_ident boolean DEFAULT true)
-        RETURNS void LANGUAGE plpgsql AS $$
-BEGIN
-    IF full_ident THEN
-        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY FULL for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', identity);
-    ELSE
-        --- RAISE NOTICE 'springtail: setting REPLICA IDENTITY DEFAULT for %', identity;
-        EXECUTE format('ALTER TABLE %s REPLICA IDENTITY DEFAULT', identity);
-    END IF;
-END;
-$$;
 
 CREATE OR REPLACE FUNCTION springtail_event_trigger_for_index_ddl()
         RETURNS event_trigger LANGUAGE plpgsql AS $$
@@ -211,7 +266,7 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl
 -- Select all users and their databases with access to springtail
 -- If springtail_user role exists, only users with that role are returned
 -- otherwise all users are returned
-CREATE OR REPLACE FUNCTION springtail_get_user_access()
+CREATE OR REPLACE FUNCTION public.springtail_get_user_access()
     RETURNS TABLE (username text, password text, databases text)
     LANGUAGE plpgsql
     SECURITY DEFINER AS $$
@@ -272,13 +327,12 @@ END;
 $$;
 
 -- Clean up function to drop the other functions and triggers
-CREATE OR REPLACE FUNCTION springtail_cleanup()
+CREATE OR REPLACE FUNCTION public.springtail_cleanup()
     RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     -- Drop event functions
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_drops() CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_table_ddl() CASCADE;
-    DROP FUNCTION IF EXISTS springtail_set_replica_identity(identity regclass, full_ident boolean) CASCADE;
     DROP FUNCTION IF EXISTS springtail_event_trigger_for_index_ddl() CASCADE;
     DROP FUNCTION IF EXISTS springtail_get_user_access() CASCADE;
     -- Drop event triggers

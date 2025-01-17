@@ -25,14 +25,6 @@ handle_sigint(int signal)
 
 int main(int argc, char* argv[])
 {
-    std::filesystem::path certificate;
-    std::filesystem::path key;
-    std::filesystem::path log;
-    int port;
-    int num_threads;
-    bool enable_ssl = false;
-    ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
-
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Help message.")
@@ -52,22 +44,21 @@ int main(int argc, char* argv[])
     if (vm.count("daemonize")) {
         pidfile = "proxy.pid";
     }
-    springtail_init("proxy", pidfile);
+    springtail_init("proxy", pidfile, LOG_PROXY);
 
     // register the SIGINT handler
     std::signal(SIGINT, handle_sigint);
 
     nlohmann::json json = Properties::get(Properties::PROXY_CONFIG);
-    Json::get_to<int>(json, "threads", num_threads, 4);
-    Json::get_to<int>(json, "port", port, 8888);
+    int num_threads = Json::get_or<int>(json, "threads", 4);
+    int port = Json::get_or<int>(json, "port", 8888);
 
-    int log_level;
-    Json::get_to<int>(json, "log_level", log_level, 1);
+    int log_level = Json::get_or<int>(json, "log_level", 1);
 
     // setup ssl config
-    Json::get_to<bool>(json, "enable_ssl", enable_ssl, false);
-    Json::get_to<std::filesystem::path>(json, "cert", certificate);
-    Json::get_to<std::filesystem::path>(json, "key", key);
+    bool enable_ssl = Json::get_or<bool>(json, "enable_ssl", false);
+    std::filesystem::path certificate = Json::get_or<std::filesystem::path>(json, "cert", "");
+    std::filesystem::path key = Json::get_or<std::filesystem::path>(json, "key", "");
     if (enable_ssl &&
         (!std::filesystem::exists(certificate) || !std::filesystem::exists(key))) {
         throw Error("Certificate/key file does not exist and ssl is enabled");
@@ -78,11 +69,11 @@ int main(int argc, char* argv[])
     }
 
     // setup the mode
-    std::string mode;
     LoggerPtr logger = nullptr;
-    Json::get_to<std::string>(json, "mode", mode, "normal");
+    ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
+    std::string mode = Json::get_or<std::string>(json, "mode", "normal");
     if (mode == "shadow") {
-        Json::get_to<std::filesystem::path>(json, "shadow_log_path", log);
+        std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
         if (log.empty()) {
             throw Error("shadow_log_path is not defined");
         }

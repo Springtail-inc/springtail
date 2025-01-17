@@ -10,6 +10,7 @@
 
 #include <proxy/server_session.hh>
 #include <proxy/client_session.hh>
+#include <proxy/server_session.hh>
 #include <proxy/database.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/errors.hh>
@@ -27,7 +28,7 @@ namespace springtail::pg_proxy {
     ClientSession::ClientSession(ProxyConnectionPtr connection,
                                  ProxyServerPtr server)
 
-        : Session(connection, server, CLIENT),
+        : Session(connection, server),
           _stmt_cache(STATEMENT_CACHE_SIZE),
           _shadow_mode(server->mode() == ProxyServer::MODE::SHADOW),
           _primary_mode(server->mode() == ProxyServer::MODE::PRIMARY)
@@ -43,34 +44,7 @@ namespace springtail::pg_proxy {
 
     ClientSession::~ClientSession()
     {
-        SPDLOG_WARN("Client session being deallocated");
-    }
-
-    void
-    ClientSession::notify_server_available(SessionPtr server)
-    {
-        // called from pool indicating there is a server session available
-        assert(0);
-    }
-
-    void
-    ClientSession::_release_server_session()
-    {
-        ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(get_associated_session());
-        assert(server_session != nullptr);
-
-        PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Releasing server session: id={}", _id, server_session->id());
-
-        // clear associated session from the client session
-        clear_associated_session();
-
-        if (server_session->is_pinned()) {
-            // server session is pinned, we can't release it
-            return;
-        }
-
-        // release session back to instance pool
-        server_session->get_instance()->release_session(server_session);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Client session being deallocated");
     }
 
     void
@@ -80,7 +54,8 @@ namespace springtail::pg_proxy {
         // this indicates server is done with processing
         // in future this may not be true for all message types
 
-        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got message from server session: {}", _id, msg->type_str());
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got message from server session: {}",
+                    _id, msg->type_str());
 
         // entry point for messages from server session
         switch(msg->type()) {
@@ -90,7 +65,7 @@ namespace springtail::pg_proxy {
                     // already ready, auth completed previously, this was new server auth completing
                     break;
                 }
-                assert(_state == AUTH);
+                CHECK_EQ(_state, AUTH);
 
                 _send_auth_done(msg->seq_id());
 
@@ -98,7 +73,7 @@ namespace springtail::pg_proxy {
                 // the replica session will be created on-demand
 
                 // if in shadow mode, then create the replica session now
-                if (_shadow_mode && _replica_session.expired()) {
+                if (_shadow_mode && _replica_session == nullptr) {
                     uint64_t seq_id = _gen_seq_id();
                     PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating replica session in shadow mode: seq_id={}", _id, seq_id);
                     _create_server_session(Session::Type::REPLICA, seq_id);
@@ -112,18 +87,24 @@ namespace springtail::pg_proxy {
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_SUCCESS:
                 // message complete
-                _stmt_cache.commit_statement(msg->data(), msg->completed());
+                _stmt_cache.commit_statement(msg->data(), msg->completed(), true);
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_MSG_ERROR:
                 // message error
-                _stmt_cache.commit_statement(msg->data(), msg->completed());
+                _stmt_cache.commit_statement(msg->data(), msg->completed(), false);
                 break;
 
             case SessionMsg::MSG_SERVER_CLIENT_COPY_READY:
-                // enable the client session to receive copy data (and unblock)
-                set_waiting_on_session(false);
+            case SessionMsg::MSG_SERVER_CLIENT_FORWARD: {
+                BufferPtr buffer = msg->buffer();
+                assert (buffer != nullptr);
+                // forward the message to the client
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding message to client: code={}, length={}",
+                            _id, buffer->data()[0], buffer->size());
+                _connection->write(buffer->data(), buffer->size());
                 break;
+            }
 
             case SessionMsg::MSG_SERVER_CLIENT_READY: {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session got ready from server session: status={}",
@@ -140,13 +121,6 @@ namespace springtail::pg_proxy {
                     // could track transaction error state and avoid server round trips
                     // until we get a rollback...
                     _in_transaction = true;
-
-                    // no longer waiting on associated session, but
-                    // we still want to keep the same session until the transaction
-                    // is complete
-                    if (is_msg_queue_empty()) {
-                        set_waiting_on_session(false);
-                    }
                 }
 
                 _stmt_cache.sync_transaction(status.transaction_status);
@@ -160,12 +134,18 @@ namespace springtail::pg_proxy {
         }
 
         if (is_ready()) {
+            // if in ready state, then we can process more messages in server loop
             enable_messages();
         }
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session done with msg, in_transaction={}, empty={}",
+                    _id, _in_transaction, is_msg_queue_empty());
+
         // release server session if not in a transaction
         if (!_in_transaction && is_msg_queue_empty()) {
-            _release_server_session();
+            SessionPtr server_session = get_associated_session();
+            clear_associated_session();
+            PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Clearing server session: id={}", _id, server_session->id());
         }
     }
 
@@ -222,7 +202,7 @@ namespace springtail::pg_proxy {
     {
         char buffer[8];
         ssize_t n = _connection->read(buffer, 8, 8);
-        assert(n == 8);
+        CHECK_EQ(n, 8);
 
         int32_t msg_length = recvint32(buffer)-4;
         int32_t code = recvint32(buffer+4);
@@ -270,7 +250,7 @@ namespace springtail::pg_proxy {
 
         char buffer[remaining];
         ssize_t n = _connection->read(buffer, remaining, remaining);
-        assert(n == remaining);
+        CHECK_EQ(n, remaining);
 
         Buffer read_buffer(buffer, remaining, remaining);
         _log_buffer(true, '?', remaining, buffer, seq_id);
@@ -286,11 +266,13 @@ namespace springtail::pg_proxy {
                 username = value;
             } else if (key == "database") {
                 database = value;
+            } else {
+                _parameters[key] = value;
             }
         }
         // read last null byte
         char c = read_buffer.get();
-        assert(c == '\0');
+        CHECK_EQ(c, '\0');
 
         // get user info and store it
         _user = UserMgr::get_instance()->get_user(username, database);
@@ -379,7 +361,7 @@ namespace springtail::pg_proxy {
 
         // we've encoded the auth message above, now we send it, for AUTH_OK it is already sent
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log the buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
@@ -397,7 +379,7 @@ namespace springtail::pg_proxy {
         for (auto buffer: blist.buffers)
         {
             char code = buffer->get();
-            assert(code == 'p');
+            CHECK_EQ(code, 'p');
 
             int32_t msg_length = buffer->get32() - 4; // subtract 4 for length field
 
@@ -511,7 +493,7 @@ namespace springtail::pg_proxy {
                                  strlen(_login->scram_state.server_first_message));
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
@@ -569,13 +551,13 @@ namespace springtail::pg_proxy {
         free (server_final_message);
 
         ssize_t n = _connection->write(write_buffer->data(), write_buffer->size());
-        assert(n == write_buffer->size());
+        CHECK_EQ(n, write_buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', write_buffer->size(), write_buffer->data(), seq_id);
 
         // auth successful on client side; see if a primary server side session exists
-        if (_primary_session.expired()) {
+        if (_primary_session != nullptr) {
             // create a new server session for primary
             _create_server_session(Session::Type::PRIMARY, seq_id);
             // wait until this is done before auth done messages are sent
@@ -584,19 +566,6 @@ namespace springtail::pg_proxy {
             // auth is done, send auth done messages
             _send_auth_done(seq_id);
         }
-    }
-
-    bool
-    ClientSession::_primary_pool_exists()
-    {
-        DatabaseInstancePtr primary = DatabaseMgr::get_instance()->get_primary_instance();
-        assert (primary != nullptr);
-        DatabasePoolPtr pool = primary->get_pool(_db_id, _user->username());
-        if (pool == nullptr || pool->total_count() == 0) {
-            return false;
-        }
-
-        return true;
     }
 
     void
@@ -623,6 +592,9 @@ namespace springtail::pg_proxy {
         _encode_parameter_status(buffer, "server_encoding", "UTF8");
         _encode_parameter_status(buffer, "client_encoding", "UTF8");
         _encode_parameter_status(buffer, "server_version", SERVER_VERSION);
+        _encode_parameter_status(buffer, "standard_conforming_strings", "on");
+        _encode_parameter_status(buffer, "integer_datetimes", "on");
+        _encode_parameter_status(buffer, "session_authorization", _user->username());
 
         // backend key data -- for cancellation
         buffer->put('K');
@@ -636,7 +608,7 @@ namespace springtail::pg_proxy {
         buffer->put('I');
 
         ssize_t n = _connection->write(buffer->data(), buffer->size());
-        assert(n == buffer->size());
+        CHECK_EQ(n, buffer->size());
 
         // log buffer
         _log_buffer(false, '\0', buffer->size(), buffer->data(), seq_id);
@@ -683,7 +655,11 @@ namespace springtail::pg_proxy {
         buffer->put('S');
         buffer->put32(key.size() + value.size() + 6); // 4B len + 2B nulls
         buffer->put_string(key);
-        buffer->put_string(value);
+        if (value.empty()) {
+            buffer->put(0);
+        } else {
+            buffer->put_string(value);
+        }
     }
 
     void
@@ -692,12 +668,14 @@ namespace springtail::pg_proxy {
         BufferList blist;
         _read_msg(blist);
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client handle request: buffers={}", _id, blist.buffers.size());
+        int i = 0;
         for (auto buffer: blist.buffers) {
             char code = buffer->get();
             int32_t len = buffer->get32();
             uint64_t seq_id = _gen_seq_id();
 
-            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client got request code: {}, seq_id: {}", _id, code, seq_id);
+            PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client, buf={}, got request code: {}, seq_id: {}", _id, i++, code, seq_id);
 
             // log buffer, skipping the header
             _log_buffer(true, code, len, buffer->current_data(), seq_id);
@@ -751,11 +729,20 @@ namespace springtail::pg_proxy {
                 _handle_sync(buffer, seq_id);
                 break;
 
-            case 'H': // flush
-            case 'f': // copy fail
             case 'c': // copy done
             case 'd': // copy data
+                if (get_associated_session() == nullptr) {
+                    SPDLOG_WARN("[C:{}] No associated server session", _id);
+                    // a c/d could come after an error message after ready for query
+                    // in this case we drop it.
+                    break;
+                }
+                // fall through if we have an associated session
+                // to forward the message
+            case 'H':  // flush
+            case 'f':  // copy fail
                 // forward to server, should have associated server session
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
                 _forward_to_server(buffer, seq_id);
                 break;
 
@@ -809,8 +796,8 @@ namespace springtail::pg_proxy {
         });
 
         // Create a query statement object
-        QueryStmt::Type qs_type = _remap_parse_type(parse_contexts[0]);
-        bool is_read_safe = parse_contexts[0]->is_read_safe;
+        QueryStmt::Type qs_type = parse_contexts.empty() ? QueryStmt::Type::PREPARE : _remap_parse_type(parse_contexts[0]);
+        bool is_read_safe = parse_contexts.empty() ? true : parse_contexts[0]->is_read_safe;
         QueryStmtPtr query_stmt = std::make_shared<QueryStmt>(QueryStmt::Type::PREPARE, buffer, is_read_safe, stmt.data());
         query_stmt->extended_type = qs_type;
 
@@ -1018,7 +1005,9 @@ namespace springtail::pg_proxy {
             // this is a weird case as it doesn't make sense to issue
             // a sync without a set of other extended queries preceeding it
             // but we'll handle it anyway, just issue a sync to the server
-            _select_session(REPLICA, seq_id);
+            ServerSessionPtr session = _select_session(REPLICA, seq_id);
+            queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, buffer, seq_id), session);
+            return;
         }
 
         QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer,
@@ -1063,6 +1052,8 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        // session == nullptr, select a session based on the message type
+
         if (_primary_mode) {
             // send to primary session force to !readonly
             is_readonly = false;
@@ -1072,7 +1063,7 @@ namespace springtail::pg_proxy {
         if (!_shadow_mode || !is_readonly) {
             // select a server session and notify it of this message
             session = _select_session(is_readonly ? REPLICA : PRIMARY, msg->seq_id());
-            queue_msg(msg);
+            queue_msg(msg, session);
             return;
         }
 
@@ -1087,18 +1078,15 @@ namespace springtail::pg_proxy {
         // don't use _select_session() as it uses/sets the associated session
         msg = msg->clone();
         session = nullptr;
-        if (!_replica_session.expired()) {
+        if (_replica_session != nullptr) {
             // have a replica session use it
-            session = _replica_session.lock();
+            session = _replica_session;
         } else {
             // create a new replica session; shouldn't be common to get here
             session = _create_server_session(REPLICA, msg->seq_id());
         }
 
         assert (session != nullptr);
-        // make sure queue_msg doesn't set associated session;
-        // if set prior to this call it won't get reset
-        assert (get_associated_session() != nullptr);
         queue_msg(msg, session);
 
         return;
@@ -1124,27 +1112,24 @@ namespace springtail::pg_proxy {
                 // TODO: handle change of associated session type
             }
             ServerSessionPtr session =  std::static_pointer_cast<ServerSession>(get_associated_session());
-            set_waiting_on_session(true);
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Using associated session: id={}", _id, session->id());
             return session;
         }
 
         ServerSessionPtr session = nullptr;
 
-        if (type == PRIMARY && !_primary_session.expired()) {
+        if (type == PRIMARY && _primary_session != nullptr) {
             // use primary session
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Using primary session; setting associated session", _id);
-            session = _primary_session.lock();
-            set_associated_session(session);
+            session = _primary_session;
             return session;
         }
 
-        if (type == REPLICA && !_replica_session.expired()) {
+        if (type == REPLICA && _replica_session != nullptr) {
             // use replica session
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Using replica session; setting associated session", _id);
-            session = _replica_session.lock();
+            session = _replica_session;
             assert (!_shadow_mode);
-            set_associated_session(session);
             return session;
         }
 
@@ -1156,36 +1141,57 @@ namespace springtail::pg_proxy {
 
         // set associated session
         assert(!_shadow_mode || type == PRIMARY);
-        set_associated_session(session);
 
         return session;
+    }
+
+    BufferPtr
+    ClientSession::_encode_session_param_query()
+    {
+        std::ostringstream query;
+        for (const auto& [key, value] : _parameters) {
+            if (EXCLUDED_STARTUP_PARAMS.contains(key)) {
+                continue;
+            }
+            query << "SET " << key << "=" << value << ";";
+        }
+        std::string query_str = query.str();
+
+        // create a buffer for the query
+        // length = 4B len + query size + null terminator + code byte
+        int length = query_str.size() + 4 + 1 + 1;
+        BufferPtr buffer = BufferPool::get_instance()->get(length);
+
+        // create a query to set the session parameters
+        buffer->put('Q');
+        buffer->put32(length - 1); // subtract 1 for the code byte
+        buffer->put_string(query.str());
+
+        return buffer;
     }
 
     ServerSessionPtr
     ClientSession::_create_server_session(Session::Type type, uint64_t seq_id)
     {
-        // get database instance from either primary or replica set
-        DatabaseInstancePtr instance = nullptr;
-        if (type == PRIMARY) {
-            // get a primary session
-            instance = DatabaseMgr::get_instance()->get_primary_instance();
-        } else {
-            // get a replica session
-            assert (_primary_mode == false);
-            instance = DatabaseMgr::get_instance()->get_replica_instance(_db_id, _user->username());
-        }
-        assert (instance != nullptr);
+        DatabaseMgr *db_mgr = DatabaseMgr::get_instance();
 
-        // get a session from the instance
-        ServerSessionPtr session = instance->get_session(_db_id, _user->username());
+        // get a session from the pool or allocate a new one
+        bool from_pool = true;
+        ServerSessionPtr session = db_mgr->get_pooled_session(type, _db_id, _user->username());
+
         if (session == nullptr) {
             // need to allocate a new session
             PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Allocating new server session: {}:{}", _id, _database, _user->username());
-            if ((session = instance->allocate_session(_server, _user, _database)) == nullptr) {
+
+            from_pool = false;
+
+            if ((session = db_mgr->allocate_session(_server, type, _db_id, _user, _parameters)) == nullptr) {
                 SPDLOG_ERROR("Failed to allocate server session for user {}, database {}", _user->username(), _database);
+                assert(0);
                 return nullptr;
             }
         }
+
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Got server session: id={}, is_ready={}", _id, session->id(), session->is_ready());
 
         if (type == PRIMARY) {
@@ -1197,18 +1203,31 @@ namespace springtail::pg_proxy {
 
             // if client is in shadow mode, then the replica session
             // becomes a shadow session, not returning results to the client
-            if (_shadow_mode) {
-                // set shadow mode on the session
-                session->set_shadow_mode(true);
-            }
+            session->set_shadow_mode(_shadow_mode);
         }
         session->pin_client_session(shared_from_this());
 
-        if (session->is_ready()) {
-            // session is ready, we can use it
+        // TODO: it is possible that the session got into an error state
+        // during allocation or just after prior to being pinned
+        // we should check for this and handle it
+
+        if (from_pool) {
+            // if session is ready and clean, we can use it
+            if (session->check_startup_params(_parameters)) {
+                session->set_ready();
+                return session;
+            }
+
+            // apply parameters to session if they don't match
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Applying session parameters to server session: id={}", _id, session->id());
+            BufferPtr buffer = _encode_session_param_query();
+            SessionMsgPtr param_msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_INIT_PARAMS, buffer, seq_id);
+            queue_msg(param_msg, session);
+
             return session;
         }
 
+        // this is a newly allocated session, we need to start it up
         // we need to do authentication and wait for session to become ready
         // register server session connection with server
         _server->register_session(session);
@@ -1218,8 +1237,6 @@ namespace springtail::pg_proxy {
         queue_msg(startup_msg, session);
 
         // at this point we'll return through process()
-        // most likely with _waiting_on_session set, in which case this
-        // session will be removed from the server poll list
 
         return session;
     }
@@ -1372,6 +1389,20 @@ namespace springtail::pg_proxy {
 
         qs->is_read_safe = is_read_safe;
         return qs;
+    }
+
+    void
+    ClientSession::shutdown_server_sessions()
+    {
+        if (_primary_session != nullptr) {
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+            _primary_session->queue_shutdown_msg(msg);
+        }
+
+        if (_replica_session != nullptr) {
+            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN);
+            _replica_session->queue_shutdown_msg(msg);
+        }
     }
 
 } // namespace springtail::pg_proxy

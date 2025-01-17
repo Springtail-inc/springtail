@@ -11,6 +11,8 @@
 #include <poll.h>
 #include <signal.h>
 
+#include <absl/log/log.h>
+
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -239,6 +241,8 @@ namespace springtail::pg_proxy {
             case Session::Type::PRIMARY:
                 type = Logger::LogMsgType::FROM_PRIMARY;
                 break;
+            default:
+                LOG(FATAL) << "Invalid session type: " << session->type();
         }
 
         _logger->log_data(type, _id, session->id(), 0, '*', endpoint.length()+1, endpoint.c_str());
@@ -268,6 +272,8 @@ namespace springtail::pg_proxy {
             case Session::Type::PRIMARY:
                 type = Logger::LogMsgType::FROM_PRIMARY;
                 break;
+            default:
+                LOG(FATAL) << "Invalid session type: " << session->type();
         }
 
         _logger->log_data(type, _id, session->id(), 0, '!', 0, nullptr);
@@ -315,7 +321,7 @@ namespace springtail::pg_proxy {
         // send signal to shutdown
         _shutdown = true;
         char buf[1] = {0};
-        write(_pipe[1], buf, 1);
+        std::ignore = write(_pipe[1], buf, 1);
 
         // other cleanup is down after while loop in run()
     }
@@ -397,6 +403,8 @@ namespace springtail::pg_proxy {
             // queue the sessions that are now runnable
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session: [{}:{}]",
+                            session->type_str(), session->id());
                 _thread_pool.queue(session);
             }
         }
@@ -440,7 +448,7 @@ namespace springtail::pg_proxy {
         lock.unlock();
 
         char buf[1] = {0};
-        write(_pipe[1], buf, 1);
+        std::ignore = write(_pipe[1], buf, 1);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", connection->get_socket());
     }

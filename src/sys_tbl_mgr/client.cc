@@ -19,78 +19,31 @@
 
 #include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/client.hh>
-#include <sys_tbl_mgr/client_factory.hh>
+
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
-     /* static initialization must happen outside of class */
-    Client* Client::_instance {nullptr};
-    std::mutex Client::_instance_mutex;
-
-    Client *
-    Client::get_instance()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance == nullptr) {
-            _instance = new Client();
-        }
-
-        return _instance;
-    }
 
     Client::Client()
     {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
-        nlohmann::json client_json;
-        nlohmann::json server_json;
+        nlohmann::json rpc_json;
         uint64_t cache_size;
 
-        // fetch properties for the sys tbl mgr
-        if (!Json::get_to(json, "client", client_json)) {
-            throw Error("Sys tbl mgr client settings not found");
-        }
-
-        if (!Json::get_to(json, "server", server_json)) {
-            throw Error("Sys tbl mgr server settings not found");
+        // fetch RPC properties for the sys_tbl_mgr client
+        if (!Json::get_to(json, "rpc_config", rpc_json)) {
+            throw Error("SysTblMgr RPC settings are not found");
         }
 
         if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
             throw Error("Sys tbl mgr cache size settings not found");
         }
 
-        // create the caches
-        //_schema_cache = std::make_shared<Cache<SchemaKey, SchemaValue>>(cache_size);
-        //_roots_cache = std::make_shared<Cache<MetadataKey, MetadataValue>>(cache_size);
-        _schema_cache = std::make_shared<SchemaCache>(cache_size, cache_size * 8);
-
-        // init channel pool
-        int max_connections;
-        int port;
-        Json::get_to<int>(client_json, "connections", max_connections, 8);
-        Json::get_to<int>(server_json, "port", port, 55051);
+        // create the cache
+        _schema_cache = std::make_shared<SchemaCache>(cache_size);
 
         std::string server = Properties::get_sys_tbl_mgr_hostname();
-
-        // construct the thrift client pool.
-        // First argument is a factory object that constructs a thrift clients
-        // using the host and port from above
-        _thrift_client_pool = std::make_shared<ObjectPool<ServiceClient>>(
-            std::make_shared<ObjectFactory>(server, port),
-            max_connections/2,
-            max_connections
-        );
-    }
-
-    void
-    Client::shutdown()
-    {
-        std::scoped_lock<std::mutex> lock(_instance_mutex);
-
-        if (_instance != nullptr) {
-            delete _instance;
-            _instance = nullptr;
-        }
+        init(server, rpc_json);
     }
 
     // exposed client service interface below
@@ -98,11 +51,10 @@ namespace springtail::sys_tbl_mgr {
     void
     Client::ping()
     {
-        ThriftClient c = _get_client();
         Status result;
-
-        c.client->ping(result);
-
+        _invoke_with_retries([&result](ThriftClient &c) {
+            c.client->ping(result);
+        });
         std::cout << "Ping got: " << result.message << std::endl;
         return;
     }
@@ -173,12 +125,12 @@ namespace springtail::sys_tbl_mgr {
                          const XidLsn &xid,
                          const PgMsgTable &msg)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
         auto &&request = _gen_table_request(db_id, xid, msg);
-
-        c.client->create_table(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_table(result, request);
+        });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -192,11 +144,12 @@ namespace springtail::sys_tbl_mgr {
                         const XidLsn &xid,
                         const PgMsgTable &msg)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
         auto &&request = _gen_table_request(db_id, xid, msg);
-        c.client->alter_table(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->alter_table(result, request);
+        });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -210,7 +163,6 @@ namespace springtail::sys_tbl_mgr {
                        const XidLsn &xid,
                        const PgMsgDropTable &msg)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
         DropTableRequest request;
@@ -221,7 +173,9 @@ namespace springtail::sys_tbl_mgr {
         request.schema = msg.schema;
         request.name = msg.table;
 
-        c.client->drop_table(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->drop_table(result, request);
+        });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -231,16 +185,17 @@ namespace springtail::sys_tbl_mgr {
     }
 
 
-    std::string 
+    std::string
     Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
         auto &&request = _gen_index_request(db_id, xid, msg);
         request.index.state=static_cast<int8_t>(state);
 
-        c.client->create_index(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_index(result, request);
+        });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -252,7 +207,6 @@ namespace springtail::sys_tbl_mgr {
     void
     Client::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
     {
-        ThriftClient c = _get_client();
         Status result;
 
         SetIndexStateRequest request;
@@ -262,7 +216,9 @@ namespace springtail::sys_tbl_mgr {
         request.index_id = index_id;
         request.state = static_cast<uint8_t>(state);
 
-        c.client->set_index_state(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->set_index_state(result, request);
+        });
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -271,25 +227,28 @@ namespace springtail::sys_tbl_mgr {
 
 
     IndexInfo 
-    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid)
+    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
     {
-        ThriftClient c = _get_client();
         IndexInfo result;
 
         GetIndexInfoRequest request;
         _set_request_common(request, db_id, xid);
         request.index_id = index_id;
+        if (tid) {
+            request.__set_table_id(*tid);
+        }
 
-        c.client->get_index_info(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->get_index_info(result, request);
+        });
 
         return result;
     }
 
 
-    std::string 
+    std::string
     Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
         DropIndexRequest request;
@@ -298,7 +257,9 @@ namespace springtail::sys_tbl_mgr {
         request.index_id = msg.oid;
         request.schema = msg.schema;
 
-        c.client->drop_index(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->drop_index(result, request);
+        });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
@@ -313,7 +274,6 @@ namespace springtail::sys_tbl_mgr {
                          uint64_t xid,
                          const TableMetadata &metadata)
     {
-        ThriftClient c = _get_client();
         Status result;
 
         UpdateRootsRequest request;
@@ -330,7 +290,9 @@ namespace springtail::sys_tbl_mgr {
         request.stats.row_count = metadata.stats.row_count;
         request.snapshot_xid = metadata.snapshot_xid;
 
-        c.client->update_roots(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->update_roots(result, request);
+        });
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -341,14 +303,15 @@ namespace springtail::sys_tbl_mgr {
     Client::finalize(uint64_t db_id,
                      uint64_t xid)
     {
-        ThriftClient c = _get_client();
         Status result;
 
         FinalizeRequest request;
         request.db_id = db_id;
         request.xid = xid;
 
-        c.client->finalize(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->finalize(result, request);
+        });
 
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
@@ -366,9 +329,9 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid;
 
         GetRootsResponse result;
-
-        ThriftClient c = _get_client();
-        c.client->get_roots(result, request);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->get_roots(result, request);
+        });
 
         auto metadata = std::make_shared<TableMetadata>();
         for (const auto &root : result.roots) {
@@ -391,7 +354,6 @@ namespace springtail::sys_tbl_mgr {
 
         auto metadata = _schema_cache->get(key, [this](const SchemaCache::Key &key) {
             ThriftClient c = _get_client();
-            GetSchemaResponse result;
 
             GetSchemaRequest request;
             request.db_id = key.db;
@@ -399,7 +361,10 @@ namespace springtail::sys_tbl_mgr {
             request.xid = key.xid.xid;
             request.lsn = key.xid.lsn;
 
-            c.client->get_schema(result, request);
+            GetSchemaResponse result;
+            _invoke_with_retries([&result, &request](ThriftClient &c) {
+                c.client->get_schema(result, request);
+            });
 
             auto metadata = std::make_shared<SchemaMetadata>();
             for (const auto &col_entry : result.columns) {
@@ -485,7 +450,6 @@ namespace springtail::sys_tbl_mgr {
         auto populate = [this](const SchemaCache::Key &access_key,
                                const SchemaCache::Key &target_key) {
             ThriftClient c = _get_client();
-            GetSchemaResponse result;
 
             GetTargetSchemaRequest request;
             request.db_id = access_key.db;
@@ -495,7 +459,10 @@ namespace springtail::sys_tbl_mgr {
             request.target_xid = target_key.xid.xid;
             request.target_lsn = target_key.xid.lsn;
 
-            c.client->get_target_schema(result, request);
+            GetSchemaResponse result;
+            _invoke_with_retries([&result, &request](ThriftClient &c) {
+                c.client->get_target_schema(result, request);
+            });
 
             auto metadata = std::make_shared<SchemaMetadata>();
             for (const auto &col_entry : result.columns) {
@@ -560,25 +527,30 @@ namespace springtail::sys_tbl_mgr {
                    uint64_t table_id,
                    const XidLsn &xid)
     {
-        ThriftClient c = _get_client();
-
         ExistsRequest request;
         request.db_id = db_id;
         request.table_id = table_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
 
-        return c.client->exists(request);
+        bool ret = false;
+        _invoke_with_retries([&ret, &request](ThriftClient &c) {
+            ret = c.client->exists(request);
+        });
+
+        return ret;
     }
 
     std::string
     Client::swap_sync_table(const TableRequest &create,
                             const UpdateRootsRequest &roots)
     {
-        ThriftClient c = _get_client();
         DDLStatement result;
 
-        c.client->swap_sync_table(result, create, roots);
+        _invoke_with_retries([&result, &create, &roots](ThriftClient &c) {
+            c.client->swap_sync_table(result, create, roots);
+        });
+
         if (result.statement.empty()) {
             throw SysTblMgrError();
         }

@@ -46,6 +46,8 @@ namespace springtail {
         static inline constexpr char PID_PATH[] = "pid_path";
         /** Proxy configuration section */
         static inline constexpr char PROXY_CONFIG[] = "proxy";
+        /** Open telemetry configuration section */
+        static inline constexpr char OTEL_CONFIG[] = "otel";
 
         /**
          * @brief Get JSON object from a key

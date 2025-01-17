@@ -26,11 +26,26 @@ namespace {
         // Called once per testsuite.  Create a table and populate it with data
         static void SetUpTestSuite()
         {
-            // call springtail_init() here to avoid call in fdw_init()
-            springtail_init();
+            struct Initializer
+            {
+                test::Services _s;
 
-            PgFdwMgr::fdw_init();
-            _services.init(true);
+                Initializer() : _s{true, true, true}
+                {
+                    springtail_init();
+                    // call springtail_init() here to avoid call in fdw_init()
+                    PgFdwMgr::fdw_init();
+                    _s.init();
+                }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
 
             _columns = {
                 {"col1", static_cast<uint8_t>(SchemaType::INT32), INT4OID, std::nullopt, 1, 0, false, true, false},
@@ -89,12 +104,6 @@ namespace {
             _table_xid = target_xid+1;
         }
 
-        // Called once per testsuite.  Remove the table directories
-        static void TearDownTestSuite() {
-            // remove any files created during the run
-           _services.shutdown();
-        }
-
         // Pre test setup
         void SetUp() override {
             // setup the attributes to fetch (all columns)
@@ -103,7 +112,7 @@ namespace {
                 _attrs[i] = new FormData_pg_attribute();
                 _attrs[i]->atttypid = INT4OID;
                 _attrs[i]->attnum = _columns[i].position;
-                strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN);
+                strncpy(_attrs[i]->attname.data, _columns[i].column_name.c_str(), NAMEDATALEN - 1);
 
                 _target_list = lappend(_target_list, makeInteger(_attrs[i]->attnum));
             }
@@ -120,8 +129,6 @@ namespace {
                 delete[] _attrs;
             }
         }
-
-        inline static test::Services _services{true, true, true};
 
         inline static uint64_t _db_id;
         inline static uint64_t _tid;
@@ -288,6 +295,7 @@ namespace {
                             valid = data >= value;
                             break;
                         default:
+                            CHECK(false) << "Invalid operator";
                             break;
                     }
                     row_valid &= valid;

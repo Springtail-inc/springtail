@@ -8,6 +8,7 @@
 #include <vector>
 
 //#include <fmt/format.h>
+#include <absl/log/check.h>
 #include <xxhash.h>
 
 #include <common/object_cache.hh>
@@ -80,13 +81,13 @@ namespace pg_proxy {
 
         /** Get buffer */
         const BufferPtr buffer() const {
-            assert(data_type == PACKET);
+            CHECK_EQ(data_type, PACKET);
             return std::get<BufferPtr>(data);
         }
 
         /** Get query string */
         const std::string &query() const {
-            assert(data_type == SIMPLE);
+            CHECK_EQ(data_type, SIMPLE);
             return std::get<std::string>(data);
         }
 
@@ -262,7 +263,7 @@ namespace pg_proxy {
          * @param stmt The statement to commit
          * @param completed The number of completed sub statements
          */
-        void commit_statement(QueryStmtPtr stmt, int completed);
+        void commit_statement(QueryStmtPtr stmt, int completed, bool success=true);
 
         /**
          * @brief Reached a sync point; READY FOR QUERY, if not in xact then implicitly commit or rollback

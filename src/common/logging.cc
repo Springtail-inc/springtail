@@ -9,6 +9,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 
+#include <absl/log/log_sink.h>
+#include <absl/log/log_sink_registry.h>
+
 #include <nlohmann/json.hpp>
 
 #include <common/logging.hh>
@@ -29,6 +32,39 @@ namespace logging {
     }
 } // namespace logging
 
+namespace {
+class SpdlogSink : public absl::LogSink {
+public:
+    void Send(const absl::LogEntry& entry) override {
+        spdlog::level::level_enum spdlog_level;
+        switch (entry.log_severity()) {
+            case absl::LogSeverity::kInfo:
+                spdlog_level = spdlog::level::info;
+                break;
+            case absl::LogSeverity::kWarning:
+                spdlog_level = spdlog::level::warn;
+                break;
+            case absl::LogSeverity::kError:
+                spdlog_level = spdlog::level::err;
+                break;
+            case absl::LogSeverity::kFatal:
+                spdlog_level = spdlog::level::critical;
+                break;
+            default:
+                spdlog_level = spdlog::level::debug;
+                break;
+        }
+
+        spdlog::log(
+            spdlog_level,
+            "[{}:{}] {}",
+            entry.source_filename(),
+            entry.source_line(),
+            entry.text_message());
+    }
+};
+
+}
     static void set_level(auto &logger, const std::string &level)
     {
         if (level == "debug") {
@@ -55,16 +91,11 @@ namespace logging {
         uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
 
         // configuration options
-        std::string log_path_str;
-        std::string log_level;
-        std::string pattern;
-        int max_size;
-        int max_files;
-        Json::get_to<std::string>(props, "log_path", log_path_str, "/tmp/springtail_log.txt");
-        Json::get_to<int>(props, "log_file_size", max_size, 1024 * 1024 * 5);
-        Json::get_to<int>(props, "log_file_count", max_files, 5);
-        Json::get_to<std::string>(props, "log_level", log_level, "trace");
-        Json::get_to<std::string>(props, "log_pattern", pattern, "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
+        std::string log_path_str = Json::get_or<std::string>(props, "log_path", "/tmp/springtail_log.txt");
+        int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
+        int max_files = Json::get_or<int>(props, "log_file_count", 5);
+        std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
+        std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
         // if the mask wasn't passed in then check if log_module is set in properties
         if (!module_mask_opt && props.contains("log_modules")) {
@@ -128,5 +159,8 @@ namespace logging {
 
         spdlog::set_default_logger(logger);
         spdlog::flush_every(std::chrono::seconds(3));
+
+        static SpdlogSink spdlog_sink;
+        absl::AddLogSink(&spdlog_sink);
     }
 } // namespace springtail

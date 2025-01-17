@@ -6,6 +6,7 @@
 #include <fmt/core.h>
 
 #include <common/exception.hh>
+#include <common/logging.hh>
 
 namespace springtail {
     /**
@@ -14,29 +15,24 @@ namespace springtail {
     class Json {
     public:
         /**
-         * @brief Get value from json blob, default value assigned if no value exists
+         * @brief Get value from json blob, default value assigned if no value exists or value is null
          * @tparam T type of value
          * @param json input json blob
          * @param key  json key to lookup
-         * @param result reference to result
-         * @param def_value default value if key doesn't exist; if key is null false is returned
-         * @return true a value is assigned to result (default or otherwise)
-         * @return false a value of null was stored in the json
+         * @param def_value default value if key doesn't exist or is assigned null
+         * @return value (from json, otherwise def_value) of type T. On json type mistamtch,
+         * then it will be a default-constructed T.
          */
-        template<typename T> static inline bool
-        get_to(const nlohmann::json &json, const std::string &key, T &result, const T &def_value)
+        template<typename T> static inline T
+        get_or(const nlohmann::json &json, const std::string &key, const T &def_value)
         {
-            if (json.is_null() || !json.contains(key)) {
-                result = def_value;
-                return true;
+            if (json.is_null() || !json.contains(key) || json[key].is_null()) {
+                return def_value;
             }
 
-            if (json[key].is_null()) {
-                return false;
-            }
-
+            T result;
             _get_to_helper(json[key], result);
-            return true;
+            return result;
         }
 
         /**
@@ -60,28 +56,6 @@ namespace springtail {
         }
 
         /**
-         * @brief Get value from json blob, default value assigned if no value exists
-         * @tparam T type of value
-         * @param json input json blob
-         * @param key  json key to lookup
-         * @param def_value  default value
-         * @return optional of type T
-         */
-        template<typename T> static inline std::optional<T>
-        get(const nlohmann::json &json, const std::string &key, const T &def_value)
-        {
-            if (json.is_null() || !json.contains(key)) {
-                return def_value;
-            }
-
-            if (json[key].is_null()) {
-                return {};
-            }
-
-            return json[key];
-        }
-
-        /**
          * @brief Get value from json blob, no default value
          * @tparam T type of value
          * @param json input json blob
@@ -92,10 +66,15 @@ namespace springtail {
         get(const nlohmann::json &json, const std::string &key)
         {
             if (json.is_null() || !json.contains(key) || json[key].is_null()) {
-                return {};
+                return std::nullopt;
             }
 
-            return json[key];
+            try {
+                return json[key].get<T>();
+            } catch (const nlohmann::json::type_error& e) {
+                SPDLOG_WARN("Bad conversion for key '{}' - {}", key, e.what());
+                return std::nullopt;  // Return nullopt on failed conversion
+            }
         }
 
     private:
@@ -105,7 +84,7 @@ namespace springtail {
                 if (json.is_string()) {
                     std::string val;
                     json.get_to(val);
-                    result = std::stol(val);
+                    result = std::stoll(val);
                 } else {
                     json.get_to(result);
                 }

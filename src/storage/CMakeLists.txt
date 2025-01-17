@@ -5,6 +5,8 @@ find_package(lz4 REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(absl CONFIG REQUIRED)
+find_package(benchmark CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 find_package(Boost COMPONENTS thread REQUIRED)
 
@@ -16,7 +18,7 @@ target_include_directories(springtail_storage
 target_link_libraries(springtail_storage
   PRIVATE lz4::lz4 xxHash::xxhash
   PUBLIC Boost::thread
-         springtail_write_cache)
+         springtail_write_cache absl::check)
 
 
 ## helpers
@@ -47,6 +49,14 @@ if(LINUX)
 else()
     set(GCOV_LIB "")
 endif()
+
+# btree benchmark
+add_executable(benchmark_btree test/benchmark_btree.cc)
+target_include_directories(benchmark_btree PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(benchmark_btree
+    PUBLIC springtail_storage
+    PRIVATE benchmark::benchmark ${GCOV_LIB})
+add_dsymutil_command(benchmark_btree)
 
 # io test
 add_executable(test_io test/io_test.cc)

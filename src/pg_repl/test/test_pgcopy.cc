@@ -28,9 +28,24 @@ namespace {
         std::filesystem::path _base_dir;
 
         void SetUp() override {
-            springtail_init();
+            struct Initializer
+            {
+                test::Services _s;
 
-            _services.init(true);
+                Initializer() : _s{true, true, true}
+                {
+                    springtail_init();
+                    _s.init();
+                }
+                Initializer(const Initializer&) = delete;
+                Initializer& operator=(const Initializer&) = delete;
+                ~Initializer()
+                {
+                    _s.shutdown();
+                }
+
+            };
+            static Initializer init;
 
             nlohmann::json db_config = Properties::get_db_config(db_id);
             auto db_name = db_config["name"].get<std::string>();
@@ -47,13 +62,7 @@ namespace {
             }
         }
 
-        void TearDown() override {
-            _services.shutdown();
-        }
-
         uint64_t db_id = 1;
-
-        test::Services _services{true, true, true};
     };
 
     TEST_F(PgCopyTable_Test, CopyTable)
@@ -114,6 +123,10 @@ namespace {
         auto table = TableMgr::get_instance()->get_table(db_id, oid, xid);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
+
+        // verify stats
+        auto &&metadata = client->get_roots(db_id, oid, xid);
+        ASSERT_EQ(metadata.stats.row_count, 5000);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)

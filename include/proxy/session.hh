@@ -34,6 +34,15 @@ namespace springtail::pg_proxy {
     public:
         using SessionPtr = std::shared_ptr<Session>;
 
+        /** Startup parameters that can't be 'SET' after session startup */
+        const std::set<std::string> EXCLUDED_STARTUP_PARAMS = {
+            "user",
+            "database",
+            "application_name",
+            "client_encoding",  // maybe this can be sometimes...
+            "is_superuser",
+        };
+
         /** Type of session */
         enum Type : int8_t {
             CLIENT=0,
@@ -52,6 +61,13 @@ namespace springtail::pg_proxy {
             DEPENDENCIES=6,   ///< waiting on dependencies
             QUERY=7,          ///< query in progress
             EXTENDED_ERROR=8, ///< extended message error state
+
+            // reset session states; states after this session is reset
+            // and released back to the session free pool
+            RESET_SESSION=9,         ///< reset session state, e.g. after error
+            RESET_SESSION_READY=10,  ///< reset session ready for allocation
+            RESET_SESSION_PARAMS=11, ///< reset session, sending startup parameters
+
             ERROR=99          ///< fatal error state
         };
 
@@ -71,16 +87,14 @@ namespace springtail::pg_proxy {
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
 
         /**
-         * @brief Construct a session with a connection and server ptr.
+         * @brief Construct a session with a connection and server ptr.  Type forced to client.
          * For client sessions.
          * @param connection connection
          * @param server     main server
-         * @param type       type of session (default=CLIENT)
          * @return Session object
          */
         Session(ProxyConnectionPtr connection,
-                ProxyServerPtr server,
-                Type type=CLIENT);
+                ProxyServerPtr server);
 
         /**
          * Construct a session with a database instance and user.
@@ -98,7 +112,17 @@ namespace springtail::pg_proxy {
                 ProxyServerPtr server,
                 UserPtr user,
                 const std::string &database,
+                const std::unordered_map<std::string, std::string> &parameters,
                 Type type=PRIMARY);
+
+        /** For test purposes */
+        Session(Type type,
+                uint64_t id,
+                uint64_t db_id,
+                const std::string &database,
+                const std::string &username)
+            : _type(type), _user(std::make_shared<User>(username)), _db_id(db_id), _database(database), _id(id)
+        {}
 
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;
@@ -122,17 +146,15 @@ namespace springtail::pg_proxy {
 
         /** Set session to be associated with this session */
         void set_associated_session(std::shared_ptr<Session> remote_session) {
+            assert(remote_session != nullptr);
             _associated_session = remote_session;
-            remote_session->_associated_session = shared_from_this();
-            _waiting_on_session = true;
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Setting associated session", (_type == CLIENT ? 'C': 'S'), _id);
         }
 
-        /** Clear associated session from this and remote session */
+        /** Clear associated session from this session, leaves any association on remote session */
         void clear_associated_session() {
             assert(_associated_session != nullptr);
-            assert(_waiting_on_session == true);
-            _waiting_on_session = false;
-            _associated_session->_associated_session = nullptr;
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[{}:{}] Clearing associated session", (_type == CLIENT ? 'C': 'S'), _id);
             _associated_session = nullptr;
         }
 
@@ -143,15 +165,6 @@ namespace springtail::pg_proxy {
 
         Type associated_session_type() const {
             return _associated_session->_type;
-        }
-
-        void set_waiting_on_session(bool waiting) {
-            _waiting_on_session = waiting;
-        }
-
-        /** Is this session blocked waiting for another session to complete */
-        bool is_waiting_on_session() const {
-            return _waiting_on_session;
         }
 
         /** Set database name for this session */
@@ -184,13 +197,13 @@ namespace springtail::pg_proxy {
             SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
                          _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
                          _connection->get_socket());
-            assert(_associated_session == nullptr);
+            CHECK_EQ(_associated_session, nullptr);
             _state = ERROR;
             _handle_error();
         }
 
         /** Check if session is in ready state or not */
-        bool is_ready() const {
+        virtual bool is_ready() const {
             return _state == READY;
         }
 
@@ -200,6 +213,10 @@ namespace springtail::pg_proxy {
          */
         void queue_msg(SessionMsgPtr msg, SessionPtr remote_session) {
             if (_associated_session == nullptr) {
+                set_associated_session(remote_session);
+            } else if (_associated_session != remote_session) {
+                SPDLOG_WARN("Associated session not cleared");
+                clear_associated_session();
                 set_associated_session(remote_session);
             }
             remote_session->_msg_queue.push(msg);
@@ -215,9 +232,18 @@ namespace springtail::pg_proxy {
             }
             assert (_associated_session != nullptr);
             _associated_session->_msg_queue.push(msg);
-            if (_type == Type::CLIENT) {
-                assert (_waiting_on_session == true);
-            }
+        }
+
+        /**
+         * @brief Queue a shutdown message on this session; higher priority than other messages
+         * Clears the message queue and sets the session to ready for message
+         * @param msg Message to queue
+         */
+        void queue_shutdown_msg(SessionMsgPtr msg)
+        {
+            _msg_queue.clear();
+            _msg_queue.push(msg);
+            _ready_for_message = true;
         }
 
         /**
@@ -255,6 +281,14 @@ namespace springtail::pg_proxy {
             return _type;
         }
 
+        /** Type string */
+        std::string type_str() const {
+            if (_type == Type::CLIENT) {
+                return "C";
+            }
+            return "S";
+        }
+
         /**
          * @brief Set shadow flag
          * @param shadow true if this is a shadow session
@@ -272,9 +306,51 @@ namespace springtail::pg_proxy {
             return _is_shadow;
         }
 
+        /**
+         * @brief Has this session been shutdown
+         * @return true if shutdown
+         * @return false if not shutdown
+         */
+        bool is_shutdown() const {
+            return _shut_down_flag.test();
+        }
+
+        /**
+         * @brief Test and set atomic shutdown flag
+         * @return true if shutdown was set previously
+         * @return false if shutdown was not set previously
+         */
+        bool test_and_set_shutdown() {
+            return _shut_down_flag.test_and_set();
+        }
+
+        /**
+         * @brief Does this session have a closed connection
+         * @return true if connection is closed
+         * @return false if connection is open
+         */
+        virtual bool is_connection_closed() const {
+            return _connection->closed();
+        }
+
+        /**
+         * @brief Reset private session state
+         */
+        virtual void reset_session() {
+            _is_shadow = false;
+            _in_transaction = false;
+            _login.reset();
+            _associated_session.reset();
+            _msg_queue.clear();
+            _ready_for_message = true;
+            _state = RESET_SESSION;
+        }
+
     protected:
         ProxyConnectionPtr _connection;    ///< connection associated with this session
         ProxyServerPtr     _server;        ///< server associated with this session
+
+        std::mutex    _session_mutex;      ///< mutex for session
 
         State        _state = STARTUP;     ///< state of session, governs process()
         Type         _type;                ///< type of session
@@ -297,6 +373,11 @@ namespace springtail::pg_proxy {
         bool _in_transaction = false;      ///< is this session in a transaction
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
+
+        std::unordered_map<std::string, std::string> _parameters; ///< parameters for the session
+
+        /** Process connection, entry from operator()() */
+        bool _process(std::unique_lock<std::mutex> &lock);
 
         /** Process messages for session connection,
          * must be implemented by derived class */
@@ -327,8 +408,8 @@ namespace springtail::pg_proxy {
         /** Stream data from one connection directly to the other */
         void _stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id);
 
-        /** Send data to remote session */
-        void _send_to_remote_session(char code, int32_t msg_length, const char *data, uint64_t seq_id);
+        /** Send data to remote session, assumes buffer contains code and length */
+        void _send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id);
 
         /** Log buffer */
         void _log_buffer(bool incoming, char code, int32_t data_length, const char *data, uint64_t seq_id, bool final=true);
@@ -336,11 +417,12 @@ namespace springtail::pg_proxy {
     private:
         /** client/server session associated with this one */
         std::shared_ptr<Session> _associated_session = nullptr;
-        /** waiting on associated session for data -- _associated_session should be set */
-        bool _waiting_on_session = false;
+
+        /** atomic shutdown flag */
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
-        bool _ready_for_message = true;  ///< ready to process messages
+        /** ready to process messages */
+        bool _ready_for_message = true;
 
         /** queue of messages to process */
         ConcurrentQueue<SessionMsg> _msg_queue;

@@ -60,7 +60,7 @@ namespace springtail::sys_tbl_mgr {
         using PopulateRangeFn = std::function<SchemaMetadataPtr(const Key &, const Key &)>;
 
     public:
-        SchemaCache(int schema_max, int history_max)
+        SchemaCache(int schema_max)
             : _schema_max(schema_max)
         { }
 

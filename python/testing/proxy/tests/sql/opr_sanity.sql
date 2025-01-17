@@ -54,7 +54,7 @@ WHERE proretset AND prokind != 'f';
 -- this might change in future, but there will probably never be many.
 SELECT p1.oid, p1.proname
 FROM pg_proc AS p1
-WHERE prosecdef
+WHERE prosecdef AND proname <> 'springtail_get_user_access'
 ORDER BY 1;
 
 -- pronargdefaults should be 0 iff proargdefaults is null

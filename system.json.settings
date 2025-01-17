@@ -28,32 +28,47 @@
         }
     },
     "write_cache": {
-        "server" : {
-            "port" : 55051,
-            "worker_threads": 8,
-            "io_threads": 1
+        "rpc_config" : {
+            "server_port": 55051,
+            "server_worker_threads": 8,
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
+            "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
+            "ssl": false,
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
+            "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         },
-        "client": {
-            "connections": 8
-        }
+        "io_threads": 1
     },
     "xid_mgr": {
-        "server" : {
-            "port" : 55052,
-            "worker_threads": 32,
-            "base_path": "xid_mgr"
+        "rpc_config" : {
+            "server_port": 55052,
+            "server_worker_threads": 32,
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
+            "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
+            "ssl": false,
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
+            "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         },
-        "client": {
-            "connections": 8
-        }
+        "base_path": "xid_mgr"
     },
     "sys_tbl_mgr": {
-        "server" : {
-            "port" : 55053,
-            "worker_threads": 16
-        },
-        "client": {
-            "connections": 8
+        "rpc_config" : {
+            "server_port": 55053,
+            "server_worker_threads": 16,
+            "server_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00_intermediate.pem",
+            "server_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_server_00.key",
+            "server_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem",
+            "ssl": false,
+            "client_connections": 8,
+            "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
+            "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
+            "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
         }
     },
     "storage": {
@@ -121,5 +136,8 @@
             "fdw_user": "springtail",
             "db_prefix": "replica_"
         }
+    },
+    "otel": {
+	"enabled": true
     }
 }

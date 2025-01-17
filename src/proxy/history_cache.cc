@@ -1,5 +1,7 @@
 #include <proxy/history_cache.hh>
 
+#include <proxy/logging.hh>
+
 namespace springtail {
 namespace pg_proxy {
 
@@ -186,6 +188,7 @@ namespace pg_proxy {
     StatementCache::sync_transaction(char xact_status)
     {
         // status is either: I - idle, T - in transaction, E - error
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Syncing transaction: status: {}, in_error: {}", xact_status, _in_error);
 
         // finished processing statements, if we are not in a xact at this point
         // then either we saw a commit earlier and are done, or were in a
@@ -203,13 +206,23 @@ namespace pg_proxy {
 
         if (xact_status != 'E') {
             _in_error = false;
+        } else {
+            _in_error = true;
         }
+
         _statement_history.clear();
     }
 
     void
-    StatementCache::commit_statement(QueryStmtPtr stmt, int completed)
+    StatementCache::commit_statement(QueryStmtPtr stmt, int completed, bool success)
     {
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Committing statement: stmt_type: {}, completed: {}, children: {}, in_error: {}, success: {}",
+                    (uint8_t)stmt->type, completed, stmt->children.size(), _in_error, success);
+
+        if (!success) {
+            _in_error = true;
+        }
+
         // if this is not a simple query statement process directly; should be only 1
         if (stmt->type != QueryStmt::Type::SIMPLE_QUERY) {
             if (completed == 1) {
@@ -222,11 +235,15 @@ namespace pg_proxy {
             return;
         }
 
-        // if this is a simple query, we need to process each child statement
+        // this is a simple query, we need to process each child statement
+        if (stmt->children.size() == 0) {
+            // no children, nothing to do (empty query)
+            return;
+        }
+
         assert (stmt->children.size() > 0);
         assert (completed <= stmt->children.size());
         for (int i = 0; i < completed; i++) {
-            assert (!_in_error);
             _commit_single_stmt(stmt->children[i]);
         }
 

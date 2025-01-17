@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <absl/log/check.h>
 #include <nlohmann/json.hpp>
 
 #include <common/exception.hh>
@@ -88,8 +89,7 @@ namespace springtail {
         int config_db = redis_config["config_db"];
 
         // check if ssl is enabled
-        bool ssl_enabled;
-        Json::get_to<bool>(_json[REDIS_CONFIG], "ssl", ssl_enabled, false);
+        bool ssl_enabled = Json::get_or<bool>(_json[REDIS_CONFIG], "ssl", false);
 
         // create connection options for config db
         sw::redis::ConnectionOptions connect_options;
@@ -168,6 +168,7 @@ namespace springtail {
         _json[ORG_CONFIG] = system_json["org"];
         _json[FS_CONFIG] = system_json["fs"];
         _json[PROXY_CONFIG] = system_json["proxy"];
+        _json[OTEL_CONFIG] = system_json["otel"];
 
         // get the redis client
         _create_redis_client();
@@ -334,7 +335,7 @@ namespace springtail {
                     key = props.substr(start, token - start);
                     next_token = ";";
                 } else {
-                    assert(props[token] == '.');
+                    CHECK_EQ(props[token], '.');
                     key = props.substr(start, token - start);
                     item = &((*item)[key]);
                 }
@@ -586,8 +587,7 @@ namespace springtail {
     Properties::get_pid_path()
     {
         nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
-        std::string pid_path;
-        Json::get_to<std::string>(props, Properties::PID_PATH, pid_path, "/var/springtail/pids");
+        std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
     }
 

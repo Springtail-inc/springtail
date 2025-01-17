@@ -72,6 +72,26 @@ def check_postgres_running() -> bool:
     return len(pids) > 0
 
 
+def restart_postgres() -> None:
+    """Restart the postgres process."""
+    print("Restarting the postgres process...")
+
+    if is_linux():
+        run_command('sudo', ['service', 'postgresql', 'restart'])
+    else:
+        run_command('brew', ['services', 'restart', POSTGRES])
+
+    iters = 0
+    pids = []
+    while (len(pids) == 0 and iters < 10):
+        time.sleep(1)
+        pids = running_pids(['postgres'])[0]
+        iters = iters + 1
+
+    if iters == 10 and len(pids) == 0:
+        raise Exception("Postgres failed to start, timedout")
+
+
 def start_postgres() -> None:
     """Start the postgres process using brew on mac."""
     print("Postgres is not running, starting it...")
@@ -103,16 +123,20 @@ def stop_postgres() -> None:
     else:
         run_command('brew', ['services', 'stop', POSTGRES])
 
-    time.sleep(1)
+    iters = 0
+    pids = []
+    while (len(pids) > 0 and iters < 10):
+        time.sleep(1)
+        pids = running_pids(['postgres'])[0]
+        iters = iters + 1
 
-    pids = running_pids(['postgres'])[0]
     if len(pids) > 0:
         print("Failed to stop the postgres cleanly, killing the process...")
         kill_processes(['postgres'])
-
-    pids = running_pids(['postgres'])[0]
-    if len(pids) > 0:
-        raise Exception("Failed to stop the postgres process, timedout")
+        time.sleep(1)
+        pids = running_pids(['postgres'])[0]
+        if len(pids) > 0:
+            raise Exception("Failed to stop the postgres process, timedout")
 
 
 def start_daemons(build_dir : str, daemons : List[tuple], restart : bool = True) -> None:
