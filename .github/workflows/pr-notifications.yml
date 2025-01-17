@@ -11,6 +11,9 @@ on:
 jobs:
   notify-slack:
     name: Notify Slack
+    permissions:
+      contents: read
+      pull-requests: read
     # Only run if the event is pull request review requested or pull request review approved
     if: |
       (github.event_name == 'pull_request' && github.event.action == 'review_requested') ||
