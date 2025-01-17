@@ -360,35 +360,26 @@ namespace springtail::sys_tbl_mgr {
                       uint64_t table_id,
                       uint64_t xid)
     {
-        return nullptr;
-#if 0
-        MetadataKey key{db_id, table_id, xid};
+        GetRootsRequest request;
+        request.db_id = db_id;
+        request.table_id = table_id;
+        request.xid = xid;
 
-        auto entry = _roots_cache->get(key, [this](const MetadataKey &key) {
-            GetRootsRequest request;
-            request.db_id = key.db;
-            request.table_id = key.tid;
-            request.xid = key.xid;
+        GetRootsResponse result;
 
-            GetRootsResponse result;
+        ThriftClient c = _get_client();
+        c.client->get_roots(result, request);
 
-            ThriftClient c = _get_client();
-            c.client->get_roots(result, request);
+        auto metadata = std::make_shared<TableMetadata>();
+        for (const auto &root : result.roots) {
+            metadata->roots.push_back([](const RootInfo &root) {
+                return TableRoot(root.index_id, root.extent_id);
+            }(root));
+        }
+        metadata->stats.row_count = result.stats.row_count;
+        metadata->snapshot_xid = result.snapshot_xid;
 
-            auto metadata = std::make_shared<TableMetadata>();
-            for (const auto &root : result.roots) {
-                metadata->roots.push_back([](const RootInfo &root) {
-                    return TableRoot(root.index_id, root.extent_id);
-                }(root));
-            }
-            metadata->stats.row_count = result.stats.row_count;
-            metadata->snapshot_xid = result.snapshot_xid;
-
-            return std::make_shared<MetadataValue>(result.snapshot_xid, metadata);
-        });
-
-        return entry->metadata;
-#endif
+        return metadata;
     }
 
     SchemaMetadataPtr
@@ -559,7 +550,9 @@ namespace springtail::sys_tbl_mgr {
             return metadata;
         };
 
-        return _schema_cache->get_range(access_key, target_key, populate);
+        // note: left this as a lambda function so we could later add a _schema_cache->get_range()
+        //       call to retrieve cached schema + change history information
+        return populate(access_key, target_key);
     }
 
     bool

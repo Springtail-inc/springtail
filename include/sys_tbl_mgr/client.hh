@@ -162,10 +162,6 @@ namespace springtail::sys_tbl_mgr {
 
         /** Cache for Schema objects. */
         std::shared_ptr<SchemaCache> _schema_cache;
-        // std::shared_ptr<Cache<SchemaKey, SchemaValue>> _schema_cache;
-
-        /** Cache for table metadata. */
-        // std::shared_ptr<Cache<MetadataKey, MetadataValue>> _roots_cache;
     };
 
 } // namespace springtail
