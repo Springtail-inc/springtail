@@ -30,7 +30,9 @@ jobs:
             echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
             echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
             echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
-            reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.requested_reviewers[].login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
+            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" 
+              https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers \
+              | jq -r '.users[].login' | sort | uniq | tr -d ' ' | tr '\n' ', ')
             echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.review.state }}" == "approved" ]; then
             echo "event_type=pr_approved" >> $GITHUB_OUTPUT
@@ -42,13 +44,23 @@ jobs:
             echo "reviewers=${approvers}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # This step will generate review mentions
+      - name: Generate Reviewer Mentions
+        id: gen_reviewers
+        run: python3 .github/workflows/gen_reviewers_mentions.py ${{ steps.info.outputs.reviewers }} >> $GITHUB_OUTPUT
+
       - name: Send notification to Slack
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook-type: incoming-webhook
           payload: |
             {
-              "text": "*${{ steps.info.outputs.event_name }}*  :face_holding_back_tears: <@U06P66F7B51>",
+              "text": "*${{ steps.info.outputs.event_name }}*  :face_holding_back_tears: \n ${{ steps.gen_reviewers.outputs.reviewers_mentions }}",
               "attachments": [
                 {
                   "color": "#36a64f",
