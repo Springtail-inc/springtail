@@ -674,6 +674,10 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
         auto info = _get_schema_info(request.db_id, request.table_id, xid, xid);
 
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Returning start_xid {}:{}, end_xid {}:{}",
+                            info->access_xid_start, info->access_lsn_start,
+                            info->access_xid_end, info->access_lsn_end);
+
         _return = *info;
     }
 
@@ -991,9 +995,9 @@ namespace springtail::sys_tbl_mgr {
         _read_schema_columns(info, db_id, table_id, access_xid);
 
         // if the requested access XID is ahead of the read XID, apply changes from the cache
-        if (access_xid > read_xid) {
-            _apply_schema_cache_history(info, db_id, table_id, access_xid);
-        }
+        // if (access_xid > read_xid) {
+        _apply_schema_cache_history(info, db_id, table_id, access_xid);
+        //}
 
         info->indexes = _read_schema_indexes(db_id, table_id, access_xid);
 
@@ -1187,11 +1191,12 @@ namespace springtail::sys_tbl_mgr {
             // don't apply changes that are beyond the requested XID/LSN
             uint64_t xid = fields->at(sys_tbl::Schemas::Data::XID)->get_uint64(row);
             uint64_t lsn = fields->at(sys_tbl::Schemas::Data::LSN)->get_uint64(row);
-            if (access_xid < XidLsn(xid, lsn)) {
+            const XidLsn row_xid(xid, lsn);
+            if (access_xid < row_xid) {
+                const XidLsn end_xid(info->access_xid_end, info->access_lsn_end);
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table column {}@{}:{}", tid, xid, lsn);
                 // note: this means the schema column is valid up to the found xid/lsn
-                if (xid < info->access_xid_end ||
-                    (xid == info->access_xid_end && lsn < info->access_lsn_end)) {
+                if (row_xid < end_xid) {
                     info->access_xid_end = xid;
                     info->access_lsn_end = lsn;
                 }
@@ -1199,8 +1204,8 @@ namespace springtail::sys_tbl_mgr {
             }
 
             // note: this means the schema column is valid from the found xid/lsn
-            if (info->access_xid_start < xid ||
-                (info->access_xid_start ==  xid && info->access_lsn_start < lsn))  {
+            const XidLsn start_xid(info->access_xid_start, info->access_lsn_start);
+            if (start_xid < row_xid) {
                 info->access_xid_start = xid;
                 info->access_lsn_start = lsn;
             }
@@ -1311,21 +1316,28 @@ namespace springtail::sys_tbl_mgr {
         // go through the history and apply any changes up through the provided XID/LSN
         for (const auto &column : schema_i->second) {
             for (const auto &history : column.second) {
-                if (xid < XidLsn(history.xid, history.lsn)) {
+                const XidLsn history_xid(history.xid, history.lsn);
+                if (xid < history_xid) {
+                    const XidLsn end_xid(info->access_xid_end, info->access_lsn_end);
+                    
                     // note: the schema's validity must end at least at this point
-                    if (xid.xid < info->access_xid_end ||
-                        (xid.xid == info->access_xid_end && xid.lsn < info->access_lsn_end)) {
-                        info->access_xid_end = xid.xid;
-                        info->access_lsn_end = xid.lsn;
+                    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Checking end {}:{} < {}:{}",
+                                        history.xid, history.lsn, end_xid.xid, end_xid.lsn);
+                    if (history_xid < end_xid) {
+                        info->access_xid_end = history.xid;
+                        info->access_lsn_end = history.lsn;
                     }
                     break; // stop applying changes
                 }
 
                 // note: the schema's validity must start at least at this point
-                if (info->access_xid_start < xid.xid ||
-                    (info->access_xid_start ==  xid.xid && info->access_lsn_start < xid.lsn))  { 
-                    info->access_xid_start = xid.xid;
-                    info->access_lsn_start = xid.lsn;
+                const XidLsn start_xid(info->access_xid_start, info->access_lsn_start);
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Checking start {}:{} < {}:{}",
+                                    start_xid.xid, start_xid.lsn, history.xid, history.lsn);
+
+                if (start_xid < history_xid) { 
+                    info->access_xid_start = history.xid;
+                    info->access_lsn_start = history.lsn;
                 }
 
                 // apply the recorded change

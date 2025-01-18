@@ -5,6 +5,7 @@ set(SYS_TBL_MGR_SOURCES
     client.cc
     server.cc
     service.cc
+    schema_cache.cc
     schema_mgr.cc
     system_tables.cc
     table.cc
