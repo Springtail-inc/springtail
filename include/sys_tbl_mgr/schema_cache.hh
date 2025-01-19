@@ -37,13 +37,19 @@ namespace springtail::sys_tbl_mgr {
          * position for the entry.  Used to mark the "current" entry for a schema or root as ending
          * at the given key.
          */
-        void invalidate(uint64_t db, uint64_t tid, const XidLsn &xid);
+        void invalidate_table(uint64_t db, uint64_t tid, const XidLsn &xid);
 
         /**
          * Performs an invalidate() but uses the index ID to lookup the table ID for use in the case
          * of dropping an index.  Necessary because we aren't provided the table ID in that case.
          */
         void invalidate_by_index(uint64_t db, uint64_t index_id, const XidLsn &xid);
+
+        /**
+         * Invalidates all of the tables within a given DB.  Records the provided XID as the most
+         * recently seen DDL change.  Used by the FDW.
+         */
+        void invalidate_db(uint64_t db, const XidLsn &xid);
 
     private:
         struct SchemaEntry;

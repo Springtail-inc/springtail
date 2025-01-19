@@ -156,7 +156,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // automaticaly invalidate the schema cache from the provided XID
-        invalidate_schema_cache(db_id, msg.oid, xid);
+        invalidate_table(db_id, msg.oid, xid);
 
         return result.statement;
     }
@@ -185,7 +185,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // automaticaly invalidate the schema cache from the provided XID
-        invalidate_schema_cache(db_id, msg.oid, xid);
+        invalidate_table(db_id, msg.oid, xid);
 
         return result.statement;
     }
@@ -208,7 +208,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // automaticaly invalidate the schema cache from the provided XID
-        invalidate_schema_cache(db_id, msg.table_oid, xid);
+        invalidate_table(db_id, msg.table_oid, xid);
 
         return result.statement;
     }
@@ -234,7 +234,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // automaticaly invalidate the schema cache from the provided XID
-        invalidate_schema_cache(db_id, table_id, xid);
+        invalidate_table(db_id, table_id, xid);
     }
 
 
@@ -559,15 +559,25 @@ namespace springtail::sys_tbl_mgr {
             throw SysTblMgrError();
         }
 
+        // auto-invalidate the cache for the swapped table
+        invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
+
         return result.statement;
     }
 
     void
-    Client::invalidate_schema_cache(uint64_t db_id,
-                                    uint64_t table_id,
-                                    const XidLsn &xid)
+    Client::invalidate_table(uint64_t db_id,
+                             uint64_t table_id,
+                             const XidLsn &xid)
     {
-        _schema_cache->invalidate(db_id, table_id, xid);
+        _schema_cache->invalidate_table(db_id, table_id, xid);
+    }
+
+    void
+    Client::invalidate_db(uint64_t db_id,
+                          const XidLsn &xid)
+    {
+        _schema_cache->invalidate_db(db_id, xid);
     }
 
 } // namespace

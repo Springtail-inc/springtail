@@ -108,7 +108,12 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Invalidates the schema entry for a given table from a given XID/LSN
          */
-        void invalidate_schema_cache(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        void invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Invalidates all of the tables of a db in the schema cache.
+         */
+        void invalidate_db(uint64_t db_id, const XidLsn &xid);
 
     private:
         /**

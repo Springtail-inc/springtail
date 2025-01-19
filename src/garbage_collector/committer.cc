@@ -119,6 +119,7 @@ namespace springtail::gc {
                     auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
                     roots.xid = completed_xid;
 
+                    // note: this will also invalidate the table's client cache entry
                     auto ddl_str = client->swap_sync_table(create, roots);
 
                     // store the ddl mutations for the FDWs
@@ -174,7 +175,6 @@ namespace springtail::gc {
             // check if there were DDL mutations as part of this txn, invalidate the schema cache accordingly
             nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
             if (!completed_ddls.is_null()) {
-                // XXX invalidate the schema cache
                 auto client = sys_tbl_mgr::Client::get_instance();
                 for (auto ddl : completed_ddls) {
                     if (!ddl.contains("tid")) {
@@ -182,8 +182,8 @@ namespace springtail::gc {
                     }
 
                     uint64_t tid = ddl["tid"].get<uint64_t>();
-                    XidLsn xidlsn(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
-                    client->invalidate_schema_cache(db_id, tid, xidlsn);
+                    XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
+                    client->invalidate_table(db_id, tid, ddl_xid);
                 }
             }
 

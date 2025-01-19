@@ -1014,10 +1014,9 @@ namespace springtail::sys_tbl_mgr {
         _read_schema_columns(info, db_id, table_id, access_xid);
 
         // if the requested access XID is ahead of the read XID, apply changes from the cache
-        // if (access_xid > read_xid) {
         _apply_schema_cache_history(info, db_id, table_id, access_xid);
-        // }
 
+        // read the index data and attach it to the info object
         _read_schema_indexes(info, db_id, table_id, access_xid);
 
         // If no index is found in sys tables, they probably haven't been finalized
