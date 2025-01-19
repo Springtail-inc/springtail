@@ -189,7 +189,8 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::vector<IndexInfo> _read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+        void _read_schema_indexes(SchemaInfoPtr schema_info,
+                                  uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to apply any in-memory changes to the schema columns that might be

@@ -64,13 +64,11 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta->indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta->indexes.end()) {
-            meta->indexes.erase(it);
-        }
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), meta->indexes,
+                                       schema->get_sort_keys(), secondary_indexes,
                                        *tbl_meta, schema);
     }
 
@@ -108,13 +106,11 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta->indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta->indexes.end()) {
-            meta->indexes.erase(it);
-        }
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(), meta->indexes,
+                                              _table_base, schema->get_sort_keys(), secondary_indexes,
                                               *tbl_meta, schema, for_gc);
     }
 

@@ -88,7 +88,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call get_schema() on the SysTblMgr.
          */
-        SchemaMetadataPtr get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Call get_target_schema() on the SysTblMgr.
