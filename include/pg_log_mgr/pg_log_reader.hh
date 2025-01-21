@@ -13,6 +13,7 @@
 #include <garbage_collector/xid_ready.hh>
 
 #include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_msg_stream.hh>
 
 #include <redis/redis_containers.hh>
 #include <redis/redis_ddl.hh>
