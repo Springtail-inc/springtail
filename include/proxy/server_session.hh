@@ -10,11 +10,10 @@
 #include <proxy/session_msg.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/buffer_pool.hh>
+#include <proxy/authorization.hh>
+#include <proxy/runnable.hh>
 
 namespace springtail::pg_proxy {
-
-    class ProxyServer;
-    using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 
     class DatabaseInstance;
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
@@ -43,13 +42,12 @@ namespace springtail::pg_proxy {
      * This object represents a session with a remote database.
      * The database may be either the primary or a replica
      */
-    class ServerSession : public Session {
+    class ServerSession : public Session, public Runnable {
     public:
         ServerSession(const ServerSession&) = delete;
         ServerSession& operator=(const ServerSession&) = delete;
 
         ServerSession(ProxyConnectionPtr connection,
-                      ProxyServerPtr server,
                       UserPtr user,
                       std::string database,
                       std::string prefix,
@@ -67,6 +65,9 @@ namespace springtail::pg_proxy {
         {}
 
         ~ServerSession() {};
+
+        /** Runnable entry point from server */
+        void run(const std::set<int> &fds) override;
 
         /**
          * @brief Pin this session to a client session
@@ -91,11 +92,12 @@ namespace springtail::pg_proxy {
          * @brief Get the client session object
          * @return SessionPtr
          */
-        SessionPtr get_client_session() {
-            SessionPtr client = _client_session.lock();
+        ClientSessionPtr get_client_session() {
+            ClientSessionPtr client = _client_session.lock();
             if (client == nullptr) {
-                client = get_associated_session();
+                client = std::dynamic_pointer_cast<ClientSession>(get_associated_session());
             }
+            CHECK_NE(client, nullptr);
             return client;
         }
 
@@ -156,22 +158,51 @@ namespace springtail::pg_proxy {
          * @brief Set the session to ready state
          */
         void set_ready() {
-            assert (_state == RESET_SESSION_READY);
+            CHECK_EQ(_state, RESET_SESSION_READY);
             _state = READY;
         }
 
+        /**
+         * @brief Called from client session to start authorization
+         * @param seq_id sequence id
+         * @param parameters startup parameters
+         */
+        void startup(uint64_t seq_id);
+
+        /**
+         * @brief Entry point for processing connection data
+         * @param seq_id sequence id
+         */
+        void process_connection(uint64_t seq_id);
+
+        /**
+         * @brief Process message from client session; queue message if busy
+         * @param msg message to process
+         */
+        void process_msg(SessionMsgPtr msg);
+
+        /**
+         * @brief Process shutdown from client session
+         * @param seq_id sequence id
+         */
+        void process_shutdown(uint64_t seq_id);
+
+        /**
+         * @brief Reset a session with new startup params (issued via simple query)
+         * @param seq_id sequence id
+         * @param parameters startup parameters from client session
+         */
+        void startup_reset_session(uint64_t seq_id, const std::unordered_map<std::string, std::string> &parameters);
+
         /** factory to create session */
         static std::shared_ptr<ServerSession>
-        create(ProxyServerPtr server, UserPtr user, const std::string &database,
+        create(UserPtr user, const std::string &database,
                const std::string &prefix,
                DatabaseInstancePtr instance,
                Session::Type type,
                const std::unordered_map<std::string, std::string> &parameters);
 
-    protected:
-        void _process_connection() override;
-
-        void _process_msg(SessionMsgPtr msg) override;
+    private:
 
         bool _is_pinned = false;
 
@@ -180,20 +211,12 @@ namespace springtail::pg_proxy {
         // message state for current client query (for state=QUERY)
         std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
 
-        std::set<std::string> _stmts;              ///< completed prepared statement ids
-        std::string _db_prefix;                    ///< database name prefix to be used for this server session
+        std::set<std::string> _stmts;    ///< completed prepared statement ids
+        std::string _db_prefix;          ///< database name prefix to be used for this server session
 
-        /** Send startup message */
-        void _send_startup_msg(uint64_t seq_id);
+        uint64_t _seq_id = 0;            ///< sequence id from client session
 
-        /** Initial setup, SSL negotiation */
-        void _send_ssl_req(uint64_t seq_id);
-
-        /** Send SSL handshake */
-        void _send_ssl_handshake(uint64_t seq_id);
-
-        /** Wrapper around sending a buffer to the server */
-        void _send_buffer(BufferPtr buffer, uint64_t seq_id, char code='\0');
+        ServerAuthorizationPtr _auth;    ///< authorization object
 
         /** Send shutdown to server */
         void _send_shutdown();
@@ -212,32 +235,11 @@ namespace springtail::pg_proxy {
         /** Send simple query */
         void _send_simple_query(const std::string &query, uint64_t seq_id);
 
-        /** Handle SSL handshake */
-        void _handle_ssl_handshake(uint64_t seq_id);
-
-        /** Handle ssl response */
-        void _handle_ssl_response();
-
-        /** Authentication */
-        void _handle_auth(BufferPtr buffer);
-
         /** Handle replies from server */
         void _handle_message_from_server();
 
         /** Handle error code 'E' */
         void _decode_error_buffer(BufferPtr buffer, uint64_t seq_id);
-
-        /** Handle md5 auth send response */
-        void _handle_auth_md5(BufferPtr buffer);
-
-        /** Handle scram-sha-256 auth send response */
-        void _handle_auth_scram(BufferPtr buffer);
-
-        /** Handle scram continue auth send response */
-        void _handle_auth_scram_continue(BufferPtr buffer);
-
-        /** Handle scram complete, update client key */
-        void _handle_auth_scram_complete(BufferPtr buffer);
 
         /** Handle forwarded message, first replay dependencies */
         void _handle_msg_to_server(SessionMsgPtr msg);
@@ -254,19 +256,20 @@ namespace springtail::pg_proxy {
         /** Handle ready for query message from server */
         void _handle_ready_for_query_response(char xact_status);
 
-        /** Handle shutdown message from client */
-        void _handle_shutdown();
-
         /** Process response from server in reset session state */
         void _handle_reset_session_message();
-
-        /** Helper to read in message; buffer contains header (code, msg_length), points past hdr */
-        BufferPtr _read_message(char code, int msg_length);
 
         /** Helper to read data and drop it */
         void _read_and_drop_message(int msg_length);
 
+        /** Encode status parameters using simple query */
+        BufferPtr _encode_status_query(const std::unordered_map<std::string, std::string> &parameters);
+
+        /** Get the type of the head of the pending queue */
         QueryStmt::Type _get_pending_query_type();
+
+        /** Send message response to the client session */
+        void _client_msg_response(SessionMsgPtr msg, bool success);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
     using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;

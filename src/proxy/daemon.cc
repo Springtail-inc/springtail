@@ -93,9 +93,9 @@ int main(int argc, char* argv[])
         throw Error("Invalid mode specified");
     }
 
-    server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
+    ProxyServer *server = ProxyServer::get_instance();
+    server->init(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
     server->set_log_level(log_level);
 
     server->run();
-    server->cleanup();
 }

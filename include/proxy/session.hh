@@ -15,13 +15,11 @@
 #include <proxy/auth/scram.hh>
 #include <proxy/user_mgr.hh>
 #include <proxy/session_msg.hh>
+#include <proxy/exception.hh>
 
 namespace springtail::pg_proxy {
 
     // forward declarations to avoid circular dependencies
-    class ProxyServer;
-    using ProxyServerPtr = std::shared_ptr<ProxyServer>;
-
     class DatabaseInstance;
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
 
@@ -53,8 +51,6 @@ namespace springtail::pg_proxy {
         /** State of session */
         enum State : int8_t {
             STARTUP=0,        ///< initial state
-            SSL_HANDSHAKE=1,  ///< SSL handshake
-            AUTH=2,           ///< authentication
             AUTH_SERVER=3,    ///< server auth
             AUTH_DONE=4,      ///< auth complete
             READY=5,          ///< ready for query
@@ -71,17 +67,6 @@ namespace springtail::pg_proxy {
             ERROR=99          ///< fatal error state
         };
 
-        constexpr static int32_t MSG_STARTUP_V2 =0x20000;
-        constexpr static int32_t MSG_STARTUP_V3 = 0x30000;
-        constexpr static int32_t MSG_SSLREQ = 80877103;
-        constexpr static int32_t MSG_CANCEL = 80877102;
-
-        constexpr static int8_t MSG_AUTH_OK = 0;
-        constexpr static int8_t MSG_AUTH_MD5 = 5;
-        constexpr static int8_t MSG_AUTH_SASL = 10;
-        constexpr static int8_t MSG_AUTH_SASL_CONTINUE = 11;
-        constexpr static int8_t MSG_AUTH_SASL_COMPLETE = 12;
-
         // max number of iterations to read packets on single socket
         // before giving thread up
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
@@ -90,18 +75,15 @@ namespace springtail::pg_proxy {
          * @brief Construct a session with a connection and server ptr.  Type forced to client.
          * For client sessions.
          * @param connection connection
-         * @param server     main server
          * @return Session object
          */
-        Session(ProxyConnectionPtr connection,
-                ProxyServerPtr server);
+        Session(ProxyConnectionPtr connection);
 
         /**
          * Construct a session with a database instance and user.
          * For server/replica sessions
          * @param instance   database instance
          * @param connection connection
-         * @param server     main server
          * @param user       user
          * @param database   database name
          * @param type       type of session (default=PRIMARY)
@@ -109,7 +91,6 @@ namespace springtail::pg_proxy {
          */
         Session(DatabaseInstancePtr instance,
                 ProxyConnectionPtr connection,
-                ProxyServerPtr server,
                 UserPtr user,
                 const std::string &database,
                 const std::unordered_map<std::string, std::string> &parameters,
@@ -129,10 +110,6 @@ namespace springtail::pg_proxy {
 
         /** Destruct a connection. */
         virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
-
-        /** Process messages for session connection;
-         * thread entry, calls _process() */
-        void operator()();
 
         /** Less than operator for std::set */
         bool operator<(const Session &rhs) const {
@@ -243,7 +220,6 @@ namespace springtail::pg_proxy {
         {
             _msg_queue.clear();
             _msg_queue.push(msg);
-            _ready_for_message = true;
         }
 
         /**
@@ -261,14 +237,6 @@ namespace springtail::pg_proxy {
         SessionMsgPtr get_msg() {
             SessionMsgPtr msg = _msg_queue.try_pop();
             return msg;
-        }
-
-        void block_messages() {
-            _ready_for_message = false;
-        }
-
-        void enable_messages() {
-            _ready_for_message = true;
         }
 
         /** Get session id */
@@ -339,51 +307,76 @@ namespace springtail::pg_proxy {
         virtual void reset_session() {
             _is_shadow = false;
             _in_transaction = false;
-            _login.reset();
             _associated_session.reset();
             _msg_queue.clear();
-            _ready_for_message = true;
             _state = RESET_SESSION;
         }
 
+        /**
+         * Read full message from data connection, returns header: 1B code, 4B length
+         * @param connection connection to read from
+         * @param buffer_list buffer list to read into
+         */
+        static void read_msg(ProxyConnectionPtr connection, BufferList &buffer_list);
+
+        /**
+         * @brief Read and log message, when we know the code and length
+         * @param connection connection to read from
+         * @param code message code
+         * @param msg_length message length
+         * @param type session type
+         * @param id session id
+         * @param seq_id sequence id
+         * @return BufferPtr buffer read, contains code and length(5B header),
+         *         current_data() points past header
+         */
+        static BufferPtr read_msg(ProxyConnectionPtr connection, char code, int msg_length,
+                                  Session::Type type, uint64_t id, uint64_t seq_id);
+
+        /**
+         * @brief Read in header from connection
+         * @param connection connection to read from
+         * @return std::pair<char,int32> code and length
+         */
+        static std::pair<char,int32_t> read_hdr(ProxyConnectionPtr connection);
+
+        /**
+         * @brief Static version of session log_buffer call, logs buffer to log
+         * @param type session type
+         * @param id session id
+         * @param incoming true if incoming data
+         * @param code message code
+         * @param data_length length of data
+         * @param data data buffer
+         * @param seq_id sequence id
+         */
+        static void log_buffer(Type type, uint64_t id, bool incoming, char code,
+                               int32_t data_length, const char *data,
+                               uint64_t seq_id, bool final=true);
+
     protected:
         ProxyConnectionPtr _connection;    ///< connection associated with this session
-        ProxyServerPtr     _server;        ///< server associated with this session
 
-        std::mutex    _session_mutex;      ///< mutex for session
+        std::mutex   _session_mutex;       ///< mutex for session
 
         State        _state = STARTUP;     ///< state of session, governs process()
         Type         _type;                ///< type of session
 
-        UserPtr      _user;                ///< user associated with this session
-        UserLoginPtr _login;               ///< user login creds, temporary
-
         int32_t      _pid;                 ///< pid for cancel request
         int32_t      _cancel_key;          ///< cancel key for cancel request
 
-        uint64_t     _db_id;               ///< database id associated with this session
-        std::string  _database;            ///< database name associated with this session
-
+        UserPtr      _user;                ///< user
+        uint32_t     _db_id;               ///< database id
+        std::string  _database;            ///< database name
         DatabaseInstancePtr _instance;     ///< database instance associated with this session
 
-        uint32_t _id;                      ///< unique id for session
+        std::unordered_map<std::string, std::string> _parameters; ///< startup parameters
 
-        std::atomic<uint32_t> _seq_id = 0; ///< sequence id for this session
+        uint32_t _id;                      ///< unique id for session
 
         bool _in_transaction = false;      ///< is this session in a transaction
 
         bool _is_shadow = false;           ///< is this a shadow session; replica shadowing primary
-
-        std::unordered_map<std::string, std::string> _parameters; ///< parameters for the session
-
-        /** Process connection, entry from operator()() */
-        bool _process(std::unique_lock<std::mutex> &lock);
-
-        /** Process messages for session connection,
-         * must be implemented by derived class */
-        virtual void _process_connection() = 0;
-
-        virtual void _process_msg(SessionMsgPtr msg) = 0;
 
         /** Generate a sequence ID for logging, should be generated by client session */
         uint64_t _gen_seq_id() {
@@ -396,23 +389,53 @@ namespace springtail::pg_proxy {
             return (seq_id << 32) | _seq_id;
         }
 
-        /** Get user creds */
-        UserLoginPtr _get_user_login();
+        /**
+         * @brief Error handler wrapper for session calls.
+         * Catch any errors and call the session error handler.
+         * @tparam Func function
+         * @tparam Args arguments
+         * @param func function to call
+         * @param args arguments to pass to function
+         */
+        template<typename Func, typename... Args>
+        void _wrap_error_handler(Func func, Args... args) {
+            try {
+                func(std::forward<Args>(args)...);
+            } catch (ProxyError &e) {
+                SPDLOG_ERROR("Error in session: {}", e.what());
+                _state = ERROR;
+            } catch (std::exception &e) {
+                SPDLOG_ERROR("Error in session: {}", e.what());
+                _state = ERROR;
+            } catch (...) {
+                SPDLOG_ERROR("Unknown exception");
+                _state = ERROR;
+            }
 
-        /** Read full message from data connection, returns header: 1B code, 4B length */
-        void _read_msg(BufferList &buffer_list);
-
-        /** Read header: 1B code, 4B length from data connection */
-        std::pair<char,int32_t> _read_hdr();
+            if (_state == ERROR || _connection->closed()) {
+                _handle_error();
+            }
+        }
 
         /** Stream data from one connection directly to the other */
         void _stream_to_remote_session(char code, int32_t msg_length, uint64_t seq_id);
 
-        /** Send data to remote session, assumes buffer contains code and length */
+        /** Send data to associated session connection, assumes buffer contains code and length */
         void _send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id);
+
+        /** Send data to session connection, assumes buffer contains code and length */
+        void _send_buffer(BufferPtr buffer, uint64_t seq_id, char code='\0');
+
+        /** Internal call to Session::read_message() */
+        BufferPtr _read_message(char code, int32_t msg_length, uint64_t seq_id) {
+            return read_msg(_connection, code, msg_length, _type, _id, seq_id);
+        }
 
         /** Log buffer */
         void _log_buffer(bool incoming, char code, int32_t data_length, const char *data, uint64_t seq_id, bool final=true);
+
+        /** handle fatal error, by shutting down */
+        void _handle_error();
 
     private:
         /** client/server session associated with this one */
@@ -421,11 +444,10 @@ namespace springtail::pg_proxy {
         /** atomic shutdown flag */
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
-        /** ready to process messages */
-        bool _ready_for_message = true;
-
         /** queue of messages to process */
         ConcurrentQueue<SessionMsg> _msg_queue;
+
+        uint32_t _seq_id = 0;              ///< sequence id for this session
 
         /**
          * Single place to do error handling on messages.  Called to check for queued messages.
@@ -433,11 +455,6 @@ namespace springtail::pg_proxy {
          */
         void _internal_process_msgs(bool is_remote);
 
-        /** enable processing of msgs via server poll loop */
-        void _enable_processing();
-
-        /** handle fatal error, by shutting down */
-        void _handle_error();
     };
     using SessionPtr = std::shared_ptr<Session>;
 } // namespace springtail::pg_proxy

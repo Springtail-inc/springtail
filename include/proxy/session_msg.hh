@@ -23,7 +23,6 @@ namespace springtail::pg_proxy {
         /** message types -- add string defn to session.cc type_map */
         enum Type : int8_t {
             ///// client to server messages
-            MSG_CLIENT_SERVER_STARTUP=0,      ///< startup; do auth, etc.; no data
             MSG_CLIENT_SERVER_SIMPLE_QUERY=1, ///< simple query; data str: query
             MSG_CLIENT_SERVER_PARSE=2,        ///< parse packet; data buffer
             MSG_CLIENT_SERVER_BIND=3,         ///< bind packet; data buffer
@@ -31,17 +30,8 @@ namespace springtail::pg_proxy {
             MSG_CLIENT_SERVER_EXECUTE=5,      ///< execute packet; data buffer
             MSG_CLIENT_SERVER_CLOSE=6,        ///< close packet; data buffer
             MSG_CLIENT_SERVER_SYNC=7,         ///< sync packet; data buffer
-            MSG_CLIENT_SERVER_SHUTDOWN=8,     ///< shutdown packet; no data
             MSG_CLIENT_SERVER_FORWARD=10,     ///< forward packet; data buffer
-            MSG_CLIENT_SERVER_INIT_PARAMS=11, ///< init params; data buffer
 
-            ///// server to client messages
-            MSG_SERVER_CLIENT_AUTH_DONE=50,   ///< auth complete; no data
-            MSG_SERVER_CLIENT_READY=51,       ///< ready for query; MsgStatus data
-            MSG_SERVER_CLIENT_MSG_SUCCESS=52, ///< message response; success
-            MSG_SERVER_CLIENT_MSG_ERROR=53,   ///< message response; success
-            MSG_SERVER_CLIENT_COPY_READY=54,  ///< ready to receive copy data; no data
-            MSG_SERVER_CLIENT_FORWARD=55,     ///< forward packet; data buffer
             MSG_SERVER_CLIENT_FATAL_ERROR=99  ///< fatal error; no data
         };
 
@@ -114,19 +104,8 @@ namespace springtail::pg_proxy {
             _dependencies = std::move(dependencies);
         }
 
-        /** Set message status */
-        void set_status_ready(MsgStatus &status) {
-            _status = status;
-            _type = MSG_SERVER_CLIENT_READY;
-        }
-
-        void set_msg_response(bool success, int completed=0) {
+        void set_msg_response(int completed=0) {
             _completed = completed;
-            if (success) {
-                _type = Type::MSG_SERVER_CLIENT_MSG_SUCCESS;
-            } else {
-                _type = Type::MSG_SERVER_CLIENT_MSG_ERROR;
-            }
         }
 
         /** Get number of completed queries */

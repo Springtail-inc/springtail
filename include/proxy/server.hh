@@ -8,11 +8,14 @@
 #include <filesystem>
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
 
 #include <openssl/ssl.h>
 
 #include <common/thread_pool.hh>
+#include <common/singleton.hh>
 
+#include <proxy/runnable.hh>
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
@@ -23,7 +26,8 @@
 
 namespace springtail::pg_proxy {
 
-    class ProxyServer : public std::enable_shared_from_this<ProxyServer> {
+    class ProxyServer : public Singleton<ProxyServer> {
+        friend class Singleton<ProxyServer>;
     public:
         static constexpr uint32_t USER_MGR_SLEEP_INTERVAL_SECS = 5;
 
@@ -34,7 +38,7 @@ namespace springtail::pg_proxy {
         };
 
         /**
-         * @brief Construct a new Proxy Server object
+         * @brief Initialize a new Proxy Server object
          * The server handles the poll loop and accepts new connections.
          * It dispatches readable sockets into the thread pool
          * @param port - port to listen for connections on
@@ -45,29 +49,27 @@ namespace springtail::pg_proxy {
          * @param enable_ssl - enable SSL
          * @param logger - logger object for shadow mode
          */
-        ProxyServer(int port,
-                    int thread_pool_size,
-                    const std::filesystem::path &cert_file,
-                    const std::filesystem::path &key_file,
-                    MODE mode=MODE::NORMAL,
-                    bool enable_ssl=false,
-                    LoggerPtr shadow_logger=nullptr);
+        void init(int port,
+                  int thread_pool_size,
+                  const std::filesystem::path &cert_file,
+                  const std::filesystem::path &key_file,
+                  MODE mode=MODE::NORMAL,
+                  bool enable_ssl=false,
+                  LoggerPtr shadow_logger=nullptr);
 
         /** Start server main loop */
         void run();
 
-        /** Cleanup server resources */
-        void cleanup();
-
         /** Signal server main loop to reset poll fd set */
-        void signal(ProxyConnectionPtr connection);
+        void signal(RunnablePtr session);
 
         /** Register a new session, add to <socket, session> to _sessions map*/
-        void register_session(SessionPtr session,
+        void register_session(RunnablePtr session,
+                              int socket,
                               bool waiting_session_insert=false);
 
         /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
-        void shutdown_session(SessionPtr session);
+        void shutdown_session(int socket);
 
         /** Allocate SSL struct for new connection */
         SSL *SSL_new(bool is_server) {
@@ -89,9 +91,6 @@ namespace springtail::pg_proxy {
             return _logger;
         }
 
-        /** Shutdown server */
-        void shutdown();
-
         /** Get the proxy id */
         uint32_t id() const {
             return _id;
@@ -105,16 +104,22 @@ namespace springtail::pg_proxy {
         /** Set the global log level */
         void set_log_level(int loglevel);
 
+    protected:
+
+        /** Shutdown server */
+        void _internal_shutdown() override;
+
     private:
         int _socket;   ///< server socket
-        int _pipe[2];  ///< pipe for interrupting poll loop; [0] - read; [1] - write
+        int _efd;      ///< eventfd for signaling
 
         uint32_t _id;  ///< unique id for this proxy server
-        ThreadPool<Session> _thread_pool;    ///< thread pool for handling incoming session data
+        std::shared_ptr<ThreadPool<Runnable>> _thread_pool;    ///< thread pool for handling incoming session data
 
-        std::mutex _waiting_sessions_mutex;  ///< mutex for _waiting_sessions set and _sessions map
-        std::set<int> _waiting_sessions;     ///< set of connection sockets waiting for read data
-        std::map<int, SessionPtr> _sessions; ///< map of connection socket to session object
+        std::mutex _waiting_sessions_mutex;   ///< mutex for _waiting_sessions set and _sessions map
+        std::set<int> _waiting_sessions;      ///< set of connection sockets waiting for read data
+        std::map<int, RunnablePtr> _sessions; ///< map of connection socket to session object
+        std::unordered_multimap<RunnablePtr, int> _session_sockets; ///< map of session to connection socket
 
         SSL_CTX *_ssl_ctx_server = nullptr;  ///< SSL context for server
         SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
@@ -138,6 +143,12 @@ namespace springtail::pg_proxy {
 
         /** Log disconnect */
         void _log_disconnect(SessionPtr session);
+
+        /** Internal shutdown session -- helper, assumes lock is held */
+        void _internal_shutdown_session(int socket);
+
+        /** Wake up intternal event loop to reprocess waiting session */
+        void _wake_event_loop();
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

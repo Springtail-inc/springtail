@@ -43,9 +43,9 @@ namespace springtail::pg_fdw {
          * @param hostname optional hostname for connection
          */
         void init(const std::string &fdw_id,
-                     const std::string &username,
-                     const std::string &password,
-                     const std::optional<std::string> &hostname = std::nullopt);
+                  const std::string &username,
+                  const std::string &password,
+                  const std::optional<std::string> &hostname = std::nullopt);
 
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections

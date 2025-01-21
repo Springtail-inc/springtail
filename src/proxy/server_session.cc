@@ -23,7 +23,6 @@ namespace springtail::pg_proxy {
     constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT";
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
-                                 ProxyServerPtr server,
                                  UserPtr user,
                                  std::string database,
                                  std::string prefix,
@@ -31,10 +30,25 @@ namespace springtail::pg_proxy {
                                  const std::unordered_map<std::string, std::string> &parameters,
                                  Session::Type type)
 
-        : Session(instance, connection, server, user, database, parameters, type), _db_prefix(prefix)
+        : Session(instance, connection, user, database, parameters, type), _db_prefix(prefix)
     {
         _state = STARTUP;
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server connected: endpoint={}", _id, connection->endpoint());
+    }
+
+    void
+    ServerSession::run(const std::set<int> &fds)
+    {
+        // should only be called when session is in reset state
+        CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
+        DCHECK_EQ(_client_session.lock(), nullptr);
+
+        _wrap_error_handler([this] {
+            // process the reset query response
+            _handle_reset_session_message();
+            // re-enable processing for this socket
+            ProxyServer::get_instance()->signal(shared_from_this());
+        });
     }
 
     void
@@ -52,100 +66,105 @@ namespace springtail::pg_proxy {
     bool
     ServerSession::check_startup_params(const std::unordered_map<std::string, std::string> &parameters)
     {
-        // check if the startup parameters match
-        for (const auto &param : parameters) {
-            // skip those that are fixed
-            if (EXCLUDED_STARTUP_PARAMS.contains(param.first)) {
-                // XXX may still want to check these
-                continue;
+        _wrap_error_handler([this, parameters] {
+            // check if the startup parameters match
+            for (const auto &param : parameters) {
+                // skip those that are fixed
+                if (EXCLUDED_STARTUP_PARAMS.contains(param.first)) {
+                    // XXX may still want to check these
+                    continue;
+                }
+
+                auto it = _parameters.find(param.first);
+                if (it == _parameters.end() || it->second != param.second) {
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server startup parameter mismatch: {}={}; expected={}",
+                                _id, param.first, it->second, param.second);
+                    return false;
+                }
             }
 
-            auto it = _parameters.find(param.first);
-            if (it == _parameters.end() || it->second != param.second) {
-                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server startup parameter mismatch: {}={}; expected={}",
-                            _id, param.first, it->second, param.second);
-                return false;
-            }
-        }
+            return true;
+        });
 
-        return true;
+        return false;
     }
 
     void
-    ServerSession::_process_msg(SessionMsgPtr msg)
+    ServerSession::startup(uint64_t seq_id)
+    {
+        CHECK_EQ(_state, STARTUP);
+
+        // wrap in error handler to catch any exceptions
+        _wrap_error_handler([this, seq_id] {
+            _auth = std::make_shared<ServerAuthorization>(_connection, _id, _user, _database, _db_prefix, _type, _parameters);
+            _state = AUTH_SERVER;
+            _auth->send_startup_msg(seq_id);
+        });
+    }
+
+    void
+    ServerSession::startup_reset_session(uint64_t seq_id, const std::unordered_map<std::string, std::string> &parameters)
+    {
+        // reset the session with new startup parameters
+        CHECK_EQ(_state, RESET_SESSION_READY);
+
+        // wrap in error handler to catch any exceptions
+        _wrap_error_handler([this, seq_id, parameters]() {
+            _seq_id = seq_id;
+            _state = RESET_SESSION_PARAMS;
+            BufferPtr buffer = _encode_status_query(parameters);
+            _send_buffer(buffer, seq_id, 'Q');
+        });
+    }
+
+    void
+    ServerSession::process_msg(SessionMsgPtr msg)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server {}{}; message: type: {}, seq_id: {}", _id,
                     (_is_shadow ? "Shadow " : ""), (_type == REPLICA ? "Replica" : "Primary"),
                     msg->type_str(), msg->seq_id());
 
-        // if not set, set seq_id, otherwise it is set when dequeuing next pending message
-        if (_seq_id == 0) {
-            _seq_id = msg->seq_id();
-        }
-
-        // entry point for message processing from client session
-        switch(msg->type()) {
-        case SessionMsg::MSG_CLIENT_SERVER_STARTUP:
-            CHECK_EQ(_state, STARTUP);
-
-            _seq_id = msg->seq_id();
-
-            // block more messages until we are ready
-            block_messages();
-
-            // this is the startup message from client session
-            if (_server->is_ssl_enabled()) {
-                // send ssl request to server
-                _send_ssl_req(_seq_id);
-            } else {
-                // otherwise send the startup message
-                _send_startup_msg(_seq_id);
+        // wrap in error handler to catch any exceptions
+        _wrap_error_handler([this, msg] {
+            // if not set, set seq_id, otherwise it is set when dequeuing next pending message
+            if (_seq_id == 0) {
+                _seq_id = msg->seq_id();
             }
 
-            break;
+            // entry point for message processing from client session
+            switch(msg->type()) {
+                case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
+                case SessionMsg::MSG_CLIENT_SERVER_PARSE:
+                case SessionMsg::MSG_CLIENT_SERVER_BIND:
+                case SessionMsg::MSG_CLIENT_SERVER_DESCRIBE:
+                case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
+                case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
+                case SessionMsg::MSG_CLIENT_SERVER_SYNC:
+                    _handle_msg_to_server(msg);
+                    break;
 
-        case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
-        case SessionMsg::MSG_CLIENT_SERVER_PARSE:
-        case SessionMsg::MSG_CLIENT_SERVER_BIND:
-        case SessionMsg::MSG_CLIENT_SERVER_DESCRIBE:
-        case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
-        case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
-        case SessionMsg::MSG_CLIENT_SERVER_SYNC:
-            _handle_msg_to_server(msg);
-            break;
+                case SessionMsg::MSG_CLIENT_SERVER_FORWARD: {
+                    // forward the message to the server
+                    // usually things like copy data, etc.
+                    // write out the buffer
+                    _send_buffer(msg->buffer(), msg->seq_id());
+                    break;
+                }
 
-        case SessionMsg::MSG_CLIENT_SERVER_FORWARD: {
-            // forward the message to the server
-            // usually things like copy data, etc.
-            // write out the buffer
-            _send_buffer(msg->buffer(), msg->seq_id());
-            break;
-        }
-
-        case SessionMsg::MSG_CLIENT_SERVER_SHUTDOWN:
-            // try to shutdown the session cleanly so it can be released to the pool
-            _seq_id = msg->seq_id();
-            _handle_shutdown();
-            break;
-
-        case SessionMsg::MSG_CLIENT_SERVER_INIT_PARAMS:
-            // got a session from the pool
-            // need to send the init params message to server
-            assert(_state == RESET_SESSION_READY);
-            _state = RESET_SESSION_PARAMS;
-            block_messages();
-            _send_buffer(msg->buffer(), msg->seq_id());
-            break;
-
-        default:
-            SPDLOG_WARN("Unknown message: {}", (int8_t)msg->type());
-            break;
-        }
+                default:
+                    SPDLOG_WARN("Unknown message: {}", (int8_t)msg->type());
+                    break;
+            }
+        });
     }
 
     void
-    ServerSession::_handle_shutdown()
+    ServerSession::process_shutdown(uint64_t seq_id)
     {
+        // try to shutdown the session cleanly so it can be released to the pool
+        // called from _handle_error when the client is shutting down
+        _seq_id = seq_id;
+
         if (_state == RESET_SESSION || is_shutdown()) {
             // if we are in reset session state, or shutdown return
             return;
@@ -161,88 +180,62 @@ namespace springtail::pg_proxy {
         // reset server_session and the private session state
         reset_session();
 
-        // send the reset simple query to server
         _state = RESET_SESSION;
+
+        // register the session with the server
+        ProxyServer::get_instance()->register_session(shared_from_this(), _connection->get_socket(), true);
+
+        // send the reset simple query to server
         _send_reset();
     }
 
     void
-    ServerSession::_send_reset()
-    {
-        // send reset message to server
-        std::string reset_query{RESET_QUERY};
-
-        // buffer length; add cmd length + null terminator + code byte
-        int length = reset_query.size() + 4 + 1 + 1;
-
-        BufferPtr buffer = BufferPool::get_instance()->get(length);
-        buffer->put('Q');
-        buffer->put32(length-1); // don't include code byte
-        buffer->put_string(reset_query);
-
-        _send_buffer(buffer, _seq_id, 'Q');
-    }
-
-    void
-    ServerSession::_process_connection()
+    ServerSession::process_connection(uint64_t seq_id)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
 
         // entry point for connection message processing
-        // called from operator() in session
+        // called from run in client session
         switch(_state) {
-        case STARTUP:
-            _handle_ssl_response();
-            break;
-        case SSL_HANDSHAKE:
-            //_handle_ssl_handshake();
-            assert(0);  // XXX don't think this is reachable, need to test
-            break;
-        case AUTH:
-        case AUTH_DONE:
-        case READY:
-        case QUERY:
-        case DEPENDENCIES:
-        case EXTENDED_ERROR:
-            // ready for query, handle requests
-            _handle_message_from_server();
-            break;
-        case RESET_SESSION:
-        case RESET_SESSION_READY:
-        case RESET_SESSION_PARAMS:
-            // session is being or has just been reset
-            // mostly dropping messages or handling error waiting for client
-            _handle_reset_session_message();
-            break;
-        default:
-            SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
-            _state = ERROR;
-            break;
+            case AUTH_SERVER:
+                if (_auth->process_auth_data(seq_id)) {
+                    // auth done, ready for queries
+                    _state = READY;
+
+                    // notify client session that auth is done
+                    auto session = get_client_session();
+                    CHECK_NE(session, nullptr);
+                    auto &&params = _auth->server_parameters();
+                    session->server_auth_done(shared_from_this(), params);
+                }
+                break;
+
+            case READY:
+            case QUERY:
+            case DEPENDENCIES:
+            case EXTENDED_ERROR:
+                // ready for query, handle requests
+                _handle_message_from_server();
+                break;
+
+            case RESET_SESSION:
+            case RESET_SESSION_READY:
+            case RESET_SESSION_PARAMS:
+                // session is being or has just been reset
+                // mostly dropping messages or handling error waiting for client
+                _handle_reset_session_message();
+                break;
+
+            default:
+                SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
+                _state = ERROR;
+                break;
         }
 
-        if (_state == READY || _state == RESET_SESSION_READY) {
-            // if we are ready, then we can process more messages
-            enable_messages();
+        if (_state == ERROR) {
+            // XXX figure this out...
+            _handle_error();
         }
-    }
-
-    BufferPtr
-    ServerSession::_read_message(char code, int msg_length)
-    {
-        // create buffer to read message, add 5 for code and length
-        BufferPtr buffer = BufferPool::get_instance()->get(msg_length + 5);
-        buffer->put(code);
-        buffer->put32(msg_length + 4);  // add 4B for length field
-
-        // read in the message from connection
-        ssize_t n = _connection->read(buffer->current_data(), msg_length, msg_length);
-        assert(n == msg_length);
-        buffer->set_size(msg_length + 5);
-
-        // log the data, current_data points past header
-        _log_buffer(true, code, msg_length, buffer->current_data(), _seq_id);
-
-        return buffer;
     }
 
     void
@@ -267,7 +260,7 @@ namespace springtail::pg_proxy {
     ServerSession::_handle_reset_session_message()
     {
         // read just the header, the message length is the remaining bytes
-        auto [code, msg_length] = _read_hdr();
+        auto [code, msg_length] = read_hdr(_connection);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}", _id, code, msg_length);
         if (msg_length == 0) {
@@ -278,7 +271,7 @@ namespace springtail::pg_proxy {
         switch (code) {
             case 'Z': {                 // Ready for query
                 // read buffer and log it
-                BufferPtr buffer = _read_message(code, msg_length);
+                BufferPtr buffer = _read_message(code, msg_length, _seq_id);
 
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
@@ -306,8 +299,8 @@ namespace springtail::pg_proxy {
                     _seq_id = 0;
                     _state = READY;
                     // emulate auth_done message to client
-                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
-                    queue_msg(msg);
+                    // XXX these params may have to be merged with the ones we just set
+                    get_client_session()->server_auth_done(shared_from_this(), _auth->server_parameters());
                     return;
                 }
 
@@ -315,7 +308,7 @@ namespace springtail::pg_proxy {
             }
             case 'E': {                // Error response
                 // read buffer and log it
-                BufferPtr buffer = _read_message(code, msg_length);
+                BufferPtr buffer = _read_message(code, msg_length, _seq_id);
 
                 // decode the error, may set the state to ERROR, if not fatal we ignore for now
                 _decode_error_buffer(buffer, _seq_id);
@@ -331,22 +324,31 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ServerSession::_send_reset()
+    {
+        // send reset message to server
+        std::string reset_query{RESET_QUERY};
+
+        // buffer length; add cmd length + null terminator + code byte
+        int length = reset_query.size() + 4 + 1 + 1;
+
+        BufferPtr buffer = BufferPool::get_instance()->get(length);
+        buffer->put('Q');
+        buffer->put32(length-1); // don't include code byte
+        buffer->put_string(reset_query);
+
+        _send_buffer(buffer, _seq_id, 'Q');
+    }
+
+    void
     ServerSession::_handle_message_from_server()
     {
         // Read messages from server session
-
-        // May be in AUTH_DONE or READY state
-        // If in AUTH_DONE state:
-        // Completed authentication; first expecting auth ok 'R' message
-        // followed by 'S' messages for parameter status (may be multiple),
-        // followed by 'K' message for backend key data,
-        // followed by 'Z' for ready for query
-
         // see: https://www.postgresql.org/docs/16/protocol-message-formats.html
         // for description of message formats
 
         // read just the header, the message length is the remaining bytes
-        auto [code, msg_length] = _read_hdr();
+        auto [code, msg_length] = Session::read_hdr(_connection);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
 
@@ -359,7 +361,7 @@ namespace springtail::pg_proxy {
                 // 'T' can be a response to a simple query for a select or for a describe
                 if (_get_pending_query_type() == QueryStmt::Type::SIMPLE_QUERY) {
                     // simple query, not a completion
-                    assert (_state == QUERY);
+                    CHECK_EQ(_state, QUERY);
                     // forward to client
                     _stream_to_remote_session(code, msg_length, _seq_id);
                     return;
@@ -375,7 +377,8 @@ namespace springtail::pg_proxy {
             case 'C': // Command complete (execute, simple query)
             case 'n': // No data - response to (describe)
             case 't': // Parameter description (describe)
-            {
+                CHECK_NE(_state, EXTENDED_ERROR);
+
                 if (_state == DEPENDENCIES) {
                     // we are in dependency checking state, continue with dependencies
                     _handle_dependency_response(false);
@@ -390,25 +393,11 @@ namespace springtail::pg_proxy {
                     // we are in query state, continue with query responses
                     // this may send a message to the client
                     _handle_query_response();
-                } else {
-                    assert (_state != EXTENDED_ERROR);
                 }
 
-                // otherwise we read in the data and forward it to the client
-                BufferPtr buffer = _read_message(code, msg_length);
-                queue_msg(std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id));
+                // fall through, forward message to client
 
-                return;
-            }
-
-            case 'G': {
-                // Copy in response; forward message to client
-                BufferPtr buffer = _read_message(code, msg_length);
-                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_COPY_READY, buffer, _seq_id);
-                queue_msg(msg);
-                return;
-            }
-
+            case 'G': // Copy in response
             case 'V': // Function call response
             case 'f': // Copy fail
             case 'c': // Copy done
@@ -418,7 +407,7 @@ namespace springtail::pg_proxy {
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
             case 'd': // Copy data
-                // no need to forward these messages to client
+                // forward message to client
                 _stream_to_remote_session(code, msg_length, _seq_id);
                 return;
         }
@@ -426,33 +415,9 @@ namespace springtail::pg_proxy {
         // if not handled above then read in full message
         // buffer contains the header (code, msg_length)
         // current_data() points past the header
-        BufferPtr buffer = _read_message(code, msg_length);
+        BufferPtr buffer = _read_message(code, msg_length, _seq_id);
 
         switch(code) {
-            case 'R': {
-                // authentication request
-                if (_state == AUTH) {
-                    // still in auth negotiation state
-                    _handle_auth(buffer);
-                    break;
-                }
-
-                // done with auth, this should be last message
-                CHECK_EQ(_state, AUTH_DONE);
-
-                // auth response, at this point should be AUTH_OK
-                int32_t status =  buffer->get32();
-                if (status != 0) {
-                    SPDLOG_ERROR("Auth failed: {}", status);
-                    throw ProxyAuthError();
-                }
-
-                // free auth data
-                assert(_login != nullptr); // should have been set in _handle_auth
-                _login = nullptr;
-
-                break;
-            }
 
             case 'S': {
                 // parameter status: either during authentication or as a result of a SET
@@ -461,12 +426,8 @@ namespace springtail::pg_proxy {
                 std::string_view key = buffer->get_string();
                 std::string_view value = buffer->get_string();
 
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}", _id, key, value);
-
-                if (_state <= AUTH_DONE) {
-                    // XXX still in auth negotiation state, if primary we should save these for the client
-                    break;
-                }
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}",
+                        _id, key, value);
 
                 // this is a result of a SET operation
                 _send_to_remote_session(code, buffer, _seq_id);
@@ -501,10 +462,7 @@ namespace springtail::pg_proxy {
                     // error during query
                     _handle_query_error();
                     // forward to client
-                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id);
-                    queue_msg(msg);
-                } else {
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error not forwarding", _id);
+                    _send_to_remote_session(code, buffer, _seq_id);
                 }
 
                 if (_state == DEPENDENCIES) {
@@ -519,19 +477,9 @@ namespace springtail::pg_proxy {
                 // Ready for query
                 // I - Idle, T - Transaction, E - Error in transaction
                 char status = buffer->get();
-                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
+                uint64_t seq_id = _seq_id; // it may get reset in the handle functions
 
-                if (_state == AUTH_DONE) {
-                    assert (status == 'I');
-                    _state = READY;
-                    // at this point we should notify client session
-                    // server authentication is done, and we can complete
-                    // the client session authentication
-                    SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_AUTH_DONE);
-                    queue_msg(msg);
-                    _seq_id = 0;
-                    break;
-                }
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session: Ready for query, status={}", _id, status);
 
                 // handle the ready for query response
                 // regardless of state
@@ -542,8 +490,8 @@ namespace springtail::pg_proxy {
                 }
 
                 // forward to client
-                SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FORWARD, buffer, _seq_id);
-                queue_msg(msg);
+                // forward to client
+                _send_to_remote_session(code, buffer, seq_id);
 
                 break;
             }
@@ -554,333 +502,6 @@ namespace springtail::pg_proxy {
         }
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Done msg handling", _id);
-    }
-
-    void
-    ServerSession::_send_ssl_req(uint64_t seq_id)
-    {
-        // Send ssl message; small buffer, bypass buffer pool
-        char data[8];
-        BufferPtr buffer = std::make_shared<Buffer>(data, 8);
-
-        buffer->put32(8); // length
-        buffer->put32(MSG_SSLREQ); // SSL request code
-
-        _send_buffer(buffer, seq_id);
-    }
-
-    void
-    ServerSession::_handle_ssl_response()
-    {
-        // Read startup ssl message from server in response to send_startup
-        // Just one character: 'N' no ssl or 'S' yes ssl
-        char ssl_response;
-        ssize_t n = _connection->read(&ssl_response, 1, 1);
-        CHECK_EQ(n, 1);
-
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL response from server: {}", _id, ssl_response);
-        if (ssl_response == 'S') {
-            // server is ready for ssl negotiation
-            _send_ssl_handshake(_seq_id);
-        } else {
-            // server is ready for startup message
-            _send_startup_msg(_seq_id);
-        }
-    }
-
-    void
-    ServerSession::_send_ssl_handshake(uint64_t seq_id)
-    {
-        // create the SSL object from the server's context, acting as a client
-        SSL *ssl = _server->SSL_new(false);
-        if (ssl == nullptr) {
-            SPDLOG_ERROR("Failed to create SSL object");
-            _state = ERROR;
-            return;
-        }
-
-        // set the SSL object on the connection
-        _connection->setup_SSL(ssl);
-
-        // do the SSL handshake
-        _state = SSL_HANDSHAKE;
-
-        _handle_ssl_handshake(seq_id);
-    }
-
-    void
-    ServerSession::_handle_ssl_handshake(uint64_t seq_id)
-    {
-        // do the SSL handshake; exception thrown on fatal error
-        int rc = _connection->SSL_connect();
-        if (rc < 0) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake in progress, need more data", _id);
-            return;
-        }
-
-        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] SSL server handshake complete", _id);
-
-        // send the startup message and then move to AUTH state
-        _send_startup_msg(seq_id);
-    }
-
-    void ServerSession::_send_startup_msg(uint64_t seq_id)
-    {
-        // Send startup message
-        std::string database_name = _db_prefix + _database;
-
-        // (msglen + protocol version) (8) + user (5) + database (9) + 3 null terminators (3)
-        int msg_len = 8 + 5 + 9 + _user->username().size() + database_name.size() + 3;
-
-        // iterate over parameters to calculate message length
-        for (const auto &param : _parameters) {
-            if (param.first == "user" || param.first == "database") {
-                continue;
-            }
-            msg_len += 1 + param.first.size() + 1 + param.second.size();
-        }
-
-        BufferPtr buffer = BufferPool::get_instance()->get(msg_len + 4);
-        buffer->put32(msg_len);
-        buffer->put32(MSG_STARTUP_V3); // protocol version
-
-        buffer->put_string("user");
-        buffer->put_string(_user->username());
-        buffer->put_string("database");
-        buffer->put_string(database_name);
-
-        for (const auto &param : _parameters) {
-            if (param.first == "user" || param.first == "database") {
-                continue;
-            }
-            // XXX what about client encoding that is not UTF8?
-            buffer->put_string(param.first);
-            buffer->put_string(param.second);
-        }
-        buffer->put(0); // null terminator
-
-        _send_buffer(buffer, seq_id, '?');
-
-        _state = AUTH;
-    }
-
-    void
-    ServerSession::_handle_auth(BufferPtr buffer)
-    {
-        // Read auth response 'R', we are still in auth flow
-        // for SASL, we may have multiple messages
-        // for MD5, we have one message
-        int32_t auth_type = buffer->get32();
-
-        switch (auth_type) {
-            case MSG_AUTH_OK:
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: OK", _id);
-                _state = AUTH_DONE;
-                break;
-
-            case MSG_AUTH_MD5:
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: MD5", _id);
-                _handle_auth_md5(buffer);
-                // set state to auth done
-                _state = AUTH_DONE;
-                break;
-
-            case MSG_AUTH_SASL:
-                // first message in SASL flow (SCRAM-SHA-256)
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL", _id);
-                // encode reply for first scram message to server
-                _handle_auth_scram(buffer);
-                break;
-
-            case MSG_AUTH_SASL_CONTINUE:
-                // continue SASL flow
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL continue", _id);
-                // encode reply to continue message
-                _handle_auth_scram_continue(buffer);
-                break;
-
-            case MSG_AUTH_SASL_COMPLETE:
-                // complete SASL flow
-                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Auth type: SASL complete", _id);
-                // verify the server signature
-                _handle_auth_scram_complete(buffer);
-                _state = AUTH_DONE;
-                break;
-
-            default:
-                SPDLOG_ERROR("Unknown auth type: {}", auth_type);
-                throw ProxyAuthError();
-        }
-    }
-
-    void
-    ServerSession::_handle_auth_md5(BufferPtr buffer)
-    {
-        // read in the salt from the server
-        int32_t salt;
-        buffer->get_bytes(reinterpret_cast<char*>(&salt), 4);
-
-        // get user login info
-        _login = _get_user_login();
-        if (_login == nullptr) {
-            throw ProxyAuthError();
-        }
-        _login->salt = salt;
-
-        char md5[MD5_PASSWD_LEN+1];
-        // calculate md5 hash; skip the 'md5' prefix on the password; add salt and compute
-        assert(_login->password.starts_with("md5"));
-        if (!pg_md5_encrypt(_login->password.c_str()+3, reinterpret_cast<char*>(&_login->salt), 4, md5)) {
-            SPDLOG_ERROR("Failed to calculate MD5 hash");
-            throw ProxyAuthError();
-        }
-        md5[MD5_PASSWD_LEN] = '\0';
-
-        // encode md5 auth response
-        BufferPtr write_buffer = BufferPool::get_instance()->get(41);
-
-        write_buffer->put('p');
-        write_buffer->put32(40); // length
-        write_buffer->put_string(md5);
-
-        _send_buffer(write_buffer, _seq_id, 'p');
-    }
-
-    void
-    ServerSession::_handle_auth_scram(BufferPtr buffer)
-    {
-        // get user login info
-        _login = _get_user_login();
-        if (_login == nullptr) {
-            SPDLOG_ERROR("Failed to get user login info");
-            throw ProxyAuthError();
-        }
-
-        // check that the server supports the SCRAM-SHA-256 mechanism
-        bool found = false;
-        do {
-            std::string_view mechanism = buffer->get_string();
-            if (mechanism == "SCRAM-SHA-256") {
-                found = true;
-            }
-        } while (!found && buffer->remaining() > 0);
-
-        if (!found) {
-            SPDLOG_ERROR("No SASL mechanism found matching: SCRAM-SHA-256");
-            throw ProxyAuthError();
-        }
-
-        char *client_first_message = build_client_first_message(&_login->scram_state);
-        if (client_first_message == nullptr) {
-            SPDLOG_ERROR("Failed to build client first message");
-            throw ProxyAuthError();
-        }
-
-        int32_t len = strlen(client_first_message);
-        BufferPtr write_buffer = BufferPool::get_instance()->get(4+14+4+1+len);
-        write_buffer->put('p');
-        write_buffer->put32(4+14+4+len); // length
-        write_buffer->put_string("SCRAM-SHA-256");
-        write_buffer->put32(len); // length of data
-        write_buffer->put_bytes(client_first_message, len);
-
-        free(client_first_message);
-
-        _send_buffer(write_buffer, _seq_id, 'p');
-    }
-
-    void
-    ServerSession::_handle_auth_scram_continue(BufferPtr buffer)
-    {
-        int data_len = buffer->remaining();
-        std::string_view data = buffer->get_bytes(data_len);
-
-        if (_login->scram_state.client_nonce == nullptr) {
-            SPDLOG_ERROR("No client nonce set");
-            throw ProxyAuthError();
-        }
-
-        if (_login->scram_state.server_first_message != nullptr) {
-            SPDLOG_ERROR("Received second SCRAM-SHA-256 continue message");
-            throw ProxyAuthError();
-        }
-
-        int salt_len;
-        char *input = new char[data_len + 1];
-        strncpy(input, data.data(), data_len);
-        input[data_len] = '\0';
-
-        if (!read_server_first_message(&_login->scram_state, input,
-                                       &_login->scram_state.server_nonce,
-                                       &_login->scram_state.salt,
-                                       &salt_len,
-                                       &_login->scram_state.iterations)) {
-            SPDLOG_ERROR("Failed to read server first message");
-            delete[] input;
-            throw ProxyAuthError();
-        }
-        delete[] input;
-
-        PgUser user;
-        user.scram_ClientKey = _login->scram_state.ClientKey;
-        user.has_scram_keys = true;
-
-        char *client_final_message = build_client_final_message(&_login->scram_state,
-			&user, _login->scram_state.server_nonce,
-			_login->scram_state.salt, salt_len, _login->scram_state.iterations);
-
-        if (client_final_message == nullptr) {
-            SPDLOG_ERROR("Failed to build client final message");
-            throw ProxyAuthError();
-        }
-
-        int msg_len = 4 + strlen(client_final_message); // length
-
-        BufferPtr write_buffer = BufferPool::get_instance()->get(1 + msg_len);
-        write_buffer->put('p');
-        write_buffer->put32(msg_len);
-        write_buffer->put_bytes(client_final_message, msg_len - 4);
-
-        free(client_final_message);
-
-        _send_buffer(write_buffer, _seq_id, 'p');
-    }
-
-    void
-    ServerSession::_handle_auth_scram_complete(BufferPtr buffer)
-    {
-        int data_len = buffer->remaining();
-        std::string_view data = buffer->get_bytes(data_len);
-
-        // make sure we are in right flow
-        if (_login->scram_state.server_first_message == nullptr) {
-            SPDLOG_ERROR("No server first message set");
-            throw ProxyAuthError();
-        }
-
-        char *input = new char[data_len + 1];
-        strncpy(input, data.data(), data_len);
-        input[data_len] = '\0';
-        char ServerSignature[SHA256_DIGEST_LENGTH];
-
-        // decode the final message from server
-        if (!read_server_final_message(input, ServerSignature)) {
-            SPDLOG_ERROR("Failed to read server final message");
-            delete[] input;
-            throw ProxyAuthError();
-        }
-        delete[] input;
-
-        PgUser user;
-        user.scram_ClientKey = _login->scram_state.ClientKey;
-        user.scram_ServerKey = _login->scram_state.ServerKey; // XXX need to get this from somewhere
-        user.has_scram_keys = true;
-
-        // last step, verify the server signature
-        if (!verify_server_signature(&_login->scram_state, &user, ServerSignature)) {
-            SPDLOG_ERROR("Failed to verify server signature");
-            throw ProxyAuthError();
-        }
     }
 
     void
@@ -966,27 +587,28 @@ namespace springtail::pg_proxy {
 
         // pop the query from the queue, and issue response
         _pending_queue.pop();
-        query_status->msg->set_msg_response(false, query_status->query_complete_count);
-        queue_msg(query_status->msg);
+        query_status->msg->set_msg_response(query_status->query_complete_count);
+        _client_msg_response(query_status->msg, false);
 
         // if we are in extended error state, we need to wait for
         // sync message and won't get any responses until then
-        if (query_status->msg->data()->is_extended()) {
-            _state = EXTENDED_ERROR;
+        if (!query_status->msg->data()->is_extended()) {
+            return;
+        }
 
-            // iterate through all pending messages and set them to error
-            while (!_pending_queue.empty()) {
-                query_status = _pending_queue.front();
-                if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
-                    // wait for query ready
-                    return;
-                }
+        _state = EXTENDED_ERROR;
 
-                // pop the query from the queue, and issue response
-                _pending_queue.pop();
-                query_status->msg->set_msg_response(false, query_status->query_complete_count);
-                queue_msg(query_status->msg);
+        // iterate through all pending messages and set them to error
+        while (!_pending_queue.empty()) {
+            query_status = _pending_queue.front();
+            if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
+                // wait for query ready
+                return;
             }
+
+            // pop the query from the queue, and issue response
+            _pending_queue.pop();
+            _client_msg_response(query_status->msg, false);
         }
     }
 
@@ -1013,20 +635,15 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        SessionMsg::MsgStatus msg_status = {xact_status};
+        DCHECK(_state == QUERY || _state == EXTENDED_ERROR);
 
         // check if current message is a sync message
         if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
             _pending_queue.pop();
-            query_status->msg->set_status_ready(msg_status);
-            queue_msg(query_status->msg);
-        } else {
-            // if previous message was a simple query then we would
-            // have returned earlier when last simple query completed
-            // create a new message to send to client
-            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_READY, msg_status);
-            queue_msg(msg);
         }
+
+        // send ready for query message to client
+        get_client_session()->server_ready_msg(xact_status);
 
         // if all queries complete, set state to ready
         if (_pending_queue.empty()) {
@@ -1048,10 +665,10 @@ namespace springtail::pg_proxy {
     void
     ServerSession::_handle_query_response()
     {
-        assert (_state == QUERY);
+        CHECK_EQ(_state, QUERY);
+        CHECK(!_pending_queue.empty());
 
         // no error, mark query as complete
-        assert(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
         query_status->query_complete_count++;
 
@@ -1060,24 +677,29 @@ namespace springtail::pg_proxy {
                     query_status->query_count,
                     (int8_t)query_status->msg->data()->type);
 
-        assert (query_status->query_complete_count <= query_status->query_count);
+        CHECK_LE(query_status->query_complete_count, query_status->query_count);
 
         // check if this was a prepare that completed
         QueryStmtPtr qs = query_status->msg->data();
-        if (qs->type == QueryStmt::Type::PREPARE) {
-            // add prepared statement to cache
-            _stmts.insert(qs->get_hashed_name());
+        switch (qs->type) {
+            case QueryStmt::Type::PREPARE:
+                // add prepared statement to cache
+                _stmts.insert(qs->get_hashed_name());
+                break;
 
-        } else if (qs->type == QueryStmt::Type::SIMPLE_QUERY) {
-            // it is possible for children.size() == 0 when there is an empty query
-            if (qs->children.size() > 0) {
-                assert (qs->children.size() >= query_status->query_complete_count);
-                qs = qs->children[query_status->query_complete_count-1];
-                if (qs->type == QueryStmt::Type::PREPARE) {
-                    // add prepared statement to cache
-                    _stmts.insert(qs->get_hashed_name());
+            case QueryStmt::Type::SIMPLE_QUERY:
+                // it is possible for children.size() == 0 when there is an empty query
+                if (qs->children.size() > 0) {
+                    assert (qs->children.size() >= query_status->query_complete_count);
+                    qs = qs->children[query_status->query_complete_count-1];
+                    if (qs->type == QueryStmt::Type::PREPARE) {
+                        // add prepared statement to cache
+                        _stmts.insert(qs->get_hashed_name());
+                    }
                 }
-            }
+                break;
+            default:
+                break;
         }
 
         // check if not done with parent query, if not then return now
@@ -1089,12 +711,14 @@ namespace springtail::pg_proxy {
 
         // this query is complete; send response to client session
         _pending_queue.pop();
-        query_status->msg->set_msg_response(true, query_status->query_complete_count);
-        queue_msg(query_status->msg);
 
-        // if all queries complete, set state to ready
+        // send response notification to client
+        query_status->msg->set_msg_response(query_status->query_complete_count);
+        _client_msg_response(query_status->msg, true);
+
+        // if all queries complete
         if (_pending_queue.empty()) {
-            _state = READY;
+            // _state = READY;  // Not sure this is needed
             return;
         }
 
@@ -1157,14 +781,14 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_send_buffer(BufferPtr buffer, uint64_t seq_id, char code)
+    ServerSession::_client_msg_response(SessionMsgPtr msg, bool success)
     {
-        // send the buffer to the server
-        ssize_t n = _connection->write(buffer->data(), buffer->size());
-        CHECK_EQ(n, buffer->size());
-
-        // log the buffer
-        _log_buffer(false, code, buffer->size(), buffer->data(), seq_id);
+        if (_is_shadow) {
+            // shadow session, don't send response to client
+            return;
+        }
+        // otherwise send message and status to client session
+        get_client_session()->server_msg_response(msg, success);
     }
 
     void
@@ -1221,10 +845,34 @@ namespace springtail::pg_proxy {
         _send_buffer(buffer, _seq_id, 'X');
     }
 
+    BufferPtr
+    ServerSession::_encode_status_query(const std::unordered_map<std::string, std::string> &parameters)
+    {
+        std::ostringstream query;
+        for (const auto& [key, value] : parameters) {
+            if (EXCLUDED_STARTUP_PARAMS.contains(key)) {
+                continue;
+            }
+            query << "SET " << key << "=" << value << ";";
+        }
+        std::string query_str = query.str();
+
+        // create a buffer for the query
+        // length = 4B len + query size + null terminator + code byte
+        int length = query_str.size() + 4 + 1 + 1;
+        BufferPtr buffer = BufferPool::get_instance()->get(length);
+
+        // create a query to set the session parameters
+        buffer->put('Q');
+        buffer->put32(length - 1); // subtract 1 for the code byte
+        buffer->put_string(query.str());
+
+        return buffer;
+    }
+
     /** factory to create session */
     ServerSessionPtr
-    ServerSession::create(ProxyServerPtr server,
-                          UserPtr user,
+    ServerSession::create(UserPtr user,
                           const std::string &database,
                           const std::string &prefix,
                           DatabaseInstancePtr instance,
@@ -1239,7 +887,7 @@ namespace springtail::pg_proxy {
             throw ProxyIOConnectionError();
         }
 
-        ServerSessionPtr session = std::make_shared<ServerSession>(connection, server, user, database, prefix, instance, params, type);
+        ServerSessionPtr session = std::make_shared<ServerSession>(connection, user, database, prefix, instance, params, type);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
 
         return session;
