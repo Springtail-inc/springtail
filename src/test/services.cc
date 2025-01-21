@@ -27,10 +27,15 @@ namespace springtail::test {
             std::filesystem::path xid_dir;
 
             auto json = Properties::get(Properties::XID_MGR_CONFIG);
+            if (json.is_null() || !json.contains("rpc_config")) {
+                throw Error("XID Mgr config incorrect");
+            }
+            /*
             if (json.is_null() || !json.contains("server")) {
                 throw Error("XID Mgr config incorrect");
             }
             json = json["server"];
+            */
             Json::get_to<std::filesystem::path>(json, "base_path", xid_dir);
             xid_dir = Properties::make_absolute_path(xid_dir);
             std::filesystem::remove_all(xid_dir);
