@@ -21,20 +21,15 @@ namespace springtail::xid_mgr {
     XidMgrServer::XidMgrServer()
     {
         nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
-        nlohmann::json client_json;
-        nlohmann::json server_json;
+        nlohmann::json rpc_json;
 
-        if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
-            throw Error("Xid Manager configuration missing server section");
+        // fetch RPC properties for the xid mgr server
+        if (!Json::get_to(json, "rpc_config", rpc_json)) {
+            throw Error("XID Mgr RPC settings are not found");
         }
 
-        SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: config: {}", server_json.dump());
-
-        int port = Json::get_or<int>(server_json, "port", 55051);
-        int worker_thread_count = Json::get_or<int>(server_json, "worker_threads", 8);
-
         std::string base_path;
-        Json::get_to<std::string>(server_json, "base_path", base_path);
+        Json::get_to<std::string>(json, "base_path", base_path);
         _base_path = Properties::make_absolute_path(base_path);
 
         SPDLOG_DEBUG_MODULE(LOG_XID_MGR, "XidMgrServer: base_path: {}", _base_path.string());
@@ -45,7 +40,7 @@ namespace springtail::xid_mgr {
 
         // iterate over all files in the base path creating partitions
         _load_partitions();
-        init(worker_thread_count, port);
+        init(rpc_json);
     }
 
     void

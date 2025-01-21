@@ -23,14 +23,9 @@ namespace {
             springtail_init();
 
             nlohmann::json json = Properties::get(Properties::XID_MGR_CONFIG);
-            nlohmann::json server_json;
-
-            if (!Json::get_to<nlohmann::json>(json, "server", server_json)) {
-                throw Error("Xid Manager configuration missing server section");
-            }
 
             std::string base_path_str;
-            Json::get_to<std::string>(server_json, "base_path", base_path_str);
+            Json::get_to<std::string>(json, "base_path", base_path_str);
             std::filesystem::path base_path = Properties::make_absolute_path(base_path_str);
 
             // clear xid directory
