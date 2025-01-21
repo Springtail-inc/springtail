@@ -30,6 +30,9 @@ namespace springtail::pg_log_mgr {
     {
         // get db state from Redis, default to RUNNING
         std::string state;
+
+        int uninitialized;
+
         try {
             state = Properties::get_db_state(_db_id);
         } catch (RedisNotFoundError &e) {
