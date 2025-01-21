@@ -246,6 +246,7 @@ namespace {
             DeparsedSortGroup* grp = new DeparsedSortGroup();
             grp->attnum = attnum;
             grp->reversed = reversed;
+            grp->nulls_first = reversed?true:false;
             return lappend(sort_list, grp);
         }
 
@@ -579,10 +580,41 @@ namespace {
                 {return a[3] < b[3];});
         _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
 
+        sortgroup = _add_sortgroup(_columns[3].position, true);
+        std::sort(sorted_data.begin(), sorted_data.end(), [](auto const& a, auto const& b)
+                {return a[3] > b[3];});
+        _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+
         // drop the secondary index, and verify full scan
         _drop_index(_db_id, _secondary_index_id, _table_xid);
         qual_list = _add_qual(_columns[3].position, EQUALS, 3);
         _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
 
+
+    }
+
+    TEST_F(FDWWhere_Test, Test_SecondaryAndQuals)
+    {
+        auto test = [this](QualOpName op, bool reversed) {
+            List *qual_list = _add_qual(_columns[3].position, op, 2);
+            std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
+            //sort by col4
+            std::sort(filtered_data.begin(), filtered_data.end(), [&reversed](auto const& a, auto const& b)
+                    {return reversed? a[3] > b[3] : a[3] < b[3];});
+            auto sortgroup = _add_sortgroup(_columns[3].position, reversed);
+            _run_scan(qual_list, filtered_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+        };
+
+        test(EQUALS, false);
+        test(EQUALS, true);
+
+        test(NOT_EQUALS, false);
+        test(NOT_EQUALS, true);
+
+        test(LESS_THAN, false);
+        test(LESS_THAN_EQUALS, true);
+
+        test(GREATER_THAN, false);
+        test(GREATER_THAN_EQUALS, true);
     }
 } // namespace
