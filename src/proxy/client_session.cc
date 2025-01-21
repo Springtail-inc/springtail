@@ -72,9 +72,8 @@ namespace springtail::pg_proxy {
             _replica_session->process_connection(_gen_seq_id());
         }
 
-           // re-enable processing
+        // re-enable processing
         ProxyServer::get_instance()->signal(shared_from_this());
-
     }
 
     void
