@@ -1191,6 +1191,9 @@ namespace springtail::sys_tbl_mgr {
                                   uint64_t table_id,
                                   const XidLsn &access_xid)
     {
+        // clear any existing column data
+        info->columns.clear();
+
         // get an accessor for the schema table
         auto schemas_t = _get_system_table(db_id, sys_tbl::Schemas::ID);
 

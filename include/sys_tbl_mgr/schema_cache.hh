@@ -24,8 +24,8 @@ namespace springtail::sys_tbl_mgr {
         using PopulateFn = std::function<SchemaMetadataPtr(uint64_t, uint64_t, const XidLsn &)>;
 
     public:
-        SchemaCache(int schema_max)
-            : _schema_max(schema_max)
+        explicit SchemaCache(int capacity)
+            : _capacity(capacity)
         { }
 
         /** Retrieve a schema from the cache based on an access key.  If it's a cache miss, populate
@@ -72,13 +72,17 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Internal helper to populate the cache using the provided populate function.
          */
-        SchemaEntryPtr _fetch(uint64_t db, uint64_t tid, const XidLsn &xid, PopulateFn populate);
+        SchemaEntryPtr _fetch_locked(std::unique_lock<std::mutex> &lock,
+                                     uint64_t db,
+                                     uint64_t tid,
+                                     const XidLsn &xid,
+                                     PopulateFn populate);
 
-        void _invalidate(uint64_t db, uint64_t tid, const XidLsn &xid);
+        void _invalidate_locked(uint64_t db, uint64_t tid, const XidLsn &xid);
 
-        void _remove(SchemaMap::iterator schema_i);
+        void _remove_locked(SchemaMap::iterator schema_i);
 
-        void _make_space();
+        void _make_space_locked();
 
     private:
         std::mutex _mutex;
@@ -87,7 +91,7 @@ namespace springtail::sys_tbl_mgr {
         LruList _lru; ///< LRU list of cached schema entries
         IndexMap _index_map; ///< Map of db id -> index oid -> table oid
 
-        uint64_t _schema_max; ///< Max number of entries in the cache
+        uint64_t _capacity; ///< Max number of entries in the cache
 
         std::map<uint64_t, XidLsn> _latest_xid; ///< Map from db -> latest known XID with a DDL change
     };

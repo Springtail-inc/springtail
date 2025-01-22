@@ -30,10 +30,7 @@ namespace springtail {
 
         std::strong_ordering operator<=>(const XidLsn &rhs) const
         {
-            if (xid == rhs.xid) {
-                return lsn <=> rhs.lsn;
-            }
-            return xid <=> rhs.xid;
+            return std::tie(xid, lsn) <=> std::tie(rhs.xid, rhs.lsn);
         }
     };
 
@@ -55,7 +52,7 @@ namespace springtail {
         // ordering is based on the end of the range
         std::strong_ordering operator<=>(const XidRange &rhs) const
         {
-            return end <=> rhs.end;
+            return std::tie(end, start) <=> std::tie(rhs.end, rhs.start);
         }
     };
 }

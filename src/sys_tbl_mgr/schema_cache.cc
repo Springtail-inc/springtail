@@ -45,7 +45,7 @@ namespace springtail::sys_tbl_mgr {
             }
 
             // not in the cache, retrieve it and try to cache it
-            auto entry = _fetch(db, tid, xid, populate);
+            auto entry = _fetch_locked(lock, db, tid, xid, populate);
 
             // record the mapping of index OIDs in the cache to table OIDs to properly
             // invalidate on drop_index()
@@ -64,28 +64,23 @@ namespace springtail::sys_tbl_mgr {
     }
 
     SchemaCache::SchemaEntryPtr
-    SchemaCache::_fetch(uint64_t db,
-                        uint64_t tid,
-                        const XidLsn &xid,
-                        PopulateFn populate)
+    SchemaCache::_fetch_locked(std::unique_lock<std::mutex> &lock,
+                               uint64_t db,
+                               uint64_t tid,
+                               const XidLsn &xid,
+                               PopulateFn populate)
     {
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "db {}, table {}, xid {}:{}", db, tid, xid.xid, xid.lsn);
-
-        // make space for the entry
-        _make_space();
 
         // create a dummy entry in the fetching state
         auto key = std::make_pair(db, tid);
         auto entry = std::make_shared<SchemaEntry>();
         auto &&result = _schema_map.try_emplace(key, entry);
-        if (!result.second) {
-            throw Error();
-        }
+        CHECK(result.second);
 
         // call the populate function for the cache
         SchemaMetadataPtr metadata;
         {
-            std::unique_lock lock(_mutex, std::adopt_lock);
             lock.unlock();
 
             // must release the lock while calling this potentially-blocking function
@@ -98,7 +93,6 @@ namespace springtail::sys_tbl_mgr {
 
 
             lock.lock();
-            lock.release();
         }
 
         // if the entry wasn't invalidated during fetch, perform bookkeeping
@@ -113,6 +107,9 @@ namespace springtail::sys_tbl_mgr {
                     _latest_xid[db] = metadata->access_range.end;
                 }
             } else {
+                // make space for the entry
+                _make_space_locked();
+
                 // place the entry on the back of the LRU list
                 entry->lru_i = _lru.insert(_lru.end(), result.first);
             }
@@ -136,7 +133,7 @@ namespace springtail::sys_tbl_mgr {
                                   const XidLsn &xid)
     {
         std::unique_lock lock(_mutex);
-        _invalidate(db, tid, xid);
+        _invalidate_locked(db, tid, xid);
     }
 
     void
@@ -157,7 +154,7 @@ namespace springtail::sys_tbl_mgr {
         auto schema_i = _schema_map.lower_bound(key);
         while (schema_i != _schema_map.end() && schema_i->first.first == db) {
             // clear the associated entry
-            _remove(schema_i);
+            _remove_locked(schema_i);
 
             // move to the next entry
             schema_i = _schema_map.lower_bound(key);
@@ -184,13 +181,13 @@ namespace springtail::sys_tbl_mgr {
         }
         
         // perform the invalidation
-        _invalidate(db, index_i->second, xid);
+        _invalidate_locked(db, index_i->second, xid);
     }
 
     void
-    SchemaCache::_invalidate(uint64_t db,
-                             uint64_t tid,
-                             const XidLsn &xid)
+    SchemaCache::_invalidate_locked(uint64_t db,
+                                    uint64_t tid,
+                                    const XidLsn &xid)
     {
         // update the latest known XID with a schema change
         if (_latest_xid[db] < xid) {
@@ -205,11 +202,11 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // remove the entry
-        _remove(entry_i);
+        _remove_locked(entry_i);
     }
 
     void
-    SchemaCache::_remove(SchemaMap::iterator schema_i)
+    SchemaCache::_remove_locked(SchemaMap::iterator schema_i)
     {
         if (!schema_i->second->fetching) {
             // clear the LRU entry
@@ -222,7 +219,7 @@ namespace springtail::sys_tbl_mgr {
                 }
 
                 auto key = std::make_pair(schema_i->first.first, index.id);
-                _index_map.erase(key);
+                CHECK_EQ(_index_map.erase(key), 1);
             }
         }
 
@@ -234,10 +231,10 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    SchemaCache::_make_space()
+    SchemaCache::_make_space_locked()
     {
         // check if we have space in the map already
-        if (_schema_map.size() < _schema_max) {
+        if (_lru.size() < _capacity) {
             return;
         }
 
@@ -245,6 +242,6 @@ namespace springtail::sys_tbl_mgr {
         auto schema_i = _lru.front();
 
         // remove the entry 
-        _remove(schema_i);
+        _remove_locked(schema_i);
     }
 }
