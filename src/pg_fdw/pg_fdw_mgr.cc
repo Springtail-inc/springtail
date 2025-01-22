@@ -536,6 +536,7 @@ namespace springtail::pg_fdw {
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
+                ++i;
             }
             // reversed=true means DESC direction in PG executor
             pg_state->scan_asc = (reversed == false);
