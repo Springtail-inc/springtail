@@ -37,7 +37,6 @@ namespace springtail::common {
 
             // wait for desired state
             _cv.wait(lock, [this, desired_states]() {
-                //SPDLOG_DEBUG("Waiting for change, current={}", static_cast<int8_t>(_current_state));
                 return desired_states.contains(_current_state);
             });
         }
