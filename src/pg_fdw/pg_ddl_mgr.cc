@@ -279,19 +279,17 @@ namespace springtail::pg_fdw {
     {
         // check if we have a connection in the cache
         LibPqConnectionPtr conn = _fdw_conn_cache.get(db_id);
+
+        // check if the connection is still valid
         if (conn != nullptr) {
-            // check connection status
-            try {
-                conn->exec("SELECT 1");
-                if (conn->status() == PGRES_TUPLES_OK) {
-                    return conn;
-                }
-            } catch (Error &e) {
-                SPDLOG_ERROR("Error checking connection status: {}", e.what());
-                _fdw_conn_cache.evict(db_id);
-                conn = nullptr;
+            if (conn->is_connected()) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Reusing connection for db_id: {}", db_id);
+                return conn;
             }
+            _fdw_conn_cache.evict(db_id);
         }
+
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Establishing connection for db_id: {}", db_id);
 
         // use libpq to connect to the database
         conn = std::make_shared<LibPqConnection>();
@@ -495,12 +493,12 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "create_index") {
-            // TODO: do something? 
+            // TODO: do something?
             SPDLOG_ERROR("CREATE INDEX");
             return "";
         }
         else if (action == "drop_index") {
-            // TODO: do something? 
+            // TODO: do something?
             SPDLOG_ERROR("DROP INDEX");
             return "";
         }

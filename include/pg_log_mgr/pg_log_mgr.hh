@@ -151,8 +151,8 @@ namespace springtail::pg_log_mgr {
         static constexpr int MAX_REDIS_BATCH_SIZE = 300;
 
         /** internal state */
-        enum StateEnum {
-            STATE_STARTUP,      ///< initial state upon startup
+        enum StateEnum : int8_t {
+            STATE_STARTUP=0,    ///< initial state upon startup
             STATE_STARTUP_SYNC, ///< full sync required after startup
             STATE_RUNNING,      ///< running state
             STATE_SYNC_STALL,   ///< stall state during sync

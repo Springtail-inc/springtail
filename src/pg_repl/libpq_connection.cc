@@ -523,7 +523,10 @@ namespace springtail {
      */
     bool LibPqConnection::is_connected()
     {
-        return (_connection != nullptr);
+        if (_connection != nullptr && PQstatus(_connection) == CONNECTION_OK) {
+            return true;
+        }
+        return false;
     }
 
 
