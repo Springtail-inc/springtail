@@ -97,7 +97,7 @@ jobs:
           cd ../../debug
           
           # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
-          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --gtest_break_on_failure" 2>&1 | tee tmplog
+          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
           # List the open listening ports and processes info after tests are done
           echo "==== Listening Ports ===="
