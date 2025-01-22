@@ -71,7 +71,7 @@ namespace springtail::common {
         }
 
 
-        /** Wait for sepecific state and then atomically switch to new state */
+        /** Wait for specific state and then atomically switch to new state */
         void wait_and_set(StateEnum desired_state,
                           StateEnum new_state)
         {
