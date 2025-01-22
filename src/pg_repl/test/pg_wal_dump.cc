@@ -32,21 +32,21 @@ int main(int argc, char* argv[])
     int port;
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("host,H", boost::program_options::value<std::string>(&host)->default_value("localhost"), "Hostname")
-        ("port,p", boost::program_options::value<int>(&port)->default_value(5432), "Port number")
-        ("dbname,d", boost::program_options::value<std::string>(&db_name)->default_value("springtail"), "DB database name")
-        ("user,u", boost::program_options::value<std::string>(&user_name)->default_value("springtail"), "DB user name")
-        ("password,P", boost::program_options::value<std::string>(&password)->default_value(""), "DB Password")
-        ("outfile,o", boost::program_options::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")), "WAL output file")
-        ("publication,b", boost::program_options::value<std::string>(&pub_name)->default_value("springtail"), "Publication name")
-        ("slot,s", boost::program_options::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("host,H", po::value<std::string>(&host)->default_value("localhost"), "Hostname");
+    desc.add_options()("port,p", po::value<int>(&port)->default_value(5432), "Port number");
+    desc.add_options()("dbname,d", po::value<std::string>(&db_name)->default_value("springtail"), "DB database name");
+    desc.add_options()("user,u", po::value<std::string>(&user_name)->default_value("springtail"), "DB user name");
+    desc.add_options()("password,P", po::value<std::string>(&password)->default_value(""), "DB Password");
+    desc.add_options()("outfile,o", po::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")), "WAL output file");
+    desc.add_options()("publication,b", po::value<std::string>(&pub_name)->default_value("springtail"), "Publication name");
+    desc.add_options()("slot,s", po::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

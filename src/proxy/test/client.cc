@@ -53,16 +53,16 @@ int main(int argc, char* argv[])
     int num_threads;
     int msg_count;
 
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("port,p", boost::program_options::value<int>(&port)->default_value(8888), "Port number")
-        ("threads,t", boost::program_options::value<int>(&num_threads)->default_value(4), "Number of threads")
-        ("count,c", boost::program_options::value<int>(&msg_count)->default_value(4), "Msgs per thread");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("port,p", po::value<int>(&port)->default_value(8888), "Port number");
+    desc.add_options()("threads,t", po::value<int>(&num_threads)->default_value(4), "Number of threads");
+    desc.add_options()("count,c", po::value<int>(&msg_count)->default_value(4), "Msgs per thread");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
