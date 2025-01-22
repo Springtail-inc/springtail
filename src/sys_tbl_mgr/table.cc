@@ -321,22 +321,34 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::begin()
+    Table::begin(uint32_t index_id)
     {
-        // check if the table is vacant
-        if (_primary_index == nullptr) {
-            return end();
-        }
+        if (index_id == constant::INDEX_PRIMARY) {
+            // check if the table is vacant
+            if (_primary_index == nullptr) {
+                return end();
+            }
 
-        // check if the table is empty
-        auto &&index_i = _primary_index->begin();
-        if (index_i == _primary_index->end()) {
-            return end();
-        }
+            // check if the table is empty
+            auto &&index_i = _primary_index->begin();
+            if (index_i == _primary_index->end()) {
+                return end();
+            }
 
-        auto page = _read_page_via_primary(index_i);
-        auto begin = page->begin();
-        return Iterator(this, _primary_index, index_i, std::move(page), begin);
+            auto page = _read_page_via_primary(index_i);
+            auto begin = page->begin();
+            return Iterator(this, _primary_index, index_i, std::move(page), begin);
+        } else {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto i = btree->begin();
+            if (i == btree->end()) {
+                return end(index_id);
+            }
+            return Iterator(this, btree, i, index_schema);
+        }
     }
 
     StorageCache::SafePagePtr
