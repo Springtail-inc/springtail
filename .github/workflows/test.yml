@@ -96,7 +96,17 @@ jobs:
           python3 springtail.py -f ../../system.json.test --load-redis --build-dir ../../debug
           cd ../../debug
           
-          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose" 2>&1 | tee tmplog
+          # Per SPR-501: break upon test failures - "--gtest_break_on_failure"
+          make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --gtest_break_on_failure" 2>&1 | tee tmplog
+          
+          # List the open listening ports and processes info after tests are done
+          echo "==== Listening Ports ===="
+          netstat -tulnp
+          # Show the full launching command of each
+          netstat -tulnp | awk '{print $7}' | grep -o '[0-9]*' | while read pid; do
+            cmd=$(ps -p $pid -o args=)
+            echo "$pid - $cmd"
+          done
           
           # Grab the success/failure status of the unit tests
           _LOG_FLAG="succeeded"
