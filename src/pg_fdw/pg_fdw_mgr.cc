@@ -301,7 +301,7 @@ namespace springtail::pg_fdw {
             case UNSUPPORTED: 
                 CHECK(false);
                 break;
-        };
+        }
     }
 
     void
@@ -394,38 +394,40 @@ namespace springtail::pg_fdw {
 
         // check if we are scanning up and iterator is at the end
         if (*state->iter_start == *state->iter_end) {
+
             SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+            if (state->filtered_quals.empty() || state->filtered_quals[0]->base.op != NOT_EQUALS) {
+                *eos = true;
+                return false;
+            }
 
-            if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
-
-                if (state->scan_asc) {
-                    // check if we need to switch iterators for not equals
-                    // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                    if (state->index.has_value() && state->iter_end != state->table->end(state->index->id)) {
-                        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                        state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-                        state->iter_end.emplace(state->table->end(state->index->id));
-                        return false;
-                    } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
-                        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                        state->iter_start.emplace(state->table->upper_bound(tuple));
-                        state->iter_end.emplace(state->table->end());
-                        return false;
-                    }
-                } else {
-                    // check if we need to switch iterators for not equals
-                    // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
-                    if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id)) {
-                        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                        state->iter_start.emplace(state->table->begin(state->index->id));
-                        state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
-                        return false;
-                    } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
-                        FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
-                        state->iter_start.emplace(state->table->begin());
-                        state->iter_end.emplace(state->table->lower_bound(tuple));
-                        return false;
-                    }
+            if (state->scan_asc) {
+                // check if we need to switch iterators for not equals
+                // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
+                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                    state->iter_end.emplace(state->table->end(state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->upper_bound(tuple));
+                    state->iter_end.emplace(state->table->end());
+                    return false;
+                }
+            } else {
+                // check if we need to switch iterators for not equals
+                // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
+                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin(state->index->id));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin());
+                    state->iter_end.emplace(state->table->lower_bound(tuple));
+                    return false;
                 }
             }
 
@@ -454,18 +456,19 @@ namespace springtail::pg_fdw {
                 // compare the qual field to the field in the row
                 bool res = _compare_field(row, state->fields->at(field_idx),
                                           state->qual_fields->at(i), qual->base.op);
-
-                if (!res) {
-                    // qual doesn't match, so this row must be skipped
-                    // since it isn't the first qual, we can skip to the next row
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
-                    state->rows_skipped++;
-                    // increment iterator if scanning up -- only scanning up for now
-                    if (state->scan_asc) {
-                        ++(*state->iter_start);
-                    }
-                    return false;
+                if (res) {
+                    continue;
                 }
+
+                // qual doesn't match, so this row must be skipped
+                // since it isn't the first qual, we can skip to the next row
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                state->rows_skipped++;
+                // increment iterator if scanning up
+                if (state->scan_asc) {
+                    ++(*state->iter_start);
+                }
+                return false;
             }
         }
 
@@ -530,8 +533,7 @@ namespace springtail::pg_fdw {
                     return {};
                 }
 
-                bool condition = pathkey->nulls_first? pathkey->reversed: !pathkey->reversed;
-                if (!condition) {
+                if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
                     SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
@@ -551,11 +553,9 @@ namespace springtail::pg_fdw {
                 int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                // TODO: https://linear.app/springtail/issue/SPR-485/
                 if (i == idx.columns.size() || attnum != idx.columns[i].position) {
                     return {};
                 }
-
                 keys.push_back(pathkey);
                 i++;
             }

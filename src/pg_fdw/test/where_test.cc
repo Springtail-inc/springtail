@@ -576,12 +576,12 @@ namespace {
         auto sortgroup = _add_sortgroup(_columns[3].position, false);
         auto sorted_data = _data;
         //sort by col4
-        std::sort(sorted_data.begin(), sorted_data.end(), [](auto const& a, auto const& b)
+        std::ranges::sort(sorted_data.begin(), sorted_data.end(), [](auto const& a, auto const& b)
                 {return a[3] < b[3];});
         _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
 
         sortgroup = _add_sortgroup(_columns[3].position, true);
-        std::sort(sorted_data.begin(), sorted_data.end(), [](auto const& a, auto const& b)
+        std::ranges::sort(sorted_data.begin(), sorted_data.end(), [](auto const& a, auto const& b)
                 {return a[3] > b[3];});
         _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
 
@@ -599,7 +599,7 @@ namespace {
             List *qual_list = _add_qual(_columns[3].position, op, qual_value);
             std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
             //sort by col4
-            std::sort(filtered_data.begin(), filtered_data.end(), [&reversed](auto const& a, auto const& b)
+            std::ranges::sort(filtered_data.begin(), filtered_data.end(), [&reversed](auto const& a, auto const& b)
                     {return reversed? a[3] > b[3] : a[3] < b[3];});
             auto sortgroup = _add_sortgroup(_columns[3].position, reversed);
             _run_scan(qual_list, filtered_data, std::numeric_limits<uint32_t>::max(), sortgroup);
