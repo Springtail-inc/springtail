@@ -171,7 +171,7 @@ namespace springtail::pg_fdw {
         // get map of dbs id:name from redis
         auto dbs = Properties::get_databases();
 
-        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
+        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
 
         // see if the fdw user exists, if not create it
         _fdw_username = username;
@@ -275,33 +275,37 @@ namespace springtail::pg_fdw {
     }
 
     LibPqConnectionPtr
-    PgDDLMgr::_connect_fdw(uint64_t db_id, const std::string &db_name)
+    PgDDLMgr::_connect_fdw(std::optional<uint64_t> db_id_opt, const std::string &db_name)
     {
         // check if we have a connection in the cache
-        LibPqConnectionPtr conn = _fdw_conn_cache.get(db_id);
-        if (conn != nullptr) {
-            // check connection status
-            try {
-                conn->exec("SELECT 1");
-                if (conn->status() == PGRES_TUPLES_OK) {
-                    return conn;
-                }
-            } catch (Error &e) {
-                SPDLOG_ERROR("Error checking connection status: {}", e.what());
-                _fdw_conn_cache.evict(db_id);
-                conn = nullptr;
-            }
+        LibPqConnectionPtr conn = nullptr;
+
+        if (!db_id_opt.has_value()) {
+            conn = std::make_shared<LibPqConnection>();
+            conn->connect(_hostname, db_name, _username, _password, _port, false);
+            return conn;
         }
+
+        uint64_t db_id = db_id_opt.value();
+        conn = _fdw_conn_cache.get(db_id);
+
+        // check if the connection is still valid
+        if (conn != nullptr) {
+            if (conn->is_connected()) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Reusing connection for db_id: {}", db_id);
+                return conn;
+            }
+            _fdw_conn_cache.evict(db_id);
+        }
+
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Establishing connection for db_id: {}", db_id);
 
         // use libpq to connect to the database
         conn = std::make_shared<LibPqConnection>();
         conn->connect(_hostname, db_name, _username, _password, _port, false);
 
         // save the connection in the cache
-        // if db_id is -1 db is postgres for startup
-        if (db_id != -1) {
-            _fdw_conn_cache.insert(db_id, conn);
-        }
+        _fdw_conn_cache.insert(db_id, conn);
 
         return conn;
     }
@@ -495,12 +499,12 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "create_index") {
-            // TODO: do something? 
+            // TODO: do something?
             SPDLOG_ERROR("CREATE INDEX");
             return "";
         }
         else if (action == "drop_index") {
-            // TODO: do something? 
+            // TODO: do something?
             SPDLOG_ERROR("DROP INDEX");
             return "";
         }
@@ -726,7 +730,7 @@ namespace springtail::pg_fdw {
         shared_lock.unlock();
 
         // verify that the database does not exist before trying to add it
-        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
+        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
         std::string prefixed_name = conn->escape_string(_db_prefix + db_name);
         conn->exec(fmt::format(VERIFY_DB_EXISTS, prefixed_name));
         if (conn->ntuples() > 0) {
@@ -756,7 +760,7 @@ namespace springtail::pg_fdw {
         std::string db_name = db_config["name"];
 
         // drop database
-        LibPqConnectionPtr conn = _connect_fdw(-1, "postgres");
+        LibPqConnectionPtr conn = _connect_fdw(std::nullopt, "postgres");
         std::string prefixed_name = conn->escape_identifier(_db_prefix + db_name);
         std::string drop_db = fmt::format(DROP_DATABASE, prefixed_name);
         conn->exec(drop_db);
