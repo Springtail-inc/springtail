@@ -595,26 +595,49 @@ namespace {
 
     TEST_F(FDWWhere_Test, Test_SecondaryAndQuals)
     {
-        auto test = [this](QualOpName op, bool reversed) {
-            List *qual_list = _add_qual(_columns[3].position, op, 2);
+        auto test = [this](QualOpName op, bool reversed, int qual_value) {
+            List *qual_list = _add_qual(_columns[3].position, op, qual_value);
             std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
             //sort by col4
             std::sort(filtered_data.begin(), filtered_data.end(), [&reversed](auto const& a, auto const& b)
                     {return reversed? a[3] > b[3] : a[3] < b[3];});
             auto sortgroup = _add_sortgroup(_columns[3].position, reversed);
             _run_scan(qual_list, filtered_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+            return filtered_data.size();
         };
 
-        test(EQUALS, false);
-        test(EQUALS, true);
+        test(EQUALS, false, 2);
+        test(EQUALS, true, 2);
 
-        test(NOT_EQUALS, false);
-        test(NOT_EQUALS, true);
+        test(NOT_EQUALS, false, 2);
+        test(NOT_EQUALS, true, 2);
 
-        test(LESS_THAN, false);
-        test(LESS_THAN_EQUALS, true);
+        test(LESS_THAN, false, 2);
+        test(LESS_THAN, true, 2);
 
-        test(GREATER_THAN, false);
-        test(GREATER_THAN_EQUALS, true);
+        // some edge cases
+        auto rows = test(LESS_THAN, true, 4);
+        // should return all data
+        ASSERT_EQ(rows, _data.size());
+        rows = test(LESS_THAN, true, 1);
+        // should be empty 
+        ASSERT_EQ(rows, 0);
+
+        test(LESS_THAN_EQUALS, false, 2);
+        test(LESS_THAN_EQUALS, true, 2);
+
+        test(GREATER_THAN, false, 2);
+        test(GREATER_THAN, true, 2);
+
+        // some edge cases
+        rows = test(GREATER_THAN, true, 0);
+        // should return all data
+        ASSERT_EQ(rows, _data.size());
+        // should be empty
+        rows = test(GREATER_THAN, true, 3);
+        ASSERT_EQ(rows, 0);
+
+        test(GREATER_THAN_EQUALS, false, 2);
+        test(GREATER_THAN_EQUALS, true, 2);
     }
 } // namespace
