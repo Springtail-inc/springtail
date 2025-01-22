@@ -24,7 +24,6 @@ namespace springtail::common {
 
             // Notify threads waiting for any state change
             lock.unlock();
-            SPDLOG_DEBUG("State change to {}", static_cast<int8_t>(new_state));
             _cv.notify_all();
         }
 
