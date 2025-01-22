@@ -138,11 +138,13 @@ def generate_report(test_cases: list) -> None:
     total_tests = len(results)
     passed_tests = sum(1 for r in results if r['result'] == 'SUCCESS')
     failed_tests = sum(1 for r in results if r['result'] == 'FAILED')
+    skipped_tests = sum(1 for r in results if r['result'] == 'SKIPPED')
 
     report = template.render(
         total_tests=total_tests,
         passed_tests=passed_tests,
         failed_tests=failed_tests,
+        skipped_tests=skipped_tests,
         test_cases=results
     )
 
@@ -158,6 +160,7 @@ def generate_report(test_cases: list) -> None:
     logging.info(f"Total tests run: {passed_tests + failed_tests}")
     logging.info(f"Tests passed: {passed_tests}")
     logging.info(f"Tests failed: {failed_tests}")
+    logging.info(f"Tests skipped: {skipped_tests}")
     logging.info(f"Tests details:")
     for result in results:
         if result['result'] == 'SUCCESS':

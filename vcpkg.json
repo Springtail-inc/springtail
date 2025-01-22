@@ -16,6 +16,7 @@
           "features": ["cxx17", "tls"] },
         "thrift",
         "gtest",
+        "benchmark",
         "vincentlaucsb-csv-parser",
         "openssl",
         "c-ares",

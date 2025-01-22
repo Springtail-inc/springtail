@@ -3,7 +3,7 @@ FROM ubuntu:noble
 RUN apt-get update && apt-get install -y \
     lsb-release wget software-properties-common gnupg \
     build-essential autoconf libelf-dev \
-    bison pkg-config flex libdw-dev openssh-server \
+    bison clang-format pkg-config flex libdw-dev openssh-server \
     libdwarf-dev binutils-dev linux-libc-dev cmake \
     git curl zip unzip tar ninja-build python3 libbsd-dev \
     redis-server postgresql-16 postgresql-contrib-16 \
