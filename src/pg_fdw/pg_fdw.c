@@ -227,13 +227,11 @@ get_foreign_server_options(Oid serverid,
         if (strcmp(def->defname, SPRINGTAIL_FDW_SCHEMA_XID_OPTION) == 0) {
             char *xidstr = defGetString(def);
             elog(DEBUG3, "XID: %s for server %s", xidstr, server->servername);
-
             *xid = strtoull(xidstr, NULL, 10);
             got_xid = true;
         } else if (strcmp(def->defname, SPRINGTAIL_FDW_DB_ID_OPTION) == 0) {
             char *dbidstr = defGetString(def);
             elog(DEBUG3, "DB ID: %s for server %s", dbidstr, server->servername);
-
             *db_id = strtoull(dbidstr, NULL, 10);
             got_db_id = true;
         }

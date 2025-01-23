@@ -242,6 +242,15 @@ namespace {
         }
 
         List *
+        _add_sortgroup(int attnum, bool reversed, List *sort_list = nullptr) {
+            DeparsedSortGroup* grp = new DeparsedSortGroup();
+            grp->attnum = attnum;
+            grp->reversed = reversed;
+            grp->nulls_first = reversed?true:false;
+            return lappend(sort_list, grp);
+        }
+
+        List *
         _add_qual(int attno, QualOpName op, int32_t val, List *qual_list = nullptr)
         {
             ConstQualPtr qual = new ConstQual();
@@ -328,7 +337,8 @@ namespace {
 
         void
         _run_scan(List *qual_list, const std::vector<std::vector<int32_t>> &filtered_data,
-                uint32_t index_id = constant::INDEX_PRIMARY)
+                uint32_t index_id = constant::INDEX_PRIMARY,
+                List *sortgroup = NIL)
         {
             // get the fdw mgr
             PgFdwMgr *mgr = PgFdwMgr::get_instance();
@@ -336,6 +346,14 @@ namespace {
             // don't call create state as it calls xid mgr, just create state
             auto table = TableMgr::get_instance()->get_table(_db_id, _tid, _table_xid);
             PgFdwState *state = new PgFdwState{table, _tid, _table_xid};
+
+            if (sortgroup)  {
+                SpringtailPlanState plan;
+                plan.pg_fdw_state = state;
+                // this should setup the sortgroup index
+                mgr->fdw_can_sort(&plan, sortgroup);
+                index_id = state->sortgroup_index->id;
+            }
 
             // begin the scan
             mgr->fdw_begin_scan(state, _target_list, qual_list, nullptr);
@@ -363,10 +381,24 @@ namespace {
                 }
 
                 if (row_valid) {
-                    for (int i = 0; i < _columns.size(); i++) {
-                        ASSERT_FALSE(nulls[i]);
-                        ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
+                    // we only check the sort column
+                    if (sortgroup) {
+                        ListCell *lc;
+                        foreach(lc, sortgroup) {
+                            auto* p = static_cast<struct DeparsedSortGroup*>(lfirst(lc));
+                            auto i = p->attnum - 1;
+
+                            ASSERT_FALSE(nulls[i]);
+                            ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
+                            break;
+                        }
+                    } else {
+                        for (int i = 0; i < _columns.size(); i++) {
+                            ASSERT_FALSE(nulls[i]);
+                            ASSERT_EQ(filtered_data[rows_valid][i], DatumGetInt32(values[i]));
+                        }
                     }
+
                     rows_valid++;
                 }
             }
@@ -539,10 +571,73 @@ namespace {
         qual_list = _add_qual(_columns[4].position, EQUALS, 3);
         _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
 
+        // col5 = 3, should do a full scan but sorted by col4
+        qual_list = _add_qual(_columns[4].position, EQUALS, 3);
+        auto sortgroup = _add_sortgroup(_columns[3].position, false);
+        auto sorted_data = _data;
+        //sort by col4
+        std::ranges::sort(sorted_data, [](auto const& a, auto const& b)
+                {return a[3] < b[3];});
+        _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+
+        sortgroup = _add_sortgroup(_columns[3].position, true);
+        std::ranges::sort(sorted_data, [](auto const& a, auto const& b)
+                {return a[3] > b[3];});
+        _run_scan(qual_list, sorted_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+
         // drop the secondary index, and verify full scan
         _drop_index(_db_id, _secondary_index_id, _table_xid);
         qual_list = _add_qual(_columns[3].position, EQUALS, 3);
         _run_scan(qual_list, _data, std::numeric_limits<uint32_t>::max());
 
+
+    }
+
+    TEST_F(FDWWhere_Test, Test_SecondaryAndQuals)
+    {
+        auto test = [this](QualOpName op, bool reversed, int qual_value) {
+            List *qual_list = _add_qual(_columns[3].position, op, qual_value);
+            std::vector<std::vector<int32_t>> filtered_data = _filter_data(qual_list);
+            //sort by col4
+            std::ranges::sort(filtered_data, [&reversed](auto const& a, auto const& b)
+                    {return reversed? a[3] > b[3] : a[3] < b[3];});
+            auto sortgroup = _add_sortgroup(_columns[3].position, reversed);
+            _run_scan(qual_list, filtered_data, std::numeric_limits<uint32_t>::max(), sortgroup);
+            return filtered_data.size();
+        };
+
+        test(EQUALS, false, 2);
+        test(EQUALS, true, 2);
+
+        test(NOT_EQUALS, false, 2);
+        test(NOT_EQUALS, true, 2);
+
+        test(LESS_THAN, false, 2);
+        test(LESS_THAN, true, 2);
+
+        // some edge cases
+        auto rows = test(LESS_THAN, true, 4);
+        // should return all data
+        ASSERT_EQ(rows, _data.size());
+        rows = test(LESS_THAN, true, 1);
+        // should be empty 
+        ASSERT_EQ(rows, 0);
+
+        test(LESS_THAN_EQUALS, false, 2);
+        test(LESS_THAN_EQUALS, true, 2);
+
+        test(GREATER_THAN, false, 2);
+        test(GREATER_THAN, true, 2);
+
+        // some edge cases
+        rows = test(GREATER_THAN, true, 0);
+        // should return all data
+        ASSERT_EQ(rows, _data.size());
+        // should be empty
+        rows = test(GREATER_THAN, true, 3);
+        ASSERT_EQ(rows, 0);
+
+        test(GREATER_THAN_EQUALS, false, 2);
+        test(GREATER_THAN_EQUALS, true, 2);
     }
 } // namespace

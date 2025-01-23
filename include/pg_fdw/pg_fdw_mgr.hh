@@ -67,7 +67,7 @@ namespace springtail::pg_fdw {
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
         int rows_skipped = 0;                 ///< Number of rows skipped
-        bool scan_up = true;                  ///< Scan direction for iterator
+        bool scan_asc = true;                 ///< Scan direction for iterator as defined by ORDER BY <col> ASC/DESC
 
         ///< Start iterator for table scan
         std::optional<Table::Iterator> iter_start = std::nullopt;
@@ -76,12 +76,11 @@ namespace springtail::pg_fdw {
 
         std::map<uint32_t, SchemaColumn> columns;     ///< Column map from ID to column metadata
         std::map<int,int> target_columns;             ///< Map of target columns, from attno to field idx
-        std::vector<PgFdwSortGroupPtr> sort_columns;  ///< List of sort group columns
         std::vector<ConstQualPtr> filtered_quals;     ///< List of quals (for where clause)
         std::vector<Index> indexes; ///< List of table indexes including the primary index. 
                                     /// Index columns are sorted by their position in the index.
-        std::optional<Index> index; ///< Index id to use for scanning
-
+        std::optional<Index> sortgroup_index; ///< Index matching the sortgroup.
+        std::optional<Index> index; ///< The final index to use for scanning
 
         /** Constructor */
         PgFdwState(TablePtr table, uint64_t tid, uint64_t xid);
@@ -265,6 +264,6 @@ namespace springtail::pg_fdw {
                                              const FieldArrayPtr qual_fields);
 
         friend std::vector<ConstQualPtr>
-        _get_index_quals(Index const& idx, List const& qual_list);
+        _get_index_quals(Index const& idx, List const* qual_list);
     };
 } // namespace springtail::pg_fdw

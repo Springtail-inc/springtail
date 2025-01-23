@@ -17,20 +17,20 @@ namespace {
 
 
 int main(int argc, char *argv[]) {
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("daemonize", "Start the server as a daemon");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("daemonize", "Start the server as a daemon");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
     }
-    boost::program_options::notify(vm);
+    po::notify(vm);
 
     std::optional<std::string> pidfile;
     if (vm.count("daemonize")) {
