@@ -9,6 +9,7 @@
 #include <common/concurrent_queue.hh>
 #include <common/redis_types.hh>
 #include <common/tracing.hh>
+#include <common/timestamp.hh>
 
 #include <garbage_collector/xid_ready.hh>
 
@@ -98,8 +99,10 @@ namespace springtail::pg_log_mgr {
             /**
              * Send all extents to the WriteCache, apply all schema changes to the SysTblMgr at the
              * provided xid.
+             * @param xid springtail xid
+             * @param commit_ts Postgres commit ts
              */
-            void commit(uint64_t xid);
+            void commit(uint64_t xid, PostgresTimestamp commit_ts);
 
             /**
              * Abort the entire transaction.  Drop all related batches from the WriteCache.

@@ -24,7 +24,7 @@
 namespace springtail::pg_log_mgr {
 
     void
-    PgLogReader::Batch::commit(uint64_t xid)
+    PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
@@ -58,7 +58,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
-        WriteCacheFuncImpl::commit(_db, xid, pg_xids);
+        WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
 
         // stop timing for this transaction
         _span->SetAttribute("xid", static_cast<int64_t>(xid));
@@ -646,7 +646,7 @@ namespace springtail::pg_log_mgr {
 
         // update the write cache and system tables as needed
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
 
@@ -724,7 +724,7 @@ namespace springtail::pg_log_mgr {
 
         // commit the current batch
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         _batch_map.erase(commit_msg.xid);
 
         // message the Committer
