@@ -18,6 +18,8 @@
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
@@ -132,6 +134,12 @@ namespace springtail::pg_fdw {
                                uint64_t schema_xid)
     {
         uint64_t xid; // springtail xid
+
+        // check if the schema_xid has progressed, if so, invalidate the schema cache
+        const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
+        if (prev_schema_xid < schema_xid) {
+            sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+        }
 
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
@@ -1150,7 +1158,7 @@ namespace springtail::pg_fdw {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = std::move(meta.indexes);
+            indexes = meta->indexes;
         }
     }
 } // namespace springtail::pg_fdw
