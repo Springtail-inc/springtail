@@ -22,19 +22,19 @@ endif()
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(SetSystem)
 
-## include the vcpkg.cmake configuration to support find_package from vcpkg
-include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
-
-# set triplets for dynamic linking
+# set triplets for dynamic linking; this MUST come before the vcpkg.cmake include
+set(VCPKG_OVERLAY_TRIPLETS "${PROJECT_SOURCE_DIR}/vcpkg-triplets")
 if (${LINUX})
     if (${CMAKE_ARCHITECTURE} MATCHES "arm64")
-        set(VCPKG_OVERLAY_TRIPLETS "{PROJECT_SOURCE_DIR}/vcpkg-triplets/arm64-linux-dynamic.cmake")
-        set(VCPKG_TARGET_TRIPLET "arm64-linux-dynamic")
+        set(VCPKG_TARGET_TRIPLET "arm64-linux-dynamic" CACHE STRING "Triplet: arm64-linux-dynamic")
     endif()
-    if (${CMAKE_ARCHITECTURE} MATCHES "x86_64")
-        set(VCPKG_TARGET_TRIPLET "x64-linux-dynamic")
+    if (${CMAKE_ARCHITECTURE} MATCHES "x64")
+        set(VCPKG_TARGET_TRIPLET "x64-linux-dynamic" CACHE STRING "Triplet: x64-linux-dynamic")
     endif()
 endif()
+
+## include the vcpkg.cmake configuration to support find_package from vcpkg
+include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
 ## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
 include(DSymUtil)
@@ -132,3 +132,4 @@ message(STATUS "Compiler cxx debug flags: " ${CMAKE_CXX_FLAGS_DEBUG})
 message(STATUS "Compiler cxx release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 message(STATUS "Compiler cxx flags:" ${CMAKE_CXX_FLAGS})
 message(STATUS "Byte order for target: " ${CMAKE_CXX_BYTE_ORDER})
+message(STATUS "Target triplet: " ${VCPKG_TARGET_TRIPLET})

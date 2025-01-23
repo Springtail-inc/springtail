@@ -17,6 +17,7 @@ fi
 if [ ! -d debug ]; then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking debug dir"
+        mkdir -p /home/dev/debug
         ln -s /home/dev/debug debug
     else
         mkdir -p debug
@@ -26,9 +27,6 @@ fi
 cmake -B debug -S . \
 	-D'CMAKE_BUILD_TYPE=Debug' \
 	-DVCPKG_INSTALL_OPTIONS="--debug;--allow-unsupported"
-#   -DVCPKG_TARGET_TRIPLET="arm64-linux-dynamic" \
-#	-DVCPKG_CMAKE_SYSTEM_NAME="Linux" \
-
 
 # build the code
 cd debug
