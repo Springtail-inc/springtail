@@ -26,7 +26,7 @@ fi
 
 cmake -B debug -S . \
 	-D'CMAKE_BUILD_TYPE=Debug' \
-	-DVCPKG_INSTALL_OPTIONS="--debug;--allow-unsupported"
+	-DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 
 # build the code
 cd debug
