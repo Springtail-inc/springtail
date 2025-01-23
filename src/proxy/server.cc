@@ -388,20 +388,20 @@ namespace springtail::pg_proxy {
 
                     // lookup fd in sessions map
                     if (session != _sessions.end()) {
+                        // find runnable object and insert into runnable sessions
                         auto runnable = session->second;
                         runnable_sessions.insert(runnable);
+
+                        // for this runnable update the set of fds that have data
                         runnable->fds.insert(fd);
 
                         // remove all associated sockets from the waiting sessions list
                         auto range = _session_sockets.equal_range(runnable);
                         for (auto it = range.first; it != range.second; it++) {
-                            if (it->second == fd) {
-                                _waiting_sessions.erase(fd);
-                                break;
-                            }
+                            _waiting_sessions.erase(fd);
                         }
                     } else {
-                        SPDLOG_ERROR("Socket {} not found in sessions map", fd);
+                        SPDLOG_WARN("Socket {} not found in sessions map", fd);
                         _waiting_sessions.erase(fd);
                     }
                     n--;
@@ -466,15 +466,17 @@ namespace springtail::pg_proxy {
     {
         // _log_disconnect(session);
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _internal_shutdown_session(socket);
+        _internal_shutdown_session(socket, lock);
         lock.unlock();
 
         _wake_event_loop();
     }
 
     void
-    ProxyServer::_internal_shutdown_session(int socket)
+    ProxyServer::_internal_shutdown_session(int socket, std::unique_lock<std::mutex> &lock)
     {
+        CHECK(lock.owns_lock());
+
         // lookup socket in sessions map socket->runnable
         auto session = _sessions.find(socket);
         if (session != _sessions.end()) {
@@ -483,8 +485,7 @@ namespace springtail::pg_proxy {
             // remove the socket based on the runnable
             _sessions.erase(session);
         } else {
-            // runnable not found, just remove the socket
-            _sessions.erase(socket);
+            SPDLOG_WARN("Socket {} not found in sessions map", socket);
         }
         _waiting_sessions.erase(socket);
     }
@@ -501,7 +502,7 @@ namespace springtail::pg_proxy {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
 
         // first do a removal based on socket
-        _internal_shutdown_session(socket);
+        _internal_shutdown_session(socket, lock);
 
         // then do the insert
         _sessions.insert(std::make_pair(socket, runnable));

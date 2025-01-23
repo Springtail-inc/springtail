@@ -145,7 +145,7 @@ namespace springtail::pg_proxy {
         void _log_disconnect(SessionPtr session);
 
         /** Internal shutdown session -- helper, assumes lock is held */
-        void _internal_shutdown_session(int socket);
+        void _internal_shutdown_session(int socket, std::unique_lock<std::mutex> &lock);
 
         /** Wake up intternal event loop to reprocess waiting session */
         void _wake_event_loop();
