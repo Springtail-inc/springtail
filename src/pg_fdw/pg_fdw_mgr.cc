@@ -237,23 +237,24 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
-        // NOTE: for now we always scan up this is the natural order of the table data
-        // we could scan down for reverse sort but would need to switch start/end iterators
-        state->scan_up = true;
+        // this will return a pair of iterators based on the conditions.
+        // for ASC order, scan from iter_start to iter_end with (iter_start++) 
+        // for DESC order, scan from iter_end to iter_end with (iter_end--)
+        // make sure to handle the special case for NOT_EQUALS while scanning
+        if (!state->index.has_value()) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: ASC={}",
+                    state->scan_asc);
+            state->iter_start.emplace(state->table->begin());
+            state->iter_end.emplace(state->table->end());
+            return;
+        }
 
         if (state->filtered_quals.empty()) {
-            // no quals, we do a full table scan of full index scan if it is present.
             // Usually the index is defined by sortgroup in this case.
-            if (state->index.has_value()) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}", state->index->id);
-                state->iter_start.emplace(state->table->begin(state->index->id));
-                state->iter_end.emplace(state->table->end(state->index->id));
-            } else {
-                // full table scan
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan");
-                state->iter_start.emplace(state->table->begin());
-                state->iter_end.emplace(state->table->end());
-            }
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}, ASC={}",
+                    state->index->id, state->scan_asc);
+            state->iter_start.emplace(state->table->begin(state->index->id));
+            state->iter_end.emplace(state->table->end(state->index->id));
             return;
         }
 
@@ -262,35 +263,44 @@ namespace springtail::pg_fdw {
 
         // create the field tuple used for bounds
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
+        QualOpName op = qual->base.op;
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
                             qual->base.opname, tuple->to_string());
 
-        if (state->index.has_value()) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Use scan index: {}", state->index->id);
-        }
-
-        // set up the start iterator based on first key op
-        QualOpName op = qual->base.op;
-        if (!state->index.has_value()) {
-            state->iter_start.emplace(state->table->begin());
-        } else if (op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
-            state->iter_start.emplace(state->table->begin(state->index->id));
-        } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
-            state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
-        } else if (op == GREATER_THAN) {
-            state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-        }
-
-        // set end iterator based on first key op
-        if (!state->index.has_value()) {
-            state->iter_end.emplace(state->table->end());
-        } else if (op == LESS_THAN || op == NOT_EQUALS) {
-            state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
-        } else if (op == LESS_THAN_EQUALS || op == EQUALS) {
-            state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
-        } else if (op == GREATER_THAN || op == GREATER_THAN_EQUALS) {
-            state->iter_end.emplace(state->table->end(state->index->id));
+        switch (op) {
+            case LESS_THAN:
+                state->iter_start.emplace(state->table->begin(state->index->id));
+                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                break;
+            case LESS_THAN_EQUALS:
+                state->iter_start.emplace(state->table->begin(state->index->id));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                break;
+            case NOT_EQUALS: 
+                if (state->scan_asc) {
+                    state->iter_start.emplace(state->table->begin(state->index->id));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                } else {
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                    state->iter_end.emplace(state->table->end(state->index->id));
+                }
+                break;
+            case EQUALS:
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                break;
+            case GREATER_THAN_EQUALS:
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->end(state->index->id));
+                break;
+            case GREATER_THAN:
+                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->end(state->index->id));
+                break;
+            case UNSUPPORTED: 
+                CHECK(false);
+                break;
         }
     }
 
@@ -383,16 +393,40 @@ namespace springtail::pg_fdw {
         }
 
         // check if we are scanning up and iterator is at the end
-        if (state->scan_up && *state->iter_start == *state->iter_end) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+        if (*state->iter_start == *state->iter_end) {
 
-            if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+            if (state->filtered_quals.empty() || state->filtered_quals[0]->base.op != NOT_EQUALS) {
+                *eos = true;
+                return false;
+            }
+
+            if (state->scan_asc) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->iter_end != state->table->end(state->index->id)) {
-                    FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
                     state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
                     state->iter_end.emplace(state->table->end(state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->upper_bound(tuple));
+                    state->iter_end.emplace(state->table->end());
+                    return false;
+                }
+            } else {
+                // check if we need to switch iterators for not equals
+                // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
+                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin(state->index->id));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin());
+                    state->iter_end.emplace(state->table->lower_bound(tuple));
                     return false;
                 }
             }
@@ -401,8 +435,12 @@ namespace springtail::pg_fdw {
             return false;
         }
 
+        if (!state->scan_asc) {
+            --(*state->iter_end);
+        }
+
         // get current row
-        Extent::Row row = *(*state->iter_start);
+        Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
         // go through the qual fields and see how they compare to the values with in the row
@@ -418,18 +456,19 @@ namespace springtail::pg_fdw {
                 // compare the qual field to the field in the row
                 bool res = _compare_field(row, state->fields->at(field_idx),
                                           state->qual_fields->at(i), qual->base.op);
-
-                if (!res) {
-                    // qual doesn't match, so this row must be skipped
-                    // since it isn't the first qual, we can skip to the next row
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
-                    state->rows_skipped++;
-                    // increment iterator if scanning up -- only scanning up for now
-                    if (state->scan_up) {
-                        ++(*state->iter_start);
-                    }
-                    return false;
+                if (res) {
+                    continue;
                 }
+
+                // qual doesn't match, so this row must be skipped
+                // since it isn't the first qual, we can skip to the next row
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                state->rows_skipped++;
+                // increment iterator if scanning up
+                if (state->scan_asc) {
+                    ++(*state->iter_start);
+                }
+                return false;
             }
         }
 
@@ -464,7 +503,7 @@ namespace springtail::pg_fdw {
         }
 
         // increment iterator if scanning up
-        if (state->scan_up) {
+        if (state->scan_asc) {
             ++(*state->iter_start);
         }
 
@@ -493,19 +532,16 @@ namespace springtail::pg_fdw {
                     SPDLOG_DEBUG_MODULE(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
                     return {};
                 }
-                // TODO: enable reverse scan support
-                if (reversed) {
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Reverse sort isn't supported currently");
-                    return {};
-                }
 
-                bool condition = pathkey->nulls_first? pathkey->reversed: !pathkey->reversed;
-                if (!condition) {
+                if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
                     SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
+                ++i;
             }
+            // reversed=true means DESC direction in PG executor
+            pg_state->scan_asc = (reversed == false);
         }
 
         auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
@@ -517,13 +553,15 @@ namespace springtail::pg_fdw {
                 int attnum = pathkey->attnum;
 
                 // must match sortgroup completely
-                // TODO: https://linear.app/springtail/issue/SPR-485/
                 if (i == idx.columns.size() || attnum != idx.columns[i].position) {
                     return {};
                 }
-
                 keys.push_back(pathkey);
                 i++;
+            }
+
+            if (!keys.empty()) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Matching sortgroup index found: {}", idx.id);
             }
 
             List *r = nullptr;

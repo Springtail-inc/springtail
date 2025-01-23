@@ -67,7 +67,7 @@ namespace springtail::pg_fdw {
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
         int rows_skipped = 0;                 ///< Number of rows skipped
-        bool scan_up = true;                  ///< Scan direction for iterator
+        bool scan_asc = true;                 ///< Scan direction for iterator as defined by ORDER BY <col> ASC/DESC
 
         ///< Start iterator for table scan
         std::optional<Table::Iterator> iter_start = std::nullopt;
