@@ -51,13 +51,13 @@ target_include_directories(pg_wal_decode
 
 # libs to link against
 target_link_libraries(springtail_pg
-    PRIVATE PostgreSQL::PostgreSQL
+    PUBLIC PostgreSQL::PostgreSQL
     PUBLIC springtail_common springtail_sys_tbl_mgr
 )
 
 target_link_libraries(pg_wal_dump
-    PRIVATE springtail_pg
-    PRIVATE PostgreSQL::PostgreSQL
+    PUBLIC springtail_pg
+    #PRIVATE PostgreSQL::PostgreSQL
     PRIVATE Boost::program_options
     PRIVATE nlohmann_json::nlohmann_json
     PUBLIC springtail_common

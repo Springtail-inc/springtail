@@ -8,6 +8,9 @@
 #include <sys/socket.h>
 #include <errno.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include <fmt/core.h>
 #include <absl/log/check.h>
 
@@ -16,12 +19,6 @@
 
 #include <common/logging.hh>
 #include <common/dns_resolver.hh>
-
-extern "C" {
-    // libpq functions; defined internally
-    extern ssize_t pqsecure_read(PGconn *conn, const void *ptr, size_t len);
-    extern ssize_t pqsecure_write(PGconn *conn, const void *ptr, size_t len);
-}
 
 namespace springtail {
 
@@ -657,7 +654,7 @@ namespace springtail {
 
         while (off < count) {
             // note this uses an internal interface
-            ssize_t r = pqsecure_read(_connection, buf + off, count - off);
+            ssize_t r = _secure_read(_connection, buf + off, count - off);
 
             // incr offset
             if (r > 0) {
@@ -723,7 +720,7 @@ namespace springtail {
 
         while (off < count) {
             // note this uses an internal interface
-            ssize_t r = pqsecure_write(_connection, buf + off, count - off);
+            ssize_t r = _secure_write(_connection, buf + off, count - off);
             // if async, or error and error is not a would block or again, then return error
             if (async || r < 0 || (!(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR))) {
                 return r;
@@ -843,10 +840,262 @@ namespace springtail {
      *        as command will fetch the result
      * @return true if result is not null
      */
-    bool LibPqConnection::fetch_result()
+    bool
+    LibPqConnection::fetch_result()
     {
         _result = PQgetResult(_connection);
         return (_result != nullptr);
+    }
+
+    ssize_t
+    LibPqConnection::_secure_write(PGconn *conn,
+                                   const void *ptr,
+                                   size_t len)
+    {
+        if (PQsslInUse(conn)) {
+            return _ssl_write(conn, ptr, len);
+        } else {
+            return _non_ssl_write(conn, ptr, len);
+        }
+    }
+
+    ssize_t
+    LibPqConnection::_secure_read(PGconn *conn,
+                                  void *ptr,
+                                  size_t len)
+    {
+        if (PQsslInUse(conn)) {
+            return _ssl_read(conn, ptr, len);
+        } else {
+            return _non_ssl_read(conn, ptr, len);
+        }
+    }
+
+    ssize_t
+    LibPqConnection::_non_ssl_read(PGconn *conn,
+                                   void *ptr,
+                                   size_t len)
+    {
+        /* See pqsecure_raw_read() in fe-secure.c */
+        int sock = PQsocket(conn);
+        errno = 0;
+        ssize_t n = recv(sock, ptr, len, 0);
+
+        if (n < 0) {
+            int result_errno = errno;
+
+            /* Set error message if appropriate */
+            switch (result_errno)
+            {
+                case EAGAIN:
+                case EINTR:
+                    /* no error message, caller is expected to retry */
+                    break;
+
+                case EPIPE:
+                case ECONNRESET:
+                    break;
+
+                case 0:
+                    /* If errno didn't get set, treat it as regular EOF */
+                    n = 0;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+        return n;
+    }
+
+    ssize_t
+    LibPqConnection::_ssl_read(PGconn *conn,
+                               void *ptr,
+                               size_t len)
+    {
+        SSL *ssl = reinterpret_cast<SSL*>(PQgetssl(conn));
+
+        /* See: pgtls_read() in fe-secure-openssl.c. */
+        while (true) {
+            errno = 0;
+            ssize_t n = SSL_read(ssl, ptr, len);
+            int err = SSL_get_error(ssl, n);
+
+            switch (err) {
+                case SSL_ERROR_NONE:
+                    if (n < 0) {
+                        /* assume the connection is broken */
+                        errno = ECONNRESET;
+                    }
+                    return n;
+
+                case SSL_ERROR_WANT_READ:
+                    return 0;
+
+                case SSL_ERROR_WANT_WRITE:
+                    /*
+                    * Returning 0 here would cause caller to wait for read-ready,
+                    * which is not correct since what SSL wants is wait for
+                    * write-ready.  The former could get us stuck in an infinite
+                    * wait, so don't risk it; busy-loop instead.
+                    */
+                    continue;
+
+                case SSL_ERROR_SYSCALL:
+                    if (n < 0 && errno != 0) {
+                        errno = errno;
+                    } else {
+                        /* assume the connection is broken */
+                        errno = ECONNRESET;
+                        n = -1;
+                    }
+                    return n;
+
+                case SSL_ERROR_SSL:
+                    /* assume the connection is broken */
+                    errno = ECONNRESET;
+                    return -1;
+
+                case SSL_ERROR_ZERO_RETURN:
+                    /*
+                    * Per OpenSSL documentation, this error code is only returned for
+                    * a clean connection closure, so we should not report it as a
+                    * server crash.
+                    */
+                    errno = ECONNRESET;
+                    return -1;
+
+                default:
+                    /* assume the connection is broken */
+                    errno = ECONNRESET;
+                    return -1;
+            } // switch (err)
+        } // while (true)
+
+        // not reached
+    }
+
+    ssize_t
+    LibPqConnection::_ssl_write(PGconn *conn,
+                                const void *ptr,
+                                size_t len)
+    {
+        SSL *ssl = reinterpret_cast<SSL*>(PQgetssl(conn));
+        ssize_t     n;
+        int         result_errno = 0;
+        int         err;
+
+        errno = 0;
+        n = SSL_write(ssl, ptr, len);
+        err = SSL_get_error(ssl, n);
+
+        switch (err)
+        {
+            case SSL_ERROR_NONE:
+                if (n < 0) {
+                    result_errno = ECONNRESET;
+                }
+                break;
+
+            case SSL_ERROR_WANT_READ:
+                /*
+                * Returning 0 here causes caller to wait for write-ready, which
+                * is not really the right thing, but it's the best we can do.
+                */
+                n = 0;
+                break;
+
+            case SSL_ERROR_WANT_WRITE:
+                n = 0;
+                break;
+
+            case SSL_ERROR_SYSCALL:
+                /*
+                * If errno is still zero then assume it's a read EOF situation,
+                * and report EOF.  (This seems possible because SSL_write can
+                * also do reads.)
+                */
+                if (n < 0 && errno != 0) {
+                    result_errno = errno;
+                } else {
+                    /* assume the connection is broken */
+                    result_errno = ECONNRESET;
+                    n = -1;
+                }
+                break;
+
+            case SSL_ERROR_SSL:
+                    /* assume the connection is broken */
+                    result_errno = ECONNRESET;
+                    n = -1;
+                    break;
+
+            case SSL_ERROR_ZERO_RETURN:
+                /*
+                * Per OpenSSL documentation, this error code is only returned for
+                * a clean connection closure, so we should not report it as a
+                * server crash.
+                */
+                result_errno = ECONNRESET;
+                n = -1;
+                break;
+
+            default:
+                /* assume the connection is broken */
+                result_errno = ECONNRESET;
+                n = -1;
+                break;
+        }
+
+        /* ensure we return the intended errno to caller */
+        errno = result_errno;
+        return n;
+    }
+
+    ssize_t
+    LibPqConnection::_non_ssl_write(PGconn *conn,
+                                    const void *ptr,
+                                    size_t len)
+    {
+        /* See pqsecure_raw_write() in fe-secure.c */
+        int         sock = PQsocket(conn);
+        int         flags = MSG_NOSIGNAL;
+        int         result_errno;
+
+        ssize_t n = send(sock, ptr, len, flags);
+
+        if (n < 0) {
+            result_errno = errno;
+
+            /* Set error message if appropriate */
+            switch (result_errno)
+            {
+                case EAGAIN:
+                case EINTR:
+                    /* no error message, caller is expected to retry */
+                    break;
+
+                case EPIPE:
+                    /* FALL THRU */
+
+                case ECONNRESET:
+                    //conn->write_failed = true;
+                    /* Now claim the write succeeded */
+                    n = len;
+                    break;
+
+                default:
+                    //conn->write_failed = true;
+                    /* Now claim the write succeeded */
+                    n = len;
+                    break;
+            }
+        }
+
+        /* ensure we return the intended errno to caller */
+        errno = result_errno;
+
+        return n;
     }
 
 };

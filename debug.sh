@@ -22,7 +22,13 @@ if [ ! -d debug ]; then
         mkdir -p debug
     fi
 fi
-cmake -B debug -S . -D'CMAKE_BUILD_TYPE=Debug'
+
+cmake -B debug -S . \
+	-D'CMAKE_BUILD_TYPE=Debug' \
+	-DVCPKG_INSTALL_OPTIONS="--debug;--allow-unsupported"
+#   -DVCPKG_TARGET_TRIPLET="arm64-linux-dynamic" \
+#	-DVCPKG_CMAKE_SYSTEM_NAME="Linux" \
+
 
 # build the code
 cd debug

@@ -25,6 +25,17 @@ include(SetSystem)
 ## include the vcpkg.cmake configuration to support find_package from vcpkg
 include("${PROJECT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake")
 
+# set triplets for dynamic linking
+if (${LINUX})
+    if (${CMAKE_ARCHITECTURE} MATCHES "arm64")
+        set(VCPKG_OVERLAY_TRIPLETS "{PROJECT_SOURCE_DIR}/vcpkg-triplets/arm64-linux-dynamic.cmake")
+        set(VCPKG_TARGET_TRIPLET "arm64-linux-dynamic")
+    endif()
+    if (${CMAKE_ARCHITECTURE} MATCHES "x86_64")
+        set(VCPKG_TARGET_TRIPLET "x64-linux-dynamic")
+    endif()
+endif()
+
 ## add command add_dsymutil_command() to run dsymutil against an executable when on macOS
 include(DSymUtil)
 

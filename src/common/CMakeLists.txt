@@ -26,7 +26,7 @@ target_link_libraries(springtail_common
          cpptrace::cpptrace
          spdlog::spdlog
          fmt::fmt
-         redis++::redis++_static
+         redis++::redis++
 	       nlohmann_json::nlohmann_json
          c-ares::cares
 	 opentelemetry-cpp::api

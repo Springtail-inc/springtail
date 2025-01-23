@@ -1,7 +1,7 @@
 #!/bin/bash
 if [ ! -d release ]; then
     mkdir -p release
-    cmake -B release -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1
+    cmake -B release -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1 	-DVCPKG_INSTALL_OPTIONS="--allow-unsupported"
 fi
 cd release
 make VERBOSE=1 $1 $2
