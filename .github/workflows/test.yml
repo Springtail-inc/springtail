@@ -100,6 +100,8 @@ jobs:
           make test ARGS="--output-junit unit-test-report.xml --output-on-failure --verbose --stop-on-failure" 2>&1 | tee tmplog
           
           # List the open listening ports and processes info after tests are done
+          sudo apt update
+          sudo apt install net-tools          
           echo "==== Listening Ports ===="
           netstat -tulnp
           # Show the full launching command of each
