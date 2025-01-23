@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string_view>
+#include <memory>
+
 #include <opentelemetry/exporters/ostream/span_exporter_factory.h>
 #include <opentelemetry/sdk/trace/exporter.h>
 #include <opentelemetry/sdk/trace/processor.h>
@@ -83,12 +86,12 @@ private:
 /**
  * @brief Initialize the tracing system
  */
-void init_tracing();
+void init_tracing_and_metrics(std::string_view component_name);
 
 /**
  * @brief Shutdown the tracing system
  */
-void shutdown_tracing();
+void shutdown_tracing_and_metrics();
 
 /**
  * @brief Retrieve the otel Tracer by name.

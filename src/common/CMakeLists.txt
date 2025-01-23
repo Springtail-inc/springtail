@@ -33,9 +33,11 @@ target_link_libraries(springtail_common
 	 opentelemetry-cpp::api
 	 opentelemetry-cpp::sdk
 	 opentelemetry-cpp::trace
+	 opentelemetry-cpp::metrics
 	 opentelemetry-cpp::ostream_span_exporter
 	 opentelemetry-cpp::otlp_grpc_client
 	 opentelemetry-cpp::otlp_grpc_exporter
+	 opentelemetry-cpp::otlp_grpc_metrics_exporter
 )
 
 add_executable(test_thread test/test_thread.cc)
