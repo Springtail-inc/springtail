@@ -1101,30 +1101,27 @@ namespace springtail::sys_tbl_mgr {
                 break;
             }
 
-            XidLsn index_xid;
-            {
-                uint64_t xid = names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row);
-                uint64_t lsn = names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row);
-                index_xid = {xid, lsn};
-                if (access_xid < index_xid) {
-                    SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}", tid, xid, lsn);
+            XidLsn index_xid(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row),
+                             names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row));
+            if (access_xid < index_xid) {
+                SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}",
+                                    tid, index_xid.xid, index_xid.lsn);
 
-                    // update the upper bound of the XID range
-                    if (XidLsn(schema_info->access_xid_end,
-                               schema_info->access_lsn_end) > index_xid) {
-                        schema_info->access_xid_end = index_xid.xid;
-                        schema_info->access_lsn_end = index_xid.lsn;
-                    }
-
-                    continue;
+                // update the upper bound of the XID range
+                if (XidLsn(schema_info->access_xid_end,
+                           schema_info->access_lsn_end) > index_xid) {
+                    schema_info->access_xid_end = index_xid.xid;
+                    schema_info->access_lsn_end = index_xid.lsn;
                 }
 
-                // update the lower bound of the XID range
-                if (XidLsn(schema_info->access_xid_start,
-                           schema_info->access_lsn_start) < index_xid) {
-                    schema_info->access_xid_start = index_xid.xid;
-                    schema_info->access_lsn_start = index_xid.lsn;
-                }
+                continue;
+            }
+
+            // update the lower bound of the XID range
+            if (XidLsn(schema_info->access_xid_start,
+                       schema_info->access_lsn_start) < index_xid) {
+                schema_info->access_xid_start = index_xid.xid;
+                schema_info->access_lsn_start = index_xid.lsn;
             }
 
             IndexInfo info;

@@ -175,16 +175,7 @@ namespace springtail::gc {
             // check if there were DDL mutations as part of this txn, invalidate the schema cache accordingly
             nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
             if (!completed_ddls.is_null()) {
-                auto client = sys_tbl_mgr::Client::get_instance();
-                for (auto ddl : completed_ddls) {
-                    if (!ddl.contains("tid")) {
-                        continue; // mutation doesn't reference a specific table
-                    }
-
-                    uint64_t tid = ddl["tid"].get<uint64_t>();
-                    XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
-                    client->invalidate_table(db_id, tid, ddl_xid);
-                }
+                _invalidate_systbl_cache(db_id, completed_ddls);
             }
 
             // find every table associated with this XID
@@ -332,6 +323,20 @@ namespace springtail::gc {
         coordinator->unregister_threads(daemon_type, cleanup_threads);
     }
 
+    void 
+    Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
+    {
+        auto client = sys_tbl_mgr::Client::get_instance();
+        for (auto ddl : completed_ddls) {
+            if (!ddl.contains("tid")) {
+                continue; // mutation doesn't reference a specific table
+            }
+
+            uint64_t tid = ddl["tid"].get<uint64_t>();
+            XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
+            client->invalidate_table(db, tid, ddl_xid);
+        }
+    }
 
     void 
     Committer::_create_indexer()

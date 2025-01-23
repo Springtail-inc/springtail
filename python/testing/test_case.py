@@ -258,6 +258,8 @@ class TestCase:
             return None
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
+        except Exception as e:
+            self._raise_failure(f'Unknown error: {e}')
         
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
