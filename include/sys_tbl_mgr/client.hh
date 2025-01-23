@@ -126,6 +126,9 @@ namespace springtail::sys_tbl_mgr {
          */
         ~Client() override = default;
 
+        /** Pack the results into a SchemaMetadata. */
+        SchemaMetadataPtr _pack_metadata(const GetSchemaResponse &result);
+
         /** Cache for Schema objects. */
         std::shared_ptr<SchemaCache> _schema_cache;
     };

@@ -360,6 +360,77 @@ namespace springtail::sys_tbl_mgr {
         return metadata;
     }
 
+SchemaMetadataPtr
+Client::_pack_metadata(const GetSchemaResponse &result) {
+    auto metadata = std::make_shared<SchemaMetadata>();
+    for (const auto &col_entry : result.columns) {
+        const auto &column = col_entry.second;
+        SchemaColumn value(column.name,
+                           column.position,
+                           static_cast<SchemaType>(column.type),
+                           column.pg_type,
+                           column.is_nullable);
+        if (column.__isset.pk_position) {
+            value.pkey_position = column.pk_position;
+        }
+        if (column.__isset.default_value) {
+            value.default_value = column.default_value;
+        }
+
+        metadata->columns.push_back(value);
+    }
+
+    for (auto history : result.history) {
+        SchemaColumn value(history.xid,
+                           history.lsn,
+                           history.column.name,
+                           history.column.position,
+                           static_cast<SchemaType>(history.column.type),
+                           history.column.pg_type,
+                           history.exists,
+                           history.column.is_nullable);
+        value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+        if (history.column.__isset.pk_position) {
+            value.pkey_position = history.column.pk_position;
+        }
+        if (history.column.__isset.default_value) {
+            value.default_value = history.column.default_value;
+        }
+
+        metadata->history.push_back(value);
+    }
+
+    for (auto const& idx: result.indexes) {
+        Index info;
+        info.id = idx.id;
+        info.name = idx.name;
+        info.schema = idx.schema;
+        info.state = idx.state;
+        info.table_id = idx.table_id;
+        info.is_unique = idx.is_unique;
+        for (auto const& col: idx.columns) {
+            info.columns.emplace_back(col.idx_position, col.position);
+        }
+        //sort by index position
+        std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
+        metadata->indexes.push_back(std::move(info));
+    }
+
+    XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
+                        static_cast<uint64_t>(result.access_lsn_start));
+    XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
+                      static_cast<uint64_t>(result.access_lsn_end));
+    XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
+                        static_cast<uint64_t>(result.target_lsn_start));
+    XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
+                      static_cast<uint64_t>(result.target_lsn_end));
+
+    metadata->access_range = XidRange(access_start, access_end);
+    metadata->target_range = XidRange(target_start, target_end);
+
+    return metadata;
+}
+
     std::shared_ptr<const SchemaMetadata>
     Client::get_schema(uint64_t db_id,
                        uint64_t table_id,
@@ -379,73 +450,7 @@ namespace springtail::sys_tbl_mgr {
                 c.client->get_schema(result, request);
             });
 
-            auto metadata = std::make_shared<SchemaMetadata>();
-            for (const auto &col_entry : result.columns) {
-                const auto &column = col_entry.second;
-                SchemaColumn value(column.name,
-                                   column.position,
-                                   static_cast<SchemaType>(column.type),
-                                   column.pg_type,
-                                   column.is_nullable);
-                if (column.__isset.pk_position) {
-                    value.pkey_position = column.pk_position;
-                }
-                if (column.__isset.default_value) {
-                    value.default_value = column.default_value;
-                }
-
-                metadata->columns.push_back(value);
-            }
-
-            for (auto history : result.history) {
-                SchemaColumn value(history.xid,
-                                   history.lsn,
-                                   history.column.name,
-                                   history.column.position,
-                                   static_cast<SchemaType>(history.column.type),
-                                   history.column.pg_type,
-                                   history.exists,
-                                   history.column.is_nullable);
-                value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-                if (history.column.__isset.pk_position) {
-                    value.pkey_position = history.column.pk_position;
-                }
-                if (history.column.__isset.default_value) {
-                    value.default_value = history.column.default_value;
-                }
-
-                metadata->history.push_back(value);
-            }
-
-            for (auto const& idx: result.indexes) {
-                Index info;
-                info.id = idx.id;
-                info.name = idx.name;
-                info.schema = idx.schema;
-                info.state = idx.state;
-                info.table_id = idx.table_id;
-                info.is_unique = idx.is_unique;
-                for (auto const& col: idx.columns) {
-                    info.columns.emplace_back(col.idx_position, col.position);
-                }
-                //sort by index position
-                std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
-                metadata->indexes.push_back(std::move(info));
-            }
-
-            XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
-                                static_cast<uint64_t>(result.access_lsn_start));
-            XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
-                              static_cast<uint64_t>(result.access_lsn_end));
-            XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
-                                static_cast<uint64_t>(result.target_lsn_start));
-            XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
-                              static_cast<uint64_t>(result.target_lsn_end));
-
-            metadata->access_range = XidRange(access_start, access_end);
-            metadata->target_range = XidRange(target_start, target_end);
-
-            return metadata;
+            return _pack_metadata(result);
         };
 
         // retrieve through the schema cache
@@ -473,57 +478,7 @@ namespace springtail::sys_tbl_mgr {
             c.client->get_target_schema(result, request);
         });
 
-        auto metadata = std::make_shared<SchemaMetadata>();
-        for (const auto &col_entry : result.columns) {
-            const auto &column = col_entry.second;
-            SchemaColumn value(column.name,
-                               column.position,
-                               static_cast<SchemaType>(column.type),
-                               column.pg_type,
-                               column.is_nullable);
-            if (column.__isset.pk_position) {
-                value.pkey_position = column.pk_position;
-            }
-            if (column.__isset.default_value) {
-                value.default_value = column.default_value;
-            }
-
-            metadata->columns.push_back(value);
-        }
-
-        for (auto history : result.history) {
-            SchemaColumn value(history.xid,
-                               history.lsn,
-                               history.column.name,
-                               history.column.position,
-                               static_cast<SchemaType>(history.column.type),
-                               history.column.pg_type,
-                               history.exists,
-                               history.column.is_nullable);
-            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-            if (history.column.__isset.pk_position) {
-                value.pkey_position = history.column.pk_position;
-            }
-            if (history.column.__isset.default_value) {
-                value.default_value = history.column.default_value;
-            }
-
-            metadata->history.push_back(value);
-        }
-
-        XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
-                            static_cast<uint64_t>(result.access_lsn_start));
-        XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
-                          static_cast<uint64_t>(result.access_lsn_end));
-        XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
-                            static_cast<uint64_t>(result.target_lsn_start));
-        XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
-                          static_cast<uint64_t>(result.target_lsn_end));
-
-        metadata->access_range = XidRange(access_start, access_end);
-        metadata->target_range = XidRange(access_start, access_end);
-
-        return metadata;
+        return _pack_metadata(result);
     }
 
     bool

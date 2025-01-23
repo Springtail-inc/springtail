@@ -30,77 +30,53 @@ namespace {
     protected:
         using Key = std::tuple<uint64_t, uint64_t, XidLsn>;
 
+        SchemaMetadataPtr _make_metadata(const XidLsn &xid, std::vector<std::string> columns) {
+            auto md = std::make_shared<SchemaMetadata>();
+            if (xid.xid < 4) {
+                md->access_range = XidRange(xid, XidLsn(xid.xid + 1));
+                md->target_range = XidRange(XidLsn{4}, XidLsn{constant::LATEST_XID});
+            } else {
+                md->access_range = XidRange(xid, XidLsn{constant::LATEST_XID});
+            }
+
+            int pos = 0;
+            for (const auto &column : columns) {
+                md->columns.push_back({ column, ++pos, SchemaType::INT32, 23, false });
+            }
+
+            return md;
+        }
+
+        void _verify_columns(SchemaMetadataPtr md, const Key &key) {
+            auto expected = _schema_map[key];
+
+            ASSERT_EQ(md->columns.size(), expected->columns.size());
+            for (int i = 0; i < md->columns.size(); ++i) {
+                ASSERT_EQ(md->columns[i].name, expected->columns[i].name);
+                ASSERT_EQ(md->columns[i].position, expected->columns[i].position);
+            }
+        }
+
         void SetUp() override {
             // populate the dummy test set
             for (uint64_t i = 0; i < 100; i++) {
                 auto xid = XidLsn{1};
                 auto key = Key{1, 10000 + i, xid};
-                auto md = std::make_shared<SchemaMetadata>();
-                md->access_range = XidRange(xid, XidLsn(xid.xid + 1));
-                md->target_range = XidRange(XidLsn{4}, XidLsn(constant::LATEST_XID));
-                md->columns.push_back({
-                        fmt::format("x{}", i),
-                        1, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("y{}", i),
-                        2, SchemaType::INT32, 23, false
-                    });
-
-                _schema_map[key] = md;
+                _schema_map[key] = _make_metadata(xid, { fmt::format("x{}", i), fmt::format("y{}", i) });
 
                 xid = XidLsn{2};
                 key = Key{1, 10000 + i, xid};
-                md = std::make_shared<SchemaMetadata>();
-                md->access_range = XidRange(xid, XidLsn(xid.xid + 1));
-                md->target_range = XidRange(XidLsn(4), XidLsn(constant::LATEST_XID));
-                md->columns.push_back({
-                        fmt::format("x{}x", i),
-                        1, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("y{}", i),
-                        2, SchemaType::INT32, 23, false
-                    });
-
-                _schema_map[key] = md;
+                _schema_map[key] = _make_metadata(xid, { fmt::format("x{}x", i), fmt::format("y{}", i) });
 
                 xid = XidLsn{3};
                 key = Key{1, 10000 + i, xid};
-                md = std::make_shared<SchemaMetadata>();
-                md->access_range = XidRange(xid, XidLsn(xid.xid + 1));
-                md->target_range = XidRange(XidLsn(4), XidLsn(constant::LATEST_XID));
-                md->columns.push_back({
-                        fmt::format("x{}x", i),
-                        1, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("y{}", i),
-                        2, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("z{}", i),
-                        3, SchemaType::INT32, 23, false
-                    });
-                _schema_map[key] = md;
+                _schema_map[key] = _make_metadata(
+                    xid, {fmt::format("x{}x", i), fmt::format("y{}", i), fmt::format("z{}", i)});
 
                 xid = XidLsn{4};
                 key = Key{1, 10000 + i, xid};
-                md = std::make_shared<SchemaMetadata>();
-                md->access_range = XidRange(xid, XidLsn(constant::LATEST_XID));
-                md->columns.push_back({
-                        fmt::format("x{}", i),
-                        1, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("y{}", i),
-                        2, SchemaType::INT32, 23, false
-                    });
-                md->columns.push_back({
-                        fmt::format("z{}", i),
-                        3, SchemaType::INT32, 23, false
-                    });
-                _schema_map[key] = md;
+                _schema_map[key] = _make_metadata(
+                    xid, {fmt::format("x{}", i), fmt::format("y{}", i), fmt::format("z{}", i)});
             }
         }
 
@@ -128,13 +104,7 @@ namespace {
                                         ++miss_count;
                                         return _schema_map[Key{db, tid, xid}];
                                     });
-                ASSERT_EQ(md->columns.size(), 3);
-                ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                ASSERT_EQ(md->columns[0].position, 1);
-                ASSERT_EQ(md->columns[1].name, fmt::format("y{}", i));
-                ASSERT_EQ(md->columns[1].position, 2);
-                ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                ASSERT_EQ(md->columns[2].position, 3);
+                _verify_columns(md, { 1, 10000 + i, XidLsn{4} });
             }
         }
         ASSERT_EQ(miss_count, 100);
@@ -153,13 +123,7 @@ namespace {
                                         ++miss_count;
                                         return _schema_map[Key{db, tid, xid}];
                                     });
-                ASSERT_EQ(md->columns.size(), 3);
-                ASSERT_EQ(md->columns[0].name, fmt::format("x{}", j));
-                ASSERT_EQ(md->columns[0].position, 1);
-                ASSERT_EQ(md->columns[1].name, fmt::format("y{}", j));
-                ASSERT_EQ(md->columns[1].position, 2);
-                ASSERT_EQ(md->columns[2].name, fmt::format("z{}", j));
-                ASSERT_EQ(md->columns[2].position, 3);
+                _verify_columns(md, { 1, 10000 + j, XidLsn{4} });
             }
         }
         ASSERT_EQ(miss_count, 100);
@@ -178,13 +142,7 @@ namespace {
                                         ++miss_count;
                                         return _schema_map[Key{db, tid, xid}];
                                     });
-                ASSERT_EQ(md->columns.size(), 3);
-                ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                ASSERT_EQ(md->columns[0].position, 1);
-                ASSERT_EQ(md->columns[1].name, fmt::format("y{}", i));
-                ASSERT_EQ(md->columns[1].position, 2);
-                ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                ASSERT_EQ(md->columns[2].position, 3);
+                _verify_columns(md, { 1, 10000 + i, XidLsn{4} });
             }
         }
         ASSERT_EQ(miss_count, 400);
@@ -204,32 +162,7 @@ namespace {
                                         ++miss_count;
                                         return _schema_map[Key{db, tid, xid}];
                                     });
-                switch (j) {
-                case 1:
-                    ASSERT_EQ(md->columns.size(), 2);
-                    ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                    break;
-                case 2:
-                    ASSERT_EQ(md->columns.size(), 2);
-                    ASSERT_EQ(md->columns[0].name, fmt::format("x{}x", i));
-                    break;
-                case 3:
-                    ASSERT_EQ(md->columns.size(), 3);
-                    ASSERT_EQ(md->columns[0].name, fmt::format("x{}x", i));
-                    ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                    ASSERT_EQ(md->columns[2].position, 3);
-                    break;
-                case 4:
-                    ASSERT_EQ(md->columns.size(), 3);
-                    ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                    ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                    ASSERT_EQ(md->columns[2].position, 3);
-                    break;
-                }
-
-                ASSERT_EQ(md->columns[0].position, 1);
-                ASSERT_EQ(md->columns[1].name, fmt::format("y{}", i));
-                ASSERT_EQ(md->columns[1].position, 2);
+                _verify_columns(md, { 1, 10000 + i, XidLsn{j} });
             }
         }
         ASSERT_EQ(miss_count, 400);
@@ -250,32 +183,7 @@ namespace {
                                             ++miss_count;
                                             return _schema_map[Key{db, tid, xid}];
                                         });
-                    switch (j) {
-                    case 1:
-                        ASSERT_EQ(md->columns.size(), 2);
-                        ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                        break;
-                    case 2:
-                        ASSERT_EQ(md->columns.size(), 2);
-                        ASSERT_EQ(md->columns[0].name, fmt::format("x{}x", i));
-                        break;
-                    case 3:
-                        ASSERT_EQ(md->columns.size(), 3);
-                        ASSERT_EQ(md->columns[0].name, fmt::format("x{}x", i));
-                        ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                        ASSERT_EQ(md->columns[2].position, 3);
-                        break;
-                    case 4:
-                        ASSERT_EQ(md->columns.size(), 3);
-                        ASSERT_EQ(md->columns[0].name, fmt::format("x{}", i));
-                        ASSERT_EQ(md->columns[2].name, fmt::format("z{}", i));
-                        ASSERT_EQ(md->columns[2].position, 3);
-                        break;
-                    }
-
-                    ASSERT_EQ(md->columns[0].position, 1);
-                    ASSERT_EQ(md->columns[1].name, fmt::format("y{}", i));
-                    ASSERT_EQ(md->columns[1].position, 2);
+                    _verify_columns(md, { 1, 10000 + i, XidLsn{j} });
                 }
             }
         }
