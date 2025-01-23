@@ -50,6 +50,7 @@ namespace {
 
         void _finalize();
         PgMsgTable _create_table(uint64_t tid, const std::string &name);
+        void _verify_schema(uint64_t tid, uint64_t index_id);
         void _drop_table(uint64_t tid, const std::string &name);
         void _alter_table(const PgMsgTable &msg);
         PgMsgIndex _create_index(uint64_t tid, const std::string& name, uint64_t index_id);
@@ -159,6 +160,24 @@ namespace {
     }
 
     void
+    SysTblMgr_Test::_verify_schema(uint64_t tid, uint64_t index_id)
+    {
+        auto schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 2);
+        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
+
+        // note: column positions start with 1
+        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
+        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
+
+        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
+        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
+
+        ASSERT_EQ(schema_meta->indexes[1].id, index_id);
+    }
+
+    void
     SysTblMgr_Test::_drop_table(uint64_t tid,
                                 const std::string &name)
     {
@@ -203,19 +222,8 @@ namespace {
         PgMsgIndex &&msg = _create_index(tid, "x", index_id);
         _finalize();
 
-        schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
-
-        // note: column positions start with 1
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
-
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
-
-        ASSERT_EQ(schema_meta->indexes[1].id, index_id);
+        // verify the schema metadata after finalize()
+        _verify_schema(tid, index_id);
 
         auto info = _client->get_index_info(_db, index_id, _xid);
         ASSERT_EQ(info.id, index_id);
@@ -264,19 +272,7 @@ namespace {
         PgMsgIndex &&msg = _create_index(tid, "x", index_id);
         _finalize();
 
-        schema_meta = _client->get_schema(_db, tid, _xid);
-        ASSERT_EQ(schema_meta->indexes.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].columns.size(), 2);
-        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
-
-        // note: column positions start with 1
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
-        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
-
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
-        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
-
-        ASSERT_EQ(schema_meta->indexes[1].id, index_id);
+        _verify_schema(tid, index_id);
 
         //drop index
         _drop_index(index_id);
