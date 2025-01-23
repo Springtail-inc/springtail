@@ -81,8 +81,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set debug level to debug for debug builds
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
   set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+  set( BUILD_TYPE "debug")
 else()
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
+  set ( BUILD_TYPE "release")
 endif()
 
 ## include external projects
@@ -119,6 +121,9 @@ foreach(MODULE ${MODULES})
   set(MODULE_BIN_DIR ${CMAKE_BINARY_DIR}/src/${MODULE})
   configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${MODULE_BIN_DIR}/CTestCustom.cmake @ONLY)
 endforeach(MODULE ${MODULES})
+
+## install shared libraries to shared-lib directory
+include(InstallLibs)
 
 ## configure CTestCustom.cmake for top level
 configure_file(${PROJECT_SOURCE_DIR}/scripts/CTestCustom.cmake.in ${PROJECT_BINARY_DIR}/CTestCustom.cmake @ONLY)
