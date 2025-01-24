@@ -69,7 +69,8 @@
             "client_cert" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00_intermediate.pem",
             "client_key" : "/home/dev/springtail/src/thrift/test/config/leaf/leaf_client_00.key",
             "client_trusted" : "/home/dev/springtail/src/thrift/test/config/root_ca/root.pem"
-        }
+        },
+        "cache_size": 4096
     },
     "storage": {
         "table_dir": "table",

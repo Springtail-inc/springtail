@@ -18,6 +18,8 @@
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 
+#include <sys_tbl_mgr/client.hh>
+
 extern "C" {
     #include <postgres.h>
     #include <postgres_ext.h>
@@ -46,11 +48,15 @@ namespace springtail::pg_fdw {
     // The intersection must start at the first index column and be
     // continuous.
     std::vector<ConstQualPtr>
-    _get_index_quals(Index const& idx, List const& qual_list) {
+    _get_index_quals(Index const& idx, List const* qual_list) {
+
+        if (!qual_list) {
+            return {};
+        }
 
         auto find_qual = [&qual_list](auto pos) -> ConstQualPtr {
             const ListCell *lc{};
-            foreach(lc, &qual_list) {
+            foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
                 if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
                         qual->base.isArray == false &&  
@@ -129,6 +135,12 @@ namespace springtail::pg_fdw {
     {
         uint64_t xid; // springtail xid
 
+        // check if the schema_xid has progressed, if so, invalidate the schema cache
+        const uint64_t prev_schema_xid = _schema_xid.exchange(schema_xid);
+        if (prev_schema_xid < schema_xid) {
+            sys_tbl_mgr::Client::get_instance()->invalidate_db(db_id, XidLsn(schema_xid));
+        }
+
         // lookup pg_xid in xid_map;
         // if doesn't exist, get a new xid from xid_mgr and add to map
         std::shared_lock<std::shared_mutex> rd_lock(_mutex);
@@ -174,27 +186,18 @@ namespace springtail::pg_fdw {
                                 attno, state->columns[attno].name);
         }
 
-        // init sort group vector
-        foreach(lc, sortgroup) {
-            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-            PgFdwSortGroupPtr pathkey_ptr = std::make_shared<PgFdwSortGroup>(pathkey);
-            state->sort_columns.push_back(pathkey_ptr);
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Sort group column: {}:{}", pathkey_ptr->attnum, pathkey_ptr->attname);
-        }
-
         // init quals
-        if (qual_list != nullptr) {
-            _init_quals(state, qual_list);
+        CHECK_EQ(state->filtered_quals.empty(), true);
+        _init_quals(state, qual_list);
 
-            // note: it is possible state->filtered_quals is empty if no quals are usable
-            // go through qual columns and make sure they are part of the target columns
-            i = state->target_columns.size();
-            for (int j = 0; j < state->filtered_quals.size(); j++) {
-                int attno = state->filtered_quals[j]->base.varattno;
-                if (!state->target_columns.contains(attno)) {
-                    target_colnames.push_back(state->columns[attno].name);
-                    state->target_columns.insert({attno, i++});
-                }
+        // note: it is possible state->filtered_quals is empty if no quals are usable
+        // go through qual columns and make sure they are part of the target columns
+        i = state->target_columns.size();
+        for (int j = 0; j < state->filtered_quals.size(); j++) {
+            int attno = state->filtered_quals[j]->base.varattno;
+            if (!state->target_columns.contains(attno)) {
+                target_colnames.push_back(state->columns[attno].name);
+                state->target_columns.insert({attno, i++});
             }
         }
 
@@ -242,15 +245,24 @@ namespace springtail::pg_fdw {
     void
     PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
-        // NOTE: for now we always scan up this is the natural order of the table data
-        // we could scan down for reverse sort but would need to switch start/end iterators
-        state->scan_up = true;
-
-        if (state->qual_fields == nullptr) {
-            // full table scan
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan");
+        // this will return a pair of iterators based on the conditions.
+        // for ASC order, scan from iter_start to iter_end with (iter_start++) 
+        // for DESC order, scan from iter_end to iter_end with (iter_end--)
+        // make sure to handle the special case for NOT_EQUALS while scanning
+        if (!state->index.has_value()) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: ASC={}",
+                    state->scan_asc);
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
+            return;
+        }
+
+        if (state->filtered_quals.empty()) {
+            // Usually the index is defined by sortgroup in this case.
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}, ASC={}",
+                    state->index->id, state->scan_asc);
+            state->iter_start.emplace(state->table->begin(state->index->id));
+            state->iter_end.emplace(state->table->end(state->index->id));
             return;
         }
 
@@ -259,42 +271,57 @@ namespace springtail::pg_fdw {
 
         // create the field tuple used for bounds
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
+        QualOpName op = qual->base.op;
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
                             qual->base.opname, tuple->to_string());
 
-        // set up the start iterator based on first key op
-        QualOpName op = qual->base.op;
-        if (!state->index.has_value() || op == LESS_THAN || op == LESS_THAN_EQUALS || op == NOT_EQUALS) {
-            state->iter_start.emplace(state->table->begin());
-        } else if (op == GREATER_THAN_EQUALS || op == EQUALS) {
-            state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
-        } else if (op == GREATER_THAN) {
-            state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
-        }
-
-        // set end iterator based on first key op
-        if (!state->index.has_value()) {
-            state->iter_end.emplace(state->table->end());
-        } else if (op == LESS_THAN || op == NOT_EQUALS) {
-            state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
-        } else if (op == LESS_THAN_EQUALS || op == EQUALS) {
-            state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
-        } else if (op == GREATER_THAN || op == GREATER_THAN_EQUALS) {
-            state->iter_end.emplace(state->table->end(state->index->id));
+        switch (op) {
+            case LESS_THAN:
+                state->iter_start.emplace(state->table->begin(state->index->id));
+                state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                break;
+            case LESS_THAN_EQUALS:
+                state->iter_start.emplace(state->table->begin(state->index->id));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                break;
+            case NOT_EQUALS: 
+                if (state->scan_asc) {
+                    state->iter_start.emplace(state->table->begin(state->index->id));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                } else {
+                    state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                    state->iter_end.emplace(state->table->end(state->index->id));
+                }
+                break;
+            case EQUALS:
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
+                break;
+            case GREATER_THAN_EQUALS:
+                state->iter_start.emplace(state->table->lower_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->end(state->index->id));
+                break;
+            case GREATER_THAN:
+                state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
+                state->iter_end.emplace(state->table->end(state->index->id));
+                break;
+            case UNSUPPORTED: 
+                CHECK(false);
+                break;
         }
     }
 
     void
     PgFdwMgr::_init_quals(PgFdwState *state, List *qual_list)
     {
-        //select the best index to use
-        {
+        if (!state->sortgroup_index) {
+            // If the sortgroup index isn't set, select the best index to use from quals.
             std::optional<Index> best_index;
             std::vector<ConstQualPtr> best;
 
             for (auto const& idx: state->indexes) {
-                auto index_quals = _get_index_quals(idx, *qual_list);
+                auto index_quals = _get_index_quals(idx, qual_list);
                 if (index_quals.empty()) {
                     continue;
                 }
@@ -312,6 +339,14 @@ namespace springtail::pg_fdw {
             }
             state->index = std::move(best_index);
             state->filtered_quals = std::move(best);
+        } else {
+            // Always use the sortgroup index
+            state->index = *state->sortgroup_index;
+
+            auto index_quals = _get_index_quals(*state->sortgroup_index, qual_list);
+            if (!index_quals.empty()) {
+                state->filtered_quals = std::move(index_quals);
+            }
         }
 
         // note: just because we have some quals doesn't mean we can use them
@@ -366,16 +401,40 @@ namespace springtail::pg_fdw {
         }
 
         // check if we are scanning up and iterator is at the end
-        if (state->scan_up && *state->iter_start == *state->iter_end) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+        if (*state->iter_start == *state->iter_end) {
 
-            if (!state->filtered_quals.empty() && state->filtered_quals[0]->base.op == NOT_EQUALS) {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_iterate_scan: iter_start == iter_end, done");
+            if (state->filtered_quals.empty() || state->filtered_quals[0]->base.op != NOT_EQUALS) {
+                *eos = true;
+                return false;
+            }
+
+            if (state->scan_asc) {
                 // check if we need to switch iterators for not equals
                 // we start scanning from begin -> lower-bound, then switch to upper-bound -> end
-                if (state->iter_end != state->table->end(state->index->id)) {
-                    FieldTuplePtr tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                if (state->index.has_value() && state->iter_end != state->table->end(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
                     state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
                     state->iter_end.emplace(state->table->end(state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_end != state->table->end()) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->upper_bound(tuple));
+                    state->iter_end.emplace(state->table->end());
+                    return false;
+                }
+            } else {
+                // check if we need to switch iterators for not equals
+                // we start scanning from end -> upper-bound, then switch to lower-bound -> begin
+                if (state->index.has_value() && state->iter_start !=state->table->begin(state->index->id)) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin(state->index->id));
+                    state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
+                    return false;
+                } else if (!state->index.has_value() && state->iter_start !=state->table->begin() ) {
+                    auto tuple = std::make_shared<FieldTuple>(state->qual_fields, nullptr);
+                    state->iter_start.emplace(state->table->begin());
+                    state->iter_end.emplace(state->table->lower_bound(tuple));
                     return false;
                 }
             }
@@ -384,8 +443,12 @@ namespace springtail::pg_fdw {
             return false;
         }
 
+        if (!state->scan_asc) {
+            --(*state->iter_end);
+        }
+
         // get current row
-        Extent::Row row = *(*state->iter_start);
+        Extent::Row row{state->scan_asc? *(*state->iter_start) : *(*state->iter_end)};
         state->rows_fetched++;
 
         // go through the qual fields and see how they compare to the values with in the row
@@ -401,18 +464,19 @@ namespace springtail::pg_fdw {
                 // compare the qual field to the field in the row
                 bool res = _compare_field(row, state->fields->at(field_idx),
                                           state->qual_fields->at(i), qual->base.op);
-
-                if (!res) {
-                    // qual doesn't match, so this row must be skipped
-                    // since it isn't the first qual, we can skip to the next row
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
-                    state->rows_skipped++;
-                    // increment iterator if scanning up -- only scanning up for now
-                    if (state->scan_up) {
-                        ++(*state->iter_start);
-                    }
-                    return false;
+                if (res) {
+                    continue;
                 }
+
+                // qual doesn't match, so this row must be skipped
+                // since it isn't the first qual, we can skip to the next row
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Qual not equal, skipping row");
+                state->rows_skipped++;
+                // increment iterator if scanning up
+                if (state->scan_asc) {
+                    ++(*state->iter_start);
+                }
+                return false;
             }
         }
 
@@ -447,7 +511,7 @@ namespace springtail::pg_fdw {
         }
 
         // increment iterator if scanning up
-        if (state->scan_up) {
+        if (state->scan_asc) {
             ++(*state->iter_start);
         }
 
@@ -457,54 +521,96 @@ namespace springtail::pg_fdw {
     List *
     PgFdwMgr::fdw_can_sort(SpringtailPlanState *state, List *sortgroup)
     {
-        List       *result = NULL;
-        ListCell   *lc;
-
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
         SPDLOG_DEBUG_MODULE(LOG_FDW, "fdw_can_sort");
 
-        // build up a list of pathkeys that match the sortgroup from the primary key
-        // in order, stop when no more matches found
-        int i = 0;
-        foreach(lc, sortgroup) {
-            // check if there are any more primary keys
-            if (!pg_state->index.has_value() || i >= pg_state->index->columns.size()) {
-                break;
+        // verify that the sort order is the same for all attributes
+        // and null_first/reverse combination is supported
+        {
+            int i = 0;
+            ListCell   *lc;
+            bool reversed = false;
+            foreach(lc, sortgroup) {
+                DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+
+                if (i == 0) {
+                    reversed = pathkey->reversed;
+                } else if (reversed != pathkey->reversed) {
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "The sort order must be the same for all attributes: {}!={}", reversed, pathkey->reversed);
+                    return {};
+                }
+
+                if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
+                            pathkey->nulls_first, pathkey->reversed);
+                    return {};
+                }
+                ++i;
             }
-
-            // get the next path key and check if it is next in primary key list
-            DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
-            int attnum = pathkey->attnum;
-
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Checking pathkey attnum: {} against pkey id: {}",
-                                attnum, pg_state->index->columns[i].position);
-
-            // check if this attnum matches next id in primary key id list, and sort order matches
-            // XXX ignore collation for now
-            if (pathkey->nulls_first || pathkey->reversed ||
-                attnum != pg_state->index->columns[i].position) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Pathkey does not match, or sort order wrong");
-                break;
-            }
-
-            // add to result
-            result = lappend(result, pathkey);
-
-            i++;
+            // reversed=true means DESC direction in PG executor
+            pg_state->scan_asc = (reversed == false);
         }
 
-        return result;
+        auto check_index = [](const Index& idx, const List* sortgroup) -> List* {
+            int i = 0;
+            ListCell   *lc;
+            std::vector<DeparsedSortGroup*> keys;
+            foreach(lc, sortgroup) {
+                DeparsedSortGroup *pathkey = static_cast<DeparsedSortGroup *>(lfirst(lc));
+                int attnum = pathkey->attnum;
+
+                // must match sortgroup completely
+                if (i == idx.columns.size() || attnum != idx.columns[i].position) {
+                    return {};
+                }
+                keys.push_back(pathkey);
+                i++;
+            }
+
+            if (!keys.empty()) {
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Matching sortgroup index found: {}", idx.id);
+            }
+
+            List *r = nullptr;
+            for (auto pk: keys) {
+                r = lappend(r, pk);
+            }
+            return r;
+        };
+
+        // try the primary index first
+        auto it = std::find_if(pg_state->indexes.begin(), pg_state->indexes.end(),
+                [](auto const& idx) {
+                    return idx.id == constant::INDEX_PRIMARY;
+                });
+        if (it != pg_state->indexes.end()) {
+            List* p = check_index(*it, sortgroup);
+            if (p) {
+                pg_state->sortgroup_index = *it;
+                return p;
+            }
+        }
+
+        for (auto const& idx: pg_state->indexes) {
+            if (idx.id == constant::INDEX_PRIMARY) {
+                // we already checked the primary index
+                continue;
+            }
+            List* p = check_index(idx, sortgroup);
+            if (p) {
+                pg_state->sortgroup_index = idx;
+                return p;
+            }
+        }
+
+        return {};
     }
 
     List *
     PgFdwMgr::fdw_get_path_keys(SpringtailPlanState *state)
     {
         List      *result = NULL;
-        List      *attnums = NULL;
-        List      *item = NULL;
-
-        double rows = 1; // number of rows with unique key
 
         PgFdwState *pg_state = static_cast<PgFdwState *>(state->pg_fdw_state);
 
@@ -512,17 +618,25 @@ namespace springtail::pg_fdw {
 
         // generate list of elements, each element is: list of attnums, followed by row count
         // [(('id',),1)]
-        
-        if (pg_state->index.has_value()) {
-            for (const auto col: pg_state->index->columns) {
+
+        for (auto const& idx: pg_state->indexes) {
+            List      *attnums = NULL;
+            List      *item = NULL;
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "adding index path: {}", idx.id);
+            for (const auto col: idx.columns) {
                 SPDLOG_DEBUG_MODULE(LOG_FDW, "adding pathkey attnum: {}", col.position);
                 attnums = list_append_unique_int(attnums, col.position);
             }
+            item = lappend(item, attnums);
+            
+            double rows = 1; // number of rows with unique key
+            if (!idx.is_unique) {
+                rows = 100; //just some number to indicate different cost
+            }
+            item = lappend(item, makeConst(INT4OID,
+                        -1, InvalidOid, 4, rows, false, true));
+            result = lappend(result, item);
         }
-        item = lappend(item, attnums);
-        item = lappend(item, makeConst(INT4OID,
-                                       -1, InvalidOid, 4, rows, false, true));
-        result = lappend(result, item);
 
         return result;
     }
@@ -1044,7 +1158,7 @@ namespace springtail::pg_fdw {
         columns = SchemaMgr::get_instance()->get_columns(table->db(), tid, { xid, constant::MAX_LSN });
         if (tid > constant::MAX_SYSTEM_TABLE_ID) {
             auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(table->db(), tid, { xid, constant::MAX_LSN });
-            indexes = std::move(meta.indexes);
+            indexes = meta->indexes;
         }
     }
 } // namespace springtail::pg_fdw

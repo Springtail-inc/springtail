@@ -61,6 +61,11 @@ namespace springtail::gc {
         constexpr static const std::string_view THREAD_WORKER = "w";
 
     private:
+        /**
+         * Clear the SysTblMgr::Client cache for any tables with DDL mutations.
+         */
+        void _invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls);
+
         void _create_indexer();
 
         /**

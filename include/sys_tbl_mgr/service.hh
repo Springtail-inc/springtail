@@ -181,7 +181,7 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+        void _read_schema_columns(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to read the table indexes.
@@ -189,7 +189,8 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::vector<IndexInfo> _read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+        void _read_schema_indexes(SchemaInfoPtr schema_info,
+                                  uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to apply any in-memory changes to the schema columns that might be
@@ -199,7 +200,7 @@ namespace springtail::sys_tbl_mgr {
          * @param columns A set of columns already constructed by calling _read_schema_columns()
          *                that will be updated by this function.
          */
-        void _apply_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
+        void _apply_schema_cache_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -208,7 +209,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _read_schema_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        void _read_schema_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -218,7 +219,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        void _get_schema_cache_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to extract a change entry for a schema by comparing the old and new
@@ -227,7 +228,7 @@ namespace springtail::sys_tbl_mgr {
          * @param new_schema The schema after the alteration.
          * @param xid The XID/LSN at which the alteration occurred.
          */
-        ColumnHistory _generate_update(const std::vector<TableColumn> &old_schema,
+        ColumnHistory _generate_update(const std::map<int32_t, TableColumn> &old_schema,
                                        const std::vector<TableColumn> &new_schema,
                                        const XidLsn &xid,
                                        nlohmann::json &ddl);

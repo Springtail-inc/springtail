@@ -12,11 +12,11 @@ namespace springtail::gc {
 
     bool _index_exists(uint64_t db_id, uint64_t tid, uint64_t index_id, uint64_t xid)
     {
-        TableMetadata meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
-        auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {
+        auto meta = sys_tbl_mgr::Client::get_instance()->get_roots(db_id, tid, xid);
+        auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
                     return index_id == v.index_id;
                 });
-        return it != meta.roots.end();
+        return it != meta->roots.end();
     }
 
 
@@ -121,6 +121,7 @@ namespace springtail::gc {
                     auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
                     roots.xid = completed_xid;
 
+                    // note: this will also invalidate the table's client cache entry
                     auto ddl_str = client->swap_sync_table(create, indexes, roots);
 
                     // store the ddl mutations for the FDWs
@@ -173,6 +174,12 @@ namespace springtail::gc {
             SPDLOG_INFO("Process XID: {}@{}", db_id, xid);
             assert(xid > completed_xid);
 
+            // check if there were DDL mutations as part of this txn, invalidate the schema cache accordingly
+            nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
+            if (!completed_ddls.is_null()) {
+                _invalidate_systbl_cache(db_id, completed_ddls);
+            }
+
             // find every table associated with this XID
             uint64_t table_cursor = 0;
             bool tid_done = false;
@@ -212,7 +219,6 @@ namespace springtail::gc {
             }
             SPDLOG_DEBUG_MODULE(LOG_GC, "All table processing complete for XID {}", xid);
 
-            nlohmann::json completed_ddls = _redis_ddl.get_ddls_xid(db_id, xid);
             nlohmann::json index_ddls = _redis_ddl.get_index_ddls_xid(db_id, xid);
 
             if (!index_ddls.is_null()) {
@@ -319,6 +325,20 @@ namespace springtail::gc {
         coordinator->unregister_threads(daemon_type, cleanup_threads);
     }
 
+    void 
+    Committer::_invalidate_systbl_cache(uint64_t db, const nlohmann::json &completed_ddls)
+    {
+        auto client = sys_tbl_mgr::Client::get_instance();
+        for (auto ddl : completed_ddls) {
+            if (!ddl.contains("tid")) {
+                continue; // mutation doesn't reference a specific table
+            }
+
+            uint64_t tid = ddl["tid"].get<uint64_t>();
+            XidLsn ddl_xid(ddl["xid"].get<uint64_t>(), ddl["lsn"].get<uint64_t>());
+            client->invalidate_table(db, tid, ddl_xid);
+        }
+    }
 
     void 
     Committer::_create_indexer()

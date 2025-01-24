@@ -30,10 +30,29 @@ namespace springtail {
 
         std::strong_ordering operator<=>(const XidLsn &rhs) const
         {
-            if (xid == rhs.xid) {
-                return lsn <=> rhs.lsn;
-            }
-            return xid <=> rhs.xid;
+            return std::tie(xid, lsn) <=> std::tie(rhs.xid, rhs.lsn);
+        }
+    };
+
+    struct XidRange {
+    public:
+        XidLsn start;
+        XidLsn end;
+
+        XidRange() = default;
+        XidRange(const XidLsn &start, const XidLsn &end)
+            : start(start), end(end)
+        { }
+
+        /** Checks if the provided XID is within the range of [start, end) */
+        bool contains(const XidLsn &xid) const {
+            return (start <= xid && xid < end);
+        }
+
+        // ordering is based on the end of the range
+        std::strong_ordering operator<=>(const XidRange &rhs) const
+        {
+            return std::tie(end, start) <=> std::tie(rhs.end, rhs.start);
         }
     };
 }
