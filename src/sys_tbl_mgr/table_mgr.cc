@@ -122,14 +122,12 @@ namespace springtail {
     TableMgr::get_snapshot_table(uint64_t db_id,
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
-                                 ExtentSchemaPtr schema)
+                                 ExtentSchemaPtr schema,
+                                 std::vector<Index> secondary_keys)
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
-        // construct an empty mutable table with the provided snapshot XID and return it
-        // XXX we need to eventually get these secondary keys passed down from the table copy code
-        std::vector<Index> secondary_keys;
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                               _table_base, schema->get_sort_keys(), secondary_keys,
                                               tbl_meta, schema, false);

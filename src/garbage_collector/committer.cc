@@ -116,10 +116,12 @@ namespace springtail::gc {
                     create.xid = completed_xid;
                     create.lsn = constant::MAX_LSN - 1;
 
-                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+                    std::vector<sys_tbl_mgr::IndexRequest> indexes = common::json_vector_to_thrift<sys_tbl_mgr::IndexRequest>(json[1]);
+
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
                     roots.xid = completed_xid;
 
-                    auto ddl_str = client->swap_sync_table(create, roots);
+                    auto ddl_str = client->swap_sync_table(create, indexes, roots);
 
                     // store the ddl mutations for the FDWs
                     auto ddl_ops = nlohmann::json::parse(ddl_str);

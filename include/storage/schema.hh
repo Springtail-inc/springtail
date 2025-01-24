@@ -93,13 +93,17 @@ namespace springtail {
     };
 
     /**
+     * Object representing the index columns.
+     */
+    struct Column {
+        uint32_t idx_position;
+        uint32_t position;
+    };
+
+    /**
      * Object representing the table index.
      */
     struct Index {
-        struct Column {
-            uint32_t idx_position;
-            uint32_t position;
-        };
         uint64_t id;
         std::string schema;
         std::string name;

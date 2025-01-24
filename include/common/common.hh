@@ -124,6 +124,35 @@ namespace springtail {
         }
 
         template <typename T>
+        nlohmann::json
+        thrift_to_json_vector(const std::vector<T> &vec_obj)
+        {
+            nlohmann::json jsonArray = nlohmann::json::array();
+            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
+            apache::thrift::protocol::TJSONProtocol protocol(buffer);
+
+            try {
+                // serialize the object
+                for (const auto &obj : vec_obj) {
+                    // Clear the buffer before serializing each object to prevent buffer issue
+                    buffer->resetBuffer();
+                    obj.write(&protocol);
+
+                    // Convert the buffer content to a string
+                    auto jsonStr = buffer->getBufferAsString();
+
+                    // Parse and add to the JSON array
+                    jsonArray.push_back(nlohmann::json::parse(jsonStr));
+                }
+            } catch (const nlohmann::json::parse_error& e) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "JSON Parse Error: {}", e.what());
+                // Handle error or return an empty json object
+                return nlohmann::json{};
+            }
+            return jsonArray;
+        }
+
+        template <typename T>
         T
         json_to_thrift(const nlohmann::json &json)
         {
@@ -138,6 +167,38 @@ namespace springtail {
             obj.read(&protocol);
 
             return obj;
+        }
+
+        template <typename T>
+        std::vector<T>
+        json_vector_to_thrift(const nlohmann::json &json)
+        {
+            std::vector<T> result;
+            if (json.is_null() || !json.is_array()) {
+                return result; // Return an empty vector
+            }
+            std::string data = json.dump();
+            auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
+            apache::thrift::protocol::TJSONProtocol protocol(buffer);
+
+            for (const auto& jsonElement : json) {
+                buffer->resetBuffer();
+
+                auto jsonStr = jsonElement.dump();
+
+                try {
+                    buffer->write(reinterpret_cast<const uint8_t*>(jsonStr.c_str()), jsonStr.size());
+                } catch (const std::exception& e) {
+                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Buffer write error: {}", e.what());
+                }
+
+                // Create a new Thrift object and read from the protocol
+                T obj;
+                obj.read(&protocol);
+                result.push_back(obj);
+            }
+
+            return result;
         }
 
         /**
