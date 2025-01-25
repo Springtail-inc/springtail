@@ -29,7 +29,7 @@ struct TableColumn {
 
 struct TableInfo {
     1: i64 id,
-    2: string schema,
+    2: i64 namespace_id,
     3: string name,
     4: list<TableColumn> columns
 }
@@ -47,8 +47,23 @@ struct DropTableRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 table_id,
-    5: string schema,
+    5: i64 namespace_id,
     6: string name
+}
+
+struct NamespaceRequest {
+    1: i64 db_id,
+    2: i64 namespace_id,
+    3: string name,
+    4: i64 xid,
+    5: i64 lsn
+}
+
+struct DropNamespaceRequest {
+    1: i64 db_id,
+    2: i64 namespace_id,
+    3: i64 xid,
+    4: i64 lsn
 }
 
 struct TableStats {
@@ -71,10 +86,11 @@ struct IndexInfo {
     2: string schema,
     3: string name,
     4: bool is_unique,
-    5: i64 table_id,
-    6: string table_name,
-    7: i8 state,
-    8: list<IndexColumn> columns
+    5: i64 namespace_id,
+    6: i64 table_id,
+    7: string table_name,
+    8: i8 state,
+    9: list<IndexColumn> columns
 }
 
 struct IndexRequest {
@@ -98,7 +114,7 @@ struct DropIndexRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 index_id,
-    5: string schema,
+    5: i64 namespace_id,
     6: string name
 }
 
@@ -206,6 +222,15 @@ service Service {
 
     // drops an existing data table at the given xid/lsn
     DDLStatement drop_table(1: DropTableRequest request),
+
+    // create a namespace at a given xid/lsn
+    DDLStatement create_namespace(1: NamespaceRequest request),
+
+    // rename a namespace at a given xid/lsn
+    DDLStatement alter_namespace(1: NamespaceRequest request),
+
+    // drop a namespace at a given xid/lsn
+    DDLStatement drop_namespace(1: DropNamespaceRequest request),
 
     // update the index root pointers and stats for a given table at a given xid
     Status update_roots(1: UpdateRootsRequest request),

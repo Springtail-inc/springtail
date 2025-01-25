@@ -172,7 +172,7 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        std::string schema;
+        uint32_t schema_oid;
         std::string table;
         std::vector<PgMsgSchemaColumn> columns;
     };
@@ -182,7 +182,7 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        std::string schema;
+        uint32_t schema_oid;
         std::string table;
     };
 
@@ -197,7 +197,7 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        std::string schema;
+        uint32_t schema_oid;
         std::string index;
         bool is_unique;
         uint32_t table_oid;
@@ -209,7 +209,7 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        std::string schema;
+        uint32_t schema_oid;
         std::string index;
     };
 

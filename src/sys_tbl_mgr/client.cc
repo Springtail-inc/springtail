@@ -75,7 +75,7 @@ namespace springtail::sys_tbl_mgr {
         TableRequest request;
         _set_request_common(request, db_id, xid);
         request.table.id = msg.oid;
-        request.table.schema = msg.schema;
+        request.table.namespace_id = msg.schema_oid;
         request.table.name = msg.table;
         for (const auto &col : msg.columns) {
             TableColumn column;
@@ -105,7 +105,7 @@ namespace springtail::sys_tbl_mgr {
         IndexRequest request;
         _set_request_common(request, db_id, xid);
         request.index.id = msg.oid;
-        request.index.schema = msg.schema;
+        request.index.namespace_id = msg.schema_oid;
         request.index.name = msg.index;
         request.index.is_unique = msg.is_unique;
         request.index.table_name = msg.table_name;
@@ -173,7 +173,7 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table_id = msg.oid;
-        request.schema = msg.schema;
+        request.namespace_id = msg.schema_oid;
         request.name = msg.table;
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
@@ -267,7 +267,7 @@ namespace springtail::sys_tbl_mgr {
         _set_request_common(request, db_id, xid);
 
         request.index_id = msg.oid;
-        request.schema = msg.schema;
+        request.namespace_id = msg.schema_oid;
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->drop_index(result, request);

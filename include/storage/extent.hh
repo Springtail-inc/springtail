@@ -121,9 +121,8 @@ namespace springtail {
         /** Interface to access a row in an extent. */
         class Row {
         public:
-            Row(Extent *e, uint32_t o)
-                : extent(e), offset(o)
-            { }
+            Row() : extent(nullptr), offset(0) {}
+            Row(Extent *e, uint32_t o) : extent(e), offset(o) {}
 
             /** Retrieve text from the variable data. */
             std::string_view get_text(uint32_t offset) {
@@ -149,8 +148,12 @@ namespace springtail {
                 return extent->_fixed_data->data() + offset;
             }
 
-            bool operator==(const Row &rhs) {
+            bool operator==(const Row &rhs) const {
                 return (extent == rhs.extent && offset == rhs.offset);
+            }
+
+            bool invalid() const {
+                return (extent == nullptr);
             }
 
         private:

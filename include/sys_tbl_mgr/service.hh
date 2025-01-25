@@ -45,6 +45,15 @@ namespace springtail::sys_tbl_mgr {
             table, just the metadata to indicate that a drop occurred at the given XID/LSN. */
         void drop_table(DDLStatement& _return, const DropTableRequest &request) override;
 
+        /** Creates a namespace in the system tables. */
+        void create_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
+
+        /** Renames a namespace in the system tables. */
+        void alter_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
+
+        /** Drops a namespace in the system tables. */
+        void drop_namespace(DDLStatement &_return, const DropNamespaceRequest &request) override;
+
         /** Updates the roots extents of the indexes of the table as well as the table stats. */
         void update_roots(Status& _return, const UpdateRootsRequest &request) override;
 
@@ -84,11 +93,11 @@ namespace springtail::sys_tbl_mgr {
             uint64_t id; ///< The table ID.
             uint64_t xid; ///< The XID at which this entry becomes valid.
             uint64_t lsn; ///< The LSN at which this entry becomes valid.
-            std::string schema; ///< The schema/namespace of the table.
+            uint64_t namespace_id; ///< The ID of the schema/namespace of the table.
             std::string name; ///< The name of the table.
             bool exists; ///< A flag indicating if the table exists at this point.
-            TableInfo(uint64_t id, uint64_t xid, uint64_t lsn, const std::string &schema, const std::string &name, bool exists)
-                : id(id), xid(xid), lsn(lsn), schema(schema), name(name), exists(exists)
+            TableInfo(uint64_t id, uint64_t xid, uint64_t lsn, uint64_t namespace_id, const std::string &name, bool exists)
+                : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
             { }
             TableInfo() = default;
         };
@@ -166,9 +175,11 @@ namespace springtail::sys_tbl_mgr {
          * @param schema The table schema.
          * @param columns The set of column data to record.
          */
-        void _set_schema_info(uint64_t db_id, uint64_t table_id,
-                const std::string& table_name, const std::string& schema,
-                const std::vector<ColumnHistory> &columns);
+        void _set_schema_info(uint64_t db_id,
+                              uint64_t table_id,
+                              uint64_t namespace_id,
+                              const std::string &table_name,
+                              const std::vector<ColumnHistory> &columns);
 
         /**
          * Clears the cache of schema data.  Called by finalize() once the system tables are
@@ -235,6 +246,12 @@ namespace springtail::sys_tbl_mgr {
 
 
         // HELPER FUNCTIONS
+
+        /**
+         * Read the name of a namespace from the NamespaceNames system table given it's ID and an
+         * XID/LSN.
+         */
+        std::string _read_namespace_name(uint64_t db_id, uint64_t namespace_id, const XidLsn &xid);
 
         /**
          * Retrieves a read-only Table interface for a given system table.
@@ -306,6 +323,12 @@ namespace springtail::sys_tbl_mgr {
          */
         std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id,
                 const XidLsn& xid, std::optional<uint64_t> tid);
+
+        /**
+         * Helper for updating the namespace_names table.
+         */
+        nlohmann::json _mutate_namespace(uint64_t db, uint64_t ns_id, std::optional<std::string> name,
+                                         const XidLsn &xid, bool exists);
 
         /**
          * Retrieve the current read XID for a db.
