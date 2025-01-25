@@ -43,7 +43,7 @@ namespace springtail::pg_proxy {
                       bool enable_ssl,
                       LoggerPtr shadow_logger)
     {
-        _thread_pool = std::make_shared<ThreadPool<Runnable>>(thread_pool_size);
+        _thread_pool = std::make_shared<ThreadPool<Session>>(thread_pool_size);
         _id = arc4random();
         _enable_ssl = enable_ssl;
         _mode = mode;
@@ -307,7 +307,7 @@ namespace springtail::pg_proxy {
 
             // add session to the waiting sessions list
             // and to the session map
-            register_session(session, client_socket, true);
+            register_session(session, nullptr, client_socket, true);
         }
     }
 
@@ -325,6 +325,8 @@ namespace springtail::pg_proxy {
     void
     ProxyServer::run()
     {
+        std::set<SessionPtr, Session::SessionComparator> runnable_sessions;
+
         while (!_shutdown) {
             // poll for readable sockets
             // lock the waiting sessions mutex
@@ -342,6 +344,7 @@ namespace springtail::pg_proxy {
                 PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Adding socket to poll list: {}", session_socket);
                 fds[nfds].fd = session_socket;
                 fds[nfds].events = POLLIN;
+                fds[nfds].revents = 0;
                 nfds++;
             }
 
@@ -375,47 +378,53 @@ namespace springtail::pg_proxy {
                 n--;
             }
 
-            // go through fds and find the sessions that are now runnable
-            // remove them from waiting sessions list, insert them into runnable sessions list
-            std::set<RunnablePtr> runnable_sessions;
-
+            // go through fds and find the sessions that are now session
+            // remove them from waiting sessions list, insert them into session sessions list
             std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
-            for (int i = 2; i < _sessions.size() + 2 && n > 0; i++) {
+            for (int i = 2; i < nfds + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
                     int fd = fds[i].fd;
-                    auto session = _sessions.find(fd);
+                    auto session_itr = _sessions.find(fd);
                     PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
 
                     // lookup fd in sessions map
-                    if (session != _sessions.end()) {
-                        // find runnable object and insert into runnable sessions
-                        auto runnable = session->second;
-                        runnable_sessions.insert(runnable);
+                    if (session_itr != _sessions.end()) {
+                        // find session object and insert into session sessions
+                        auto session = session_itr->second;
+                        // for this session update the set of fds that have data
+                        session->add_fd(fd);
+                        // insert into set of runnable sessions
+                        auto ins_res = runnable_sessions.insert(session);
+                        if (!ins_res.second) {
+                            // already inserted session into runnable set, socket should not be waiting_sessions
+                            DCHECK_EQ(_waiting_sessions.erase(fd), 0);
+                        } else {
+                            // remove all associated sockets from the waiting sessions list
+                            auto it = _session_sockets.find(session);
+                            CHECK(it != _session_sockets.end());
 
-                        // for this runnable update the set of fds that have data
-                        runnable->fds.insert(fd);
-
-                        // remove all associated sockets from the waiting sessions list
-                        auto range = _session_sockets.equal_range(runnable);
-                        for (auto it = range.first; it != range.second; it++) {
-                            _waiting_sessions.erase(fd);
+                            for (auto socket : it->second) {
+                                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
+                                CHECK_EQ(_waiting_sessions.erase(socket), 1);
+                            }
                         }
                     } else {
                         SPDLOG_WARN("Socket {} not found in sessions map", fd);
-                        _waiting_sessions.erase(fd);
+                        CHECK_EQ(_waiting_sessions.erase(fd), 1);
                     }
                     n--;
                 }
             }
             lock2.unlock();
 
-            // queue the sessions that are now runnable
+            // queue the sessions that are now session
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing {} sessions", runnable_sessions.size());
             for (auto &session : runnable_sessions) {
-                //PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session: [{}:{}]",
-                //            session->type_str(), session->id());
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Queueing session {}", session->name());
                 _thread_pool->queue(session);
             }
+
+            runnable_sessions.clear();
         }
 
         SPDLOG_INFO("Proxy server shutting down");
@@ -445,73 +454,99 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::signal(RunnablePtr session)
+    ProxyServer::signal(SessionPtr session)
     {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        session->fds.clear();
+        session->clear_fds();
 
-        auto range = _session_sockets.equal_range(session);
-        for (auto it = range.first; it != range.second; it++) {
-            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", it->second);
-            _waiting_sessions.insert(it->second);
+        // lookup session in the session map
+        auto session_itr = _session_sockets.find(session);
+        CHECK(session_itr != _session_sockets.end());
+
+        // go through the list of sockets and add them back to the waiting sessions list
+        for (auto socket: session_itr->second) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Signaled server waiting on socket {}", socket);
+            _waiting_sessions.insert(socket);
         }
-        lock.unlock();
+         lock.unlock();
 
         // signal the eventfd to wake up the main loop
         _wake_event_loop();
     }
 
     void
-    ProxyServer::shutdown_session(int socket)
+    ProxyServer::shutdown_session(SessionPtr session)
     {
-        // _log_disconnect(session);
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
-        _internal_shutdown_session(socket, lock);
+        _internal_shutdown_session(session, lock);
         lock.unlock();
 
         _wake_event_loop();
     }
 
     void
-    ProxyServer::_internal_shutdown_session(int socket, std::unique_lock<std::mutex> &lock)
+    ProxyServer::_internal_shutdown_session(SessionPtr session, std::unique_lock<std::mutex> &lock)
     {
         CHECK(lock.owns_lock());
 
-        // lookup socket in sessions map socket->runnable
-        auto session = _sessions.find(socket);
-        if (session != _sessions.end()) {
-            // remove the session from the sockets map (runnable->socket)
-            _session_sockets.erase(session->second);
-            // remove the socket based on the runnable
-            _sessions.erase(session);
-        } else {
-            SPDLOG_WARN("Socket {} not found in sessions map", socket);
+        auto session_itr = _session_sockets.find(session);
+        if (session_itr == _session_sockets.end()) {
+            SPDLOG_WARN("Session not found in session sockets map: {}", session->name());
+            return;
         }
-        _waiting_sessions.erase(socket);
+
+        // go through the list of sockets and remove them
+        for (auto socket: session_itr->second) {
+            _waiting_sessions.erase(socket);
+            _sessions.erase(socket);
+        }
+
+        // remove the session from the sockets map (session->socket)
+        _session_sockets.erase(session_itr);
     }
 
     void
-    ProxyServer::register_session(RunnablePtr runnable,
+    ProxyServer::register_session(SessionPtr new_session,
+                                  SessionPtr old_session,
                                   int socket,
                                   bool waiting_session_insert)
     {
         // all new sessions must be registered, so good place to log it
         // _log_connect(session);
 
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Registering socket {} with session: {}", socket, new_session->name());
+
+        if (old_session != nullptr) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "De-registering session: {}", old_session->name());
+        }
+
         // add the session to the list of sessions
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
 
         // first do a removal based on socket
-        _internal_shutdown_session(socket, lock);
-
-        // then do the insert
-        _sessions.insert(std::make_pair(socket, runnable));
-        _session_sockets.insert(std::make_pair(runnable, socket));
-        if (waiting_session_insert) {
-            _waiting_sessions.insert(socket);
+        if (old_session != nullptr) {
+            _internal_shutdown_session(old_session, lock);
         }
 
+        // double check the socket isn't registered
+        _sessions.erase(socket);
+
+        // then do the insert; <socket, session>
+        auto ins_res = _sessions.insert(std::make_pair(socket, new_session));
+        CHECK(ins_res.second);
+
+        // then do the insert; <session, vector:socket>
+        auto res = _session_sockets.insert(std::make_pair(new_session, std::vector<int>()));
+        res.first->second.push_back(socket);
+
+        if (waiting_session_insert) {
+            _waiting_sessions.insert(socket);
+        } else {
+            int n = _waiting_sessions.erase(socket);
+            DCHECK_EQ(n, 0);
+        }
         lock.unlock();
+
         _wake_event_loop();
     }
 

@@ -15,7 +15,7 @@
 #include <common/thread_pool.hh>
 #include <common/singleton.hh>
 
-#include <proxy/runnable.hh>
+#include <proxy/Session.hh>
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
@@ -61,15 +61,23 @@ namespace springtail::pg_proxy {
         void run();
 
         /** Signal server main loop to reset poll fd set */
-        void signal(RunnablePtr session);
+        void signal(SessionPtr session);
 
-        /** Register a new session, add to <socket, session> to _sessions map*/
-        void register_session(RunnablePtr session,
+        /**
+         * @brief Register a new session, add to <socket, session> to _sessions map
+         * Remove old session association if it exists
+         * @param new_session session to add
+         * @param old_session session to replace
+         * @param socket socket for the session
+         * @param waiting_session_insert true if session is being added to _waiting_sessions
+         */
+        void register_session(SessionPtr new_session,
+                              SessionPtr old_session,
                               int socket,
                               bool waiting_session_insert=false);
 
-        /** Cleanup a session, remove from _sessions_map, remove from poll fd set */
-        void shutdown_session(int socket);
+        /** Cleanup a session, remove from _sessions_map, remove all associated sockets */
+        void shutdown_session(SessionPtr session);
 
         /** Allocate SSL struct for new connection */
         SSL *SSL_new(bool is_server) {
@@ -114,12 +122,14 @@ namespace springtail::pg_proxy {
         int _efd;      ///< eventfd for signaling
 
         uint32_t _id;  ///< unique id for this proxy server
-        std::shared_ptr<ThreadPool<Runnable>> _thread_pool;    ///< thread pool for handling incoming session data
+        std::shared_ptr<ThreadPool<Session>> _thread_pool;    ///< thread pool for handling incoming session data
 
         std::mutex _waiting_sessions_mutex;   ///< mutex for _waiting_sessions set and _sessions map
         std::set<int> _waiting_sessions;      ///< set of connection sockets waiting for read data
-        std::map<int, RunnablePtr> _sessions; ///< map of connection socket to session object
-        std::unordered_multimap<RunnablePtr, int> _session_sockets; ///< map of session to connection socket
+        std::map<int, SessionPtr> _sessions;  ///< map of connection socket to session object
+
+        /** map of session to connection socket */
+        std::unordered_map<SessionPtr, std::vector<int>, Session::SessionHash, Session::SessionEqual> _session_sockets;
 
         SSL_CTX *_ssl_ctx_server = nullptr;  ///< SSL context for server
         SSL_CTX *_ssl_ctx_client = nullptr;  ///< SSL context for client
@@ -145,7 +155,7 @@ namespace springtail::pg_proxy {
         void _log_disconnect(SessionPtr session);
 
         /** Internal shutdown session -- helper, assumes lock is held */
-        void _internal_shutdown_session(int socket, std::unique_lock<std::mutex> &lock);
+        void _internal_shutdown_session(SessionPtr session, std::unique_lock<std::mutex> &lock);
 
         /** Wake up intternal event loop to reprocess waiting session */
         void _wake_event_loop();

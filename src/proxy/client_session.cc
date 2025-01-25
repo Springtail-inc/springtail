@@ -49,31 +49,53 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ClientSession::run(const std::set<int> &fds)
+    ClientSession::run(std::set<int> &fds)
     {
         // main entry point for client session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session running", _id);
 
-        // first go through fds and check if we have any pending data
-        // first check client session
-        if (fds.contains(_connection->get_socket())) {
-            // wrap with error handler to catch any exceptions
-            _wrap_error_handler([this] {
-                _process_connection();
-            });
+        do {
+            // go through fds and check if we have any pending data
+            // first check client session
+            if (fds.contains(_connection->get_socket())) {
+                // wrap with error handler to catch any exceptions
+                _wrap_error_handler([this] {
+                    _process_connection();
+                });
+            }
+
+            // check if we have any server sessions
+            if (_primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
+                _primary_session->process_connection(_gen_seq_id());
+            }
+
+            if (_replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
+                _replica_session->process_connection(_gen_seq_id());
+            }
+
+            fds.clear();
+
+        } while (_has_pending_data(fds));
+
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[C:{}] Client session done", _id);
+    }
+
+    bool
+    ClientSession::_has_pending_data(std::set<int> &fds) const
+    {
+        std::vector<ProxyConnectionPtr> connections;
+        connections.push_back(_connection);
+
+        if (_primary_session) {
+            connections.push_back(_primary_session->get_connection());
         }
 
-        // check if we have any server sessions
-        if (_primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
-            _primary_session->process_connection(_gen_seq_id());
+        if (_replica_session) {
+            connections.push_back(_replica_session->get_connection());
+
         }
 
-        if (_replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
-            _replica_session->process_connection(_gen_seq_id());
-        }
-
-        // re-enable processing
-        ProxyServer::get_instance()->signal(shared_from_this());
+        return ProxyConnection::has_pending(connections, fds);
     }
 
     void
@@ -163,6 +185,57 @@ namespace springtail::pg_proxy {
 
         _stmt_cache.sync_transaction(xact_status);
     }
+
+    void
+    ClientSession::server_shutdown(ServerSessionPtr session)
+    {
+        // server session is shutting down
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Server session shutting down", _id);
+
+        if (session->type() == Session::Type::PRIMARY) {
+            // primary session is shutting down
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Primary session shutting down", _id);
+            _primary_session = nullptr;
+        } else {
+            // replica session is shutting down
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Replica session shutting down", _id);
+            _replica_session = nullptr;
+            // XXX need to failover to new replica
+        }
+
+        // XXX right now can't handle this
+        clear_associated_session();
+        _state = ERROR;
+    }
+
+
+    void
+    ClientSession::shutdown_session(void)
+    {
+        // Callback from Session::_handle_error()
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client session shutting down", _id);
+
+        // first close connection and remove from server poll list
+        // this removes all associated sockets from this session
+        _connection->close();
+        ProxyServer::get_instance()->shutdown_session(shared_from_this());
+
+        // notify server replica/primary sessions via shutdown_server_sessions()
+        uint64_t seq_id = _gen_seq_id();
+        if (_primary_session != nullptr) {
+            _primary_session->process_shutdown(seq_id);
+            _primary_session = nullptr;
+        }
+
+        if (_replica_session != nullptr) {
+            _replica_session->process_shutdown(seq_id);
+            _replica_session = nullptr;
+        }
+
+        // clear all internal data structures; clears associated session
+        reset_session();
+    }
+
 
     void
     ClientSession::_handle_request()
@@ -264,7 +337,11 @@ namespace springtail::pg_proxy {
         // instead clients should use a prepared statement
 
         // send to primary server session
-        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id);
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::FUNCTION, buffer, false);
+
+        SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FUNCTION, qs, seq_id);
+
+        // select a server session and queue message
         _send_msg(msg, false);
     }
 
@@ -499,7 +576,9 @@ namespace springtail::pg_proxy {
             session = _select_session(REPLICA, seq_id);
         }
 
-        session->process_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, buffer, seq_id));
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer,
+            session->type() == REPLICA);
+        session->process_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs, seq_id));
     }
 
     void
@@ -679,14 +758,14 @@ namespace springtail::pg_proxy {
         // during allocation or just after prior to being pinned
         // we should check for this and handle it
 
-        // register server session connection with server
-        ProxyServer::get_instance()->register_session(shared_from_this(), session->get_connection()->get_socket());
+        // first unregister server session and then register connection with server
+        ProxyServer::get_instance()->register_session(shared_from_this(), session, session->get_connection()->get_socket());
 
         if (from_pool) {
             // if session is ready and clean, we can use it
             auto &&parameters = _auth->parameters();
             if (session->check_startup_params(parameters)) {
-                session->set_ready();
+                session->set_ready_reset_done();
             } else {
                 // apply parameters to session if they don't match
                 PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Applying session parameters to server session: id={}", _id, session->id());
@@ -853,19 +932,6 @@ namespace springtail::pg_proxy {
 
         qs->is_read_safe = is_read_safe;
         return qs;
-    }
-
-    void
-    ClientSession::shutdown_server_sessions()
-    {
-        uint64_t seq_id = _gen_seq_id();
-        if (_primary_session != nullptr) {
-            _primary_session->process_shutdown(seq_id);
-        }
-
-        if (_replica_session != nullptr) {
-            _replica_session->process_shutdown(seq_id);
-        }
     }
 
 } // namespace springtail::pg_proxy

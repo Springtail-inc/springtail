@@ -6,8 +6,8 @@
 #include <vector>
 #include <set>
 #include <unordered_map>
+#include <fmt/core.h>
 
-#include <proxy/runnable.hh>
 #include <proxy/session.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/connection.hh>
@@ -23,7 +23,7 @@ namespace springtail::pg_proxy {
     class ServerSession;
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
 
-    class ClientSession : public Session, public Runnable
+    class ClientSession : public Session
     {
     public:
         constexpr static int STATEMENT_CACHE_SIZE = 100;
@@ -36,7 +36,16 @@ namespace springtail::pg_proxy {
 
         ~ClientSession();
 
-        void run(const std::set<int> &fds) override;
+        /** Entry point from runnable */
+        void run(std::set<int> &fds) override;
+
+        /** Runnable name */
+        std::string name() const override {
+            return fmt::format("Client[{}]", _id);
+        }
+
+        /** Callback from Session::_handle_error() to shutdown the session */
+        void shutdown_session() override;
 
         /**
          * @brief Is client session in shadow mode: sending to primary and replica,
@@ -94,11 +103,6 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Shutdown the client session; send shutdown message to server sessions
-         */
-        void shutdown_server_sessions();
-
-        /**
          * @brief Callback from Server indicating that authentication is done
          */
         void server_auth_done(ServerSessionPtr session, const std::unordered_map<std::string, std::string> &parameters);
@@ -116,6 +120,12 @@ namespace springtail::pg_proxy {
          */
         void server_ready_msg(char xact_status);
 
+        /**
+         * @brief Callback from Server indicating that it is shutting down
+         * @param session session that is shutting down
+         */
+        void server_shutdown(ServerSessionPtr session);
+
     private:
 
         /** cache of statements, transaction history and session history */
@@ -131,7 +141,13 @@ namespace springtail::pg_proxy {
 
         ClientAuthorizationPtr _auth; ///< client authorization
 
-        void _run(const std::set<int> &fds);
+        /**
+         * @brief Check for pending data on any associated connections
+         * @param fds set of fds; set socket if socket has data
+         * @return true if any socket has data
+         * @return false if no socket has data
+         */
+        bool _has_pending_data(std::set<int> &fds) const;
 
         /**
          * @brief Entry point for data from the connection, called from _run()

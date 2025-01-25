@@ -108,13 +108,58 @@ namespace springtail::pg_proxy {
         Session(const Session&) = delete;
         Session& operator=(const Session&) = delete;
 
+        /** Thread entry point, calls child::run() */
+        void operator()();
+
         /** Destruct a connection. */
         virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
+
+        /** Virtual run to be overriden by child class */
+        virtual void run(std::set<int> &fds) = 0;
+
+        /** Perform a fatal shutdown */
+        virtual void shutdown_session() = 0;
+
+        /** Name of session */
+        virtual std::string name() const {
+            return fmt::format("[{}:{}]", type_str(), _id);
+        }
+
+        /** Helper to add file descriptor */
+        void add_fd(int fd) {
+            _fds.insert(fd);
+        }
+
+        /** Helper to clear file descriptors */
+        void clear_fds() {
+            _fds.clear();
+        }
 
         /** Less than operator for std::set */
         bool operator<(const Session &rhs) const {
             return _id < rhs._id;
         }
+
+        /** Comparator for SessionPtr */
+        struct SessionComparator {
+            bool operator()(const SessionPtr &lhs, const SessionPtr &rhs) const {
+                return lhs->_id < rhs->_id;
+            }
+        };
+
+        /** Custom hash function for SessionPtr */
+        struct SessionHash {
+            std::size_t operator()(const SessionPtr& session) const {
+                return std::hash<int>{}(session->_id);  // Hash based on `_id`
+            }
+        };
+
+        /** Custom equality function for SessionPtr */
+        struct SessionEqual {
+            bool operator()(const SessionPtr& lhs, const SessionPtr& rhs) const {
+                return lhs->_id == rhs->_id;  // Compare based on `_id`
+            }
+        };
 
         /** Get connection associated with this session */
         ProxyConnectionPtr get_connection() const {
@@ -167,16 +212,6 @@ namespace springtail::pg_proxy {
         /** Get db instance */
         DatabaseInstancePtr get_instance() const {
             return _instance;
-        }
-
-        /** Shutdown the session, close connection, etc */
-        void shutdown() {
-            SPDLOG_DEBUG_MODULE(LOG_PROXY, "Shutting down session: type={}, socket={}",
-                         _type == Type::PRIMARY ? "PRIMARY" : "CLIENT",
-                         _connection->get_socket());
-            CHECK_EQ(_associated_session, nullptr);
-            _state = ERROR;
-            _handle_error();
         }
 
         /** Check if session is in ready state or not */
@@ -444,17 +479,14 @@ namespace springtail::pg_proxy {
         /** atomic shutdown flag */
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
+        std::atomic_flag _running = ATOMIC_FLAG_INIT;
+
         /** queue of messages to process */
         ConcurrentQueue<SessionMsg> _msg_queue;
 
-        uint32_t _seq_id = 0;              ///< sequence id for this session
+        std::set<int> _fds;     ///< set of fds to pass to run()
 
-        /**
-         * Single place to do error handling on messages.  Called to check for queued messages.
-         * @param is_remote true if this called on an associated session
-         */
-        void _internal_process_msgs(bool is_remote);
-
+        uint32_t _seq_id = 0;   ///< sequence id for this session
     };
     using SessionPtr = std::shared_ptr<Session>;
 } // namespace springtail::pg_proxy

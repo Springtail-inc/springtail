@@ -30,6 +30,7 @@ namespace springtail::pg_proxy {
             {MSG_CLIENT_SERVER_EXECUTE, "MSG_CLIENT_SERVER_EXECUTE"},
             {MSG_CLIENT_SERVER_CLOSE, "MSG_CLIENT_SERVER_CLOSE"},
             {MSG_CLIENT_SERVER_SYNC, "MSG_CLIENT_SERVER_SYNC"},
+            {MSG_CLIENT_SERVER_FUNCTION, "MSG_CLIENT_SERVER_FUNCTION"},
             {MSG_CLIENT_SERVER_FORWARD, "MSG_CLIENT_SERVER_FORWARD"},
             {MSG_SERVER_CLIENT_FATAL_ERROR, "MSG_SERVER_CLIENT_FATAL_ERROR"}
     };
@@ -61,6 +62,28 @@ namespace springtail::pg_proxy {
             _db_id = optional_db_id.value();
         } else {
             _state = ERROR;
+        }
+    }
+
+    void
+    Session::operator()()
+    {
+        if (_running.test_and_set()) {
+            SPDLOG_ERROR("{} Session already running", name());
+            assert(0);
+            return;
+        }
+
+        // call child run method
+        run(_fds);
+
+        // clear fds
+        _fds.clear();
+
+        // re-enable processing for this socket
+        _running.clear();
+        if (!_connection->closed()) {
+            ProxyServer::get_instance()->signal(shared_from_this());
         }
     }
 
@@ -229,34 +252,8 @@ namespace springtail::pg_proxy {
         SPDLOG_WARN("Error state, closing connection: type={} for session id={}\n",
                      _type == Type::PRIMARY ? "PRIMARY" : "CLIENT", _id);
 
-        // general error handling, shutdown for both clients and servers
-        if (_type == Type::PRIMARY || _type == Type::REPLICA) {
-            // This is a server session, notify client session of error
-            ServerSession *server_session = static_cast<ServerSession *>(this);
-            server_session->shutdown_client_session();
-
-            // on error, the server shuts down the connection and releases the session
-            // on clean shutdown (initiated by client), it is released back to the pool
-            _connection->close();
-            ProxyServer::get_instance()->shutdown_session(_connection->get_socket());
-
-            // release the session, and deallocate it
-            server_session->release_session(true);
-
-            // the client will notify the other server session of the error
-            // when it comes through this code path
-
-        } else if (_type == Type::CLIENT) {
-            // This is a client session, notify server sessions of error
-
-            // first close connection and remove from server poll list
-            _connection->close();
-            ProxyServer::get_instance()->shutdown_session(_connection->get_socket());
-
-            // notify server replica/primary sessions via shutdown_server_sessions()
-            ClientSession *client = static_cast<ClientSession *>(this);
-            client->shutdown_server_sessions();
-        }
+        // shutdown the session, calls into child class
+        shutdown_session();
     }
 
     void

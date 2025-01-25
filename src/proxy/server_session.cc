@@ -37,7 +37,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::run(const std::set<int> &fds)
+    ServerSession::run(std::set<int> &fds)
     {
         // should only be called when session is in reset state
         CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
@@ -46,13 +46,11 @@ namespace springtail::pg_proxy {
         _wrap_error_handler([this] {
             // process the reset query response
             _handle_reset_session_message();
-            // re-enable processing for this socket
-            ProxyServer::get_instance()->signal(shared_from_this());
         });
     }
 
     void
-    ServerSession::release_session(bool deallocate)
+    ServerSession::_release_session(bool deallocate)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Server type={}; releasing session", _id,
                     (_type == REPLICA ? "Replica" : "Primary"));
@@ -111,10 +109,33 @@ namespace springtail::pg_proxy {
         // wrap in error handler to catch any exceptions
         _wrap_error_handler([this, seq_id, parameters]() {
             _seq_id = seq_id;
+
+            // encode parameters as set statements in simple query
+            if (!_send_status_query(parameters)) {
+                // nothing to send set to ready state
+                set_ready_reset_done();
+                return;
+            }
+
             _state = RESET_SESSION_PARAMS;
-            BufferPtr buffer = _encode_status_query(parameters);
-            _send_buffer(buffer, seq_id, 'Q');
         });
+    }
+
+    void
+    ServerSession::set_ready_reset_done()
+    {
+        CHECK(_state == RESET_SESSION_READY || _state == RESET_SESSION_PARAMS);
+
+        // set state to ready
+        _seq_id = 0;
+        _state = READY;
+
+        // XXX these params may have to be merged with the ones we just set
+
+        // do callback to client session
+        auto cs = get_client_session();
+        CHECK_NE(cs, nullptr);
+        cs->server_auth_done(shared_from_this(), _auth->server_parameters());
     }
 
     void
@@ -140,6 +161,7 @@ namespace springtail::pg_proxy {
                 case SessionMsg::MSG_CLIENT_SERVER_EXECUTE:
                 case SessionMsg::MSG_CLIENT_SERVER_CLOSE:
                 case SessionMsg::MSG_CLIENT_SERVER_SYNC:
+                case SessionMsg::MSG_CLIENT_SERVER_FUNCTION:
                     _handle_msg_to_server(msg);
                     break;
 
@@ -183,7 +205,7 @@ namespace springtail::pg_proxy {
         _state = RESET_SESSION;
 
         // register the session with the server
-        ProxyServer::get_instance()->register_session(shared_from_this(), _connection->get_socket(), true);
+        ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
 
         // send the reset simple query to server
         _send_reset();
@@ -203,10 +225,10 @@ namespace springtail::pg_proxy {
                     _state = READY;
 
                     // notify client session that auth is done
-                    auto session = get_client_session();
-                    CHECK_NE(session, nullptr);
+                    auto cs = get_client_session();
+                    CHECK_NE(cs, nullptr);
                     auto &&params = _auth->server_parameters();
-                    session->server_auth_done(shared_from_this(), params);
+                    cs->server_auth_done(shared_from_this(), params);
                 }
                 break;
 
@@ -218,12 +240,15 @@ namespace springtail::pg_proxy {
                 _handle_message_from_server();
                 break;
 
-            case RESET_SESSION:
             case RESET_SESSION_READY:
             case RESET_SESSION_PARAMS:
                 // session is being or has just been reset
                 // mostly dropping messages or handling error waiting for client
                 _handle_reset_session_message();
+                break;
+
+            case RESET_SESSION:
+                CHECK_NE(_state, RESET_SESSION);
                 break;
 
             default:
@@ -268,6 +293,8 @@ namespace springtail::pg_proxy {
             return;
         }
 
+        assert(msg_length < 10000); // sanity check
+
         switch (code) {
             case 'Z': {                 // Ready for query
                 // read buffer and log it
@@ -289,18 +316,14 @@ namespace springtail::pg_proxy {
                     assert(status == 'I');
                     _seq_id = 0;
                     _state = RESET_SESSION_READY;
-                    release_session(false);
+                    _release_session(false);
                     return;
                 }
 
                 if (_state == RESET_SESSION_PARAMS) {
                     assert(status == 'I');
-                    // sent init params, now ready for queries, notify client
-                    _seq_id = 0;
-                    _state = READY;
-                    // emulate auth_done message to client
-                    // XXX these params may have to be merged with the ones we just set
-                    get_client_session()->server_auth_done(shared_from_this(), _auth->server_parameters());
+                    // reset is complete move to ready state
+                    set_ready_reset_done();
                     return;
                 }
 
@@ -643,7 +666,9 @@ namespace springtail::pg_proxy {
         }
 
         // send ready for query message to client
-        get_client_session()->server_ready_msg(xact_status);
+        auto cs = get_client_session();
+        CHECK_NE(cs, nullptr);
+        cs->server_ready_msg(xact_status);
 
         // if all queries complete, set state to ready
         if (_pending_queue.empty()) {
@@ -788,7 +813,9 @@ namespace springtail::pg_proxy {
             return;
         }
         // otherwise send message and status to client session
-        get_client_session()->server_msg_response(msg, success);
+        auto cs = get_client_session();
+        CHECK_NE(cs, nullptr);
+        cs->server_msg_response(msg, success);
     }
 
     void
@@ -845,10 +872,16 @@ namespace springtail::pg_proxy {
         _send_buffer(buffer, _seq_id, 'X');
     }
 
-    BufferPtr
-    ServerSession::_encode_status_query(const std::unordered_map<std::string, std::string> &parameters)
+    bool
+    ServerSession::_send_status_query(const std::unordered_map<std::string, std::string> &parameters)
     {
         std::ostringstream query;
+
+        if (parameters.empty()) {
+            // no parameters to set
+            return false;
+        }
+
         for (const auto& [key, value] : parameters) {
             if (EXCLUDED_STARTUP_PARAMS.contains(key)) {
                 continue;
@@ -856,6 +889,11 @@ namespace springtail::pg_proxy {
             query << "SET " << key << "=" << value << ";";
         }
         std::string query_str = query.str();
+
+        if (query_str.empty()) {
+            // no parameters to set
+            return false;
+        }
 
         // create a buffer for the query
         // length = 4B len + query size + null terminator + code byte
@@ -867,7 +905,33 @@ namespace springtail::pg_proxy {
         buffer->put32(length - 1); // subtract 1 for the code byte
         buffer->put_string(query.str());
 
-        return buffer;
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server session: encode status query: {}", _id, query_str);
+
+        _send_buffer(buffer, _seq_id, 'Q');
+
+        return true;
+    }
+
+    void
+    ServerSession::shutdown_session()
+    {
+        // callback from Session::_handle_error()
+
+        // notify client session of error
+        auto client = get_client_session();
+        if (client != nullptr) {
+            client->server_shutdown(shared_from_this());
+        }
+
+        // on error, the server shuts down the connection and releases the session
+        _connection->close();
+        ProxyServer::get_instance()->shutdown_session(shared_from_this());
+
+        // clear all internal data structures
+        reset_session();
+
+        // release the session, and deallocate it
+        _release_session(true);
     }
 
     /** factory to create session */

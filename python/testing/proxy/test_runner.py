@@ -286,6 +286,7 @@ class Test:
                 (pids, not_running) = running_pids(['proxy'])
                 if not pids:
                     print("Can't find running proxy process")
+                    break
                 else:
                     break
         else:

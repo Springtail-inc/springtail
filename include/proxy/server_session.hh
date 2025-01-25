@@ -4,6 +4,7 @@
 #include <queue>
 #include <set>
 #include <unordered_map>
+#include <fmt/core.h>
 
 #include <proxy/session.hh>
 #include <proxy/client_session.hh>
@@ -11,7 +12,6 @@
 #include <proxy/user_mgr.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/authorization.hh>
-#include <proxy/runnable.hh>
 
 namespace springtail::pg_proxy {
 
@@ -42,7 +42,7 @@ namespace springtail::pg_proxy {
      * This object represents a session with a remote database.
      * The database may be either the primary or a replica
      */
-    class ServerSession : public Session, public Runnable {
+    class ServerSession : public Session {
     public:
         ServerSession(const ServerSession&) = delete;
         ServerSession& operator=(const ServerSession&) = delete;
@@ -64,10 +64,18 @@ namespace springtail::pg_proxy {
             : Session(type, id, db_id, database, username)
         {}
 
-        ~ServerSession() {};
+        ~ServerSession() { PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id); }
 
-        /** Runnable entry point from server */
-        void run(const std::set<int> &fds) override;
+        /** Entry point from server */
+        void run(std::set<int> &fds) override;
+
+        /** Session name */
+        std::string name() const override {
+            return fmt::format("Server[{}]", _id);
+        }
+
+        /** Shutdown session called from Session::_handle_error() */
+        void shutdown_session() override;
 
         /**
          * @brief Pin this session to a client session
@@ -97,25 +105,7 @@ namespace springtail::pg_proxy {
             if (client == nullptr) {
                 client = std::dynamic_pointer_cast<ClientSession>(get_associated_session());
             }
-            CHECK_NE(client, nullptr);
             return client;
-        }
-
-        /**
-         * @brief Shutdown the client session
-         */
-        void shutdown_client_session()
-        {
-            SessionMsgPtr msg = std::make_shared<SessionMsg>(SessionMsg::MSG_SERVER_CLIENT_FATAL_ERROR);
-            SessionPtr client = _client_session.lock();
-            if (client == nullptr) {
-                client = get_associated_session();
-                if (client == nullptr) {
-                    return;
-                }
-            }
-
-            client->queue_shutdown_msg(msg);
         }
 
         /**
@@ -127,12 +117,6 @@ namespace springtail::pg_proxy {
         }
 
         /**
-         * @brief Helper to release the session
-         * @param deallocate if true it will deallocate the session and not add to the pool
-         */
-        void release_session(bool deallocate);
-
-        /**
          * @brief Reset the session, override base session (and call it)
          */
         void reset_session() override {
@@ -142,7 +126,7 @@ namespace springtail::pg_proxy {
             while (!_pending_queue.empty()) {
                 _pending_queue.pop();
             }
-            // reset base session
+            // reset base session - clears associated session, etc
             Session::reset_session();
         }
 
@@ -155,12 +139,9 @@ namespace springtail::pg_proxy {
         bool check_startup_params(const std::unordered_map<std::string, std::string> &parameters);
 
         /**
-         * @brief Set the session to ready state
+         * @brief Set the session to ready state after being reset
          */
-        void set_ready() {
-            CHECK_EQ(_state, RESET_SESSION_READY);
-            _state = READY;
-        }
+        void set_ready_reset_done();
 
         /**
          * @brief Called from client session to start authorization
@@ -225,7 +206,7 @@ namespace springtail::pg_proxy {
         void _send_reset();
 
         /**
-         * Send required statements to fulfil dependency
+         * @brief Send required statements to fulfil dependency
          * @param dependency dependency to fulfil
          */
         void _send_dependency(const QueryStmtPtr dependency, uint64_t seq_id);
@@ -262,14 +243,20 @@ namespace springtail::pg_proxy {
         /** Helper to read data and drop it */
         void _read_and_drop_message(int msg_length);
 
-        /** Encode status parameters using simple query */
-        BufferPtr _encode_status_query(const std::unordered_map<std::string, std::string> &parameters);
+        /** Encode status parameters using simple query, return true if sent */
+        bool _send_status_query(const std::unordered_map<std::string, std::string> &parameters);
 
         /** Get the type of the head of the pending queue */
         QueryStmt::Type _get_pending_query_type();
 
         /** Send message response to the client session */
         void _client_msg_response(SessionMsgPtr msg, bool success);
+
+        /**
+         * @brief Helper to release the session
+         * @param deallocate if true it will deallocate the session and not add to the pool
+         */
+        void _release_session(bool deallocate);
     };
     using ServerSessionPtr = std::shared_ptr<ServerSession>;
     using ServerSessionWeakPtr = std::weak_ptr<ServerSession>;
