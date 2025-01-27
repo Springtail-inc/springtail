@@ -23,6 +23,9 @@
 #include <storage/field.hh>
 #include <storage/xid.hh>
 
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
+
 namespace springtail::pg_log_mgr {
     /**
      * @brief Log reader class.  Reads logs written by PgLogWriter.  Collects the various table
@@ -38,11 +41,7 @@ namespace springtail::pg_log_mgr {
          * @brief Construct a new Pg Log Reader object
          * @param queue queue to enqueue parsed xactions for xid logger and GC
          */
-        PgLogReader(uint64_t db_id,
-                    const PgTransactionQueuePtr queue)
-            : _db_id(db_id),
-              _queue(queue)
-        { }
+        PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue);
 
         /**
          * @brief Process next set of messages from log file
@@ -249,5 +248,7 @@ namespace springtail::pg_log_mgr {
         /** Check if we need to perform a table swap / commit and notify the Committer if so. */
         void _check_sync_commit(uint64_t db_id, int32_t pg_xid, uint64_t xid);
 
+        std::shared_ptr<opentelemetry::metrics::Histogram<double>> _postgres_log_reader_latencies;
+        opentelemetry::context::Context _context;
     };
 } // namespace springtail::pg_log_mgr

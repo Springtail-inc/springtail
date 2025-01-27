@@ -2,26 +2,35 @@
 
 #include <common/logging.hh>
 #include <common/tracing.hh>
-
 #include <garbage_collector/xid_ready.hh>
-
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_repl_msg.hh>
-
-#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-
 #include <pg_repl/pg_msg_stream.hh>
-
+#include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_types.hh>
 #include <storage/xid.hh>
-
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
-
 #include <write_cache/write_cache_func.hh>
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
 
 namespace springtail::pg_log_mgr {
+
+    PgLogReader::PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue)
+        : _db_id(db_id),
+          _queue(queue)
+    {
+        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
+        _postgres_log_reader_latencies = std::shared_ptr<opentelemetry::metrics::Histogram<double>>(
+            meter
+                ->CreateDoubleHistogram("postgres_log_reader_latencies",
+                                        "Latency between when Postgres committed the transaction "
+                                        "and when we process it in the log reader",
+                                        "ms")
+                .release());
+    }
 
     void
     PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
@@ -639,6 +648,15 @@ namespace springtail::pg_log_mgr {
         }
 
         assert (xact->type == PgTransaction::TYPE_COMMIT);
+
+        // Record latency between postgres commit time and when we process it
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            PostgresTimestamp(commit_msg.commit_ts).to_system_time());
+        _postgres_log_reader_latencies->Record(duration.count(), _context);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                            "Commit processed {} milliseconds after postgres commit",
+                            duration.count());
 
         // set transaction path and end offset
         xact->commit_path = _current_path;
