@@ -219,8 +219,8 @@ namespace springtail::pg_proxy {
         /** Handle replies from server */
         void _handle_message_from_server();
 
-        /** Handle error code 'E' */
-        void _decode_error_buffer(BufferPtr buffer, uint64_t seq_id);
+        /** Handle error code 'E' -- returns error code */
+        std::string _decode_error_buffer(BufferPtr buffer, uint64_t seq_id);
 
         /** Handle forwarded message, first replay dependencies */
         void _handle_msg_to_server(SessionMsgPtr msg);

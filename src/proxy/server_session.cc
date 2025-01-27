@@ -1,7 +1,10 @@
+#include <regex>
+
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
 #include <common/logging.hh>
+#include <common/common.hh>
 
 #include <proxy/session.hh>
 #include <proxy/server_session.hh>
@@ -12,7 +15,7 @@
 #include <proxy/buffer_pool.hh>
 #include <proxy/logging.hh>
 #include <proxy/database.hh>
-
+#include <proxy/util.hh>
 #include <proxy/auth/md5.h>
 #include <proxy/auth/sha256.h>
 #include <proxy/auth/scram.hh>
@@ -334,7 +337,10 @@ namespace springtail::pg_proxy {
                 BufferPtr buffer = _read_message(code, msg_length, _seq_id);
 
                 // decode the error, may set the state to ERROR, if not fatal we ignore for now
-                _decode_error_buffer(buffer, _seq_id);
+                std::string err_code = _decode_error_buffer(buffer, _seq_id);
+
+                DCHECK(code != 'E' || err_code == "57P01");
+
                 break;
             }
 
@@ -539,7 +545,7 @@ namespace springtail::pg_proxy {
         _send_buffer(write_buffer, seq_id, 'Q');
     }
 
-    void
+    std::string
     ServerSession::_decode_error_buffer(BufferPtr buffer, uint64_t seq_id)
     {
         // Error response
@@ -560,7 +566,7 @@ namespace springtail::pg_proxy {
         }
 
         // if not fatal then wait for ready for query from server
-        return;
+        return code;
     }
 
     void
@@ -882,12 +888,39 @@ namespace springtail::pg_proxy {
             return false;
         }
 
+        std::map<std::string, std::string> params;
+
+        // go through parameters to find valid ones
+        // these maps should be very small
         for (const auto& [key, value] : parameters) {
-            if (EXCLUDED_STARTUP_PARAMS.contains(key)) {
+            if (EXCLUDED_STARTUP_PARAMS.contains(key) || !util::is_valid_postgres_key(key)) {
                 continue;
             }
-            query << "SET " << key << "=" << value << ";";
+
+            if (key == "options") {
+                // if the key is options, parse the options, values are quoted
+                auto option_map = util::parse_options(value);
+
+                // go through the options and set the valid ones
+                for (const auto& [opt_key, opt_value] : option_map) {
+                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server options key: {}, value: {}", _id, opt_key, opt_value);
+                    if (util::is_valid_postgres_key(opt_key) &&
+                        !EXCLUDED_STARTUP_PARAMS.contains(opt_key) &&
+                        util::is_valid_postgres_value(opt_value)) {
+                        query << "SET " << opt_key << "=" << opt_value << ";";
+                    }
+                }
+            } else {
+                // regular key value pair
+                std::string quoted_value = util::quote_postgres_value(value);
+                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server key: {}, value: {}", _id, key, quoted_value);
+                if (util::is_valid_postgres_value(quoted_value)) {
+                    query << "SET " << key << "=" << quoted_value << ";";
+                }
+            }
         }
+
+        // get the query string
         std::string query_str = query.str();
 
         if (query_str.empty()) {
