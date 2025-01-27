@@ -433,7 +433,7 @@ namespace springtail::pg_proxy {
          * @param args arguments to pass to function
          */
         template<typename Func, typename... Args>
-        void _wrap_error_handler(Func func, Args... args) {
+        void _wrap_error_handler(Func func, Args && ...args) {
             try {
                 func(std::forward<Args>(args)...);
             } catch (ProxyError &e) {
