@@ -1,22 +1,21 @@
-#include <iostream>
-
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
+#include <iostream>
 #include <sys_tbl_mgr/server.hh>
 
 using namespace springtail;
 
 namespace {
-    void
-    handle_sigint(int signal)
-    {
-        sys_tbl_mgr::Server::get_instance()->stop();
-    }
+void
+handle_sigint(int signal)
+{
+    sys_tbl_mgr::Server::get_instance()->stop();
 }
+}  // namespace
 
-
-int main(int argc, char *argv[]) {
+int
+main(int argc, char *argv[])
+{
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");

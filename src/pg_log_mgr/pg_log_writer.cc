@@ -1,135 +1,135 @@
 #include <unistd.h>
 
 #include <common/common.hh>
-#include <common/logging.hh>
 #include <common/exception.hh>
-
-#include <pg_repl/pg_types.hh>
+#include <common/logging.hh>
 #include <pg_log_mgr/pg_log_writer.hh>
-
+#include <pg_repl/pg_types.hh>
 
 namespace springtail::pg_log_mgr {
 
-    PgLogWriter::PgLogWriter(const std::filesystem::path &file,
-                             std::function<void (uint64_t)> lsn_callback_fn)
-        : _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
+PgLogWriter::PgLogWriter(const std::filesystem::path &file,
+                         std::function<void(uint64_t)> lsn_callback_fn)
+    : _writer(file), _file(file), _lsn_callback_fn(lsn_callback_fn)
 
-    {
-        _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
-    }
+{
+    _fsync_thread = std::thread(&PgLogWriter::_fsync_worker, this);
+}
 
-    void
-    PgLogWriter::_fsync_worker()
-    {
-        while (!_shutdown) {
-            // sleep for at least PG_LOG_MIN_FSYNC_MS
-            std::this_thread::sleep_for(std::chrono::milliseconds(PG_LOG_MIN_FSYNC_MS));
-            if (_shutdown) {
-                break;
-            }
-            uint64_t offset = _current_offset.load();
-
-            // only fsync if offset changed
-            if (offset == _last_fsync_offset.load()) {
-                continue;
-            }
-
-            // do fsync and update offset
-            _writer.sync();
-            _last_fsync_offset = offset;
-
-            _update_lsn_from_queue();
+void
+PgLogWriter::_fsync_worker()
+{
+    while (!_shutdown) {
+        // sleep for at least PG_LOG_MIN_FSYNC_MS
+        std::this_thread::sleep_for(std::chrono::milliseconds(PG_LOG_MIN_FSYNC_MS));
+        if (_shutdown) {
+            break;
         }
-    }
+        uint64_t offset = _current_offset.load();
 
-    void
-    PgLogWriter::_add_lsn_to_queue(uint64_t offset, LSN_t lsn)
-    {
-        std::unique_lock lock{_queue_mutex};
-        _lsn_queue.push(std::make_shared<LsnOffset>(offset, lsn));
-    }
-
-    void
-    PgLogWriter::_update_lsn_from_queue()
-    {
-        std::unique_lock lock{_queue_mutex};
-        uint64_t curr_offset = _last_fsync_offset.load();
-        LSN_t latest_lsn = _latest_synced_lsn.load();
-        LSN_t queued_lsn = INVALID_LSN;
-
-        // go through the lsn queue and check if the current offset
-        // is greater than the offset of the LSN in the queue, if so
-        // then pop the LSN off the queue and update the latest LSN
-        while (!_lsn_queue.empty()) {
-            LsnOffsetPtr p = _lsn_queue.front();
-            if (p->offset <= curr_offset) {
-                queued_lsn = p->lsn;
-                _lsn_queue.pop();
-            } else {
-                break;
-            }
+        // only fsync if offset changed
+        if (offset == _last_fsync_offset.load()) {
+            continue;
         }
 
-        lock.unlock();
+        // do fsync and update offset
+        _writer.sync();
+        _last_fsync_offset = offset;
 
-        if (latest_lsn != queued_lsn && queued_lsn != INVALID_LSN) {
-            _latest_synced_lsn = queued_lsn;
-            _lsn_callback_fn(queued_lsn);
+        _update_lsn_from_queue();
+    }
+}
+
+void
+PgLogWriter::_add_lsn_to_queue(uint64_t offset, LSN_t lsn)
+{
+    std::unique_lock lock{_queue_mutex};
+    _lsn_queue.push(std::make_shared<LsnOffset>(offset, lsn));
+}
+
+void
+PgLogWriter::_update_lsn_from_queue()
+{
+    std::unique_lock lock{_queue_mutex};
+    uint64_t curr_offset = _last_fsync_offset.load();
+    LSN_t latest_lsn = _latest_synced_lsn.load();
+    LSN_t queued_lsn = INVALID_LSN;
+
+    // go through the lsn queue and check if the current offset
+    // is greater than the offset of the LSN in the queue, if so
+    // then pop the LSN off the queue and update the latest LSN
+    while (!_lsn_queue.empty()) {
+        LsnOffsetPtr p = _lsn_queue.front();
+        if (p->offset <= curr_offset) {
+            queued_lsn = p->lsn;
+            _lsn_queue.pop();
+        } else {
+            break;
         }
     }
 
-    void
-    PgLogWriter::close()
-    {
-        // shutdown the fsync thread and join
-        _shutdown_fsync();
+    lock.unlock();
 
-        // see if we need to do a final fsync
-        uint64_t curr_offset = _current_offset.load();
-        if (curr_offset != _last_fsync_offset.load()) {
-            _writer.sync();
-            _last_fsync_offset = curr_offset;
-            _update_lsn_from_queue();
-        }
+    if (latest_lsn != queued_lsn && queued_lsn != INVALID_LSN) {
+        _latest_synced_lsn = queued_lsn;
+        _lsn_callback_fn(queued_lsn);
+    }
+}
 
-        // finally close the fd
-        _writer.close();
+void
+PgLogWriter::close()
+{
+    // shutdown the fsync thread and join
+    _shutdown_fsync();
+
+    // see if we need to do a final fsync
+    uint64_t curr_offset = _current_offset.load();
+    if (curr_offset != _last_fsync_offset.load()) {
+        _writer.sync();
+        _last_fsync_offset = curr_offset;
+        _update_lsn_from_queue();
     }
 
-    bool
-    PgLogWriter::log_data(const PgCopyData &data)
-    {
-        if (data.length == 0) {
-            return false;
-        }
+    // finally close the fd
+    _writer.close();
+}
 
-        // write message data, returns offset after write
-        uint64_t current_offset = _writer.write_message(data);
-
-        // write out header containing length if start of message
-        if (data.msg_offset == 0) {
-            _msg_end_offset = _writer.msg_end_offset();
-
-            // add LSN data to queue for fsync thread
-            _add_lsn_to_queue(current_offset, data.starting_lsn);
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Write repl message start: start lsn={}, length={}, msg_length={}",
-                                data.starting_lsn, data.length, data.msg_length);
-        }
-
-        // update shared current offset atomic var
-        _current_offset = current_offset;
-
-        if (data.msg_offset + data.length == data.msg_length) {
-            // full message written
-            _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
-
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Write repl message end: start lsn={}, length={}, msg_length={}",
-                                data.ending_lsn, data.length, data.msg_length);
-
-            return true;
-        }
-
+bool
+PgLogWriter::log_data(const PgCopyData &data)
+{
+    if (data.length == 0) {
         return false;
     }
-} // namespace springtail::pg_log_mgr
+
+    // write message data, returns offset after write
+    uint64_t current_offset = _writer.write_message(data);
+
+    // write out header containing length if start of message
+    if (data.msg_offset == 0) {
+        _msg_end_offset = _writer.msg_end_offset();
+
+        // add LSN data to queue for fsync thread
+        _add_lsn_to_queue(current_offset, data.starting_lsn);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                            "Write repl message start: start lsn={}, length={}, msg_length={}",
+                            data.starting_lsn, data.length, data.msg_length);
+    }
+
+    // update shared current offset atomic var
+    _current_offset = current_offset;
+
+    if (data.msg_offset + data.length == data.msg_length) {
+        // full message written
+        _add_lsn_to_queue(_msg_end_offset, data.ending_lsn);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                            "Write repl message end: start lsn={}, length={}, msg_length={}",
+                            data.ending_lsn, data.length, data.msg_length);
+
+        return true;
+    }
+
+    return false;
+}
+}  // namespace springtail::pg_log_mgr

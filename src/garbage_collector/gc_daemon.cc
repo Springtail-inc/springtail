@@ -1,24 +1,24 @@
-#include <csignal>
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
 #include <common/coordinator.hh>
+#include <csignal>
 #include <garbage_collector/committer.hh>
 
 namespace {
-    std::shared_ptr<springtail::gc::Committer> committer;
+std::shared_ptr<springtail::gc::Committer> committer;
 
-    void shutdown_handler(int signal) {
-        committer->shutdown();
-    }
+void
+shutdown_handler(int signal)
+{
+    committer->shutdown();
 }
+}  // namespace
 
 /**
  * Main program loop for the garbage collector daemon.
  */
 int
-main(int argc,
-     char *argv[])
+main(int argc, char *argv[])
 {
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");

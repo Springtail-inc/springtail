@@ -1,17 +1,15 @@
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
 #include <common/filesystem.hh>
-
+#include <pg_log_mgr/pg_log_mgr.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
-
-#include <pg_log_mgr/pg_log_mgr.hh>
 
 using namespace springtail;
 namespace po = boost::program_options;
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     std::string file;
     uint64_t start_offset = 0;
@@ -19,7 +17,8 @@ int main(int argc, char *argv[])
     po::options_description desc("Options");
     desc.add_options()("help,h", "Print help message");
     desc.add_options()("file,f", po::value<std::string>(&file), "File to scan");
-    desc.add_options()("offset,o", po::value<uint64_t>(&start_offset)->default_value(0), "Start offset");
+    desc.add_options()("offset,o", po::value<uint64_t>(&start_offset)->default_value(0),
+                       "Start offset");
     desc.add_options()("all,a", "Scan all files");
 
     po::variables_map vm;
@@ -40,14 +39,13 @@ int main(int argc, char *argv[])
     std::filesystem::path start_file(file);
 
     while (!start_file.empty() && std::filesystem::exists(start_file)) {
-
         PgMsgStreamReader reader(start_file, start_offset, -1);
         std::cout << "\nScanning log: " << start_file << std::endl;
 
         // consume messages from log; num_messages of -1 means go until eos
-        bool eos = false; // end of stream
+        bool eos = false;  // end of stream
         while (!eos) {
-            bool eob=false; // end of block
+            bool eob = false;  // end of block
 
             // while not at end of message block (or stream) process
             while (!eob && !eos) {
@@ -75,21 +73,22 @@ int main(int argc, char *argv[])
         }
 
         if (scan_all_files) {
-            start_file = fs::get_next_file(start_file, pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL, pg_log_mgr::PgLogMgr::LOG_SUFFIX);
+            start_file = fs::get_next_file(start_file, pg_log_mgr::PgLogMgr::LOG_PREFIX_REPL,
+                                           pg_log_mgr::PgLogMgr::LOG_SUFFIX);
         } else {
             break;
         }
     }
 
     std::cout << "\nFound xids: " << xids.size() << std::endl;
-    for (auto xid: xids) {
+    for (auto xid : xids) {
         std::cout << xid << " ";
     }
     std::cout << std::endl;
 
     if (!duplicate_xids.empty()) {
         std::cout << "\nDuplicate xids found:" << std::endl;
-        for (auto xid: duplicate_xids) {
+        for (auto xid : duplicate_xids) {
             std::cout << xid << std::endl;
         }
     }

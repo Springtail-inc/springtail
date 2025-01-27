@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
+
 #include <common/common.hh>
 #include <common/logging.hh>
 
 using namespace springtail;
 
-TEST(CommonTest, SplitString) {
+TEST(CommonTest, SplitString)
+{
     std::string str = "a,b,c";
     std::vector<std::string> result;
     common::split_string(",", str, result);
@@ -14,7 +16,8 @@ TEST(CommonTest, SplitString) {
     ASSERT_EQ(result[2], "c");
 }
 
-TEST(CommonTest, SplitString2) {
+TEST(CommonTest, SplitString2)
+{
     std::string str = "a,b,c,";
     std::vector<std::string> result;
     common::split_string(",", str, result);
@@ -24,7 +27,8 @@ TEST(CommonTest, SplitString2) {
     ASSERT_EQ(result[2], "c");
 }
 
-TEST(LoggingTest, Logging) {
+TEST(LoggingTest, Logging)
+{
     springtail::springtail_init();
     SPDLOG_DEBUG_MODULE(0x01, "Test log message, no args");
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 1 arg {}", 1);
@@ -35,7 +39,8 @@ TEST(LoggingTest, Logging) {
     SPDLOG_DEBUG_MODULE(0x01, "Test log message: 6 args {} {} {} {} {} {}", 1, 2, 3, 4, 5, 6);
 }
 
-TEST(CommonTest, EscapeQuotedString) {
+TEST(CommonTest, EscapeQuotedString)
+{
     std::string str = "a\"b";
     std::string result = common::escape_quoted_string(str);
     ASSERT_EQ(result, "\"a\\\"b\"");
@@ -52,7 +57,8 @@ TEST(CommonTest, EscapeQuotedString) {
     ASSERT_EQ(common::unescape_quoted_string(result), str);
 }
 
-TEST(CommonTest, SplitQuotedString) {
+TEST(CommonTest, SplitQuotedString)
+{
     std::string str = "a,b,c";
     std::vector<std::string> result;
     common::split_quoted_string(',', str, result);

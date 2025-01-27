@@ -1,7 +1,7 @@
-#include <memory>
 #include <gtest/gtest.h>
 
 #include <common/concurrent_queue.hh>
+#include <memory>
 
 using namespace springtail;
 
@@ -10,7 +10,8 @@ struct QueueEntry {
     QueueEntry(int a) : a(a) {}
 };
 
-TEST(QueueTest, SimpleTest) {
+TEST(QueueTest, SimpleTest)
+{
     ConcurrentQueue<QueueEntry> queue{};
     queue.push(std::make_shared<QueueEntry>(1));
     queue.push(std::make_shared<QueueEntry>(2));
@@ -32,7 +33,8 @@ TEST(QueueTest, SimpleTest) {
     EXPECT_EQ(entry->a, 5);
 }
 
-TEST(QueueTest, ArrayTest) {
+TEST(QueueTest, ArrayTest)
+{
     ConcurrentQueue<QueueEntry> queue{};
     std::vector<std::shared_ptr<QueueEntry>> entries;
     entries.push_back(std::make_shared<QueueEntry>(1));
@@ -54,7 +56,8 @@ TEST(QueueTest, ArrayTest) {
     EXPECT_EQ(entry->a, 5);
 }
 
-TEST(QueueTest, ThreadedTestArrayBound) {
+TEST(QueueTest, ThreadedTestArrayBound)
+{
     ConcurrentQueue<QueueEntry> queue{3};
     std::vector<std::shared_ptr<QueueEntry>> entries;
     entries.push_back(std::make_shared<QueueEntry>(1));
@@ -63,11 +66,9 @@ TEST(QueueTest, ThreadedTestArrayBound) {
     entries.push_back(std::make_shared<QueueEntry>(4));
     entries.push_back(std::make_shared<QueueEntry>(5));
 
-    std::thread t1([&queue, &entries](){
-        queue.push(entries);
-    });
+    std::thread t1([&queue, &entries]() { queue.push(entries); });
 
-    std::thread t2([&queue](){
+    std::thread t2([&queue]() {
         auto entry = queue.pop();
         EXPECT_EQ(entry->a, 1);
         entry = queue.pop();
@@ -84,10 +85,11 @@ TEST(QueueTest, ThreadedTestArrayBound) {
     t2.join();
 }
 
-TEST(QueueTest, ThreadedTestBound) {
+TEST(QueueTest, ThreadedTestBound)
+{
     ConcurrentQueue<QueueEntry> queue{3};
 
-    std::thread t1([&queue](){
+    std::thread t1([&queue]() {
         queue.push(std::make_shared<QueueEntry>(1));
         queue.push(std::make_shared<QueueEntry>(2));
         queue.push(std::make_shared<QueueEntry>(3));
@@ -95,7 +97,7 @@ TEST(QueueTest, ThreadedTestBound) {
         queue.push(std::make_shared<QueueEntry>(5));
     });
 
-    std::thread t2([&queue](){
+    std::thread t2([&queue]() {
         auto entry = queue.pop();
         EXPECT_EQ(entry->a, 1);
         entry = queue.pop();

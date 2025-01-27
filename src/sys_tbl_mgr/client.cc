@@ -1,375 +1,347 @@
-#include <string>
-#include <memory>
-#include <cassert>
-
-#include <nlohmann/json.hpp>
-
-#include <thrift/transport/TSocket.h>
-#include <thrift/transport/TBufferTransports.h>
 #include <thrift/protocol/TCompactProtocol.h>
+#include <thrift/sys_tbl_mgr/Service.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/transport/TSocket.h>
 
-#include <common/properties.hh>
-#include <common/logging.hh>
-#include <common/json.hh>
-#include <common/object_cache.hh>
+#include <cassert>
 #include <common/common.hh>
 #include <common/exception.hh>
-
-#include <thrift/sys_tbl_mgr/Service.h>
-
-#include <sys_tbl_mgr/exception.hh>
+#include <common/json.hh>
+#include <common/logging.hh>
+#include <common/object_cache.hh>
+#include <common/properties.hh>
+#include <memory>
+#include <nlohmann/json.hpp>
+#include <string>
 #include <sys_tbl_mgr/client.hh>
-
+#include <sys_tbl_mgr/exception.hh>
 #include <vector>
 
 namespace springtail::sys_tbl_mgr {
 
-    Client::Client()
-    {
-        nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
-        nlohmann::json rpc_json;
-        uint64_t cache_size;
+Client::Client()
+{
+    nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
+    nlohmann::json rpc_json;
+    uint64_t cache_size;
 
-        // fetch RPC properties for the sys_tbl_mgr client
-        if (!Json::get_to(json, "rpc_config", rpc_json)) {
-            throw Error("SysTblMgr RPC settings are not found");
+    // fetch RPC properties for the sys_tbl_mgr client
+    if (!Json::get_to(json, "rpc_config", rpc_json)) {
+        throw Error("SysTblMgr RPC settings are not found");
+    }
+
+    if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
+        throw Error("Sys tbl mgr cache size settings not found");
+    }
+
+    // create the cache
+    _schema_cache = std::make_shared<SchemaCache>(cache_size);
+
+    std::string server = Properties::get_sys_tbl_mgr_hostname();
+    init(server, rpc_json);
+}
+
+// exposed client service interface below
+
+void
+Client::ping()
+{
+    Status result;
+    _invoke_with_retries([&result](ThriftClient &c) { c.client->ping(result); });
+    std::cout << "Ping got: " << result.message << std::endl;
+    return;
+}
+
+template <typename Req>
+void
+_set_request_common(Req &r, uint64_t db_id, const XidLsn &xid)
+{
+    r.db_id = db_id;
+    r.xid = xid.xid;
+    r.lsn = xid.lsn;
+}
+
+TableRequest
+_gen_table_request(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+{
+    TableRequest request;
+    _set_request_common(request, db_id, xid);
+    request.table.id = msg.oid;
+    request.table.schema = msg.schema;
+    request.table.name = msg.table;
+    for (const auto &col : msg.columns) {
+        TableColumn column;
+        column.__set_name(col.column_name);
+        column.__set_type(col.type);
+        column.__set_pg_type(col.pg_type);
+        column.__set_position(col.position);
+        column.__set_is_nullable(col.is_nullable);
+        column.__set_is_generated(col.is_generated);
+        if (col.is_pkey) {
+            column.__set_pk_position(col.pk_position);
+        }
+        if (col.default_value) {
+            column.__set_default_value(*col.default_value);
         }
 
-        if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
-            throw Error("Sys tbl mgr cache size settings not found");
-        }
+        request.table.columns.push_back(column);
+    }
+    return request;
+}
 
-        // create the cache
-        _schema_cache = std::make_shared<SchemaCache>(cache_size);
+IndexRequest
+_gen_index_request(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg)
+{
+    IndexRequest request;
+    _set_request_common(request, db_id, xid);
+    request.index.id = msg.oid;
+    request.index.schema = msg.schema;
+    request.index.name = msg.index;
+    request.index.is_unique = msg.is_unique;
+    request.index.table_name = msg.table_name;
+    request.index.table_id = msg.table_oid;
+    for (const auto &col : msg.columns) {
+        IndexColumn column;
+        column.position = col.position;
+        column.name = col.name;
+        column.idx_position = col.idx_position;
+        request.index.columns.push_back(column);
+    }
+    return request;
+}
 
-        std::string server = Properties::get_sys_tbl_mgr_hostname();
-        init(server, rpc_json);
+std::string
+Client::create_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+{
+    DDLStatement result;
+
+    auto &&request = _gen_table_request(db_id, xid, msg);
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->create_table(result, request); });
+
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    // exposed client service interface below
+    return result.statement;
+}
 
-    void
-    Client::ping()
-    {
-        Status result;
-        _invoke_with_retries([&result](ThriftClient &c) {
-            c.client->ping(result);
-        });
-        std::cout << "Ping got: " << result.message << std::endl;
-        return;
+std::string
+Client::alter_table(uint64_t db_id, const XidLsn &xid, const PgMsgTable &msg)
+{
+    DDLStatement result;
+
+    auto &&request = _gen_table_request(db_id, xid, msg);
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->alter_table(result, request); });
+
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    template<typename Req>
-    void _set_request_common(Req& r, uint64_t db_id,
-                       const XidLsn &xid) {
-        r.db_id = db_id;
-        r.xid = xid.xid;
-        r.lsn = xid.lsn;
+    // automaticaly invalidate the schema cache from the provided XID
+    invalidate_table(db_id, msg.oid, xid);
+
+    return result.statement;
+}
+
+std::string
+Client::drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg)
+{
+    DDLStatement result;
+
+    DropTableRequest request;
+    request.db_id = db_id;
+    request.xid = xid.xid;
+    request.lsn = xid.lsn;
+    request.table_id = msg.oid;
+    request.schema = msg.schema;
+    request.name = msg.table;
+
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->drop_table(result, request); });
+
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    TableRequest
-    _gen_table_request(uint64_t db_id,
-                       const XidLsn &xid,
-                       const PgMsgTable &msg)
-    {
-        TableRequest request;
-        _set_request_common(request, db_id, xid);
-        request.table.id = msg.oid;
-        request.table.schema = msg.schema;
-        request.table.name = msg.table;
-        for (const auto &col : msg.columns) {
-            TableColumn column;
-            column.__set_name(col.column_name);
-            column.__set_type(col.type);
-            column.__set_pg_type(col.pg_type);
-            column.__set_position(col.position);
-            column.__set_is_nullable(col.is_nullable);
-            column.__set_is_generated(col.is_generated);
-            if (col.is_pkey) {
-                column.__set_pk_position(col.pk_position);
-            }
-            if (col.default_value) {
-                column.__set_default_value(*col.default_value);
-            }
+    // automaticaly invalidate the schema cache from the provided XID
+    invalidate_table(db_id, msg.oid, xid);
 
-            request.table.columns.push_back(column);
-        }
-        return request;
+    return result.statement;
+}
+
+std::string
+Client::create_index(uint64_t db_id,
+                     const XidLsn &xid,
+                     const PgMsgIndex &msg,
+                     sys_tbl::IndexNames::State state)
+{
+    DDLStatement result;
+
+    auto &&request = _gen_index_request(db_id, xid, msg);
+    request.index.state = static_cast<int8_t>(state);
+
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->create_index(result, request); });
+
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    IndexRequest
-    _gen_index_request(uint64_t db_id,
-                       const XidLsn &xid,
-                       const PgMsgIndex &msg)
-    {
-        IndexRequest request;
-        _set_request_common(request, db_id, xid);
-        request.index.id = msg.oid;
-        request.index.schema = msg.schema;
-        request.index.name = msg.index;
-        request.index.is_unique = msg.is_unique;
-        request.index.table_name = msg.table_name;
-        request.index.table_id = msg.table_oid;
-        for (const auto &col : msg.columns) {
-            IndexColumn column;
-            column.position = col.position;
-            column.name = col.name;
-            column.idx_position = col.idx_position;
-            request.index.columns.push_back(column);
-        }
-        return request;
-    }
+    // automaticaly invalidate the schema cache from the provided XID
+    invalidate_table(db_id, msg.table_oid, xid);
 
-    std::string
-    Client::create_table(uint64_t db_id,
-                         const XidLsn &xid,
-                         const PgMsgTable &msg)
-    {
-        DDLStatement result;
+    return result.statement;
+}
 
-        auto &&request = _gen_table_request(db_id, xid, msg);
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->create_table(result, request);
-        });
-
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
-
-        return result.statement;
-    }
-
-    std::string
-    Client::alter_table(uint64_t db_id,
+void
+Client::set_index_state(uint64_t db_id,
                         const XidLsn &xid,
-                        const PgMsgTable &msg)
-    {
-        DDLStatement result;
+                        uint64_t table_id,
+                        uint64_t index_id,
+                        sys_tbl::IndexNames::State state)
+{
+    Status result;
 
-        auto &&request = _gen_table_request(db_id, xid, msg);
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->alter_table(result, request);
-        });
+    SetIndexStateRequest request;
+    _set_request_common(request, db_id, xid);
 
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
+    request.table_id = table_id;
+    request.index_id = index_id;
+    request.state = static_cast<uint8_t>(state);
 
-        // automaticaly invalidate the schema cache from the provided XID
-        invalidate_table(db_id, msg.oid, xid);
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->set_index_state(result, request); });
 
-        return result.statement;
+    if (result.status != StatusCode::SUCCESS) {
+        throw SysTblMgrError(result.message);
     }
 
-    std::string
-    Client::drop_table(uint64_t db_id,
+    // automaticaly invalidate the schema cache from the provided XID
+    invalidate_table(db_id, table_id, xid);
+}
+
+IndexInfo
+Client::get_index_info(uint64_t db_id,
+                       uint64_t index_id,
                        const XidLsn &xid,
-                       const PgMsgDropTable &msg)
-    {
-        DDLStatement result;
+                       std::optional<uint64_t> tid)
+{
+    IndexInfo result;
 
-        DropTableRequest request;
-        request.db_id = db_id;
-        request.xid = xid.xid;
-        request.lsn = xid.lsn;
-        request.table_id = msg.oid;
-        request.schema = msg.schema;
-        request.name = msg.table;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->drop_table(result, request);
-        });
-
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
-
-        // automaticaly invalidate the schema cache from the provided XID
-        invalidate_table(db_id, msg.oid, xid);
-
-        return result.statement;
+    GetIndexInfoRequest request;
+    _set_request_common(request, db_id, xid);
+    request.index_id = index_id;
+    if (tid) {
+        request.__set_table_id(*tid);
     }
 
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->get_index_info(result, request); });
 
-    std::string
-    Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
-    {
-        DDLStatement result;
+    return result;
+}
 
-        auto &&request = _gen_index_request(db_id, xid, msg);
-        request.index.state=static_cast<int8_t>(state);
+std::string
+Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
+{
+    DDLStatement result;
 
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->create_index(result, request);
-        });
+    DropIndexRequest request;
+    _set_request_common(request, db_id, xid);
 
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
+    request.index_id = msg.oid;
+    request.schema = msg.schema;
 
-        // automaticaly invalidate the schema cache from the provided XID
-        invalidate_table(db_id, msg.table_oid, xid);
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->drop_index(result, request); });
 
-        return result.statement;
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    void
-    Client::set_index_state(uint64_t db_id, const XidLsn &xid, uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state)
-    {
-        Status result;
+    // automaticaly invalidate the schema cache from the provided XID
+    _schema_cache->invalidate_by_index(db_id, msg.oid, xid);
 
-        SetIndexStateRequest request;
-        _set_request_common(request, db_id, xid);
+    return result.statement;
+}
 
-        request.table_id = table_id;
-        request.index_id = index_id;
-        request.state = static_cast<uint8_t>(state);
+void
+Client::update_roots(uint64_t db_id, uint64_t table_id, uint64_t xid, const TableMetadata &metadata)
+{
+    Status result;
 
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->set_index_state(result, request);
-        });
-
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
-        }
-
-        // automaticaly invalidate the schema cache from the provided XID
-        invalidate_table(db_id, table_id, xid);
+    UpdateRootsRequest request;
+    request.db_id = db_id;
+    request.xid = xid;
+    request.table_id = table_id;
+    for (auto const &[index_id, extent_id] : metadata.roots) {
+        sys_tbl_mgr::RootInfo ri;
+        ri.index_id = index_id;
+        ri.extent_id = extent_id;
+        request.roots.push_back(ri);
     }
 
+    request.stats.row_count = metadata.stats.row_count;
+    request.snapshot_xid = metadata.snapshot_xid;
 
-    IndexInfo 
-    Client::get_index_info(uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid)
-    {
-        IndexInfo result;
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->update_roots(result, request); });
 
-        GetIndexInfoRequest request;
-        _set_request_common(request, db_id, xid);
-        request.index_id = index_id;
-        if (tid) {
-            request.__set_table_id(*tid);
-        }
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->get_index_info(result, request);
-        });
-
-        return result;
+    if (result.status != StatusCode::SUCCESS) {
+        throw SysTblMgrError(result.message);
     }
+}
 
+void
+Client::finalize(uint64_t db_id, uint64_t xid)
+{
+    Status result;
 
-    std::string
-    Client::drop_index(uint64_t db_id, const XidLsn &xid, const PgMsgDropIndex &msg)
-    {
-        DDLStatement result;
+    FinalizeRequest request;
+    request.db_id = db_id;
+    request.xid = xid;
 
-        DropIndexRequest request;
-        _set_request_common(request, db_id, xid);
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->finalize(result, request); });
 
-        request.index_id = msg.oid;
-        request.schema = msg.schema;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->drop_index(result, request);
-        });
-
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
-
-        // automaticaly invalidate the schema cache from the provided XID
-        _schema_cache->invalidate_by_index(db_id, msg.oid, xid);
-
-        return result.statement;
+    if (result.status != StatusCode::SUCCESS) {
+        throw SysTblMgrError(result.message);
     }
+}
 
-    void
-    Client::update_roots(uint64_t db_id,
-                         uint64_t table_id,
-                         uint64_t xid,
-                         const TableMetadata &metadata)
-    {
-        Status result;
+TableMetadataPtr
+Client::get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid)
+{
+    GetRootsRequest request;
+    request.db_id = db_id;
+    request.table_id = table_id;
+    request.xid = xid;
 
-        UpdateRootsRequest request;
-        request.db_id = db_id;
-        request.xid = xid;
-        request.table_id = table_id;
-        for (auto const& [index_id, extent_id]: metadata.roots) {
-            sys_tbl_mgr::RootInfo ri;
-            ri.index_id = index_id;
-            ri.extent_id = extent_id;
-            request.roots.push_back(ri);
-        }
+    GetRootsResponse result;
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->get_roots(result, request); });
 
-        request.stats.row_count = metadata.stats.row_count;
-        request.snapshot_xid = metadata.snapshot_xid;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->update_roots(result, request);
-        });
-
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
-        }
+    auto metadata = std::make_shared<TableMetadata>();
+    for (const auto &root : result.roots) {
+        metadata->roots.push_back(
+            [](const RootInfo &root) { return TableRoot(root.index_id, root.extent_id); }(root));
     }
+    metadata->stats.row_count = result.stats.row_count;
+    metadata->snapshot_xid = result.snapshot_xid;
 
-    void
-    Client::finalize(uint64_t db_id,
-                     uint64_t xid)
-    {
-        Status result;
-
-        FinalizeRequest request;
-        request.db_id = db_id;
-        request.xid = xid;
-
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->finalize(result, request);
-        });
-
-        if (result.status != StatusCode::SUCCESS) {
-            throw SysTblMgrError(result.message);
-        }
-    }
-
-    TableMetadataPtr
-    Client::get_roots(uint64_t db_id,
-                      uint64_t table_id,
-                      uint64_t xid)
-    {
-        GetRootsRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
-        request.xid = xid;
-
-        GetRootsResponse result;
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->get_roots(result, request);
-        });
-
-        auto metadata = std::make_shared<TableMetadata>();
-        for (const auto &root : result.roots) {
-            metadata->roots.push_back([](const RootInfo &root) {
-                return TableRoot(root.index_id, root.extent_id);
-            }(root));
-        }
-        metadata->stats.row_count = result.stats.row_count;
-        metadata->snapshot_xid = result.snapshot_xid;
-
-        return metadata;
-    }
+    return metadata;
+}
 
 SchemaMetadataPtr
-Client::_pack_metadata(const GetSchemaResponse &result) {
+Client::_pack_metadata(const GetSchemaResponse &result)
+{
     auto metadata = std::make_shared<SchemaMetadata>();
     for (const auto &col_entry : result.columns) {
         const auto &column = col_entry.second;
-        SchemaColumn value(column.name,
-                           column.position,
-                           static_cast<SchemaType>(column.type),
-                           column.pg_type,
-                           column.is_nullable);
+        SchemaColumn value(column.name, column.position, static_cast<SchemaType>(column.type),
+                           column.pg_type, column.is_nullable);
         if (column.__isset.pk_position) {
             value.pkey_position = column.pk_position;
         }
@@ -381,14 +353,9 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
     }
 
     for (auto history : result.history) {
-        SchemaColumn value(history.xid,
-                           history.lsn,
-                           history.column.name,
-                           history.column.position,
-                           static_cast<SchemaType>(history.column.type),
-                           history.column.pg_type,
-                           history.exists,
-                           history.column.is_nullable);
+        SchemaColumn value(history.xid, history.lsn, history.column.name, history.column.position,
+                           static_cast<SchemaType>(history.column.type), history.column.pg_type,
+                           history.exists, history.column.is_nullable);
         value.update_type = static_cast<SchemaUpdateType>(history.update_type);
         if (history.column.__isset.pk_position) {
             value.pkey_position = history.column.pk_position;
@@ -400,7 +367,7 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
         metadata->history.push_back(value);
     }
 
-    for (auto const& idx: result.indexes) {
+    for (auto const &idx : result.indexes) {
         Index info;
         info.id = idx.id;
         info.name = idx.name;
@@ -408,11 +375,13 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
         info.state = idx.state;
         info.table_id = idx.table_id;
         info.is_unique = idx.is_unique;
-        for (auto const& col: idx.columns) {
+        for (auto const &col : idx.columns) {
             info.columns.emplace_back(col.idx_position, col.position);
         }
-        //sort by index position
-        std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
+        // sort by index position
+        std::ranges::sort(info.columns, [](auto const &a, auto const &b) {
+            return a.idx_position < b.idx_position;
+        });
         metadata->indexes.push_back(std::move(info));
     }
 
@@ -431,108 +400,96 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
     return metadata;
 }
 
-    std::shared_ptr<const SchemaMetadata>
-    Client::get_schema(uint64_t db_id,
-                       uint64_t table_id,
-                       const XidLsn &xid)
-    {
-        auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
-            ThriftClient c = _get_client();
-
-            GetSchemaRequest request;
-            request.db_id = db;
-            request.table_id = tid;
-            request.xid = xid.xid;
-            request.lsn = xid.lsn;
-
-            GetSchemaResponse result;
-            _invoke_with_retries([&result, &request](ThriftClient &c) {
-                c.client->get_schema(result, request);
-            });
-
-            return _pack_metadata(result);
-        };
-
-        // retrieve through the schema cache
-        return _schema_cache->get(db_id, table_id, xid, populate);
-    }
-
-    SchemaMetadataPtr
-    Client::get_target_schema(uint64_t db_id,
-                              uint64_t table_id,
-                              const XidLsn &access_xid,
-                              const XidLsn &target_xid)
-    {
+std::shared_ptr<const SchemaMetadata>
+Client::get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+{
+    auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
         ThriftClient c = _get_client();
 
-        GetTargetSchemaRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
-        request.access_xid = access_xid.xid;
-        request.access_lsn = access_xid.lsn;
-        request.target_xid = target_xid.xid;
-        request.target_lsn = target_xid.lsn;
-
-        GetSchemaResponse result;
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->get_target_schema(result, request);
-        });
-
-        return _pack_metadata(result);
-    }
-
-    bool
-    Client::exists(uint64_t db_id,
-                   uint64_t table_id,
-                   const XidLsn &xid)
-    {
-        ExistsRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
+        GetSchemaRequest request;
+        request.db_id = db;
+        request.table_id = tid;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
 
-        bool ret = false;
-        _invoke_with_retries([&ret, &request](ThriftClient &c) {
-            ret = c.client->exists(request);
-        });
+        GetSchemaResponse result;
+        _invoke_with_retries(
+            [&result, &request](ThriftClient &c) { c.client->get_schema(result, request); });
 
-        return ret;
+        return _pack_metadata(result);
+    };
+
+    // retrieve through the schema cache
+    return _schema_cache->get(db_id, table_id, xid, populate);
+}
+
+SchemaMetadataPtr
+Client::get_target_schema(uint64_t db_id,
+                          uint64_t table_id,
+                          const XidLsn &access_xid,
+                          const XidLsn &target_xid)
+{
+    ThriftClient c = _get_client();
+
+    GetTargetSchemaRequest request;
+    request.db_id = db_id;
+    request.table_id = table_id;
+    request.access_xid = access_xid.xid;
+    request.access_lsn = access_xid.lsn;
+    request.target_xid = target_xid.xid;
+    request.target_lsn = target_xid.lsn;
+
+    GetSchemaResponse result;
+    _invoke_with_retries(
+        [&result, &request](ThriftClient &c) { c.client->get_target_schema(result, request); });
+
+    return _pack_metadata(result);
+}
+
+bool
+Client::exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+{
+    ExistsRequest request;
+    request.db_id = db_id;
+    request.table_id = table_id;
+    request.xid = xid.xid;
+    request.lsn = xid.lsn;
+
+    bool ret = false;
+    _invoke_with_retries([&ret, &request](ThriftClient &c) { ret = c.client->exists(request); });
+
+    return ret;
+}
+
+std::string
+Client::swap_sync_table(const TableRequest &create, const UpdateRootsRequest &roots)
+{
+    DDLStatement result;
+
+    _invoke_with_retries([&result, &create, &roots](ThriftClient &c) {
+        c.client->swap_sync_table(result, create, roots);
+    });
+
+    if (result.statement.empty()) {
+        throw SysTblMgrError();
     }
 
-    std::string
-    Client::swap_sync_table(const TableRequest &create,
-                            const UpdateRootsRequest &roots)
-    {
-        DDLStatement result;
+    // auto-invalidate the cache for the swapped table
+    invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
 
-        _invoke_with_retries([&result, &create, &roots](ThriftClient &c) {
-            c.client->swap_sync_table(result, create, roots);
-        });
+    return result.statement;
+}
 
-        if (result.statement.empty()) {
-            throw SysTblMgrError();
-        }
+void
+Client::invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid)
+{
+    _schema_cache->invalidate_table(db_id, table_id, xid);
+}
 
-        // auto-invalidate the cache for the swapped table
-        invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
+void
+Client::invalidate_db(uint64_t db_id, const XidLsn &xid)
+{
+    _schema_cache->invalidate_db(db_id, xid);
+}
 
-        return result.statement;
-    }
-
-    void
-    Client::invalidate_table(uint64_t db_id,
-                             uint64_t table_id,
-                             const XidLsn &xid)
-    {
-        _schema_cache->invalidate_table(db_id, table_id, xid);
-    }
-
-    void
-    Client::invalidate_db(uint64_t db_id,
-                          const XidLsn &xid)
-    {
-        _schema_cache->invalidate_db(db_id, xid);
-    }
-
-} // namespace
+}  // namespace springtail::sys_tbl_mgr

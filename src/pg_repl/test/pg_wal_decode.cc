@@ -1,17 +1,17 @@
+#include <boost/program_options.hpp>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
-#include <cstdio>
-
-#include <boost/program_options.hpp>
 
 // springtail includes
 #include <common/common.hh>
-#include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_msg_stream.hh>
+#include <pg_repl/pg_repl_msg.hh>
 
 using namespace springtail;
 
-int main(int argc, char* argv[])
+int
+main(int argc, char* argv[])
 {
     std::string file;
 
@@ -19,7 +19,8 @@ int main(int argc, char* argv[])
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("file,f", po::value<std::string>(&file)->default_value("wal.log"), "WAL file to process");
+    desc.add_options()("file,f", po::value<std::string>(&file)->default_value("wal.log"),
+                       "WAL file to process");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);

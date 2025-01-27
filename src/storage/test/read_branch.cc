@@ -1,28 +1,24 @@
 #include <common/common.hh>
-
-#include <storage/csv_field.hh>
 #include <storage/btree.hh>
+#include <storage/csv_field.hh>
 #include <storage/mutable_btree.hh>
 
 using namespace springtail;
 
 int
-main(int argc,
-     char *argv[])
+main(int argc, char *argv[])
 {
     springtail_init();
-    
+
     // construct a schema for testing
-    std::vector<SchemaColumn> columns({
-            { "table_id", 0, SchemaType::UINT64, 0, false },
-            { "name", 1, SchemaType::TEXT, 0, false },
-            { "offset", 2, SchemaType::UINT64, 0, false }
-        });
+    std::vector<SchemaColumn> columns({{"table_id", 0, SchemaType::UINT64, 0, false},
+                                       {"name", 1, SchemaType::TEXT, 0, false},
+                                       {"offset", 2, SchemaType::UINT64, 0, false}});
     auto schema = std::make_shared<ExtentSchema>(columns);
 
     SchemaColumn child("child", 0, SchemaType::UINT64, 0, false);
     auto keys = std::vector<std::string>({"name", "table_id"});
-    auto branch_schema = schema->create_schema(keys, { child }, keys);
+    auto branch_schema = schema->create_schema(keys, {child}, keys);
     auto name_f = branch_schema->get_field("name");
     auto child_f = branch_schema->get_field("child");
 
@@ -37,8 +33,7 @@ main(int argc,
 
     int count = 0;
     for (auto &&row : extent) {
-        std::cout << name_f->get_text(row) << ", "
-                  << child_f->get_uint64(row) << std::endl;
+        std::cout << name_f->get_text(row) << ", " << child_f->get_uint64(row) << std::endl;
         ++count;
     }
     std::cout << count << std::endl;

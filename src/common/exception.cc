@@ -1,60 +1,59 @@
-#include <csignal>
-
 #include <common/exception.hh>
 #include <common/logging.hh>
+#include <csignal>
 
 namespace {
-    void
-    backtrace_handler(int signo)
-    {
-        // attempt to flush the log before we try to capture the backtrace in case something goes wrong
-        spdlog::default_logger()->flush();
+void
+backtrace_handler(int signo)
+{
+    // attempt to flush the log before we try to capture the backtrace in case something goes wrong
+    spdlog::default_logger()->flush();
 
-        // note: may be unsafe -- for known safe method, see cpptrace's signal_demo.cpp
-        auto trace = cpptrace::generate_trace();
+    // note: may be unsafe -- for known safe method, see cpptrace's signal_demo.cpp
+    auto trace = cpptrace::generate_trace();
 
-        std::stringstream ss;
-        trace.print(ss);
+    std::stringstream ss;
+    trace.print(ss);
 
-        SPDLOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
-        signal(signo, SIG_DFL);
-        raise(signo);
-    }
+    SPDLOG_ERROR("Backtrace from signal {}:\n{}", signo, ss.str());
+    signal(signo, SIG_DFL);
+    raise(signo);
 }
+}  // namespace
 
 namespace springtail {
-    void
-    init_exception()
-    {
-        // register the signal handlers for backtraces
-        std::vector<int> signals{
-            SIGABRT, // Abort signal from abort(3)
-            SIGBUS,  // Bus error (bad memory access)
-            SIGFPE,  // Floating point exception
-            SIGILL,  // Illegal Instruction
-            SIGIOT,  // IOT trap. A synonym for SIGABRT
-            SIGQUIT, // Quit from keyboard
-            SIGSEGV, // Invalid memory reference
-            SIGSYS,  // Bad argument to routine (SVr4)
-            SIGTRAP, // Trace/breakpoint trap
-            SIGXCPU, // CPU time limit exceeded (4.2BSD)
-            SIGXFSZ, // File size limit exceeded (4.2BSD)
+void
+init_exception()
+{
+    // register the signal handlers for backtraces
+    std::vector<int> signals{
+        SIGABRT,  // Abort signal from abort(3)
+        SIGBUS,   // Bus error (bad memory access)
+        SIGFPE,   // Floating point exception
+        SIGILL,   // Illegal Instruction
+        SIGIOT,   // IOT trap. A synonym for SIGABRT
+        SIGQUIT,  // Quit from keyboard
+        SIGSEGV,  // Invalid memory reference
+        SIGSYS,   // Bad argument to routine (SVr4)
+        SIGTRAP,  // Trace/breakpoint trap
+        SIGXCPU,  // CPU time limit exceeded (4.2BSD)
+        SIGXFSZ,  // File size limit exceeded (4.2BSD)
 #if defined(__APPLE__)
-            SIGEMT, // emulation instruction executed
+        SIGEMT,  // emulation instruction executed
 #endif
-        };
+    };
 
-        for (int s : signals) {
-            std::signal(s, backtrace_handler);
-        }
-    }
-
-    void
-    Error::log_backtrace() const
-    {
-        std::stringstream ss;
-        _trace.print(ss);
-
-        SPDLOG_ERROR("Backtrace:\n{}", ss.str());
+    for (int s : signals) {
+        std::signal(s, backtrace_handler);
     }
 }
+
+void
+Error::log_backtrace() const
+{
+    std::stringstream ss;
+    _trace.print(ss);
+
+    SPDLOG_ERROR("Backtrace:\n{}", ss.str());
+}
+}  // namespace springtail

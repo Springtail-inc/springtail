@@ -1,14 +1,14 @@
+#include <gtest/gtest.h>
+
 #include <chrono>
+#include <common/counter.hh>
 #include <future>
 #include <thread>
 
-#include <gtest/gtest.h>
-
-#include <common/counter.hh>
-
 using namespace springtail;
 
-TEST(CounterTest, SimpleTest) {
+TEST(CounterTest, SimpleTest)
+{
     Counter counter(8);
 
     // get the current time
@@ -30,9 +30,7 @@ TEST(CounterTest, SimpleTest) {
     });
 
     // create a thread that will wait for the counter to hit zero
-    auto future = std::async(std::launch::async, [&counter]() {
-        counter.wait();
-    });
+    auto future = std::async(std::launch::async, [&counter]() { counter.wait(); });
 
     // should not take 3 seconds
     EXPECT_TRUE(future.wait_until(start + std::chrono::seconds(3)) == std::future_status::timeout);

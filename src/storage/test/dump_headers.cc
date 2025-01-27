@@ -1,16 +1,13 @@
 #include <common/common.hh>
 #include <common/constants.hh>
-
 #include <storage/field.hh>
-
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
 using namespace springtail;
 
 int
-main(int argc,
-     char *argv[])
+main(int argc, char *argv[])
 {
     springtail_init();
 
@@ -26,7 +23,8 @@ main(int argc,
         std::cout << fmt::format("Extent @ {}", pos) << std::endl
                   << fmt::format("\ttype: {}, xid: {}, row_size: {}, prev: {}",
                                  static_cast<uint8_t>(e.header().type), e.header().xid,
-                                 e.header().row_size, e.header().prev_offset) << std::endl;
+                                 e.header().row_size, e.header().prev_offset)
+                  << std::endl;
 
         pos += response->next_offset;
     }

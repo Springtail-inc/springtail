@@ -1,16 +1,15 @@
-#include <gtest/gtest.h>
-#include <thread>
-#include <chrono>
-#include <optional>
-
 #include <fmt/core.h>
+#include <gtest/gtest.h>
 
+#include <chrono>
 #include <common/common.hh>
 #include <common/coordinator.hh>
+#include <common/logging.hh>
+#include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <common/properties.hh>
-#include <common/logging.hh>
+#include <optional>
+#include <thread>
 
 using namespace springtail;
 
@@ -32,21 +31,22 @@ protected:
             // setup the pubsub for liveness notifications
             _subscriber = RedisMgr::get_instance()->get_subscriber(5);
             std::string channel = fmt::format(redis::PUBSUB_LIVENESS_NOTIFY, _instance_id);
-            _subscriber->on_message([&](const std::string &channel, const std::string &msg) {
-                this->_msg = msg;
-            });
+            _subscriber->on_message(
+                [&](const std::string &channel, const std::string &msg) { this->_msg = msg; });
             _subscriber->subscribe(channel);
-            _subscriber->consume(); // consume the unsubscribe message
+            _subscriber->consume();  // consume the unsubscribe message
 
             _subscriber->subscribe(channel);
-            _subscriber->consume(); // consume the subscribe message
+            _subscriber->consume();  // consume the subscribe message
 
         } catch (const std::exception &e) {
             GTEST_SKIP() << "Redis is not running, skipping test";
         }
 
         _coordinator = Coordinator::get_instance();
-        _now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        _now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+                   .count();
     }
 
     void TearDown() override
@@ -102,20 +102,22 @@ protected:
         }
     }
 
-    Coordinator* _coordinator;
+    Coordinator *_coordinator;
     RedisMgr::SubscriberPtr _subscriber;
     uint64_t _instance_id;
     uint64_t _now;
-    std::string _msg; ///< message from the pubsub
+    std::string _msg;  ///< message from the pubsub
 };
 
-TEST_F(CoordinatorTest, SingletonInstanceTest) {
-    Coordinator* instance1 = Coordinator::get_instance();
-    Coordinator* instance2 = Coordinator::get_instance();
+TEST_F(CoordinatorTest, SingletonInstanceTest)
+{
+    Coordinator *instance1 = Coordinator::get_instance();
+    Coordinator *instance2 = Coordinator::get_instance();
     EXPECT_EQ(instance1, instance2);
 }
 
-TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
+TEST_F(CoordinatorTest, RegisterUnregisterThreadTest)
+{
     std::string thread_id = "1";
 
     _coordinator->register_thread(Coordinator::LOG_MGR, thread_id);
@@ -125,7 +127,8 @@ TEST_F(CoordinatorTest, RegisterUnregisterThreadTest) {
     check_redis_empty();
 }
 
-TEST_F(CoordinatorTest, SetLivenessTest) {
+TEST_F(CoordinatorTest, SetLivenessTest)
+{
     std::string thread_id = "1";
 
     _coordinator->register_thread(Coordinator::WRITE_CACHE, thread_id);
@@ -134,7 +137,8 @@ TEST_F(CoordinatorTest, SetLivenessTest) {
     check_redis(Coordinator::WRITE_CACHE, thread_id, true);
 }
 
-TEST_F(CoordinatorTest, KillDaemonTest) {
+TEST_F(CoordinatorTest, KillDaemonTest)
+{
     std::string thread_id = "1";
 
     _coordinator->register_thread(Coordinator::XID_MGR, thread_id);
@@ -143,7 +147,8 @@ TEST_F(CoordinatorTest, KillDaemonTest) {
     check_redis(Coordinator::XID_MGR, thread_id, false);
 }
 
-TEST_F(CoordinatorTest, MultipleThreadsTest) {
+TEST_F(CoordinatorTest, MultipleThreadsTest)
+{
     std::string thread_id1 = "1";
     std::string thread_id2 = "2";
 

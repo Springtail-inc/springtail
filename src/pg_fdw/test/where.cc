@@ -1,12 +1,9 @@
-#include <iostream>
-
 #include <fmt/format.h>
 
 #include <common/common.hh>
-
-#include <storage/field.hh>
+#include <iostream>
 #include <storage/extent.hh>
-
+#include <storage/field.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 
@@ -22,7 +19,8 @@ enum QualOpName {
     GREATER_THAN_EQUALS,
 };
 
-bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, QualOpName op)
+bool
+check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, QualOpName op)
 {
     FieldPtr val_field = fields->at(0);
 
@@ -46,7 +44,8 @@ bool check_row(const std::any &row, FieldArrayPtr fields, FieldPtr key_field, Qu
     }
 }
 
-void search(uint64_t db_id, int val, QualOpName op)
+void
+search(uint64_t db_id, int val, QualOpName op)
 {
     TablePtr table = TableMgr::get_instance()->get_table(db_id, 57455, 8);
     std::optional<Table::Iterator> iter_start = std::nullopt;
@@ -78,7 +77,8 @@ void search(uint64_t db_id, int val, QualOpName op)
     while (*iter_start != *iter_end) {
         auto row = *(*iter_start);
         if (check_row(row, fields, key_field, op)) {
-            std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
+            std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row),
+                                     fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
         } else {
             std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(row));
         }
@@ -94,7 +94,9 @@ void search(uint64_t db_id, int val, QualOpName op)
         while (*iter_start != *iter_end) {
             auto row = *(*iter_start);
             if (check_row(row, fields, key_field, op)) {
-                std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row), fields->at(1)->get_int32(row), fields->at(2)->get_text(row));
+                std::cout << fmt::format("Row: {} {} {}\n", fields->at(0)->get_int32(row),
+                                         fields->at(1)->get_int32(row),
+                                         fields->at(2)->get_text(row));
             } else {
                 std::cout << fmt::format("Skipping row: {}\n", fields->at(0)->get_int32(row));
             }
@@ -104,8 +106,8 @@ void search(uint64_t db_id, int val, QualOpName op)
     }
 }
 
-
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <val> <direction>\n";

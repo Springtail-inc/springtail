@@ -1,22 +1,21 @@
+#include <boost/program_options.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
 
-#include <boost/program_options.hpp>
-
 // springtail includes
 #include <common/common.hh>
 #include <common/logging.hh>
-
-#include <pg_repl/pg_types.hh>
+#include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
-#include <pg_repl/pg_msg_stream.hh>
+#include <pg_repl/pg_types.hh>
 
 using namespace springtail;
 
-int main(int argc, char* argv[])
+int
+main(int argc, char* argv[])
 {
     std::string host;
     std::string db_name;
@@ -35,14 +34,24 @@ int main(int argc, char* argv[])
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("host,H", po::value<std::string>(&host)->default_value("localhost"), "Hostname");
+    desc.add_options()("host,H", po::value<std::string>(&host)->default_value("localhost"),
+                       "Hostname");
     desc.add_options()("port,p", po::value<int>(&port)->default_value(5432), "Port number");
-    desc.add_options()("dbname,d", po::value<std::string>(&db_name)->default_value("springtail"), "DB database name");
-    desc.add_options()("user,u", po::value<std::string>(&user_name)->default_value("springtail"), "DB user name");
-    desc.add_options()("password,P", po::value<std::string>(&password)->default_value(""), "DB Password");
-    desc.add_options()("outfile,o", po::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")), "WAL output file");
-    desc.add_options()("publication,b", po::value<std::string>(&pub_name)->default_value("springtail"), "Publication name");
-    desc.add_options()("slot,s", po::value<std::string>(&slot_name)->default_value("springtail"), "Slot name; if none specified slot will be created");
+    desc.add_options()("dbname,d", po::value<std::string>(&db_name)->default_value("springtail"),
+                       "DB database name");
+    desc.add_options()("user,u", po::value<std::string>(&user_name)->default_value("springtail"),
+                       "DB user name");
+    desc.add_options()("password,P", po::value<std::string>(&password)->default_value(""),
+                       "DB Password");
+    desc.add_options()(
+        "outfile,o",
+        po::value<std::filesystem::path>(&outfile)->default_value(std::filesystem::path("wal.log")),
+        "WAL output file");
+    desc.add_options()("publication,b",
+                       po::value<std::string>(&pub_name)->default_value("springtail"),
+                       "Publication name");
+    desc.add_options()("slot,s", po::value<std::string>(&slot_name)->default_value("springtail"),
+                       "Slot name; if none specified slot will be created");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -74,8 +83,8 @@ int main(int argc, char* argv[])
 
     if (create_slot) {
         SPDLOG_INFO("Creating replication slot: name={}\n", slot_name);
-        pg_conn.create_replication_slot(false,  // export
-                                        false); // temporary
+        pg_conn.create_replication_slot(false,   // export
+                                        false);  // temporary
     }
 
     // start steaming
@@ -92,10 +101,9 @@ int main(int argc, char* argv[])
     while (true) {
         pg_conn.read_data(data);
 
-        SPDLOG_INFO("Recevied data: data len={}, msg len={}, msg offset={}\n",
-                     data.length, data.msg_length, data.msg_offset);
-        SPDLOG_INFO("  - start LSN={}, end LSN={}\n",
-                    data.starting_lsn, data.ending_lsn);
+        SPDLOG_INFO("Recevied data: data len={}, msg len={}, msg offset={}\n", data.length,
+                    data.msg_length, data.msg_offset);
+        SPDLOG_INFO("  - start LSN={}, end LSN={}\n", data.starting_lsn, data.ending_lsn);
 
         writer.write_message(data);
 

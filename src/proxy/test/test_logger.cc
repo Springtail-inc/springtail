@@ -1,13 +1,14 @@
-#include <iostream>
-#include <fstream>
-
 #include <absl/log/check.h>
 
+#include <fstream>
+#include <iostream>
 #include <proxy/logger.hh>
 
 using namespace springtail::pg_proxy;
 
-int main(void) {
+int
+main(void)
+{
     Logger logger("/tmp/springtail_binlog.txt", 1024 * 1024 * 5, 5);
     uint64_t data = 0x1234567ULL;
 
@@ -21,7 +22,7 @@ int main(void) {
     // open the file /tmp/springtail_binlog.txt and read a binary uint64_t
     std::ifstream file("/tmp/springtail_binlog.txt", std::ios::binary);
     uint64_t value;
-    if (file.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+    if (file.read(reinterpret_cast<char *>(&value), sizeof(value))) {
         std::cout << fmt::format("Read value: {:#X}\n", value);
         CHECK_EQ(value, data);
     } else {

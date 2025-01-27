@@ -3,27 +3,27 @@
 // springtail includes
 #include <common/common.hh>
 #include <common/properties.hh>
-
 #include <pg_log_mgr/pg_log_coordinator.hh>
-#include <xid_mgr/xid_mgr_client.hh>
 #include <sys_tbl_mgr/client.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;
 
 namespace {
-    void
-    handle_sigint(int signal)
-    {
-        pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
-        if (log_co != nullptr) {
-            log_co->notify_shutdown();
-        }
-        XidMgrClient::get_instance()->notify_shutdown();
-        sys_tbl_mgr::Client::get_instance()->notify_shutdown();
+void
+handle_sigint(int signal)
+{
+    pg_log_mgr::PgLogCoordinator *log_co = pg_log_mgr::PgLogCoordinator::get_instance();
+    if (log_co != nullptr) {
+        log_co->notify_shutdown();
     }
+    XidMgrClient::get_instance()->notify_shutdown();
+    sys_tbl_mgr::Client::get_instance()->notify_shutdown();
 }
+}  // namespace
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     // parse the arguments
     namespace po = boost::program_options;

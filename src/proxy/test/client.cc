@@ -1,25 +1,25 @@
+#include <fmt/core.h>
+
+#include <boost/asio.hpp>
+#include <boost/program_options.hpp>
 #include <iostream>
 #include <string>
 #include <thread>
 
-#include <fmt/core.h>
-
-#include <boost/asio.hpp>
-
-#include <boost/program_options.hpp>
-
-void client(int port, int count, int id)
+void
+client(int port, int count, int id)
 {
     std::string host = "127.0.0.1";
 
     boost::asio::io_service io_service;
 
-    //socket creation
+    // socket creation
     boost::asio::ip::tcp::socket socket(io_service);
 
-    //connection
+    // connection
     std::cout << "Thread connecting to " << host << ":" << port << std::endl;
-    socket.connect(boost::asio::ip::tcp::endpoint(boost::asio::ip::address::from_string(host), port));
+    socket.connect(
+        boost::asio::ip::tcp::endpoint(boost::asio::ip::address::from_string(host), port));
 
     // request/message from client
     const std::string msg = fmt::format("Hello from Client: {}", id);
@@ -28,7 +28,7 @@ void client(int port, int count, int id)
     for (int i = 0; i < count; i++) {
         boost::asio::write(socket, boost::asio::buffer(msg), error);
         if (!error) {
-            std::cout << "Client "<< id << " sent: " << msg << std::endl;
+            std::cout << "Client " << id << " sent: " << msg << std::endl;
         } else {
             std::cout << "send failed: " << error.message() << std::endl;
             break;
@@ -47,7 +47,8 @@ void client(int port, int count, int id)
     }
 }
 
-int main(int argc, char* argv[])
+int
+main(int argc, char* argv[])
 {
     int port;
     int num_threads;
@@ -57,7 +58,8 @@ int main(int argc, char* argv[])
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("port,p", po::value<int>(&port)->default_value(8888), "Port number");
-    desc.add_options()("threads,t", po::value<int>(&num_threads)->default_value(4), "Number of threads");
+    desc.add_options()("threads,t", po::value<int>(&num_threads)->default_value(4),
+                       "Number of threads");
     desc.add_options()("count,c", po::value<int>(&msg_count)->default_value(4), "Msgs per thread");
 
     po::variables_map vm;

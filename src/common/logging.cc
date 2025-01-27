@@ -1,41 +1,40 @@
-#include <memory>
-#include <set>
-#include <vector>
-#include <optional>
-#include <map>
-#include <iostream>
-
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-
 #include <absl/log/log_sink.h>
 #include <absl/log/log_sink_registry.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
-#include <nlohmann/json.hpp>
-
+#include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <common/json.hh>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <set>
+#include <vector>
 
 namespace springtail {
 
 namespace logging {
-    uint32_t _log_mask = LOG_ALL;
+uint32_t _log_mask = LOG_ALL;
 
-    std::shared_ptr<spdlog::logger> get_logger(uint32_t log_id)
-    {
-        if ((log_id & _log_mask) == 0) {
-            return nullptr;
-        }
-        return spdlog::default_logger();
+std::shared_ptr<spdlog::logger>
+get_logger(uint32_t log_id)
+{
+    if ((log_id & _log_mask) == 0) {
+        return nullptr;
     }
-} // namespace logging
+    return spdlog::default_logger();
+}
+}  // namespace logging
 
 namespace {
 class SpdlogSink : public absl::LogSink {
 public:
-    void Send(const absl::LogEntry& entry) override {
+    void Send(const absl::LogEntry &entry) override
+    {
         spdlog::level::level_enum spdlog_level;
         switch (entry.log_severity()) {
             case absl::LogSeverity::kInfo:
@@ -55,112 +54,113 @@ public:
                 break;
         }
 
-        spdlog::log(
-            spdlog_level,
-            "[{}:{}] {}",
-            entry.source_filename(),
-            entry.source_line(),
-            entry.text_message());
+        spdlog::log(spdlog_level, "[{}:{}] {}", entry.source_filename(), entry.source_line(),
+                    entry.text_message());
     }
 };
 
+}  // namespace
+static void
+set_level(auto &logger, const std::string &level)
+{
+    if (level == "debug") {
+        logger->set_level(spdlog::level::debug);
+    } else if (level == "info") {
+        logger->set_level(spdlog::level::info);
+    } else if (level == "warn") {
+        logger->set_level(spdlog::level::warn);
+    } else if (level == "error") {
+        logger->set_level(spdlog::level::err);
+    } else if (level == "critical") {
+        logger->set_level(spdlog::level::critical);
+    } else {
+        logger->set_level(spdlog::level::trace);
+    }
 }
-    static void set_level(auto &logger, const std::string &level)
-    {
-        if (level == "debug") {
-            logger->set_level(spdlog::level::debug);
-        } else if (level == "info") {
-            logger->set_level(spdlog::level::info);
-        } else if (level == "warn") {
-            logger->set_level(spdlog::level::warn);
-        } else if (level == "error") {
-            logger->set_level(spdlog::level::err);
-        } else if (level == "critical") {
-            logger->set_level(spdlog::level::critical);
-        } else {
-            logger->set_level(spdlog::level::trace);
-        }
-    }
 
-    void init_logging(const std::optional<uint32_t> &module_mask_opt,
-                      const std::optional<std::string> &log_name,
-                      bool is_daemon)
-    {
-        nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
+void
+init_logging(const std::optional<uint32_t> &module_mask_opt,
+             const std::optional<std::string> &log_name,
+             bool is_daemon)
+{
+    nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
 
-        uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
+    uint32_t module_mask = module_mask_opt.has_value() ? module_mask_opt.value() : LOG_ALL;
 
-        // configuration options
-        std::string log_path_str = Json::get_or<std::string>(props, "log_path", "/tmp/springtail_log.txt");
-        int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
-        int max_files = Json::get_or<int>(props, "log_file_count", 5);
-        std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
-        std::string pattern = Json::get_or<std::string>(props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
+    // configuration options
+    std::string log_path_str =
+        Json::get_or<std::string>(props, "log_path", "/tmp/springtail_log.txt");
+    int max_size = Json::get_or<int>(props, "log_file_size", 1024 * 1024 * 5);
+    int max_files = Json::get_or<int>(props, "log_file_count", 5);
+    std::string log_level = Json::get_or<std::string>(props, "log_level", "trace");
+    std::string pattern = Json::get_or<std::string>(
+        props, "log_pattern", "[%Y-%m-%d %T.%e %z] [%^%l%$] [%s:%#:%!] [thread %t] %v");
 
-        // if the mask wasn't passed in then check if log_module is set in properties
-        if (!module_mask_opt && props.contains("log_modules")) {
-            std::set<std::string> log_modules;
-            // extract log_module array from properties
-            Json::get_to<std::set<std::string>>(props, "log_modules", log_modules);
-            // generate bit pattern for log modules looking up in map
-            module_mask = 0;
-            for (const auto &module : log_modules) {
-                if (log_module_map.find(module) != log_module_map.end()) {
-                    module_mask |= log_module_map[module];
-                } else {
-                    std::cerr << fmt::format("Unknown log module: {}\n", module);
-                }
-            }
-        }
-
-        // if log_name is set, then override log_path
-        if (log_name.has_value()) {
-            std::filesystem::path log_path{log_path_str};
-            std::filesystem::path log_name_path{log_name.value()};
-
-            // add extension if not already exists
-            if (!log_name_path.has_extension()) {
-                log_name_path += ".log";
-            }
-
-            // if log_name is absolute path, then use it as is
-            if (log_name_path.is_absolute()) {
-                log_path = log_name_path;
+    // if the mask wasn't passed in then check if log_module is set in properties
+    if (!module_mask_opt && props.contains("log_modules")) {
+        std::set<std::string> log_modules;
+        // extract log_module array from properties
+        Json::get_to<std::set<std::string>>(props, "log_modules", log_modules);
+        // generate bit pattern for log modules looking up in map
+        module_mask = 0;
+        for (const auto &module : log_modules) {
+            if (log_module_map.find(module) != log_module_map.end()) {
+                module_mask |= log_module_map[module];
             } else {
-                log_path = log_path.parent_path() / log_name_path;
+                std::cerr << fmt::format("Unknown log module: {}\n", module);
             }
-            log_path_str = log_path.string();
         }
-
-        // log bitmask
-        logging::_log_mask = module_mask;
-
-        std::vector<spdlog::sink_ptr> sinks;
-
-        // console sink
-        if (!is_daemon) {
-            auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-            console_sink->set_pattern(pattern);
-            set_level(console_sink, log_level);
-            sinks.push_back(console_sink);
-        }
-
-        // file sink
-        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
-        set_level(file_sink, log_level);
-        sinks.push_back(file_sink);
-
-        // create the logger for both console and file sink
-        auto logger = std::make_shared<spdlog::logger>("springtail",
-                                                       std::begin(sinks), std::end(sinks));
-        logger->set_pattern(pattern);
-        set_level(logger, log_level);
-        logger->flush_on(spdlog::level::err);
-
-        spdlog::set_default_logger(logger);
-        spdlog::flush_every(std::chrono::seconds(3));
-
-        static SpdlogSink spdlog_sink;
-        absl::AddLogSink(&spdlog_sink);
     }
-} // namespace springtail
+
+    // if log_name is set, then override log_path
+    if (log_name.has_value()) {
+        std::filesystem::path log_path{log_path_str};
+        std::filesystem::path log_name_path{log_name.value()};
+
+        // add extension if not already exists
+        if (!log_name_path.has_extension()) {
+            log_name_path += ".log";
+        }
+
+        // if log_name is absolute path, then use it as is
+        if (log_name_path.is_absolute()) {
+            log_path = log_name_path;
+        } else {
+            log_path = log_path.parent_path() / log_name_path;
+        }
+        log_path_str = log_path.string();
+    }
+
+    // log bitmask
+    logging::_log_mask = module_mask;
+
+    std::vector<spdlog::sink_ptr> sinks;
+
+    // console sink
+    if (!is_daemon) {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        console_sink->set_pattern(pattern);
+        set_level(console_sink, log_level);
+        sinks.push_back(console_sink);
+    }
+
+    // file sink
+    auto file_sink =
+        std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path_str, max_size, max_files);
+    set_level(file_sink, log_level);
+    sinks.push_back(file_sink);
+
+    // create the logger for both console and file sink
+    auto logger =
+        std::make_shared<spdlog::logger>("springtail", std::begin(sinks), std::end(sinks));
+    logger->set_pattern(pattern);
+    set_level(logger, log_level);
+    logger->flush_on(spdlog::level::err);
+
+    spdlog::set_default_logger(logger);
+    spdlog::flush_every(std::chrono::seconds(3));
+
+    static SpdlogSink spdlog_sink;
+    absl::AddLogSink(&spdlog_sink);
+}
+}  // namespace springtail

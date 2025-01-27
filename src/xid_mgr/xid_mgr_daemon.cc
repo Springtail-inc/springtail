@@ -1,29 +1,29 @@
-#include <iostream>
-
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
+#include <iostream>
 #include <xid_mgr/xid_mgr_server.hh>
 
 using namespace springtail;
 
 namespace {
-    void
-    handle_sigint(int signal)
-    {
-        xid_mgr::XidMgrServer::get_instance()->stop();
-    }
+void
+handle_sigint(int signal)
+{
+    xid_mgr::XidMgrServer::get_instance()->stop();
 }
+}  // namespace
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     uint64_t starting_xid;
-    uint64_t db_id=1;
+    uint64_t db_id = 1;
 
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid)->default_value(2), "The starting XID.");
+    desc.add_options()("xid,x", po::value<uint64_t>(&starting_xid)->default_value(2),
+                       "The starting XID.");
     desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
     desc.add_options()("daemonize", "Start the server as a daemon");
 

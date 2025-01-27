@@ -1,12 +1,12 @@
 // external includes
-#include <fstream>
-#include <iostream>
-#include <thread>
+#include <fmt/core.h>
+#include <miniocpp/client.h>
 
 #include <boost/program_options.hpp>
-#include <fmt/core.h>
+#include <fstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
-#include <miniocpp/client.h>
+#include <thread>
 
 // springtail includes
 #include <common/timer.hh>
@@ -61,20 +61,23 @@ writer(const std::string &url,
 void
 reader()
 {
-
 }
 
 /**
  * Benchmark for MinIO
  */
-int main(int argc, char* argv[]) {
+int
+main(int argc, char *argv[])
+{
     std::string credentials_file;
 
     // parse the arguments
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
-    desc.add_options()("creds,c", po::value<std::string>(&credentials_file)->default_value("credentials.json"), "MinIO credentials file.");
+    desc.add_options()("creds,c",
+                       po::value<std::string>(&credentials_file)->default_value("credentials.json"),
+                       "MinIO credentials file.");
     // XXX number of files
     // XXX size of files
     // XXX number of concurrent threads
@@ -92,11 +95,10 @@ int main(int argc, char* argv[]) {
     // parse the credentials
     std::ostringstream ss;
     std::fstream file(credentials_file);
-    ss << file.rdbuf(); // reading data
+    ss << file.rdbuf();  // reading data
     std::string json_data = ss.str();
 
     const nlohmann::json credentials = nlohmann::json::parse(json_data);
-
 
     // Create S3 base URL.
     minio::s3::BaseUrl base_url(credentials.at("url").get<std::string>());
@@ -119,8 +121,7 @@ int main(int argc, char* argv[]) {
 
         minio::s3::BucketExistsResponse resp = client.BucketExists(args);
         if (!resp) {
-            std::cout << "unable to do bucket existence check; " << resp.Error()
-                      << std::endl;
+            std::cout << "unable to do bucket existence check; " << resp.Error() << std::endl;
             return -1;
         }
 

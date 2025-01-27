@@ -1,13 +1,12 @@
-#include <iostream>
-#include <csignal>
 #include <boost/program_options.hpp>
+#include <csignal>
+#include <iostream>
 
 // springtail includes
 #include <common/common.hh>
+#include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <common/json.hh>
-
 #include <proxy/server.hh>
 
 using namespace springtail;
@@ -23,7 +22,8 @@ handle_sigint(int signal)
     }
 }
 
-int main(int argc, char* argv[])
+int
+main(int argc, char* argv[])
 {
     namespace po = boost::program_options;
     po::options_description desc("Allowed options");
@@ -59,8 +59,7 @@ int main(int argc, char* argv[])
     bool enable_ssl = Json::get_or<bool>(json, "enable_ssl", false);
     std::filesystem::path certificate = Json::get_or<std::filesystem::path>(json, "cert", "");
     std::filesystem::path key = Json::get_or<std::filesystem::path>(json, "key", "");
-    if (enable_ssl &&
-        (!std::filesystem::exists(certificate) || !std::filesystem::exists(key))) {
+    if (enable_ssl && (!std::filesystem::exists(certificate) || !std::filesystem::exists(key))) {
         throw Error("Certificate/key file does not exist and ssl is enabled");
     }
 
@@ -73,7 +72,8 @@ int main(int argc, char* argv[])
     ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
     std::string mode = Json::get_or<std::string>(json, "mode", "normal");
     if (mode == "shadow") {
-        std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
+        std::filesystem::path log =
+            Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
         if (log.empty()) {
             throw Error("shadow_log_path is not defined");
         }
@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
         log_file.close();
 
         SPDLOG_INFO("Logging initialized to: {}", log.string());
-        logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
+        logger = std::make_shared<Logger>(log, 1024 * 1024 * 100, 5);
 
         server_mode = ProxyServer::MODE::SHADOW;
     } else if (mode == "normal") {
@@ -93,7 +93,8 @@ int main(int argc, char* argv[])
         throw Error("Invalid mode specified");
     }
 
-    server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
+    server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, server_mode,
+                                           enable_ssl, logger);
     server->set_log_level(log_level);
 
     server->run();

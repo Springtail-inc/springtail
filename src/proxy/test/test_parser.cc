@@ -1,11 +1,10 @@
-#include <vector>
-#include <iostream>
-
 #include <gtest/gtest.h>
 
 #include <common/common.hh>
 #include <common/logging.hh>
+#include <iostream>
 #include <proxy/parser.hh>
+#include <vector>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;
@@ -25,9 +24,12 @@ static const std::vector<std::tuple<std::string, bool, std::string>> tests = {
     {"SET LOCAL foo='bar'", true, "foo"},
     {"SELECT foo FROM bar; UPDATE bar set foo = foo + 1", false, ""},
     {"COPY foo TO STDOUT", true, ""},
-    {"PREPARE fooplan (int, text, bool, numeric) AS INSERT INTO foo VALUES($1, $2, $3, $4)", false, "fooplan"},
+    {"PREPARE fooplan (int, text, bool, numeric) AS INSERT INTO foo VALUES($1, $2, $3, $4)", false,
+     "fooplan"},
     {"PREPARE fooplan (int, text, bool, numeric) AS VALUES($1, $2, $3, $4)", true, "fooplan"},
-    {"PREPARE foobar (int, text) AS INSERT INTO users (user_id, group_name) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM users WHERE user_id = $1)", false, "foobar"},
+    {"PREPARE foobar (int, text) AS INSERT INTO users (user_id, group_name) SELECT $1, $2 WHERE "
+     "NOT EXISTS (SELECT 1 FROM users WHERE user_id = $1)",
+     false, "foobar"},
     {"EXECUTE fooplan(1, 'Hunter Valley', 't', 200.0)", true, "fooplan"},
     {"SELECT a FROM b UNION SELECT x FROM y LIMIT 10", true, ""},
     {"ALTER TABLE foo ADD COLUMN bar INT", false, ""},
@@ -55,14 +57,15 @@ TEST(ProxyParser_Test, TestParser)
     springtail_init();
 
     for (int i = 0; i < tests.size(); i++) {
-        std::vector<Parser::StmtContextPtr> res = Parser::parse_query(std::get<0>(tests[i]),  [](const std::string &schema, const std::string &table) {
-            return true;
-        });
+        std::vector<Parser::StmtContextPtr> res = Parser::parse_query(
+            std::get<0>(tests[i]),
+            [](const std::string &schema, const std::string &table) { return true; });
 
         bool is_readable = true;
         std::string name;
         for (auto &r : res) {
-            SPDLOG_INFO("Query: {} is {}", std::get<0>(tests[i]), (r->is_read_safe ? "readable" : "NOT readable"));
+            SPDLOG_INFO("Query: {} is {}", std::get<0>(tests[i]),
+                        (r->is_read_safe ? "readable" : "NOT readable"));
             if (!r->is_read_safe) {
                 is_readable = false;
             }
@@ -73,7 +76,8 @@ TEST(ProxyParser_Test, TestParser)
 
         bool expected_readable = std::get<1>(tests[i]);
         if (is_readable != expected_readable) {
-            SPDLOG_ERROR("Mismatch in query expectations: expected={}, got={}", expected_readable, is_readable);
+            SPDLOG_ERROR("Mismatch in query expectations: expected={}, got={}", expected_readable,
+                         is_readable);
             Parser::dump_parse_tree(std::get<0>(tests[i]));
         }
         if (name != std::get<2>(tests[i])) {

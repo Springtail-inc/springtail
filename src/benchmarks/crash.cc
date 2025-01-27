@@ -1,26 +1,29 @@
-#include <iostream>
-
+#include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <common/common.hh>
+#include <iostream>
 
 class CrashError : public springtail::Error {
 public:
-    CrashError() { }
-    CrashError(const std::string &error)
-        : springtail::Error(error)
-    { }
+    CrashError() {}
+    CrashError(const std::string &error) : springtail::Error(error) {}
 };
 
-void crash(const char *str) {
+void
+crash(const char *str)
+{
     std::cout << *str << std::endl;
 }
 
-void error() {
+void
+error()
+{
     throw CrashError();
 }
 
-int main() {
+int
+main()
+{
     // initialize the common framework
     springtail::springtail_init();
 

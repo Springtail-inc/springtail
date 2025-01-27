@@ -1,23 +1,16 @@
-#include <iostream>
-
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdbool.h>
-
 #include <fmt/format.h>
-#include <boost/program_options.hpp>
-#include <nlohmann/json.hpp>
+#include <stdbool.h>
+#include <stdint.h>
 
+#include <boost/program_options.hpp>
 #include <common/common.hh>
 #include <common/constants.hh>
 #include <common/json.hh>
-
+#include <iostream>
+#include <nlohmann/json.hpp>
 #include <pg_fdw/pg_fdw_mgr.hh>
-
 #include <storage/field.hh>
 #include <storage/schema.hh>
-
 #include <sys_tbl_mgr/system_tables.hh>
 #include <sys_tbl_mgr/table.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
@@ -29,9 +22,8 @@ using namespace springtail::pg_fdw;
 void
 list_tables(uint64_t db_id)
 {
-    auto table = TableMgr::get_instance()->get_table(db_id,
-                                                     sys_tbl::TableNames::ID,
-                                                     constant::LATEST_XID);
+    auto table =
+        TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, constant::LATEST_XID);
     // get field array
     auto fields = table->extent_schema()->get_fields();
 
@@ -45,7 +37,8 @@ list_tables(uint64_t db_id)
 
         // check if table already exists in the map
         if (exists) {
-            std::cout << fmt::format("Found table {}.{} tid={}, xid={}\n", schema_name, table_name, tid, xid);
+            std::cout << fmt::format("Found table {}.{} tid={}, xid={}\n", schema_name, table_name,
+                                     tid, xid);
         }
     }
 }
@@ -58,9 +51,8 @@ lookup_table(uint64_t db_id,
              uint64_t xid)
 {
     // get the table names table
-    auto table = TableMgr::get_instance()->get_table(db_id,
-                                                     sys_tbl::TableNames::ID,
-                                                     constant::LATEST_XID);
+    auto table =
+        TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID, constant::LATEST_XID);
     // get field array
     auto fields = table->extent_schema()->get_fields();
 
@@ -107,7 +99,7 @@ dump_datum(Datum value, SchemaType type)
         case SchemaType::FLOAT64:
             return fmt::format("{}", DatumGetFloat8(value));
         case SchemaType::TEXT:
-            //return fmt::format("{}", DatumGetCString(value));
+            // return fmt::format("{}", DatumGetCString(value));
             return fmt::format("{}", TextDatumGetCString(value));
         default:
             return "UNKNOWN";
@@ -116,13 +108,12 @@ dump_datum(Datum value, SchemaType type)
 
 /** Dump a table by table ID and xid */
 void
-dump_table(uint64_t db_id,
-           uint64_t tid,
-           uint64_t xid)
+dump_table(uint64_t db_id, uint64_t tid, uint64_t xid)
 {
     TablePtr table = TableMgr::get_instance()->get_table(db_id, tid, xid);
     ExtentSchemaPtr schema = table->extent_schema();
-    std::map<uint32_t, SchemaColumn> columns = SchemaMgr::get_instance()->get_columns(db_id, tid, { xid, constant::MAX_LSN });
+    std::map<uint32_t, SchemaColumn> columns =
+        SchemaMgr::get_instance()->get_columns(db_id, tid, {xid, constant::MAX_LSN});
 
     auto fields = schema->get_fields();
     FormData_pg_attribute attrdata[fields->size()];
@@ -194,15 +185,16 @@ dump_table(uint64_t db_id,
     dump_table(db_id, tid, xid);
 }
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     springtail_init();
 
     std::string table;
     std::string schema;
     uint64_t db_id = 0;
-    uint64_t xid=0;
-    uint64_t tid=0;
+    uint64_t xid = 0;
+    uint64_t tid = 0;
     bool list = false;
 
     springtail::springtail_init();
@@ -213,7 +205,8 @@ int main(int argc, char *argv[])
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("db,d", po::value<uint64_t>(&db_id), "Database ID");
     desc.add_options()("table,t", po::value<std::string>(&table), "Table name to dump");
-    desc.add_options()("schema,s", po::value<std::string>(&schema)->default_value("public"), "Schema name");
+    desc.add_options()("schema,s", po::value<std::string>(&schema)->default_value("public"),
+                       "Schema name");
     desc.add_options()("xid,x", po::value<uint64_t>(&xid), "XID");
     desc.add_options()("tid,i", po::value<uint64_t>(&tid), "Table ID");
     desc.add_options()("list,l", po::bool_switch(&list)->default_value(false), "List tables");

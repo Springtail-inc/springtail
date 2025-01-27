@@ -1,27 +1,26 @@
-#include <pg_fdw/pg_ddl_mgr.hh>
-
 #include <boost/program_options.hpp>
+#include <pg_fdw/pg_ddl_mgr.hh>
 
 // springtail includes
 #include <common/common.hh>
 #include <common/properties.hh>
-
 #include <pg_log_mgr/pg_log_coordinator.hh>
 
 using namespace springtail;
 
 namespace {
-    void
-    handle_sigint(int signal)
-    {
-        pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
-        if (ddl_mgr != nullptr) {
-            ddl_mgr->stop_thread();
-        }
+void
+handle_sigint(int signal)
+{
+    pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();
+    if (ddl_mgr != nullptr) {
+        ddl_mgr->stop_thread();
     }
 }
+}  // namespace
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     std::optional<std::string> socket_hostname = {};
     std::string socket_host_str;
@@ -34,9 +33,12 @@ int main(int argc, char *argv[])
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Help message.");
     desc.add_options()("daemonize", "Start the server as a daemon");
-    desc.add_options()("username,u", po::value<std::string>(&username)->required(), "DDL Postgres username");
-    desc.add_options()("password,p", po::value<std::string>(&password)->required(), "DDL Postgres password");
-    desc.add_options()("socket,s", po::value<std::string>(&socket_host_str), "Unix domain socket path for Postgresql");
+    desc.add_options()("username,u", po::value<std::string>(&username)->required(),
+                       "DDL Postgres username");
+    desc.add_options()("password,p", po::value<std::string>(&password)->required(),
+                       "DDL Postgres password");
+    desc.add_options()("socket,s", po::value<std::string>(&socket_host_str),
+                       "Unix domain socket path for Postgresql");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -76,18 +78,20 @@ int main(int argc, char *argv[])
         } else {
             try {
                 // Try to iterate over the directory
-                for (const auto& entry : std::filesystem::directory_iterator(socket_path)) {
+                for (const auto &entry : std::filesystem::directory_iterator(socket_path)) {
                     (void)entry;  // We don't actually need the entries
                 }
-            } catch (const std::filesystem::filesystem_error& e) {
-                std::cerr << "Error: socket path is not readable: " << *socket_hostname << std::endl;
+            } catch (const std::filesystem::filesystem_error &e) {
+                std::cerr << "Error: socket path is not readable: " << *socket_hostname
+                          << std::endl;
                 socket_hostname = std::nullopt;
             }
         }
     }
 
-    SPDLOG_DEBUG("Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}",
-                 fdw_id, username, password, socket_hostname.value_or(""));
+    SPDLOG_DEBUG(
+        "Starting DDL Mgr with fdw_id: {}, username: {}, password: {}, socket_hostname: {}", fdw_id,
+        username, password, socket_hostname.value_or(""));
 
     // get the DDL Mgr instance
     pg_fdw::PgDDLMgr *ddl_mgr = pg_fdw::PgDDLMgr::get_instance();

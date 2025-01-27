@@ -1,10 +1,9 @@
-#include <vector>
-#include <iostream>
-
 #include <gtest/gtest.h>
 
 #include <common/logging.hh>
+#include <iostream>
 #include <proxy/parser.hh>
+#include <vector>
 
 using namespace springtail;
 
@@ -24,12 +23,13 @@ static const std::vector<std::string> tests = {
     "COPY foo TO STDOUT",
     "PREPARE fooplan (int, text, bool, numeric) AS INSERT INTO foo VALUES($1, $2, $3, $4)",
     "PREPARE fooplan (int, text, bool, numeric) AS VALUES($1, $2, $3, $4)",
-    "PREPARE foobar (int, text) AS INSERT INTO users (user_id, group_name) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM users WHERE user_id = $1)",
+    "PREPARE foobar (int, text) AS INSERT INTO users (user_id, group_name) SELECT $1, $2 WHERE NOT "
+    "EXISTS (SELECT 1 FROM users WHERE user_id = $1)",
     "EXECUTE fooplan(1, 'Hunter Valley', 't', 200.0)",
     "SELECT a FROM b UNION SELECT x FROM y LIMIT 10",
     "ALTER TABLE foo ADD COLUMN bar INT",
     "EXPLAIN ANALYZE SELECT * FROM foo",
-    "RESET ALL", // maps to VariableSetStmt kind=VAR_RESET_ALL
+    "RESET ALL",  // maps to VariableSetStmt kind=VAR_RESET_ALL
     "DECLARE myportal CURSOR FOR SELECT * FROM foo",
     "DECLARE myportal CURSOR FOR SELECT * FROM foo FOR UPDATE",
     "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
@@ -43,15 +43,15 @@ static const std::vector<std::string> tests = {
     "RELEASE SAVEPOINT foo",
 };
 
-int main(void)
+int
+main(void)
 {
     init_logging(LOG_ALL);
 
     for (int i = 0; i < tests.size(); i++) {
         std::cout << "\nQuery: " << tests[i] << std::endl;
-        std::vector<pg_proxy::Parser::StmtContextPtr> res = pg_proxy::Parser::parse_query(tests[i], [](const std::string &schema, const std::string &table) {
-            return true;
-        });
+        std::vector<pg_proxy::Parser::StmtContextPtr> res = pg_proxy::Parser::parse_query(
+            tests[i], [](const std::string &schema, const std::string &table) { return true; });
         pg_proxy::Parser::dump_parse_tree(tests[i]);
         for (auto &r : res) {
             std::cout << "IS: " << (r->is_read_safe ? "readable\n" : "NOT readable\n") << std::endl;

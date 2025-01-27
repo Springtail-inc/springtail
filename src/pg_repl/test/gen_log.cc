@@ -1,15 +1,13 @@
+#include <boost/program_options.hpp>
+#include <common/common.hh>
 #include <filesystem>
 #include <iostream>
-
-#include <boost/program_options.hpp>
-
-#include <common/common.hh>
-
 #include <pg_repl/pg_msg_log_gen.hh>
 
 using namespace springtail;
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
     std::string input_file, output_file;
     bool dump;

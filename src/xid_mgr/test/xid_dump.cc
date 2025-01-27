@@ -1,11 +1,9 @@
-#include <iostream>
-#include <fstream>
-#include <filesystem>
 #include <boost/program_options.hpp>
-
 #include <common/common.hh>
 #include <common/properties.hh>
-
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <xid_mgr/xid_partition.hh>
 
 using namespace springtail;
@@ -24,19 +22,20 @@ read_partition_file(const std::filesystem::path &path)
     uint64_t magic;
     uint64_t num_entries;
 
-    std::copy_n(buffer, sizeof(magic), reinterpret_cast<char*>(&magic));
-    std::copy_n(buffer + sizeof(magic), sizeof(num_entries), reinterpret_cast<char*>(&num_entries));
+    std::copy_n(buffer, sizeof(magic), reinterpret_cast<char *>(&magic));
+    std::copy_n(buffer + sizeof(magic), sizeof(num_entries),
+                reinterpret_cast<char *>(&num_entries));
 
-    assert (magic == xid_mgr::Partition::MAGIC_HDR);
-    assert (num_entries * 16 <= xid_mgr::Partition::BUFFER_SIZE);
+    assert(magic == xid_mgr::Partition::MAGIC_HDR);
+    assert(num_entries * 16 <= xid_mgr::Partition::BUFFER_SIZE);
 
     int off = sizeof(magic) + sizeof(num_entries);
     for (int i = 0; i < num_entries; i++) {
         uint64_t db_id;
         uint64_t xid;
-        std::copy_n(buffer + off, sizeof(db_id), reinterpret_cast<char*>(&db_id));
+        std::copy_n(buffer + off, sizeof(db_id), reinterpret_cast<char *>(&db_id));
         off += sizeof(db_id);
-        std::copy_n(buffer + off, sizeof(xid), reinterpret_cast<char*>(&xid));
+        std::copy_n(buffer + off, sizeof(xid), reinterpret_cast<char *>(&xid));
         off += sizeof(xid);
 
         std::cout << "db_id=" << db_id << ", xid=" << xid << std::endl;
