@@ -134,12 +134,17 @@ namespace springtail {
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
+        static void shutdown() {
+            std::call_once(_shutdown_flag, _shutdown);
+        }
+
     private:
         /** static _instance singleton */
         static Properties *_instance;
 
         /** once init flag */
         static std::once_flag _init_flag;
+        static std::once_flag _shutdown_flag;
 
         /** json containing parsed settings file */
         nlohmann::json _json;
@@ -148,6 +153,13 @@ namespace springtail {
          * @brief Construct a new Properties object
          */
         Properties(bool load_redis);
+
+        static void _shutdown() {
+            if (_instance != nullptr) {
+                delete _instance;
+                _instance = nullptr;
+            }
+        }
 
         /**
          * @brief Read the environment variables into base config

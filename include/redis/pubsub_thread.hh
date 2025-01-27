@@ -21,7 +21,7 @@ namespace springtail {
          *                  false - use data db
          */
         PubSubThread(int timeout, bool config_db) : _subscriber_counter(0) {
-            _subscriber = RedisMgr::get_instance()->get_subscriber(timeout, config_db);
+            _subscriber = RedisMgr::get_subscriber(timeout, config_db);
         }
 
         /**

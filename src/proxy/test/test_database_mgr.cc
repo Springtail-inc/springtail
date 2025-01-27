@@ -16,33 +16,17 @@ namespace {
             springtail_init();
 
             DatabaseMgr::get_instance()->init();
+
             _data_client = RedisMgr::get_instance()->get_client();
 
-            sw::redis::ConnectionOptions con_opt;
-            nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
+            int db_id;
+            tie(db_id, _config_client) = RedisMgr::create_client(false);
 
-            con_opt.host = Json::get_or<std::string>(json, "host", "localhost");
-            con_opt.user = Json::get_or<std::string>(json, "user", "user");
-            Json::get_to<std::string>(json, "password", con_opt.password);
-            con_opt.port = Json::get_or<int>(json, "port", 6379);
-            con_opt.db = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_CONFIG_DB);
-            int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
-
-            con_opt.keep_alive_s = std::chrono::seconds(keep_alive_secs);
-            con_opt.keep_alive = true;
-            con_opt.resp = 3;
-            con_opt.socket_timeout = std::chrono::milliseconds(0);
-
-            sw::redis::ConnectionPoolOptions pool_opt;
-            pool_opt.size = 1;
-            pool_opt.connection_idle_time = std::chrono::seconds(60);
-            pool_opt.connection_lifetime = std::chrono::seconds(0);
-
-            _config_client = std::make_shared<RedisClient>(con_opt, pool_opt);
         }
         static void TearDownTestSuite()
         {
             DatabaseMgr::shutdown();
+            RedisMgr::shutdown();
         }
         static inline RedisClientPtr _config_client;
         static inline RedisClientPtr _data_client;

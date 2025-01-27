@@ -8,6 +8,7 @@
 #include <sw/redis++/redis++.h>
 
 #include <common/exception.hh>
+#include <common/singleton.hh>
 
 namespace springtail {
 
@@ -64,23 +65,13 @@ namespace springtail {
     /**
      * @brief Singleton redis client
      */
-    class RedisMgr {
+    class RedisMgr : public Singleton<RedisMgr> {
+        friend class Singleton<RedisMgr>;
     public:
         using SubscriberPtr = std::shared_ptr<sw::redis::Subscriber>;
 
         static constexpr int REDIS_CONFIG_DB = 0;
         static constexpr int REDIS_DATA_DB = 1;
-
-        /**
-         * @brief Get the singleton instance object
-         * @return RedisMgr*
-         */
-        static RedisMgr *get_instance();
-
-        /**
-         * @brief Shutdown Redis Mgr and connection pool
-         */
-        void shutdown();
 
         /**
          * @brief Get the redis client object
@@ -98,28 +89,20 @@ namespace springtail {
          * @param config_db if true, use the config db
          * @return SubscriberPtr
          */
-        SubscriberPtr get_subscriber(int timeout_secs=5,  bool config_db=true);
+        static SubscriberPtr get_subscriber(int timeout_secs=5,  bool config_db=true);
+
+        static std::tuple<int, RedisClientPtr> create_client(bool config_db);
 
     protected:
-        /** internal singleton instance */
-        static RedisMgr *_instance;
-
-        /** mutex protecting _instance creation */
-        static std::mutex _instance_mutex;
-
         /** Redis client wrapper around client object */
         RedisClientPtr _redis;
 
         RedisMgr();
 
-        ~RedisMgr() {}
+        ~RedisMgr() override = default;
 
     private:
-        sw::redis::ConnectionOptions     _connect_options;
-        sw::redis::ConnectionPoolOptions _pool_options;
-
-        // delete copy constructor
-        RedisMgr(const RedisMgr &)       = delete;
-        void operator=(const RedisMgr &) = delete;
+        int _db_id;
+        static sw::redis::ConnectionOptions get_connect_options(bool config_db=true);
     };
 }

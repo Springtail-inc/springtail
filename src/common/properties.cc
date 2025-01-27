@@ -19,6 +19,7 @@ namespace springtail {
 
     Properties* Properties::_instance {nullptr};
     std::once_flag Properties::_init_flag;
+    std::once_flag Properties::_shutdown_flag;
 
     nlohmann::json
     Properties::get(const std::string &key)
