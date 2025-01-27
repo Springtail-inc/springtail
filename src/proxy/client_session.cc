@@ -217,6 +217,7 @@ namespace springtail::pg_proxy {
 
         // first close connection and remove from server poll list
         // this removes all associated sockets from this session
+        ProxyServer::get_instance()->log_disconnect(shared_from_this());
         _connection->close();
         ProxyServer::get_instance()->shutdown_session(shared_from_this());
 

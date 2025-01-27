@@ -749,7 +749,6 @@ namespace springtail::pg_proxy {
 
         // if all queries complete
         if (_pending_queue.empty()) {
-            // _state = READY;  // Not sure this is needed
             return;
         }
 
@@ -957,6 +956,7 @@ namespace springtail::pg_proxy {
         }
 
         // on error, the server shuts down the connection and releases the session
+        ProxyServer::get_instance()->log_disconnect(shared_from_this());
         _connection->close();
         ProxyServer::get_instance()->shutdown_session(shared_from_this());
 
@@ -986,6 +986,8 @@ namespace springtail::pg_proxy {
 
         ServerSessionPtr session = std::make_shared<ServerSession>(connection, user, database, prefix, instance, params, type);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Created connection for server session, to: db={}", session->id(), database);
+
+        ProxyServer::get_instance()->log_connect(session);
 
         return session;
     }

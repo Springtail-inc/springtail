@@ -215,7 +215,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::_log_connect(SessionPtr session)
+    ProxyServer::log_connect(SessionPtr session)
     {
         if (!_logger) {
             return;
@@ -245,7 +245,7 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ProxyServer::_log_disconnect(SessionPtr session)
+    ProxyServer::log_disconnect(SessionPtr session)
     {
         if (!_logger) {
             return;
@@ -304,6 +304,7 @@ namespace springtail::pg_proxy {
             // create the connection and attach it to a client session
             ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
             ClientSessionPtr session = std::make_shared<ClientSession>(connection);
+            log_connect(session);
 
             // add session to the waiting sessions list
             // and to the session map
@@ -511,9 +512,6 @@ namespace springtail::pg_proxy {
                                   int socket,
                                   bool waiting_session_insert)
     {
-        // all new sessions must be registered, so good place to log it
-        // _log_connect(session);
-
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Registering socket {} with session: {}", socket, new_session->name());
 
         if (old_session != nullptr) {

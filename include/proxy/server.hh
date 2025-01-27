@@ -112,6 +112,12 @@ namespace springtail::pg_proxy {
         /** Set the global log level */
         void set_log_level(int loglevel);
 
+        /** Log new connection */
+        void log_connect(SessionPtr session);
+
+        /** Log disconnect */
+        void log_disconnect(SessionPtr session);
+
     protected:
 
         /** Shutdown server */
@@ -147,12 +153,6 @@ namespace springtail::pg_proxy {
         /** Setup and configure SSL context; pass in certificate and private key */
         SSL_CTX *_setup_SSL_context(const std::filesystem::path &cert_file={},
                                     const std::filesystem::path &key_file={});
-
-        /** Log new connection */
-        void _log_connect(SessionPtr session);
-
-        /** Log disconnect */
-        void _log_disconnect(SessionPtr session);
 
         /** Internal shutdown session -- helper, assumes lock is held */
         void _internal_shutdown_session(SessionPtr session, std::unique_lock<std::mutex> &lock);
