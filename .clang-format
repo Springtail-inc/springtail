@@ -114,16 +114,16 @@ IfMacros:
 IncludeBlocks:   Regroup
 IncludeCategories:
   - Regex:           '^<ext/.*\.h>'
-    Priority:        2
+    Priority:        1
     SortPriority:    0
     CaseSensitive:   false
   - Regex:           '^<postgres\.h>'
-    Priority:        1
+    Priority:        0
     SortPriority:    0
     CaseSensitive:   false
   - Regex:           '^<.*\.h>'
     Priority:        1
-    SortPriority:    1
+    SortPriority:    0
     CaseSensitive:   false
   - Regex:           '^<[^/.]*>'
     Priority:        2
