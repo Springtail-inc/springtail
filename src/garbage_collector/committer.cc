@@ -3,6 +3,8 @@
 #include <common/coordinator.hh>
 #include <common/constants.hh>
 #include <garbage_collector/committer.hh>
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>
@@ -26,6 +28,13 @@ namespace springtail::gc {
         // perform cleanup for any Committer threads in a previous run
         cleanup();
         _create_indexer();
+        auto meter = metrics::Provider::GetMeterProvider()->GetMeter("gc");
+        _btree_write_latencies = std::shared_ptr<metrics::Histogram<double>>(
+            meter
+                ->CreateDoubleHistogram(
+                    "btree_write_latencies",
+                    "Latency between postgres commit and btree write completion", "ms")
+                .release());
 
         auto coordinator = Coordinator::get_instance();
         constexpr auto daemon_type = Coordinator::DaemonType::GC_MGR;
@@ -501,7 +510,9 @@ namespace springtail::gc {
             // log how long it took to process this table
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now() - min_commit_ts->to_system_time());
+            _btree_write_latencies->Record(duration.count(), _context);
             SPDLOG_DEBUG_MODULE(LOG_GC, "Processed table {} in {} milliseconds", tid, duration.count());
+            SPDLOG_ERROR("Processed table {} in {} milliseconds", tid, duration.count());
         }
         // update the system table roots
         TableMgr::get_instance()->update_roots(table->db(), table->id(), xid, metadata);

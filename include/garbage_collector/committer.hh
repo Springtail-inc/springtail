@@ -23,7 +23,12 @@
 #include <write_cache/write_cache_client.hh>
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/metrics/meter.h>
+
 namespace springtail::gc {
+    namespace metrics = opentelemetry::metrics;
+
     /**
      * The Committer is responsible for reading modifications from the write cache and applying them
      * to the on-disk representation of the tables.  It operates by pulling a list of extents from
@@ -146,5 +151,8 @@ namespace springtail::gc {
         /** Indexer
          */
         std::unique_ptr<Indexer> _indexer;
+
+        std::shared_ptr<metrics::Histogram<double>> _btree_write_latencies;
+        opentelemetry::context::Context _context;
     };
 }
