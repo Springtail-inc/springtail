@@ -232,13 +232,15 @@ namespace springtail
             index_obj.table_id = _schema.table_oid;
             index_obj.is_unique = is_unique;
             index_obj.columns = columns;
+            // set the index state to ready since its part of the initial table copy
+            index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
             
             secondary_indexes[index_name] = index_obj;
         }
 
         for (const auto &index : secondary_indexes) {
             _schema.secondary_keys.push_back(index.second);
-            SPDLOG_INFO("Adding to secondary keys {} {}", index.second.id, index.second.name);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
         }
         
         _connection.clear();
@@ -463,7 +465,7 @@ namespace springtail
                 requests.push_back(request);   
             }
 
-            auto &&index_json = common::thrift_to_json_vector<sys_tbl_mgr::IndexRequest>(requests);
+            auto &&index_json = common::thrift_json_to_vector<sys_tbl_mgr::IndexRequest>(requests);
 
             ops.push_back(index_json);
         }

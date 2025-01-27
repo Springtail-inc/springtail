@@ -103,7 +103,7 @@ namespace {
             create.xid = xid;
             create.lsn = constant::MAX_LSN - 1;
 
-            auto indexes = common::json_vector_to_thrift<sys_tbl_mgr::IndexRequest>(json[1]);
+            auto indexes = common::json_to_vector_thrift<sys_tbl_mgr::IndexRequest>(json[1]);
 
             auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
             roots.xid = xid;

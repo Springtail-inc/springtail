@@ -125,7 +125,7 @@ namespace springtail {
 
         template <typename T>
         nlohmann::json
-        thrift_to_json_vector(const std::vector<T> &vec_obj)
+        thrift_json_to_vector(const std::vector<T> &vec_obj)
         {
             nlohmann::json jsonArray = nlohmann::json::array();
             auto buffer = std::make_shared<apache::thrift::transport::TMemoryBuffer>();
@@ -145,7 +145,7 @@ namespace springtail {
                     jsonArray.push_back(nlohmann::json::parse(jsonStr));
                 }
             } catch (const nlohmann::json::parse_error& e) {
-                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "JSON Parse Error: {}", e.what());
+                SPDLOG_ERROR("JSON Parse Error when parsing vector to JSON array : {}", e.what());
                 // Handle error or return an empty json object
                 return nlohmann::json{};
             }
@@ -171,7 +171,7 @@ namespace springtail {
 
         template <typename T>
         std::vector<T>
-        json_vector_to_thrift(const nlohmann::json &json)
+        json_to_vector_thrift(const nlohmann::json &json)
         {
             std::vector<T> result;
             if (json.is_null() || !json.is_array()) {
@@ -189,7 +189,7 @@ namespace springtail {
                 try {
                     buffer->write(reinterpret_cast<const uint8_t*>(jsonStr.c_str()), jsonStr.size());
                 } catch (const std::exception& e) {
-                    SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Buffer write error: {}", e.what());
+                    SPDLOG_ERROR("Buffer write error when converting JSON array to vector: {}", e.what());
                 }
 
                 // Create a new Thrift object and read from the protocol
