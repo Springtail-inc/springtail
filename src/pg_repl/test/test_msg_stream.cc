@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <filesystem>
+#include <iostream>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <filesystem>
-#include <iostream>
 #include <pg_repl/pg_msg_log_gen.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>

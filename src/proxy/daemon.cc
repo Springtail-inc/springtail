@@ -1,6 +1,7 @@
-#include <boost/program_options.hpp>
 #include <csignal>
 #include <iostream>
+
+#include <boost/program_options.hpp>
 
 // springtail includes
 #include <common/common.hh>

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <barrier>
+
 #include <common/common.hh>
 #include <common/constants.hh>
 #include <common/json.hh>

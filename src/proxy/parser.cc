@@ -1,10 +1,11 @@
 #include <cassert>
-#include <common/logging.hh>
 #include <map>
+#include <set>
+
+#include <common/logging.hh>
 #include <proxy/logging.hh>
 #include <proxy/parser.hh>
 #include <proxy/pg_functions.hh>
-#include <set>
 
 extern "C" {
 #include <postgres.h>

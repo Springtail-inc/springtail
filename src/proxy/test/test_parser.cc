@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <iostream>
+#include <vector>
+
 #include <common/common.hh>
 #include <common/logging.hh>
-#include <iostream>
 #include <proxy/parser.hh>
-#include <vector>
 
 using namespace springtail;
 using namespace springtail::pg_proxy;

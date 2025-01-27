@@ -2,11 +2,12 @@
 #include <fmt/core.h>
 #include <miniocpp/client.h>
 
-#include <boost/program_options.hpp>
 #include <fstream>
 #include <iostream>
-#include <nlohmann/json.hpp>
 #include <thread>
+
+#include <boost/program_options.hpp>
+#include <nlohmann/json.hpp>
 
 // springtail includes
 #include <common/timer.hh>

@@ -4,16 +4,17 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include <common/json.hh>
-#include <common/logging.hh>
-#include <common/properties.hh>
 #include <iostream>
 #include <map>
 #include <memory>
-#include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
 #include <vector>
+
+#include <common/json.hh>
+#include <common/logging.hh>
+#include <common/properties.hh>
+#include <nlohmann/json.hpp>
 
 namespace springtail {
 

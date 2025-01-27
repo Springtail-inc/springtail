@@ -1,11 +1,12 @@
 #include <fmt/core.h>
 
+#include <string>
+
 #include <common/common.hh>
 #include <common/coordinator.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <string>
 
 namespace springtail {
 

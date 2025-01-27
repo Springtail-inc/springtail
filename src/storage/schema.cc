@@ -1,9 +1,10 @@
 #include <fmt/core.h>
 
+#include <string>
+
 #include <storage/exception.hh>
 #include <storage/field.hh>
 #include <storage/schema.hh>
-#include <string>
 
 namespace springtail {
 

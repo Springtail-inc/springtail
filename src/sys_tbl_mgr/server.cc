@@ -1,10 +1,11 @@
+#include <iostream>
+#include <memory>
+#include <mutex>
+
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <iostream>
-#include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <sys_tbl_mgr/server.hh>
 

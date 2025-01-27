@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include <vector>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/filesystem.hh>
@@ -9,7 +11,6 @@
 #include <pg_log_mgr/pg_xact_log_reader.hh>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
 #include <pg_repl/pg_repl_msg.hh>
-#include <vector>
 
 namespace springtail::pg_log_mgr {
 

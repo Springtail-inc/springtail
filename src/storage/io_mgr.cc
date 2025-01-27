@@ -1,21 +1,22 @@
 #include <fmt/core.h>
 
-#include <common/logging.hh>
 #include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <thread>
+#include <variant>
+#include <vector>
+
+#include <common/logging.hh>
 #include <storage/compressors.hh>
 #include <storage/exception.hh>
 #include <storage/io.hh>
 #include <storage/io_file.hh>
 #include <storage/io_mgr.hh>
-#include <string>
-#include <thread>
-#include <variant>
-#include <vector>
 
 namespace springtail {
 

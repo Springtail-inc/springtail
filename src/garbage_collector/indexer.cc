@@ -1,10 +1,11 @@
 #include <assert.h>
 
 #include <algorithm>
-#include <common/logging.hh>
-#include <garbage_collector/indexer.hh>
 #include <mutex>
 #include <stop_token>
+
+#include <common/logging.hh>
+#include <garbage_collector/indexer.hh>
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 

@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <common/state_synchronizer.hh>
 #include <thread>
+
+#include <common/state_synchronizer.hh>
 
 using namespace springtail::common;
 

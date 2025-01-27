@@ -6,13 +6,14 @@
 #include <unistd.h>
 
 #include <climits>
-#include <common/dns_resolver.hh>
-#include <common/logging.hh>
 #include <iostream>
 #include <optional>
+#include <string>
+
+#include <common/dns_resolver.hh>
+#include <common/logging.hh>
 #include <pg_repl/exception.hh>
 #include <pg_repl/libpq_connection.hh>
-#include <string>
 
 extern "C" {
 // libpq functions; defined internally

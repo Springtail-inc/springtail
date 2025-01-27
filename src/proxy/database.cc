@@ -1,18 +1,19 @@
+#include <format>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <unordered_map>
+
 #include <common/counter.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <format>
-#include <memory>
-#include <mutex>
 #include <proxy/client_session.hh>
 #include <proxy/database.hh>
 #include <proxy/exception.hh>
 #include <proxy/logging.hh>
 #include <proxy/server_session.hh>
 #include <proxy/session.hh>
-#include <shared_mutex>
-#include <unordered_map>
 
 namespace springtail::pg_proxy {
 

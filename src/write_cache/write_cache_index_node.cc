@@ -1,6 +1,7 @@
-#include <common/logging.hh>
 #include <memory>
 #include <mutex>
+
+#include <common/logging.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_index_node.hh>
 #include <write_cache/write_cache_table_set.hh>

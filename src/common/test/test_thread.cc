@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
-#include <common/thread_pool.hh>
 #include <iostream>
 #include <memory>
 #include <mutex>
+
+#include <common/common.hh>
+#include <common/thread_pool.hh>
 
 using namespace springtail;
 

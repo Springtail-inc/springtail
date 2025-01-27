@@ -1,7 +1,8 @@
+#include <memory>
+
 #include <common/constants.hh>
 #include <common/coordinator.hh>
 #include <garbage_collector/committer.hh>
-#include <memory>
 #include <pg_log_mgr/pg_redis_xact.hh>
 #include <redis/db_state_change.hh>
 #include <sys_tbl_mgr/client.hh>

@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <common/counter.hh>
 #include <future>
 #include <thread>
+
+#include <common/counter.hh>
 
 using namespace springtail;
 

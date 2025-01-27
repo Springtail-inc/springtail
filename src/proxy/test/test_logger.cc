@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iostream>
+
 #include <proxy/logger.hh>
 
 using namespace springtail::pg_proxy;

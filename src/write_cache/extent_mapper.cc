@@ -1,4 +1,5 @@
 #include <cassert>
+
 #include <common/logging.hh>
 #include <write_cache/extent_mapper.hh>
 

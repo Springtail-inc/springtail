@@ -3,15 +3,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <memory>
+#include <vector>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_msg_stream.hh>
 #include <pg_repl/pg_repl_msg.hh>
-#include <vector>
 
 namespace springtail {
 

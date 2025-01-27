@@ -1,6 +1,7 @@
-#include <common/tracking_allocator.hh>
 #include <iostream>
 #include <set>
+
+#include <common/tracking_allocator.hh>
 
 namespace springtail {
 // Define static init function for Tracking allocator stats

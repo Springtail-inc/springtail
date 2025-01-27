@@ -2,12 +2,13 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <string>
+#include <vector>
+
 #include <storage/exception.hh>
 #include <storage/io.hh>
 #include <storage/io_mgr.hh>
 #include <storage/io_request.hh>
-#include <string>
-#include <vector>
 
 namespace springtail {
 

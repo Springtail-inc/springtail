@@ -1,4 +1,5 @@
 #include <algorithm>
+
 #include <common/logging.hh>
 #include <storage/compressors.hh>
 #include <storage/exception.hh>

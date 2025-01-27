@@ -1,7 +1,8 @@
 #include <atomic>
 #include <cassert>
-#include <common/logging.hh>
 #include <memory>
+
+#include <common/logging.hh>
 #include <proxy/buffer_pool.hh>
 #include <proxy/client_session.hh>
 #include <proxy/connection.hh>

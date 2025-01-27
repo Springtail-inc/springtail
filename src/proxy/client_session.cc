@@ -2,8 +2,10 @@
 #include <proxy/auth/md5.h>
 
 #include <cassert>
-#include <common/logging.hh>
 #include <iostream>
+#include <sstream>
+
+#include <common/logging.hh>
 #include <pg_repl/pg_types.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/buffer_pool.hh>
@@ -16,7 +18,6 @@
 #include <proxy/server.hh>
 #include <proxy/server_session.hh>
 #include <proxy/user_mgr.hh>
-#include <sstream>
 
 namespace springtail::pg_proxy {
 

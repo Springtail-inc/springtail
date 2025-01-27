@@ -6,14 +6,15 @@
 
 #include <cassert>
 #include <cerrno>
-#include <common/logging.hh>
 #include <memory>
+#include <string>
+#include <vector>
+
+#include <common/logging.hh>
 #include <storage/compressors.hh>
 #include <storage/exception.hh>
 #include <storage/io.hh>
 #include <storage/io_file.hh>
-#include <string>
-#include <vector>
 
 namespace springtail {
 

@@ -5,16 +5,17 @@
 #include <thrift/write_cache/ThriftWriteCache.h>
 
 #include <cassert>
+#include <memory>
+#include <string>
+#include <string_view>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/object_cache.hh>
 #include <common/properties.hh>
-#include <memory>
 #include <nlohmann/json.hpp>
-#include <string>
-#include <string_view>
 #include <write_cache/write_cache_client.hh>
 
 namespace springtail {

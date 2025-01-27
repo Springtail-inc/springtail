@@ -2,14 +2,15 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <optional>
+#include <thread>
+
 #include <common/common.hh>
 #include <common/coordinator.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <optional>
-#include <thread>
 
 using namespace springtail;
 

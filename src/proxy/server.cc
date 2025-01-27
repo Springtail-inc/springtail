@@ -12,16 +12,17 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <iostream>
+#include <thread>
+
 #include <common/logging.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
-#include <iostream>
 #include <proxy/client_session.hh>
 #include <proxy/logger.hh>
 #include <proxy/logging.hh>
 #include <proxy/server.hh>
-#include <thread>
 
 namespace springtail::pg_proxy {
 

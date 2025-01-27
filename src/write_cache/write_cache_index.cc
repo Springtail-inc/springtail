@@ -1,5 +1,6 @@
 #include <memory>
 #include <vector>
+
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_table_set.hh>
 

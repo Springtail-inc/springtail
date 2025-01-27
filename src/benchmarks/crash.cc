@@ -1,7 +1,8 @@
+#include <iostream>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <iostream>
 
 class CrashError : public springtail::Error {
 public:

@@ -1,7 +1,8 @@
+#include <csignal>
+
 #include <boost/program_options.hpp>
 #include <common/common.hh>
 #include <common/coordinator.hh>
-#include <csignal>
 #include <garbage_collector/committer.hh>
 
 namespace {

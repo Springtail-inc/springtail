@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <common/concurrent_queue.hh>
 #include <memory>
+
+#include <common/concurrent_queue.hh>
 
 using namespace springtail;
 

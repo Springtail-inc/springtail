@@ -2,6 +2,8 @@
 #include <sys/time.h>
 
 #include <chrono>
+#include <thread>
+
 #include <common/common.hh>
 #include <common/coordinator.hh>
 #include <common/logging.hh>
@@ -14,7 +16,6 @@
 #include <pg_repl/pg_copy_table.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_types.hh>
-#include <thread>
 #include <xid_mgr/xid_mgr_client.hh>
 
 namespace springtail::pg_log_mgr {

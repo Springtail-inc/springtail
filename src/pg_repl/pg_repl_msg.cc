@@ -1,14 +1,15 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <sstream>
+#include <variant>
+
 #include <common/common.hh>
 #include <common/logging.hh>
-#include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <pg_repl/exception.hh>
 #include <pg_repl/pg_repl_msg.hh>
-#include <sstream>
-#include <variant>
 
 extern "C" {
 #include <postgres.h>

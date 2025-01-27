@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
 #include <memory>
+
+#include <common/common.hh>
 #include <proxy/database.hh>
 #include <proxy/server_session.hh>
 

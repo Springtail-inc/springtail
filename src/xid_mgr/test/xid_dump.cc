@@ -1,9 +1,10 @@
-#include <boost/program_options.hpp>
-#include <common/common.hh>
-#include <common/properties.hh>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#include <boost/program_options.hpp>
+#include <common/common.hh>
+#include <common/properties.hh>
 #include <xid_mgr/xid_partition.hh>
 
 using namespace springtail;

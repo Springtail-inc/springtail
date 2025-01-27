@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+
 #include <common/common.hh>
 #include <common/threaded_test.hh>
 #include <common/tracking_allocator.hh>

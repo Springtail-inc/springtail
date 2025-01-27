@@ -1,12 +1,13 @@
 #include <fmt/core.h>
 
 #include <cassert>
-#include <common/common.hh>
-#include <common/logging.hh>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include <common/common.hh>
+#include <common/logging.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_table_set.hh>
 

@@ -3,19 +3,20 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#include <common/constants.hh>
-#include <common/logging.hh>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <sstream>
+#include <variant>
+#include <vector>
+
+#include <common/constants.hh>
+#include <common/logging.hh>
 #include <pg_repl/exception.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <pg_repl/pg_repl_connection.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <pg_repl/pg_types.hh>
-#include <sstream>
-#include <variant>
-#include <vector>
 
 // from socket.h; indicates more data is coming to send
 #if !defined(MSG_MORE)

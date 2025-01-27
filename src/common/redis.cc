@@ -1,12 +1,13 @@
 #include <sw/redis++/redis++.h>
 
+#include <iostream>
+#include <mutex>
+
 #include <common/common.hh>
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/redis.hh>
-#include <iostream>
-#include <mutex>
 
 namespace springtail {
 /* static initialization must happen outside of class */

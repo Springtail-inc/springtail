@@ -1,6 +1,8 @@
 #include <fmt/core.h>
 #include <stdlib.h>
 
+#include <shared_mutex>
+
 #include <common/common.hh>
 #include <common/constants.hh>
 #include <common/exception.hh>
@@ -13,7 +15,6 @@
 #include <pg_fdw/exception.hh>
 #include <pg_fdw/pg_fdw_mgr.hh>
 #include <redis/redis_ddl.hh>
-#include <shared_mutex>
 #include <sys_tbl_mgr/client.hh>
 
 extern "C" {

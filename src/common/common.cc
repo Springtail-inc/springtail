@@ -1,13 +1,14 @@
 #include <atomic>
+#include <filesystem>
+#include <iostream>
+#include <optional>
+#include <string>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/tracing.hh>
-#include <filesystem>
-#include <iostream>
-#include <optional>
-#include <string>
 
 namespace springtail {
 

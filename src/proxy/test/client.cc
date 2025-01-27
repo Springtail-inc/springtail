@@ -1,10 +1,11 @@
 #include <fmt/core.h>
 
-#include <boost/asio.hpp>
-#include <boost/program_options.hpp>
 #include <iostream>
 #include <string>
 #include <thread>
+
+#include <boost/asio.hpp>
+#include <boost/program_options.hpp>
 
 void
 client(int port, int count, int id)

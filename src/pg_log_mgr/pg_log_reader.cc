@@ -1,4 +1,5 @@
 #include <cassert>
+
 #include <common/logging.hh>
 #include <common/tracing.hh>
 #include <garbage_collector/xid_ready.hh>

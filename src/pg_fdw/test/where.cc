@@ -1,7 +1,8 @@
 #include <fmt/format.h>
 
-#include <common/common.hh>
 #include <iostream>
+
+#include <common/common.hh>
 #include <storage/extent.hh>
 #include <storage/field.hh>
 #include <sys_tbl_mgr/table.hh>

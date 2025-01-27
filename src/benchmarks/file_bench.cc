@@ -2,12 +2,13 @@
 #include <fcntl.h>
 #include <fmt/core.h>
 
-#include <boost/program_options.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <numeric>
 #include <thread>
+
+#include <boost/program_options.hpp>
 
 // springtail includes
 #include <common/timer.hh>

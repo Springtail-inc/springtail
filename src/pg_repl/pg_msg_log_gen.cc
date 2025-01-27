@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include <cassert>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <nlohmann/json.hpp>

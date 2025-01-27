@@ -1,7 +1,8 @@
-#include <boost/program_options.hpp>
-#include <common/common.hh>
 #include <filesystem>
 #include <iostream>
+
+#include <boost/program_options.hpp>
+#include <common/common.hh>
 #include <pg_repl/pg_msg_log_gen.hh>
 
 using namespace springtail;

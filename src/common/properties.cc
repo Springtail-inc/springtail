@@ -1,5 +1,10 @@
 #include <absl/log/check.h>
 
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
 #include <common/common.hh>
 #include <common/environment.hh>
 #include <common/exception.hh>
@@ -8,11 +13,7 @@
 #include <common/properties.hh>
 #include <common/redis.hh>
 #include <common/redis_types.hh>
-#include <fstream>
-#include <iostream>
 #include <nlohmann/json.hpp>
-#include <stdexcept>
-#include <string>
 
 namespace springtail {
 

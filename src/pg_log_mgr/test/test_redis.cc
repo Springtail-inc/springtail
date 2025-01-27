@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <common/common.hh>
 #include <iostream>
-#include <pg_log_mgr/pg_redis_xact.hh>
 #include <set>
 #include <string>
+
+#include <common/common.hh>
+#include <pg_log_mgr/pg_redis_xact.hh>
 
 using namespace springtail;
 using namespace springtail::pg_log_mgr;

@@ -1,14 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <common/common.hh>
 #include <iostream>
 #include <memory>
 #include <random>
+#include <vector>
+
+#include <common/common.hh>
 #include <storage/io.hh>
 #include <storage/io_mgr.hh>
 #include <storage/io_request.hh>
-#include <vector>
 
 /**
  * @brief Helper to generate random data

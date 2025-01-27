@@ -6,12 +6,13 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <iostream>
+#include <vector>
+
 #include <common/common.hh>
 #include <common/exception.hh>
 #include <common/logging.hh>
-#include <iostream>
 #include <pg_log_mgr/pg_xact_log_writer.hh>
-#include <vector>
 
 namespace springtail::pg_log_mgr {
 

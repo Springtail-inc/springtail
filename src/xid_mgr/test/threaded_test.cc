@@ -1,10 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <thread>
+
 #include <common/common.hh>
 #include <common/json.hh>
 #include <nlohmann/json.hpp>
-#include <thread>
 #include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 

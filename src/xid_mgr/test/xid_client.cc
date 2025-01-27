@@ -1,7 +1,8 @@
+#include <iostream>
+
 #include <boost/program_options.hpp>
 #include <common/common.hh>
 #include <common/properties.hh>
-#include <iostream>
 #include <xid_mgr/xid_mgr_client.hh>
 
 using namespace springtail;

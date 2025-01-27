@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <common/logging.hh>
 #include <iostream>
-#include <proxy/parser.hh>
 #include <vector>
+
+#include <common/logging.hh>
+#include <proxy/parser.hh>
 
 using namespace springtail;
 

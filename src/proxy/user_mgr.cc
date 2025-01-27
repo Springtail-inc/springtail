@@ -1,7 +1,8 @@
 #include <proxy/auth/md5.h>
 
-#include <common/properties.hh>
 #include <memory>
+
+#include <common/properties.hh>
 #include <pg_repl/libpq_connection.hh>
 #include <proxy/auth/scram.hh>
 #include <proxy/database.hh>
