@@ -261,9 +261,6 @@ namespace springtail::pg_proxy {
                          int32_t len, const char *data,
                          uint64_t seq_id, bool final)
     {
-        if (seq_id == -1) {
-            seq_id = _gen_seq_id();
-        }
         log_buffer(_type, _id, incoming, code, len, data, seq_id, final);
     }
 
