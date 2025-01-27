@@ -119,7 +119,7 @@ namespace springtail {
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
                                  ExtentSchemaPtr schema,
-                                 std::vector<Index> secondary_keys)
+                                 const std::vector<Index>& secondary_keys)
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;

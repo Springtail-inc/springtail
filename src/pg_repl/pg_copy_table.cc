@@ -214,12 +214,13 @@ namespace springtail
             std::uint32_t column_attnum = _connection.get_int32(i, 4);
             bool is_unique = _connection.get_boolean(i, 5);
 
-            Column index_column;
+            Index::Column index_column;
             index_column.idx_position = secondary_index_num;
             index_column.position = column_attnum;
 
-            std::vector<Column> columns;
-            if ( secondary_indexes.count(index_name) > 0 ){
+            std::vector<Index::Column> columns;
+            // If the existing key is found, use the list of columns from that.
+            if ( secondary_indexes.find(index_name) != secondary_indexes.end() ){
                 columns = secondary_indexes[index_name].columns;
             }
 
