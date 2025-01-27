@@ -124,6 +124,7 @@ namespace springtail {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
+        // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                               _table_base, schema->get_sort_keys(), secondary_keys,
                                               tbl_meta, schema, false);

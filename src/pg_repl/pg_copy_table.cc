@@ -232,11 +232,11 @@ namespace springtail
             index_obj.schema = _schema.schema_name;
             index_obj.table_id = _schema.table_oid;
             index_obj.is_unique = is_unique;
-            index_obj.columns = columns;
+            index_obj.columns = std::move(columns);
             // set the index state to ready since its part of the initial table copy
             index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
             
-            secondary_indexes[index_name] = index_obj;
+            secondary_indexes[index_name] = std::move(index_obj);
         }
 
         for (const auto &index : secondary_indexes) {
@@ -452,7 +452,7 @@ namespace springtail
                 sys_tbl_mgr::IndexRequest request;
                 request.db_id = db_id;
                 request.xid = xid.xid;
-                request.lsn = 1;
+                request.lsn = constant::MAX_LSN - 1;
                 request.index.id = index.id;
                 request.index.table_id = _schema.table_oid;
                 request.index.is_unique = index.is_unique;
@@ -466,7 +466,7 @@ namespace springtail
                 requests.push_back(request);   
             }
 
-            auto &&index_json = common::thrift_json_to_vector<sys_tbl_mgr::IndexRequest>(requests);
+            auto &&index_json = common::thrift_vector_to_json<sys_tbl_mgr::IndexRequest>(requests);
 
             ops.push_back(index_json);
         }

@@ -772,7 +772,7 @@ namespace springtail::sys_tbl_mgr {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create index: {}:{} @ {}:{}",
                             index.db_id, index.index.id, index.xid, index.lsn);
 
-            // assert(index.lsn == constant::MAX_LSN - 1);
+            // CHECK_EQ(index.lsn, constant::MAX_LSN - 1);
             auto &&index_ddl = this->_create_index(index);
             ddls.push_back(index_ddl);
         }
