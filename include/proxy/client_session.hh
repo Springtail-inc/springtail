@@ -32,7 +32,7 @@ namespace springtail::pg_proxy {
         ClientSession& operator=(const ClientSession&) = delete;
 
         /** Construct a connection with the given socket. */
-        ClientSession(ProxyConnectionPtr connection);
+        explicit ClientSession(ProxyConnectionPtr connection);
 
         ~ClientSession();
 

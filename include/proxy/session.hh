@@ -77,7 +77,7 @@ namespace springtail::pg_proxy {
          * @param connection connection
          * @return Session object
          */
-        Session(ProxyConnectionPtr connection);
+        explicit Session(ProxyConnectionPtr connection);
 
         /**
          * Construct a session with a database instance and user.
