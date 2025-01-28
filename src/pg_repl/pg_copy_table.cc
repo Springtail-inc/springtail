@@ -452,7 +452,7 @@ namespace springtail
                 sys_tbl_mgr::IndexRequest request;
                 request.db_id = db_id;
                 request.xid = xid.xid;
-                request.lsn = constant::MAX_LSN - 1;
+                request.lsn = 1;
                 request.index.id = index.id;
                 request.index.table_id = _schema.table_oid;
                 request.index.is_unique = index.is_unique;
