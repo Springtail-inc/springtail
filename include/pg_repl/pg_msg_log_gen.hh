@@ -67,6 +67,20 @@ namespace springtail {
         void drop_table(uint32_t table_id);
 
         /**
+         * @brief Create a schema
+         * @param schema_id schema id
+         * @param schema additional schema information
+         */
+        void create_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema);
+
+        /**
+         * @brief Alter a schema
+         * @param schema_id schema id
+         * @param schema additional schema information
+         */
+        void alter_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema);
+
+        /**
          * @brief Start a transaction, every begin must end with a commit
          * @return uint32_t transaction ID
          */
@@ -218,6 +232,8 @@ namespace springtail {
         static constexpr char PG_OP_UPDATE[] = "update";
         static constexpr char PG_OP_TRUNCATE[] = "truncate";
         static constexpr char PG_OP_ALTER_TABLE[] = "alter table";
+        static constexpr char PG_OP_CREATE_SCHEMA[] = "create schema";
+        static constexpr char PG_OP_ALTER_SCHEMA[] = "alter schema";
         static constexpr char PG_OP_CREATE_TABLE[] = "create table";
         static constexpr char PG_OP_DROP_TABLE[] = "drop table";
         static constexpr char PG_OP_CREATE_INDEX[] = "create index";
@@ -278,6 +294,12 @@ namespace springtail {
 
         /** Parse drop table op -- calls into _log_gen */
         void _parse_drop_table(const nlohmann::json &json);
+
+        /** Parse create schema op -- calls into _log_gen */
+        void _parse_create_schema(const nlohmann::json &json);
+
+        /** Parse alter schema op -- calls into _log_gen */
+        void _parse_alter_schema(const nlohmann::json &json);
 
         /** Parse begin op -- calls into _log_gen */
         void _parse_begin(const nlohmann::json &json);

@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <spdlog/spdlog.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1012,6 +1013,68 @@ namespace springtail {
     }
 
     PgMsgPtr
+    PgMsgStreamReader::_decode_create_schema(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgSchema schema_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type schema
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "schema") {
+            SPDLOG_ERROR("Create/alter schema msg not for schema object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        schema_msg.xid = message.xid; // only valid in streaming mode
+        schema_msg.lsn = message.lsn;
+        json["schema_name"].get_to(schema_msg.schema_name);
+        json["oid"].get_to(schema_msg.oid);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create schema: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_SCHEMA);
+        msg->msg.emplace<PgMsgSchema>(schema_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_alter_schema(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgSchema schema_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type schema
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "schema") {
+            SPDLOG_ERROR("Create/alter schema msg not for schema object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        schema_msg.xid = message.xid; // only valid in streaming mode
+        schema_msg.lsn = message.lsn;
+        json["schema_name"].get_to(schema_msg.schema_name);
+        json["oid"].get_to(schema_msg.oid);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded alter schema: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::ALTER_SCHEMA);
+        msg->msg.emplace<PgMsgSchema>(schema_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
     PgMsgStreamReader::_decode_copy_sync(const PgMsgMessage &message, char *buffer, int len)
     {
         PgMsgCopySync copy_sync_msg;
@@ -1076,6 +1139,10 @@ namespace springtail {
             return _decode_alter_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TABLE) {
             return _decode_drop_table(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_SCHEMA) {
+            return _decode_create_schema(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_SCHEMA) {
+            return _decode_alter_schema(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_INDEX) {
             return _decode_create_index(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_INDEX) {

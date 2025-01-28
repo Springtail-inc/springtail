@@ -283,6 +283,30 @@ namespace springtail {
     }
 
     void
+    PgMsgLogGen::create_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "CREATE SCHEMA";
+        msg["oid"] = schema_id;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_CREATE_SCHEMA, msg);
+    }
+
+    void
+    PgMsgLogGen::alter_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ALTER SCHEMA";
+        msg["oid"] = schema_id;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_ALTER_SCHEMA, msg);
+    }
+
+    void
     PgMsgLogGen::drop_table(uint32_t table_id) {
         nlohmann::json msg;
 
@@ -584,6 +608,14 @@ namespace springtail {
             _parse_alter_table(json);
             return;
         }
+        if (cmd == PG_OP_CREATE_SCHEMA) {
+            _parse_create_schema(json);
+            return;
+        }
+        if (cmd == PG_OP_ALTER_SCHEMA) {
+            _parse_alter_schema(json);
+            return;
+        }
         if (cmd == PG_OP_DROP_TABLE) {
             _parse_drop_table(json);
             return;
@@ -689,6 +721,27 @@ namespace springtail {
 
     void
     PgLogGenJson::_parse_alter_table(const nlohmann::json &json) {
+        std::string table = json["table"];
+
+        std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
+        uint32_t table_id = _get_table_id(table);
+        _log_gen.alter_table(table_id, columns);
+    }
+
+    void
+    PgLogGenJson::_parse_create_schema(const nlohmann::json &json)
+    {
+        std::string table = json["table"];
+
+        std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
+        uint32_t table_id = _log_gen.create_table(table, columns);
+
+        _table_name_to_id[table] = table_id;
+    }
+
+    void
+    PgLogGenJson::_parse_alter_schema(const nlohmann::json &json)
+    {
         std::string table = json["table"];
 
         std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);

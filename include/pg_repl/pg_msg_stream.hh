@@ -183,6 +183,8 @@ namespace springtail {
         PgMsgPtr _decode_create_table(PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_alter_table(PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_table(PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_create_schema(PgMsgMessage &message, char *buffer, int len);
+        PgMsgPtr _decode_alter_schema(PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_create_index(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_drop_index(const PgMsgMessage &message, char *buffer, int len);
         PgMsgPtr _decode_copy_sync(const PgMsgMessage &message, char *buffer, int len);
