@@ -67,7 +67,7 @@ namespace springtail::pg_fdw {
         TableStats stats;                     ///< Table statistics
         int rows_fetched = 0;                 ///< Number of rows fetched
         int rows_skipped = 0;                 ///< Number of rows skipped
-        bool scan_up = true;                  ///< Scan direction for iterator
+        bool scan_asc = true;                 ///< Scan direction for iterator as defined by ORDER BY <col> ASC/DESC
 
         ///< Start iterator for table scan
         std::optional<Table::Iterator> iter_start = std::nullopt;
@@ -204,6 +204,8 @@ namespace springtail::pg_fdw {
 
         std::shared_mutex _mutex;               ///< Mutex for xid map
         std::map<uint64_t, uint64_t> _xid_map;  ///< Map of pg XID to springtail XID
+
+        std::atomic<uint64_t> _schema_xid; ///< The most recently seen schema XID
 
         // static methods
 

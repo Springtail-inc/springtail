@@ -1230,6 +1230,8 @@ namespace springtail {
 
     void Table::Iterator::Secondary::update_page()
     {
+        CHECK(_btree_i != _btree->end());
+
         uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
         if (_page.empty() || _extent_id != eid) {
             _extent_id = eid;
@@ -1242,5 +1244,20 @@ namespace springtail {
     const Extent::Row& Table::Iterator::Secondary::row() const
     {
         return *_page_i;
+    }
+
+    Table::Iterator::Iterator(const Table *table, uint32_t index_id)
+    { 
+        if (index_id == constant::INDEX_PRIMARY) {
+            _tracker.emplace<Primary>(table, table->_primary_index, 
+                    table->_primary_index->end(), 
+                    StorageCache::SafePagePtr{}, 
+                    StorageCache::Page::Iterator{});
+        } else {
+            auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(table->_schema, cols);
+            _tracker.emplace<Secondary>(table, btree, 
+                    btree->end(), index_schema );
+        }
     }
 }

@@ -70,7 +70,7 @@ namespace springtail {
 
         // non-system tables
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
-        return _convert_columns(meta.columns);
+        return _convert_columns(meta->columns);
     }
 
     std::shared_ptr<Schema>
@@ -91,11 +91,11 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_target_schema(db_id, table_id, access_xid, target_xid);
 
         // construct the schema object
-        if (meta.history.empty()) {
-            return std::make_shared<ExtentSchema>(meta.columns);
+        if (meta->history.empty()) {
+            return std::make_shared<ExtentSchema>(meta->columns);
         }
 
-        return std::make_shared<VirtualSchema>(meta);
+        return std::make_shared<VirtualSchema>(*meta);
     }
 
     std::shared_ptr<ExtentSchema>
@@ -115,7 +115,7 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, xid);
 
         // construct the schema from the provided schema metadata
-        return std::make_shared<ExtentSchema>(meta.columns);
+        return std::make_shared<ExtentSchema>(meta->columns);
     }
 
 }

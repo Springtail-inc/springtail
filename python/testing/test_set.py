@@ -139,6 +139,8 @@ class TestSet:
                 logging.error(f'Error: {e}')
                 if self._tests[test_file].get_result()['result'] == 'FAILED':
                     test_failed = True
+                else:
+                    self._tests[test_file].skip()
 
             # save the logs
             self._tests[test_file].stop_capture()

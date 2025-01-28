@@ -8,8 +8,9 @@
 #include <common/singleton.hh>
 #include <pg_repl/pg_repl_msg.hh>
 #include <storage/xid.hh>
-#include <sys_tbl_mgr/table.hh>
+#include <sys_tbl_mgr/schema_cache.hh>
 #include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table.hh>
 
 #include <thrift/sys_tbl_mgr/Service.h> // generated file
 #include <thrift/common/thrift_client.hh>
@@ -82,17 +83,17 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call get_roots() on the SysTblMgr.
          */
-        TableMetadata get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
+        TableMetadataPtr get_roots(uint64_t db_id, uint64_t table_id, uint64_t xid);
 
         /**
          * Call get_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        std::shared_ptr<const SchemaMetadata> get_schema(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Call get_target_schema() on the SysTblMgr.
          */
-        SchemaMetadata get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        SchemaMetadataPtr get_target_schema(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Call exists() on the SysTblMgr.
@@ -104,6 +105,16 @@ namespace springtail::sys_tbl_mgr {
          */
         std::string swap_sync_table(const TableRequest &create, const UpdateRootsRequest &roots);
 
+        /**
+         * Invalidates the schema entry for a given table from a given XID/LSN
+         */
+        void invalidate_table(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Invalidates all of the tables of a db in the schema cache.
+         */
+        void invalidate_db(uint64_t db_id, const XidLsn &xid);
+
     private:
         /**
          * @brief Construct a new Write Cache Client object
@@ -114,6 +125,12 @@ namespace springtail::sys_tbl_mgr {
          * @brief Destroy the Write Cache Client object; shouldn't be called directly use shutdown()
          */
         ~Client() override = default;
+
+        /** Pack the results into a SchemaMetadata. */
+        SchemaMetadataPtr _pack_metadata(const GetSchemaResponse &result);
+
+        /** Cache for Schema objects. */
+        std::shared_ptr<SchemaCache> _schema_cache;
     };
 
 } // namespace springtail
