@@ -248,7 +248,7 @@ namespace springtail::gc {
                 current_row_id = 0;
             }
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(static_cast<uint32_t>(current_row_id));
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
