@@ -381,7 +381,7 @@ namespace springtail::gc {
                         PgMsgIndex msg;
                         msg.oid = index_id;
                         msg.xid = xid;
-                        msg.schema = ddl["schema"];
+                        msg.schema_name = ddl["schema"];
                         msg.index = ddl["index"];
                         msg.is_unique = ddl["is_unique"];
                         msg.table_oid = tid;

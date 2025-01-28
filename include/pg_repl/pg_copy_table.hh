@@ -88,7 +88,8 @@ namespace springtail
         std::string schema_name;
         std::string table_name;
         std::string xids;                // pg_current_snapshot(); xmin:xmax:xids
-        int32_t table_oid;
+        uint64_t table_oid;
+        uint64_t schema_oid;
         std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
         std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
@@ -112,6 +113,7 @@ namespace springtail
             std::string table_name;
             std::string schema_name;
             int32_t table_oid;
+            int32_t schema_oid;
         };
         using CopyRequestPtr = std::shared_ptr<CopyRequest>;
         using CopyQueue = ConcurrentQueue<CopyRequest>;
@@ -135,7 +137,8 @@ namespace springtail
          */
         void _set_schema(const std::string &table_name,
                          const std::string &schema_name,
-                         uint64_t table_oid);
+                         uint64_t table_oid,
+                         uint64_t schema_oid);
 
         /**
          * @brief Get transaction ids for current transaction snapshot
@@ -192,7 +195,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+                             std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -200,7 +203,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids);
+                             std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids);
 
         /**
          * @brief Copy table from remote system
@@ -209,7 +212,8 @@ namespace springtail
                          springtail::XidLsn &xid,
                          const std::string &table_name,
                          const std::string &schema_name,
-                         uint64_t table_oid);
+                         uint64_t table_oid,
+                         uint64_t schema_oid);
 
         /**
          * @brief End the copy, commit the transaction

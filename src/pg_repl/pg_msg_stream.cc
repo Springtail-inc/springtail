@@ -883,9 +883,8 @@ namespace springtail {
 
         msg.xid = message.xid; // only valid in streaming mode
         msg.lsn = message.lsn;
-        json["schema"].get_to(msg.schema);
         json["oid"].get_to(msg.oid);
-        json["schema"].get_to(msg.schema);
+        json["schema"].get_to(msg.schema_name);
         json["table_name"].get_to(msg.table_name);
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);

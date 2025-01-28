@@ -14,7 +14,7 @@ namespace springtail {
         std::vector<Index> keys;
         Index idx;
         idx.id = 1;
-        idx.table_id = sys_tbl::TableNames::ID;
+        idx.table_id = Table::ID;
         idx.is_unique = false;
         idx.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
 
@@ -211,6 +211,12 @@ namespace springtail {
                                            sys_tbl::IndexNames::Primary::KEY,
                                            secondary_keys, tbl_meta, schema);
         }
+        case (sys_tbl::NamespaceNames::ID): {
+            secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
+            return std::make_shared<Table>(db_id, table_id, xid, _table_base,
+                                           sys_tbl::NamespaceNames::Primary::KEY,
+                                           secondary_keys, tbl_meta, schema);
+        }
         default:
             CHECK(0);
         }
@@ -274,6 +280,12 @@ namespace springtail {
         case (sys_tbl::IndexNames::ID): {
             return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
                                                   sys_tbl::IndexNames::Primary::KEY, secondary_keys,
+                                                  tbl_meta, schema);
+        }
+        case (sys_tbl::NamespaceNames::ID): {
+            secondary_keys = _get_secondary_keys<sys_tbl::NamespaceNames>();
+            return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid, _table_base,
+                                                  sys_tbl::NamespaceNames::Primary::KEY, secondary_keys,
                                                   tbl_meta, schema);
         }
         default:

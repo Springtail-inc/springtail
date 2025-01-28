@@ -287,8 +287,27 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::inverse_lower_bound(TuplePtr search_key)
+    Table::inverse_lower_bound(TuplePtr search_key, uint32_t index_id)
     {
+        if (index_id != constant::INDEX_PRIMARY) {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto &&i = btree->lower_bound(search_key);
+
+            // for secondary indexes, it's a row-based index, so finding begin() means there's no
+            // row before the search key
+            if (i == btree->begin()) {
+                return end(index_id);
+            }
+
+            // for secondary indexes, always decrement since it's a row-based index
+            --i;
+
+            return Iterator(this, btree, i, index_schema);
+        }
+
         // check if the table is vacant
         if (_primary_index == nullptr) {
             return end();

@@ -174,6 +174,7 @@ namespace springtail
         int32_t xid;        // proto vers 2+ only if streaming
         uint32_t schema_oid;
         std::string table;
+        std::string schema;
         std::vector<PgMsgSchemaColumn> columns;
     };
 
@@ -184,6 +185,7 @@ namespace springtail
         int32_t xid;        // proto vers 2+ only if streaming
         uint32_t schema_oid;
         std::string table;
+        std::string schema;
     };
 
     /** Column schema for a single column used by Create index */
@@ -202,6 +204,7 @@ namespace springtail
         bool is_unique;
         uint32_t table_oid;
         std::string table_name;
+        std::string schema_name;
         std::vector<PgMsgSchemaIndexColumn> columns;
     };
 
@@ -211,6 +214,20 @@ namespace springtail
         int32_t xid;        // proto vers 2+ only if streaming
         uint32_t schema_oid;
         std::string index;
+        std::string schema;
+    };
+
+    struct PgMsgNamespace {
+        LSN_t lsn;
+        uint32_t oid;
+        int32_t xid; // pg xid; proto vers 2+ only if streaming
+        std::string name;
+    };
+
+    struct PgMsgDropNamespace {
+        LSN_t lsn;
+        uint32_t oid;
+        int32_t xid; // pg xid; proto vers 2+ only if streaming
     };
 
     struct PgMsgCopySync {
@@ -255,6 +272,8 @@ namespace springtail
          PgMsgDropTable,
          PgMsgIndex,
          PgMsgDropIndex,
+         PgMsgNamespace,
+         PgMsgDropNamespace,
          PgMsgCopySync
         > msg;                 ///< message data
 

@@ -147,4 +147,13 @@ const std::vector<SchemaColumn> NamespaceNames::Primary::SCHEMA = {
 
 const std::vector<std::string> NamespaceNames::Primary::KEY = {"namespace_id", "xid", "lsn"};
 
+const std::vector<SchemaColumn> NamespaceNames::Secondary::SCHEMA = {
+    {"name", 1, SchemaType::TEXT, TEXTOID, false},
+    {"xid", 2, SchemaType::UINT64, INT8OID, false},
+    {"lsn", 3, SchemaType::UINT64, INT8OID, false},
+    {constant::INDEX_EID_FIELD, 4, SchemaType::UINT64, INT8OID, false},
+    {constant::INDEX_RID_FIELD, 5, SchemaType::UINT64, INT8OID, false}};
+
+const std::vector<std::string> NamespaceNames::Secondary::KEY = {"name", "xid", "lsn"};
+
 }  // namespace springtail::sys_tbl

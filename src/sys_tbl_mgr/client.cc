@@ -190,6 +190,70 @@ namespace springtail::sys_tbl_mgr {
         return result.statement;
     }
 
+    std::string
+    Client::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+    {
+        DDLStatement result;
+
+        NamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+        request.name = msg.name;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
+
+    std::string
+    Client::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+    {
+        DDLStatement result;
+
+        NamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+        request.name = msg.name;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->alter_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
+
+    std::string
+    Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgDropNamespace &msg)
+    {
+        DDLStatement result;
+
+        DropNamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->drop_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
 
     std::string
     Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)

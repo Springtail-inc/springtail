@@ -337,7 +337,7 @@ namespace springtail {
          * Returns an iterator to the first row that is less than or equal to the provided search
          * key.  Search key must match the primary index order.
          */
-        Iterator inverse_lower_bound(TuplePtr search_key);
+        Iterator inverse_lower_bound(TuplePtr search_key, uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * An iterator to the start of the table.

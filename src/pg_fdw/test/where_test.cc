@@ -181,7 +181,7 @@ namespace {
 
             msg.lsn = 0;
             msg.xid = xid;
-            msg.schema = "public";
+            msg.schema_name = "public";
             msg.index = "secondary_index";
             msg.is_unique = false;
             msg.table_oid = table_id;
