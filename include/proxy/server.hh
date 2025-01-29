@@ -15,7 +15,7 @@
 #include <common/thread_pool.hh>
 #include <common/singleton.hh>
 
-#include <proxy/Session.hh>
+#include <proxy/session.hh>
 #include <proxy/connection.hh>
 #include <proxy/session.hh>
 #include <proxy/user_mgr.hh>
