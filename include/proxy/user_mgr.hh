@@ -16,8 +16,7 @@
 #include <proxy/auth/scram.hh>
 #include <proxy/auth/scram-common.h>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** Auth type, if this changes, change string mapping in user_mgr.cc */
     enum AuthType : int8_t {
@@ -120,7 +119,10 @@ namespace pg_proxy {
             return _password;
         }
 
-        /** add database */
+        /**
+         * @brief Add database to user's list of connected databases
+         * @param name - database name
+         */
         void add_database(const std::string &name) {
             std::unique_lock lock(_user_mutex);
             _connected_databases.insert(name);
@@ -128,7 +130,6 @@ namespace pg_proxy {
 
          /**
          * @brief Set user list of databases
-         *
          * @param databases
          */
         void set_databases(const std::set<std::string> &databases) {
@@ -138,7 +139,6 @@ namespace pg_proxy {
 
         /**
          * @brief Verify if the user is allowed to access database
-         *
          * @param database - database name
          * @return true - allowed
          * @return false - not allowed
@@ -153,7 +153,6 @@ namespace pg_proxy {
 
         /**
          * @brief Change user password
-         *
          * @param password - password
          */
         void set_password(const std::string &password);
@@ -269,5 +268,4 @@ namespace pg_proxy {
         void _internal_run() override;
 
     };
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

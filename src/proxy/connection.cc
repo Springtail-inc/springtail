@@ -381,6 +381,36 @@ namespace springtail::pg_proxy {
         return 0;
     }
 
+    bool
+    ProxyConnection::has_pending(std::vector<ProxyConnectionPtr> connections,
+                                 std::set<int> &fds)
+    {
+        struct pollfd pfds[connections.size()];
+        fds.clear();
+
+        int i = 0;
+        for (auto &conn : connections) {
+            if (conn->_ssl_enabled && ::SSL_pending(conn->_ssl) > 0) {
+                fds.insert(conn->get_socket());
+            }
+            pfds[i].fd = conn->get_socket();
+            pfds[i].events = POLLIN;
+            pfds[i].revents = 0;
+            i++;
+        }
+
+        int n = poll(pfds, connections.size(), 0);
+        if (n > 0) {
+            for (i = 0; i < connections.size(); i++) {
+                if (pfds[i].revents & POLLIN) {
+                    fds.insert(pfds[i].fd);
+                }
+            }
+        }
+
+        return fds.size() > 0;
+    }
+
     /** Does connection have pending data */
     bool
     ProxyConnection::has_pending()
