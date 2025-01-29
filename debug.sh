@@ -17,6 +17,7 @@ fi
 if [ ! -d debug ]; then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking debug dir"
+        mkdir -p /home/dev/debug
         ln -s /home/dev/debug debug
     else
         mkdir -p debug

@@ -301,5 +301,22 @@ namespace springtail {
             }
             return false;
         }
+
+        static inline std::string
+        trim(const std::string& str)
+        {
+            // Find the first non-whitespace character
+            auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) {
+                return std::isspace(c);
+            });
+
+            // Find the last non-whitespace character
+            auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char c) {
+                return std::isspace(c);
+            }).base();
+
+            // Return the trimmed string
+            return (start < end) ? std::string(start, end) : std::string();
+        }
     }
 }

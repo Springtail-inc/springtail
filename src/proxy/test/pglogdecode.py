@@ -251,10 +251,14 @@ def decode_data(data_with_header, header, db_conn=None):
         return
 
     if code == '!':
-        #session disconnect
+        # session disconnect
         print("Session disconnect: session_id={}".format(header['session_id']))
         db_update_session_disconnect(db_conn, header)
         return
+
+    if code == '-':
+        # ssl request packet
+        print("SSL request packet")
 
     msg = None
     data_row = None

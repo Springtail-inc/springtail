@@ -53,7 +53,8 @@ namespace pg_proxy {
             SYNC = 25,          ///< sync for extended query
             DESCRIBE = 26,      ///< describe statement
             SIMPLE_QUERY = 27,  ///< simple query statement parent (not cached)
-            ANONYMOUS = 28,     ///< anonymous statement (no name)
+            FUNCTION = 28,      ///< function call
+            ANONYMOUS = 29,     ///< anonymous statement (no name)
         };
 
         /** Type of cached query string */
