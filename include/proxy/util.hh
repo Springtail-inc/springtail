@@ -10,47 +10,6 @@
 namespace springtail::pg_proxy::util {
 
     /**
-     * @brief Quote a value for PostgreSQL
-     * @param value value to quote
-     * @return std::string quoted value
-     */
-    static inline std::string
-    quote_postgres_value(const std::string& value)
-    {
-        // Check if the value is already quoted with single or double quotes
-        if (value.size() >= 2 &&
-            ((value.front() == '\'' && value.back() == '\'') ||
-            (value.front() == '"' && value.back() == '"'))) {
-            return value; // Already quoted
-        }
-
-        // Check if the value is safe as an unquoted identifier (alphanumeric and underscores)
-        bool is_safe_unquoted = !value.empty() &&
-                                (std::isalpha(value[0]) || value[0] == '_') &&
-                                std::all_of(value.begin() + 1, value.end(), [](unsigned char c) {
-                                    return std::isalnum(c) || c == '_';
-                                });
-
-        // Return the value as-is if it doesn't require quoting
-        if (is_safe_unquoted) {
-            return value;
-        }
-
-        // Otherwise, add single quotes and escape any existing single quotes in the value
-        std::string quoted_value = "'";
-        for (char c : value) {
-            if (c == '\'') {
-                quoted_value += "''"; // Escape single quote by doubling it
-            } else {
-                quoted_value += c;
-            }
-        }
-        quoted_value += "'";
-
-        return quoted_value;
-    }
-
-    /**
      * @brief Is the key a valid PostgreSQL (SET) key
      * @param key key to check
      * @return true if valid
@@ -77,6 +36,40 @@ namespace springtail::pg_proxy::util {
         // Regex for general PostgreSQL SET values
         std::regex valid_value_regex(R"(^([a-zA-Z0-9_.+-]+|'[^']*'|".*")$)");
         return std::regex_match(value, valid_value_regex);
+    }
+
+    /**
+     * @brief Quote a value for PostgreSQL, tries to detect if quoting is necessary
+     * @param value value to quote
+     * @return std::string quoted value
+     */
+    static inline std::string
+    quote_postgres_value(const std::string& value)
+    {
+        // Check if the value is safe as an unquoted identifier (alphanumeric and underscores)
+        bool is_safe_unquoted = !value.empty() &&
+                                (std::isalpha(value[0]) || value[0] == '_') &&
+                                std::all_of(value.begin() + 1, value.end(), [](unsigned char c) {
+                                    return std::isalnum(c) || c == '_';
+                                });
+
+        // Return the value as-is if it doesn't require quoting
+        if (is_safe_unquoted || is_valid_postgres_value(value)) {
+            return value;
+        }
+
+        // Otherwise, add single quotes and escape any existing single quotes in the value
+        std::string quoted_value = "'";
+        for (char c : value) {
+            if (c == '\'') {
+                quoted_value += "''"; // Escape single quote by doubling it
+            } else {
+                quoted_value += c;
+            }
+        }
+        quoted_value += "'";
+
+        return quoted_value;
     }
 
     /**

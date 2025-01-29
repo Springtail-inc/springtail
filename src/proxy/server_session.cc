@@ -889,8 +889,13 @@ namespace springtail::pg_proxy {
 
         std::map<std::string, std::string> params;
 
-        // go through parameters to find valid ones
-        // these maps should be very small
+        // this function goes through the client session startup params and tries to
+        // apply them on the server session as a set of SET statements
+        // some startup params may be encoded as options: options= -c key=value -c key=value
+        // these have to be split out and processed separately.
+        // No escaping is needed as startup params so the values are quoted if needed
+
+        // go through parameters to find valid ones; these maps should be very small
         for (const auto& [key, value] : parameters) {
             if (EXCLUDED_STARTUP_PARAMS.contains(key) || !util::is_valid_postgres_key(key)) {
                 continue;
