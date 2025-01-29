@@ -14,6 +14,7 @@
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
 #include <common/json.hh>
+#include <common/constants.hh>
 
 #include <redis/redis_containers.hh>
 
@@ -452,7 +453,7 @@ namespace springtail
                 sys_tbl_mgr::IndexRequest request;
                 request.db_id = db_id;
                 request.xid = xid.xid;
-                request.lsn = MAX_LSN-1;
+                request.lsn = constant::MAX_LSN-1;
                 request.index.id = index.id;
                 request.index.table_id = _schema.table_oid;
                 request.index.is_unique = index.is_unique;
