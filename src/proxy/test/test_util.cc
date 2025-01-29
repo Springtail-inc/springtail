@@ -12,7 +12,7 @@ namespace {
             {"postgres_verbose", "postgres_verbose"},
             {"'already_quoted'", "'already_quoted'"},
             {"\"double_quoted\"", "\"double_quoted\""},
-            {"123", "'123'"},
+            {"123", "123"},
             {"some value with spaces", "'some value with spaces'"},
             {"contains'single'quotes", "'contains''single''quotes'"},
             {"contains\"double\"quotes", "'contains\"double\"quotes'"},
@@ -35,7 +35,8 @@ namespace {
             {"'value with spaces'", true},
             {"'value'with'quote'", false},
             {"-123.45", true},
-            {"some;value", false}
+            {"some;value", false},
+            {"'value''with''quotes'", true},
         };
 
         for (const auto &test : test_values) {

@@ -34,12 +34,12 @@ namespace springtail::pg_proxy::util {
     is_valid_postgres_value(const std::string& value)
     {
         // Regex for general PostgreSQL SET values
-        std::regex valid_value_regex(R"(^([a-zA-Z0-9_.+-]+|'[^']*'|".*")$)");
+        std::regex valid_value_regex(R"(^([a-zA-Z0-9_.+-]+|'([^']|'')*'|".*")$)");
         return std::regex_match(value, valid_value_regex);
     }
 
     /**
-     * @brief Quote a value for PostgreSQL, tries to detect if quoting is necessary
+     * @brief Quote a value for PostgreSQL (SET), tries to detect if quoting is necessary
      * @param value value to quote
      * @return std::string quoted value
      */
