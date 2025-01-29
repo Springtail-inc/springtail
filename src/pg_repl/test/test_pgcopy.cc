@@ -103,10 +103,12 @@ namespace {
             create.xid = xid;
             create.lsn = constant::MAX_LSN - 1;
 
-            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+            auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[1]);
+
+            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
             roots.xid = xid;
 
-            client->swap_sync_table(create, roots);
+            client->swap_sync_table(create, indexes, roots);
 
             // clear the table entry from the hash
             redis->hdel(key, hkey);

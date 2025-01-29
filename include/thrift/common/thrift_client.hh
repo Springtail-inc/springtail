@@ -302,7 +302,7 @@ namespace springtail::thrift {
                     api_call(c);
                     call_successful = true;
                 } catch (const apache::thrift::transport::TTransportException &e) {
-                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : ", _type_name, e.what());
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : {}", _type_name, e.what());
                     if (_shutting_down) {
                         throw e;
                     }

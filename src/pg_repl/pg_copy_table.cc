@@ -14,6 +14,7 @@
 #include <common/redis_types.hh>
 #include <common/thread_pool.hh>
 #include <common/json.hh>
+#include <common/constants.hh>
 
 #include <redis/redis_containers.hh>
 
@@ -68,10 +69,12 @@ namespace springtail
 
     static constexpr char SECONDARY_INDEX_QUERY[] =
         "SELECT"
+        "    idx.indexrelid AS index_id, "
         "    i.relname AS index_name, "
         "    a.attname AS column_name, "
         "    s.snum AS secondary_index_num, "
-        "    a.attnum AS column_attnum "
+        "    a.attnum AS column_attnum, "
+        "    idx.indisunique AS is_unique "
         "FROM pg_index idx "
         "JOIN pg_class i ON i.oid = idx.indexrelid "
         "JOIN pg_attribute a ON a.attrelid = idx.indrelid "
@@ -200,22 +203,48 @@ namespace springtail
             return;  // there are no secondary indexes
         }
 
+        SPDLOG_INFO("Secondary indexes found for table with oid {}", _schema.table_oid);
+
         // iterate through results and generate vector of secondary indexes
-        std::map<std::string, std::vector<std::string>> secondary_indexes;
+        std::map<std::string, Index> secondary_indexes;
         for (int i = 0; i < _connection.ntuples(); i++) {
-            std::string index_name = _connection.get_string(i, 0);
-            std::string column_name = _connection.get_string(i, 1);
+            std::uint32_t index_id = _connection.get_int32(i, 0);
+            std::string index_name = _connection.get_string(i, 1);
+            std::string column_name = _connection.get_string(i, 2);
+            std::uint32_t secondary_index_num = _connection.get_int32(i, 3);
+            std::uint32_t column_attnum = _connection.get_int32(i, 4);
+            bool is_unique = _connection.get_boolean(i, 5);
 
-            // add column name to map indexed by index_name
-            // columns are ordered in query
-            secondary_indexes[index_name].push_back(column_name);
+            Index::Column index_column;
+            index_column.idx_position = secondary_index_num;
+            index_column.position = column_attnum;
+
+            std::vector<Index::Column> columns;
+            // If the existing key is found, use the list of columns from that.
+            if ( secondary_indexes.find(index_name) != secondary_indexes.end() ){
+                columns = secondary_indexes[index_name].columns;
+            }
+
+            columns.push_back(index_column);
+            
+            Index index_obj;
+            index_obj.id = index_id;
+            index_obj.name = index_name;
+            index_obj.schema = _schema.schema_name;
+            index_obj.table_id = _schema.table_oid;
+            index_obj.is_unique = is_unique;
+            index_obj.columns = std::move(columns);
+            // set the index state to ready since its part of the initial table copy
+            index_obj.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+            
+            secondary_indexes[index_name] = std::move(index_obj);
         }
 
-        // go through map and generate secondary keys in PgCopyTable object
-        for (auto &index : secondary_indexes) {
+        for (const auto &index : secondary_indexes) {
             _schema.secondary_keys.push_back(index.second);
+            SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Adding to secondary keys {} {}", index.second.id, index.second.name);
         }
-
+        
         _connection.clear();
     }
 
@@ -418,8 +447,33 @@ namespace springtail
             ops.push_back(create_json);
         }
 
+        {
+            std::vector<sys_tbl_mgr::IndexRequest> requests;
+            for (const auto &index : _schema.secondary_keys) {
+                sys_tbl_mgr::IndexRequest request;
+                request.db_id = db_id;
+                request.xid = xid.xid;
+                request.lsn = constant::MAX_LSN-1;
+                request.index.id = index.id;
+                request.index.table_id = _schema.table_oid;
+                request.index.is_unique = index.is_unique;
+                for (const auto &column : index.columns){
+                    sys_tbl_mgr::IndexColumn index_column;
+                    index_column.idx_position = column.idx_position;
+                    index_column.position = column.position;
+                    request.index.columns.push_back(index_column);
+                }
+                request.index.name = index.name;
+                requests.push_back(request);   
+            }
+
+            auto &&index_json = common::thrift_vector_to_json<sys_tbl_mgr::IndexRequest>(requests);
+
+            ops.push_back(index_json);
+        }
+
         auto schema = std::make_shared<ExtentSchema>(_schema.columns);
-        auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid, schema);
+        auto table = TableMgr::get_instance()->get_snapshot_table(db_id, _schema.table_oid, xid.xid, schema, _schema.secondary_keys);
 
         // start the COPY
         _prepare_copy();
