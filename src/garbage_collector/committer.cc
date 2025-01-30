@@ -121,13 +121,13 @@ namespace springtail::gc {
                     create.xid = completed_xid;
                     create.lsn = constant::MAX_LSN - 1;
 
-                    auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[1]);
+                    auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[2]);
                     for (auto &index : indexes) {
                         index.xid = completed_xid;
                         index.lsn = constant::MAX_LSN - 1;
                     }
 
-                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[3]);
                     roots.xid = completed_xid;
 
                     // note: this will also invalidate the table's client cache entry
