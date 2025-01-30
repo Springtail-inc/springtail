@@ -215,6 +215,7 @@ namespace {
         // should get the cached (hasn't been finalized) primary index
         ASSERT_EQ(schema_meta->indexes.size(), 1);
         ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[0].state, (uint8_t)sys_tbl::IndexNames::State::READY);
 
         _finalize();
 

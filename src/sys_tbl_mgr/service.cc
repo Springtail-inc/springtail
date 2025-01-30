@@ -238,7 +238,7 @@ namespace springtail::sys_tbl_mgr {
         // For other indexes we use PG OID that must be unique and tid is optional
         assert( index_id != constant::INDEX_PRIMARY || optional_tid);
 
-        uint64_t tid = optional_tid.has_value()? *optional_tid: 0;
+        uint64_t tid = optional_tid.value_or(0);
 
         // use the cached one first
 
@@ -1390,12 +1390,12 @@ namespace springtail::sys_tbl_mgr {
             return;
         }
 
-        auto it = db_it->second.find(table_id);
-        if (it == db_it->second.end()) {
+        auto tab_it = db_it->second.find(table_id);
+        if (tab_it == db_it->second.end()) {
             return;
         }
 
-        for (auto const& [_, cache]: it->second) {
+        for (auto const& [_, cache]: tab_it->second) {
             // cache is vector<IndexCacheItem>
             if (cache.empty()) {
                 continue;
