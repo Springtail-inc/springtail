@@ -42,7 +42,15 @@ namespace springtail::sys_tbl_mgr {
     Service::_get_index_info(const GetIndexInfoRequest &request)
     {
         XidLsn xid(request.xid, request.lsn);
-        auto info = _find_index(request.db_id, request.index_id, xid, request.table_id);
+        std::optional<uint64_t> tid;
+        if (request.__isset.table_id) {
+            tid = request.table_id;
+        }
+        auto info = _find_cached_index(request.db_id, request.index_id, xid, tid);
+        if (info) {
+            return info->first;
+        }
+        info = _find_index(request.db_id, request.index_id, xid, tid);
         if (!info) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index not found: {}@{} - {}",
                             request.db_id, request.xid, request.index_id);
@@ -77,7 +85,8 @@ namespace springtail::sys_tbl_mgr {
 
         // this is the existing index info
         auto index_info = *index_i;
-        assert(index_info.table_id == request.table_id && index_info.id == request.index_id);
+        CHECK(index_info.table_id == request.table_id && index_info.id == request.index_id);
+        index_info.state = request.state;
 
         auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
         auto tuple = sys_tbl::IndexNames::Data::tuple(index_info.schema,
@@ -86,16 +95,12 @@ namespace springtail::sys_tbl_mgr {
                 request.index_id,
                 xid.xid,
                 xid.lsn,
-                static_cast<sys_tbl::IndexNames::State>(request.state),
+                static_cast<sys_tbl::IndexNames::State>(index_info.state),
                 index_info.is_unique );
 
         // update the index state
-        index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
-
-        // no need to carry the columns for deleted indexes
-        if (request.state == static_cast<uint8_t>(sys_tbl::IndexNames::State::DELETED)) {
-            return true;
-        }
+        auto write_xid = _get_write_xid(request.db_id);
+        index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
 
         std::map<uint32_t, uint32_t> keys;
         for (const auto &column : index_info.columns) {
@@ -105,6 +110,12 @@ namespace springtail::sys_tbl_mgr {
 
         // update columns with the state XID
         _write_index(xid, request.db_id, index_info.table_id, index_info.id, keys);
+
+        // add to index cache
+        {
+            boost::unique_lock lock(_mutex);
+            _index_cache[request.db_id][request.table_id][index_info.id].emplace_back(xid, index_info);
+        }
 
         return true;
     }
@@ -186,6 +197,11 @@ namespace springtail::sys_tbl_mgr {
 
         _write_index(xid, request.db_id, request.index.table_id, request.index.id, keys);
 
+        {
+            boost::unique_lock lock(_mutex);
+            _index_cache[request.db_id][request.index.table_id][request.index.id].emplace_back(xid, request.index);
+        }
+
         return ddl;
     }
 
@@ -222,7 +238,9 @@ namespace springtail::sys_tbl_mgr {
         // For other indexes we use PG OID that must be unique and tid is optional
         assert( index_id != constant::INDEX_PRIMARY || optional_tid);
 
-        uint64_t tid = optional_tid? *optional_tid: 0;
+        uint64_t tid = optional_tid.has_value()? *optional_tid: 0;
+
+        // use the cached one first
 
         auto names_t = _get_system_table(db_id, sys_tbl::IndexNames::ID);
         auto names_schema = names_t->extent_schema();
@@ -312,15 +330,31 @@ namespace springtail::sys_tbl_mgr {
 
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, info->first.table_id, index_id);
         auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
+
+        info->first.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::DELETED);
         auto tuple = sys_tbl::IndexNames::Data::tuple(info->first.schema,
                 info->first.name,
                 info->first.table_id,
                 index_id,
                 xid.xid,
                 xid.lsn,
-                sys_tbl::IndexNames::State::DELETED,
+                static_cast<sys_tbl::IndexNames::State>(info->first.state),
                 info->first.is_unique );
         index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
+
+        std::map<uint32_t, uint32_t> keys;
+        for (const auto &column : info->first.columns) {
+            assert(keys.find(column.idx_position) == keys.end());
+            keys[column.idx_position] = column.position;
+        }
+
+        // update columns with the state XID
+        _write_index(xid, db_id, info->first.table_id, index_id, keys);
+
+        {
+            boost::unique_lock lock(_mutex);
+            _index_cache[db_id][info->first.table_id][info->first.id].emplace_back(xid, info->first);
+        }
     }
 
     void
@@ -395,7 +429,9 @@ namespace springtail::sys_tbl_mgr {
             ddl["columns"].push_back(column_json);
         }
 
-        _set_schema_info(request.db_id, request.table.id, request.table.name, request.table.schema,columns);
+        _set_schema_info(request.db_id, request.table.id, request.table.name, request.table.schema, columns);
+
+        _set_primary_index(request.db_id, request.table.id, request.table.name, request.table.schema, xid);
 
         return ddl;
     }
@@ -438,6 +474,7 @@ namespace springtail::sys_tbl_mgr {
             ddl["old_table"] = table_info->name;
             ddl["old_schema"] = table_info->schema;
 
+            _set_primary_index(request.db_id, request.table.id, table_info->name, table_info->schema, xid);
         } else {
             XidLsn xid(request.xid, request.lsn);
 
@@ -455,7 +492,10 @@ namespace springtail::sys_tbl_mgr {
                 // write the column change to the schemas table and update the cache
                 _set_schema_info(request.db_id, request.table.id, request.table.name, request.table.schema, { history });
             }
+
+            _set_primary_index(request.db_id, request.table.id, request.table.name, request.table.schema, xid);
         }
+
 
         _return.__set_statement(nlohmann::to_string(ddl));
     }
@@ -1019,34 +1059,6 @@ namespace springtail::sys_tbl_mgr {
         // read the index data and attach it to the info object
         _read_schema_indexes(info, db_id, table_id, access_xid);
 
-        // If no index is found in sys tables, they probably haven't been finalized
-        // construct the primary index from cache history
-        if (info->indexes.empty()) {
-            IndexInfo index;
-            index.id = constant::INDEX_PRIMARY;
-            index.is_unique = true;
-            index.name =  "primary_key";
-            index.table_id = table_id;
-            index.schema = "public";
-            index.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
-            for (auto const& [pos, col]: info->columns) {
-                if (col.__isset.pk_position) {
-                    IndexColumn key;
-                    key.name = col.name;
-                    key.position = col.position;
-                    key.idx_position = col.pk_position;
-                    index.columns.push_back(key);
-                }
-            }
-            if (!index.columns.empty()) {
-                // make sure to sort by idx_position
-                std::ranges::sort(index.columns, [](auto const& c1, auto const& c2) {
-                        assert(c1.idx_position != c2.idx_position);
-                        return c1.idx_position < c2.idx_position; });
-                info->indexes.push_back(std::move(index));
-            }
-        }
-
         // note: at this point we have the set of columns at the access_xid
         if (access_xid == target_xid) {
             info->target_xid_start = info->access_xid_start;
@@ -1103,25 +1115,11 @@ namespace springtail::sys_tbl_mgr {
 
             XidLsn index_xid(names_fields->at(sys_tbl::IndexNames::Data::XID)->get_uint64(row),
                              names_fields->at(sys_tbl::IndexNames::Data::LSN)->get_uint64(row));
+
             if (access_xid < index_xid) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "No more data for table indexes {}@{}:{}",
                                     tid, index_xid.xid, index_xid.lsn);
-
-                // update the upper bound of the XID range
-                if (XidLsn(schema_info->access_xid_end,
-                           schema_info->access_lsn_end) > index_xid) {
-                    schema_info->access_xid_end = index_xid.xid;
-                    schema_info->access_lsn_end = index_xid.lsn;
-                }
-
                 continue;
-            }
-
-            // update the lower bound of the XID range
-            if (XidLsn(schema_info->access_xid_start,
-                       schema_info->access_lsn_start) < index_xid) {
-                schema_info->access_xid_start = index_xid.xid;
-                schema_info->access_lsn_start = index_xid.lsn;
             }
 
             IndexInfo info;
@@ -1139,6 +1137,7 @@ namespace springtail::sys_tbl_mgr {
                 }
                 continue;
             }
+
             if (static_cast<sys_tbl::IndexNames::State>(info.state) == sys_tbl::IndexNames::State::NOT_READY) {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid, index_xid.xid, index_xid.lsn, info.id);
             }
@@ -1180,6 +1179,9 @@ namespace springtail::sys_tbl_mgr {
             }
             schema_info->indexes.push_back(std::move(info));
         }
+
+        // apply cached changes
+        _apply_index_cache_history(schema_info, db_id, table_id, access_xid);
     }
 
     void
@@ -1377,6 +1379,114 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
+    void 
+    Service::_apply_index_cache_history(SchemaInfoPtr schema_info, uint64_t db_id,
+            uint64_t table_id, const XidLsn &xid)
+    {
+        boost::unique_lock ulock(_mutex);
+
+        auto db_it = _index_cache.find(db_id); 
+        if (db_it == _index_cache.end()) {
+            return;
+        }
+
+        auto it = db_it->second.find(table_id);
+        if (it == db_it->second.end()) {
+            return;
+        }
+
+        for (auto const& [_, cache]: it->second) {
+            // cache is vector<IndexCacheItem>
+            if (cache.empty()) {
+                continue;
+            }
+
+            // get the first item that is greater than xid
+            auto iit = std::ranges::upper_bound(cache, IndexCacheItem{xid, {}}, 
+                    [](auto const& a, auto const&b) { 
+                        return a.xid < b.xid; 
+                    });
+
+            if (iit == cache.begin()) {
+                continue;
+            }
+
+            --iit;
+
+            // replace the existing info with the cached one
+                
+            auto it = std::ranges::find_if(schema_info->indexes, [&](auto const& v) {
+                    return iit->info.id == v.id; });
+            if (it != schema_info->indexes.end()) {
+                schema_info->indexes.erase(it);
+            }
+
+            if (static_cast<sys_tbl::IndexNames::State>(iit->info.state) == sys_tbl::IndexNames::State::DELETED) {
+                continue;
+            }
+
+            schema_info->indexes.push_back(iit->info);
+        }
+    }
+
+    std::optional<std::pair<IndexInfo, XidLsn>> 
+    Service::_find_cached_index(uint64_t db_id, uint64_t index_id,
+            const XidLsn& xid, std::optional<uint64_t> tid)
+    {
+        boost::unique_lock ulock(_mutex);
+
+        auto db_it = _index_cache.find(db_id); 
+        if (db_it == _index_cache.end()) {
+            return {};
+        }
+
+        const std::vector<IndexCacheItem>* cache = nullptr;
+
+        if (tid.has_value()) {
+            auto it = db_it->second.find(*tid);
+            if (it == db_it->second.end()) {
+                return {};
+            }
+            auto iit = it->second.find(index_id);
+            if (iit == it->second.end()) {
+                return {};
+            }
+            cache = &(iit->second);
+        } else { 
+            // Except for primary indexes, secondary index ID's should be
+            // globally unique so tid is optional in this case but
+            // it is required for primary indexes.
+            CHECK(index_id != constant::INDEX_PRIMARY);
+
+            auto const& db = db_it->second;
+
+            // find the first matching index_id 
+            for (auto const& [_, tab_cache]: db) {
+                auto iit = tab_cache.find(index_id);
+                if (iit != tab_cache.end()) {
+                    cache = &(iit->second);
+                    break;
+                }
+            }
+            if ( !cache) {
+                return {}; 
+            }
+        }
+
+        // get the first item that is greater than xid
+        auto it = std::ranges::upper_bound(*cache, IndexCacheItem{xid, {}}, 
+                [](auto const& a, auto const&b) { 
+                    return a.xid < b.xid; 
+                });
+
+        if (it == cache->begin()) {
+            return {};
+        }
+        --it;
+
+        return {{it->info, it->xid}};
+    }
+
     void
     Service::_read_schema_history(SchemaInfoPtr info,
                                   uint64_t db_id,
@@ -1499,7 +1609,6 @@ namespace springtail::sys_tbl_mgr {
                               const std::string& table_name, const std::string& schema,
                               const std::vector<ColumnHistory> &columns)
     {
-        std::map<uint32_t, uint32_t> primary_keys; // record the primary keys to update the indexes table
         auto schemas_t = _get_mutable_system_table(db_id, sys_tbl::Schemas::ID);
         auto write_xid = _get_write_xid(db_id);
 
@@ -1507,11 +1616,6 @@ namespace springtail::sys_tbl_mgr {
         for (auto &history : columns) {
             assert(history.__isset.column);
             assert(!history.__isset.index_column);
-
-            // record the primary key columns and order
-            if (history.exists && history.column.__isset.pk_position) {
-                primary_keys[history.column.pk_position] = history.column.position;
-            }
 
             // XXX do we need to enforce XID ordering somehow here?  are we guaranteed to apply these in xid order?
             boost::unique_lock lock(_mutex);
@@ -1536,22 +1640,61 @@ namespace springtail::sys_tbl_mgr {
                                                        history.update_type);
             schemas_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
         }
+    }
 
-        // update the primary index information
+    void 
+    Service::_set_primary_index(uint64_t db_id, uint64_t table_id,
+            const std::string& schema, const std::string& table_name, const XidLsn& xid)
+    {
+        // pk_position, position
+        std::map<uint32_t, uint32_t> primary_keys;
+
+        auto info = _get_schema_info(db_id, table_id, xid, xid);
+
+        IndexInfo index;
+
+        index.id = constant::INDEX_PRIMARY;
+        index.name = table_name + ".primary_key";
+        index.is_unique = true;
+        index.schema = schema;
+        index.table_id = table_id;
+
+        for (auto const &[_, c] : info->columns) {
+            if (!c.__isset.pk_position) {
+                continue;
+            }
+            IndexColumn col;
+            col.position = c.position;
+            col.idx_position = c.pk_position;
+            index.columns.emplace_back(col);
+            primary_keys[c.pk_position] = c.position;
+        }
+
+        index.state = index.columns.empty()?
+            static_cast<uint8_t>(sys_tbl::IndexNames::State::DELETED) 
+            :  static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
+
+        auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
+
+        auto tuple = sys_tbl::IndexNames::Data::tuple(index.schema,
+                index.name,
+                index.table_id,
+                index.id,
+                xid.xid,
+                xid.lsn,
+                static_cast<sys_tbl::IndexNames::State>(index.state),
+                true );
+        auto write_xid = _get_write_xid(db_id);
+        index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
+
         if (!primary_keys.empty()) {
-            XidLsn xid{write_xid};
-            auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
-            auto tuple = sys_tbl::IndexNames::Data::tuple(schema,
-                    table_name + ".primary_key",
-                    table_id,
-                    constant::INDEX_PRIMARY, //index id
-                    xid.xid,
-                    xid.lsn,
-                    sys_tbl::IndexNames::State::READY,
-                    true );
-            index_names_t->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
-
             _write_index(xid, db_id, table_id, constant::INDEX_PRIMARY, primary_keys);
+        }
+
+        // add to index cache
+        {
+            boost::unique_lock lock(_mutex);
+            _index_cache[db_id][table_id][index.id].emplace_back(xid, index);
         }
     }
 
@@ -1560,6 +1703,7 @@ namespace springtail::sys_tbl_mgr {
     {
         boost::unique_lock lock(_mutex);
         _schema_cache.erase(db_id);
+        _index_cache.erase(db_id);
     }
 
     TablePtr
@@ -1613,6 +1757,7 @@ namespace springtail::sys_tbl_mgr {
             return;
         }
         auto write_xid = _get_write_xid(db_id);
+
         auto indexes_t = _get_mutable_system_table(db_id, sys_tbl::Indexes::ID);
         auto fields = sys_tbl::Indexes::Data::fields(tab_id,
                 index_id,

@@ -158,6 +158,7 @@ namespace springtail::gc {
         }
 
         XidLsn xid{idx._xid};
+
         sys_tbl_mgr::IndexInfo info = client->get_index_info(db_id, index_id, xid);
         if (info.id == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
@@ -165,8 +166,6 @@ namespace springtail::gc {
             SPDLOG_INFO("The index is not valid: {}", index_id);
             return;
         }
-
-        SPDLOG_INFO("Drop index table id: {}", info.table_id);
 
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id, xid.xid, xid.lsn);
         if (!exists) {
@@ -176,20 +175,30 @@ namespace springtail::gc {
             return;
         }
 
-        auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
-        auto root = table->index(index_id);
-        assert(root);
+        // index column positions
+        std::vector<uint32_t> idx_cols;
+        for (auto const& col: info.columns) {
+            idx_cols.push_back(col.position);
+        }
 
         auto meta = client->get_roots(db_id, info.table_id, idx._xid);
         auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
             return index_id == v.index_id;
         });
-        assert(it != meta->roots.end());
-        meta->roots.erase(it);
-        client->update_roots(db_id, info.table_id, idx._xid, *meta);
+        CHECK(it != meta->roots.end());
 
+        auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
+        auto root = table->create_index_root(index_id, idx_cols);
+        if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            root->init(it->extent_id);
+        } else {
+            root->init_empty();
+        }
         root->truncate();
         root->finalize();
+
+        meta->roots.erase(it);
+        client->update_roots(db_id, info.table_id, idx._xid, *meta);
 
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }

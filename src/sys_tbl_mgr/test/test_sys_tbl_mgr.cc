@@ -211,21 +211,45 @@ namespace {
 
         // create the table
         _create_table(tid, "x");
+        auto &&schema_meta = _client->get_schema(_db, tid, _xid);
+        // should get the cached (hasn't been finalized) primary index
+        ASSERT_EQ(schema_meta->indexes.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
+
         _finalize();
 
-        auto &&schema_meta = _client->get_schema(_db, tid, _xid);
-
+        schema_meta = _client->get_schema(_db, tid, _xid);
         // must have a primary index
         ASSERT_EQ(schema_meta->indexes.size(), 1);
         ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
 
         PgMsgIndex &&msg = _create_index(tid, "x", index_id);
+
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+        ASSERT_EQ(schema_meta->indexes[0].columns.size(), 1);
+        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::NOT_READY);
+        ASSERT_EQ(schema_meta->indexes[1].columns[0].idx_position, 0);
+        ASSERT_EQ(schema_meta->indexes[1].columns[0].position, 2);
+        ASSERT_EQ(schema_meta->indexes[1].columns[1].idx_position, 1);
+        ASSERT_EQ(schema_meta->indexes[1].columns[1].position, 1);
+
+        _set_index_state(tid, index_id, sys_tbl::IndexNames::State::READY);
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
+
+        _set_index_state(tid, index_id, sys_tbl::IndexNames::State::NOT_READY);
+
+        auto info = _client->get_index_info(_db, index_id, _xid);
+        ASSERT_EQ(info.id, index_id);
+        ASSERT_EQ(schema_meta->indexes[1].state, (uint8_t)sys_tbl::IndexNames::State::READY);
+
         _finalize();
 
         // verify the schema metadata after finalize()
         _verify_schema(tid, index_id);
 
-        auto info = _client->get_index_info(_db, index_id, _xid);
+        info = _client->get_index_info(_db, index_id, _xid);
         ASSERT_EQ(info.id, index_id);
 
         // use optional table ID
@@ -274,8 +298,16 @@ namespace {
 
         _verify_schema(tid, index_id);
 
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        ASSERT_EQ(schema_meta->indexes.size(), 2);
+
         //drop index
         _drop_index(index_id);
+
+        schema_meta = _client->get_schema(_db, tid, _xid);
+        // must have a primary index
+        ASSERT_EQ(schema_meta->indexes.size(), 1);
+
         _finalize();
 
         schema_meta = _client->get_schema(_db, tid, _xid);
