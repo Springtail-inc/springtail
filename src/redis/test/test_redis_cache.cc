@@ -2,18 +2,18 @@
 
 #include <common/common.hh>
 #include <common/counter.hh>
-#include <common/tracing.hh>
 #include <redis/redis_cache.hh>
 
 using namespace springtail;
 
 namespace {
-    class RedisCache_Test : public testing::Test {
+    class RedisCache_Test : public testing::Test
+    {
     protected:
         static void SetUpTestSuite()
         {
             // springtail_init();
-            // NOTE: the reason for not using springtail_init() is bacause I am using valgrind to run
+            // NOTE: the reason for not using springtail_init() is because I am using valgrind to run
             //      this unit test and to ensure that no memory is leaked, corrupted, or not cleaned up
             //      properly. Unfortunately, springtail_init() brings a lot of noise that I did not want
             //      to deal with at the moment.
@@ -50,7 +50,7 @@ namespace {
 
         class RedisChangeWatcher : public RedisCache::RedisCacheChangeCallback {
         public:
-            RedisChangeWatcher(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) : _cb(func) {}
+            explicit RedisChangeWatcher(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) : _cb(func) {}
             ~RedisChangeWatcher() override = default;
 
             void change_callback(const std::string &path, const nlohmann::json &new_value) override {
@@ -149,8 +149,10 @@ namespace {
     {
         EXPECT_EQ(_cache->get_callback_count(""), 0);
 
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>([] (const std::string &path, const nlohmann::json &new_value) {
-        });
+        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+            [] (const std::string &path, const nlohmann::json &new_value) {
+                // emtpy callback for now, will be reset later on
+            });
 
         _cache->add_callback("db_config", redis_watcher);
         EXPECT_EQ(_cache->get_callback_count(""), 1);

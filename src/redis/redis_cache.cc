@@ -183,7 +183,8 @@ RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_lev
 }
 
 size_t
-RedisCache::get_callback_count(const std::string &path) {
+RedisCache::get_callback_count(const std::string &path)
+{
     std::deque<std::string> json_path_queue = {};
     if (!path.empty()) {
         std::string json_path = std::to_string(_instance_id) + ":" + path;
@@ -281,7 +282,8 @@ RedisCache::_init_storage()
 }
 
 void
-RedisCache::_run() {
+RedisCache::_run()
+{
     _id = std::this_thread::get_id();
     SPDLOG_DEBUG("Started RedisCache subscriber thread {}", _id);
     while (!_shutdown) {
