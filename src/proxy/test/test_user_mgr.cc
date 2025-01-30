@@ -43,7 +43,6 @@ namespace {
             pg_proxy::UserMgr::shutdown();
             pg_proxy::DatabaseMgr::shutdown();
             _db_conn.disconnect();
-            Properties::shutdown();
         }
 
         void SetUp() override
