@@ -502,12 +502,13 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
 
     std::string
     Client::swap_sync_table(const TableRequest &create,
+                            const std::vector<IndexRequest> indexes,
                             const UpdateRootsRequest &roots)
     {
         DDLStatement result;
 
-        _invoke_with_retries([&result, &create, &roots](ThriftClient &c) {
-            c.client->swap_sync_table(result, create, roots);
+        _invoke_with_retries([&result, &create, &indexes, &roots](ThriftClient &c) {
+            c.client->swap_sync_table(result, create, indexes, roots);
         });
 
         if (result.statement.empty()) {

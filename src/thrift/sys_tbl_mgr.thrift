@@ -227,5 +227,5 @@ service Service {
 
     // performs a drop + create + update_roots as a single operation
     // to support swapping a newly synced table into place
-    DDLStatement swap_sync_table(1: TableRequest create, 2: UpdateRootsRequest roots);
+    DDLStatement swap_sync_table(1: TableRequest create, 2: list<IndexRequest> indexes, 3: UpdateRootsRequest roots);
 }

@@ -1,7 +1,32 @@
 #!/bin/bash
-if [ ! -d release ]; then
-    mkdir -p release
-    cmake -B release -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNDEBUG=1
+
+if [ $(uname -p) == aarch64 ]; then
+    export VCPKG_FORCE_SYSTEM_BINARIES=1
 fi
+
+# install dependent packages with vcpkg
+./vcpkg.sh
+
+if [ -e '/.dockerenv' ]; then
+    DOCKER=1
+else
+    DOCKER=0
+fi
+
+# setup the debug build
+if [ ! -d release ]; then
+    if [ $DOCKER -eq 1 ]; then
+        echo "Building inside a container; symlinking release dir"
+        mkdir -p /home/dev/release
+        ln -s /home/dev/release release
+    else
+        mkdir -p release
+    fi
+fi
+
+cmake -B release -S . \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DNDEBUG=1
+
 cd release
-make VERBOSE=1 $1 $2
+make $1 $2
