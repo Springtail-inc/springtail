@@ -36,8 +36,7 @@ namespace {
             : DatabaseInstance(type, hostname, prefix, port) {}
 
         /** override allocate session (create a TestServerSession) to avoid creating a connection */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) override
         {
@@ -57,8 +56,7 @@ namespace {
         TestableDatabaseSet() : DatabaseSet(5) {}
 
         /** override abstract method */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-                UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
                 uint64_t db_id,
                 const std::unordered_map<std::string, std::string> &parameters) override
         {
@@ -69,7 +67,7 @@ namespace {
         /** allocate session from Test Instance and set the session's instance */
         ServerSessionPtr allocate_session(uint64_t db_id, const std::string &username, DatabaseInstancePtr instance)
         {
-            auto session = _allocate_session(nullptr, std::make_shared<User>(username), db_id, {}, instance);
+            auto session = _allocate_session(std::make_shared<User>(username), db_id, {}, instance);
             TestServerSessionPtr test_session = std::dynamic_pointer_cast<TestServerSession>(session);
             test_session->set_instance(instance);
             return session;

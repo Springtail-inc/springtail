@@ -767,6 +767,7 @@ namespace springtail::sys_tbl_mgr {
     void
     Service::swap_sync_table(DDLStatement &_return,
                              const TableRequest &create,
+                             const std::vector<IndexRequest> &indexes,
                              const UpdateRootsRequest &roots)
     {
         SPDLOG_INFO("got swap_sync_table()");
@@ -804,6 +805,15 @@ namespace springtail::sys_tbl_mgr {
         assert(create.lsn == constant::MAX_LSN - 1);
         auto &&create_ddl = this->_create_table(create);
         ddls.push_back(create_ddl);
+        
+        for (const IndexRequest &index : indexes) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create index: {}:{} @ {}:{}",
+                            index.db_id, index.index.id, index.xid, index.lsn);
+
+            CHECK_EQ(index.lsn, constant::MAX_LSN - 1);
+            auto &&index_ddl = this->_create_index(index);
+            ddls.push_back(index_ddl);
+        }
 
         // 5. update the metadata of the table
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}",

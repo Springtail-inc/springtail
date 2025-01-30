@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <atomic>
+#include <set>
+#include <vector>
 
 #include <unistd.h>
 #include <netinet/in.h>
@@ -18,6 +20,8 @@ namespace springtail::pg_proxy {
     /** Connection object */
     class ProxyConnection : public std::enable_shared_from_this<ProxyConnection> {
     public:
+        using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
+
         ProxyConnection(int socket, struct sockaddr_in &addr)
           : _socket(socket),
             _addr(addr)
@@ -81,7 +85,9 @@ namespace springtail::pg_proxy {
         bool has_pending();
 
         /** factory method to create a connection */
-        static std::shared_ptr<ProxyConnection> create(const std::string &hostname, int port);
+        static ProxyConnectionPtr create(const std::string &hostname, int port);
+
+        static bool has_pending(std::vector<ProxyConnectionPtr> connections, std::set<int> &fds);
 
     private:
         int _socket;
