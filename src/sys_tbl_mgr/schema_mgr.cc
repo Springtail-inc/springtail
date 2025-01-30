@@ -32,6 +32,9 @@ namespace springtail {
 
         // IndexNames
         _system_cache[{ sys_tbl::IndexNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::IndexNames::Data::SCHEMA);
+
+        // NamespaceNames
+        _system_cache[{ sys_tbl::NamespaceNames::ID, constant::INDEX_DATA, true }] = std::make_shared<ExtentSchema>(sys_tbl::NamespaceNames::Data::SCHEMA);
     }
 
     std::map<uint32_t, SchemaColumn>

@@ -111,8 +111,7 @@ namespace {
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
-        msg.schema_oid = 1;
-        // msg.schema = "public";
+        msg.namespace_name = "public";
         msg.oid = index_id;
 
         _client->drop_index(_db, xid, msg);
@@ -128,8 +127,7 @@ namespace {
 
         msg.lsn = xid.lsn;
         msg.xid = xid.xid;
-        msg.schema_oid = 1;
-        // msg.schema = "public";
+        msg.namespace_name = "public";
         msg.index = name;
         msg.is_unique = true;
         msg.table_oid = tid;
@@ -151,8 +149,7 @@ namespace {
 
         PgMsgTable create_msg;
         create_msg.oid = tid;
-        create_msg.schema_oid = 1;
-        // create_msg.schema = "public";
+        create_msg.namespace_name = "public";
         create_msg.table = name;
         create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 1, 0, false, true});
         create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 2, 0, true, false});
@@ -189,8 +186,7 @@ namespace {
         // drop the table
         PgMsgDropTable drop_msg;
         drop_msg.oid = tid;
-        drop_msg.schema_oid = 1;
-        // drop_msg.schema = "public";
+        drop_msg.namespace_name = "public";
         drop_msg.table = name;
 
         _client->drop_table(_db, xid, drop_msg);

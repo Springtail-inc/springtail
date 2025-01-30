@@ -58,8 +58,7 @@ namespace {
         create_msg.lsn = 1;
         create_msg.oid = 100000;
         create_msg.xid = 2;
-        create_msg.schema_oid = 90000;
-        create_msg.schema = "public";
+        create_msg.namespace_name = "public";
         create_msg.table = "x";
         create_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
         create_msg.columns.push_back({"col2", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
@@ -71,8 +70,7 @@ namespace {
         alter_msg.lsn = 0;
         alter_msg.oid = 100000;
         alter_msg.xid = 3;
-        alter_msg.schema_oid = 90000;
-        alter_msg.schema = "public";
+        alter_msg.namespace_name = "public";
         alter_msg.table = "x";
         alter_msg.columns.push_back({"col1", static_cast<uint8_t>(SchemaType::TEXT), 0, "foo", 0, 0, false, true});
         alter_msg.columns.push_back({"colnew", static_cast<uint8_t>(SchemaType::INT32), 0, std::nullopt, 1, 0, true, false});
@@ -84,8 +82,7 @@ namespace {
         drop_msg.lsn = 0;
         drop_msg.oid = 100000;
         drop_msg.xid = 4;
-        drop_msg.schema_oid = 90000;
-        drop_msg.schema = "public";
+        drop_msg.namespace_name = "public";
         drop_msg.table = "x";
         TableMgr::get_instance()->drop_table(db_id, {4, 0}, drop_msg);
 

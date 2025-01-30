@@ -290,7 +290,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema_oid << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -315,7 +315,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << table.oid << std::endl;
                 ss << "  LSN=" << table.lsn << std::endl;
-                ss << "  schema=" << table.schema_oid << std::endl;
+                ss << "  namespace=" << table.namespace_name << std::endl;
                 ss << "  table=" << table.table << std::endl;
                 ss << "  columns=" << table.columns.size() << std::endl;
 
@@ -338,7 +338,7 @@ namespace pg_msg {
                 }
                 ss << "  oid=" << drop_table.oid << std::endl;
                 ss << "  LSN=" << drop_table.lsn << std::endl;
-                ss << "  schema=" << drop_table.schema_oid << std::endl;
+                ss << "  namespace=" << drop_table.namespace_name << std::endl;
                 ss << "  table=" << drop_table.table << std::endl;
                 break;
             }

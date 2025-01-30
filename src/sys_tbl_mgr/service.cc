@@ -9,6 +9,7 @@
 
 #include <xid_mgr/xid_mgr_client.hh>
 
+#include <sys_tbl_mgr/exception.hh>
 #include <sys_tbl_mgr/table_mgr.hh>
 #include <sys_tbl_mgr/system_tables.hh>
 
@@ -51,7 +52,7 @@ namespace springtail::sys_tbl_mgr {
             return dummy;
         }
 
-        return info->first;
+        return std::get<0>(*info);
     }
 
     bool
@@ -65,6 +66,7 @@ namespace springtail::sys_tbl_mgr {
         info->access_xid_end = constant::LATEST_XID;
         info->access_lsn_end = constant::MAX_LSN;
 
+        // XXX this is overly heavy-weight to retrieve a specific index
         _read_schema_indexes(info, request.db_id, request.table_id, xid);
 
         auto index_i = std::ranges::find_if(info->indexes, [&](auto const& v) {
@@ -79,8 +81,13 @@ namespace springtail::sys_tbl_mgr {
         auto index_info = *index_i;
         assert(index_info.table_id == request.table_id && index_info.id == request.index_id);
 
+        // lookup the namespace ID
+        // XXX it seems like we shouldn't need to look this up -- we just retrieved all of the index
+        //     info above in _read_schema_indexes() -- we should optimize this whole flow
+        auto ns_info = _get_namespace_info(request.db_id, index_info.namespace_name, xid);
+
         auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
-        auto tuple = sys_tbl::IndexNames::Data::tuple(index_info.namespace_id,
+        auto tuple = sys_tbl::IndexNames::Data::tuple(ns_info->id,
                 index_info.name,
                 index_info.table_id,
                 request.index_id,
@@ -141,14 +148,10 @@ namespace springtail::sys_tbl_mgr {
     {
         XidLsn xid(request.xid, request.lsn);
 
-        // retrieve the name of the namespace
-        auto &&ns_name = _read_namespace_name(request.db_id, request.index.namespace_id,
-                                              XidLsn(request.xid, request.lsn));
-
         nlohmann::json ddl;
         ddl["action"] = "create_index";
         ddl["index"] = request.index.name;
-        ddl["schema"] = ns_name;
+        ddl["schema"] = request.index.namespace_name;
         ddl["id"] = request.index.id;
         ddl["is_unique"] = request.index.is_unique;
         ddl["table_id"] = request.index.table_id;
@@ -174,9 +177,12 @@ namespace springtail::sys_tbl_mgr {
 
         // update index names
         {
+            // lookup the namespace info
+            auto ns_info = _get_namespace_info(request.db_id, request.index.namespace_name, xid);
+
             auto write_xid = _get_write_xid(request.db_id);
             auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
-            auto tuple = sys_tbl::IndexNames::Data::tuple(request.index.namespace_id,
+            auto tuple = sys_tbl::IndexNames::Data::tuple(ns_info->id,
                     request.index.name,
                     request.index.table_id,
                     request.index.id,
@@ -203,15 +209,11 @@ namespace springtail::sys_tbl_mgr {
         // acquire a shared lock to ensure no one is doing a finalize
         boost::shared_lock lock(_write_mutex);
 
-        // retrieve the name of the namespace
-        auto &&ns_name = _read_namespace_name(request.db_id, request.namespace_id,
-                                              XidLsn(request.xid, request.lsn));
-
         nlohmann::json ddl;
         ddl["action"] = "drop_index";
         ddl["id"] = request.index_id;
         ddl["name"] = request.name;
-        ddl["schema"] = ns_name;
+        ddl["schema"] = request.namespace_name;
 
         XidLsn xid(request.xid, request.lsn);
 
@@ -222,7 +224,7 @@ namespace springtail::sys_tbl_mgr {
         _return.__set_statement(nlohmann::to_string(ddl));
     }
 
-    std::optional<std::pair<IndexInfo, XidLsn>> 
+    std::optional<std::tuple<IndexInfo, uint64_t, XidLsn>> 
     Service::_find_index(uint64_t db_id, uint64_t index_id, const XidLsn& access_xid, std::optional<uint64_t> optional_tid)
     {
         // All tables share the same primary index id, and the table id is required in this case.
@@ -293,10 +295,10 @@ namespace springtail::sys_tbl_mgr {
         info.state = state;
 
         // need to look up the schema name in the namespace_names table
-        info.namespace_id = namespace_id;
-        info.schema = _read_namespace_name(db_id, namespace_id, access_xid);
+        auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
+        info.namespace_name = ns_info->name;
 
-        return {{info, index_xid}};
+        return {{info, namespace_id, index_xid}};
     }
 
     void
@@ -314,24 +316,26 @@ namespace springtail::sys_tbl_mgr {
                     db_id, xid.xid, index_id);
             return;
         }
-        if (static_cast<sys_tbl::IndexNames::State>(info->first.state) == sys_tbl::IndexNames::State::DELETED) {
+        auto &index_info = std::get<0>(*info);
+
+        if (static_cast<sys_tbl::IndexNames::State>(index_info.state) == sys_tbl::IndexNames::State::DELETED) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}",
                     db_id, xid.xid, index_id);
             return;
         }
 
-        assert(xid > info->second);
+        assert(xid > std::get<2>(*info));
 
-        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, info->first.table_id, index_id);
+        SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, index_info.table_id, index_id);
         auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);
-        auto tuple = sys_tbl::IndexNames::Data::tuple(info->first.namespace_id,
-                info->first.name,
-                info->first.table_id,
+        auto tuple = sys_tbl::IndexNames::Data::tuple(std::get<1>(*info),
+                index_info.name,
+                index_info.table_id,
                 index_id,
                 xid.xid,
                 xid.lsn,
                 sys_tbl::IndexNames::State::DELETED,
-                info->first.is_unique );
+                index_info.is_unique );
         index_names_t->upsert(tuple, xid.xid, constant::UNKNOWN_EXTENT);
     }
 
@@ -357,14 +361,14 @@ namespace springtail::sys_tbl_mgr {
     {
         XidLsn xid(request.xid, request.lsn);
 
-        // retrieve the name of the namespace
-        auto &&ns_name = _read_namespace_name(request.db_id, request.table.namespace_id,
-                                              XidLsn(request.xid, request.lsn));
+        // retrieve the id of the namespace
+        auto ns_info = _get_namespace_info(request.db_id, request.table.namespace_name,
+                                           XidLsn(request.xid, request.lsn));
 
         // initialize the ddl statement
         nlohmann::json ddl;
         ddl["action"] = "create";
-        ddl["schema"] = ns_name;
+        ddl["schema"] = request.table.namespace_name;
         ddl["table"] = request.table.name;
         ddl["tid"] = request.table.id;
         ddl["xid"] = request.xid;
@@ -372,8 +376,8 @@ namespace springtail::sys_tbl_mgr {
         ddl["columns"] = nlohmann::json::array();
 
         // add table name
-        auto table_info = std::make_shared<TableInfo>(request.table.id, request.xid, request.lsn,
-                                                      request.table.namespace_id, request.table.name, true);
+        auto table_info = std::make_shared<TableCacheRecord>(request.table.id, request.xid, request.lsn,
+                                                             ns_info->id, request.table.name, true);
         _set_table_info(request.db_id, table_info);
 
         // add roots and stats entry -- may get overwritten later if data is added to the table
@@ -411,7 +415,7 @@ namespace springtail::sys_tbl_mgr {
             ddl["columns"].push_back(column_json);
         }
 
-        _set_schema_info(request.db_id, request.table.id, request.table.namespace_id,
+        _set_schema_info(request.db_id, request.table.id, ns_info->id,
                          request.table.name, columns);
 
         return ddl;
@@ -423,14 +427,15 @@ namespace springtail::sys_tbl_mgr {
     {
         SPDLOG_INFO("got alter_table()");
 
-        auto &&ns_name = _read_namespace_name(request.db_id, request.table.namespace_id,
-                                              XidLsn(request.xid, request.lsn));
+        // retrieve the id of the namespace
+        auto ns_info = _get_namespace_info(request.db_id, request.table.namespace_name,
+                                           XidLsn(request.xid, request.lsn));
 
         nlohmann::json ddl;
         ddl["tid"] = request.table.id;
         ddl["xid"] = request.xid;
         ddl["lsn"] = request.lsn;
-        ddl["schema"] = ns_name;
+        ddl["schema"] = request.table.namespace_name;
         ddl["table"] = request.table.name;
 
         boost::shared_lock lock(_write_mutex);
@@ -442,31 +447,33 @@ namespace springtail::sys_tbl_mgr {
         // note: table should always exist when calling alter_table()
         assert(table_info != nullptr);
 
-        if (table_info->namespace_id != request.table.namespace_id) {
+        if (table_info->namespace_id != ns_info->id) {
             // if the schema/namespace changed then update the table_names table
             // insert the new name for this oid
-            auto new_info = std::make_shared<TableInfo>(request.table.id,
-                                                        request.xid,
-                                                        request.lsn,
-                                                        request.table.namespace_id,
-                                                        request.table.name,
-                                                        true);
+            auto new_info = std::make_shared<TableCacheRecord>(request.table.id,
+                                                               request.xid,
+                                                               request.lsn,
+                                                               ns_info->id,
+                                                               request.table.name,
+                                                               true);
             _set_table_info(request.db_id, new_info);
 
             // set the DDL statement
             ddl["action"] = "set_schema";
-            ddl["old_schema"] = _read_namespace_name(request.db_id, table_info->namespace_id,
-                                                     XidLsn(request.xid, request.lsn));
+
+            auto old_ns_info = _get_namespace_info(request.db_id, table_info->namespace_id,
+                                                   XidLsn(request.xid, request.lsn));
+            ddl["old_schema"] = old_ns_info->name;
 
         } else if (table_info->name != request.table.name) {
             // if the name is changed, update the name in the table_names table
             // insert the new name for this oid
-            auto new_info = std::make_shared<TableInfo>(request.table.id,
-                                                        request.xid,
-                                                        request.lsn,
-                                                        request.table.namespace_id,
-                                                        request.table.name,
-                                                        true);
+            auto new_info = std::make_shared<TableCacheRecord>(request.table.id,
+                                                               request.xid,
+                                                               request.lsn,
+                                                               ns_info->id,
+                                                               request.table.name,
+                                                               true);
             _set_table_info(request.db_id, new_info);
 
             // set the DDL statement
@@ -488,7 +495,7 @@ namespace springtail::sys_tbl_mgr {
                 history.update_type != static_cast<int8_t>(SchemaUpdateType::RESYNC)) {
 
                 // write the column change to the schemas table and update the cache
-                _set_schema_info(request.db_id, request.table.id, request.table.namespace_id,
+                _set_schema_info(request.db_id, request.table.id, ns_info->id,
                                  request.table.name, { history });
             }
         }
@@ -515,8 +522,9 @@ namespace springtail::sys_tbl_mgr {
     nlohmann::json
     Service::_drop_table(const DropTableRequest &request)
     {
-        auto &&ns_name = _read_namespace_name(request.db_id, request.namespace_id,
-                                              XidLsn(request.xid, request.lsn));
+        // retrieve the id of the namespace
+        auto ns_info = _get_namespace_info(request.db_id, request.namespace_name,
+                                           XidLsn(request.xid, request.lsn));
 
         // initialize the ddl json
         nlohmann::json ddl;
@@ -524,7 +532,7 @@ namespace springtail::sys_tbl_mgr {
         ddl["tid"] = request.table_id;
         ddl["xid"] = request.xid;
         ddl["lsn"] = request.lsn;
-        ddl["schema"] = ns_name;
+        ddl["schema"] = request.namespace_name;
         ddl["table"] = request.name;
 
         XidLsn xid(request.xid, request.lsn);
@@ -544,12 +552,12 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // mark the table as dropped in the table_names
-        auto table_info = std::make_shared<TableInfo>(request.table_id,
-                                                      request.xid,
-                                                      request.lsn,
-                                                      request.namespace_id,
-                                                      request.name,
-                                                      false);
+        auto table_info = std::make_shared<TableCacheRecord>(request.table_id,
+                                                             request.xid,
+                                                             request.lsn,
+                                                             ns_info->id,
+                                                             request.name,
+                                                             false);
         _set_table_info(request.db_id, table_info);
 
         // get the schema prior to this change
@@ -569,7 +577,7 @@ namespace springtail::sys_tbl_mgr {
 
             changes.push_back(change);
         }
-        _set_schema_info(request.db_id, request.table_id, request.namespace_id, request.name, changes);
+        _set_schema_info(request.db_id, request.table_id, ns_info->id, request.name, changes);
 
         return ddl;
     }
@@ -629,7 +637,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
     nlohmann::json
-    Service::_mutate_namespace(uint64_t db,
+    Service::_mutate_namespace(uint64_t db_id,
                                uint64_t ns_id,
                                std::optional<std::string> name,
                                const XidLsn &xid,
@@ -644,9 +652,21 @@ namespace springtail::sys_tbl_mgr {
             ddl["name"] = *name;
         }
 
+        // record the namespace info into the cache
+        {
+            boost::unique_lock lock(_mutex);
+            auto entry = std::make_shared<NamespaceCacheRecord>(ns_id, (name) ? *name : "", exists);
+            _namespace_id_cache[db_id][ns_id][xid] = entry;
+            if (name) {
+                // XXX do we need to make sure we cache the name even if it's not provided?  e.g.,
+                //     in the case of drop?
+                _namespace_name_cache[db_id][*name][xid] = entry;
+            }
+        }
+
         // add the namespace to the namespace_names table
-        auto write_xid = _get_write_xid(db);
-        auto table = _get_mutable_system_table(db, sys_tbl::NamespaceNames::ID);
+        auto write_xid = _get_write_xid(db_id);
+        auto table = _get_mutable_system_table(db_id, sys_tbl::NamespaceNames::ID);
         auto tuple = sys_tbl::NamespaceNames::Data::tuple(ns_id, (name) ? *name : "", xid.xid,
                                                           xid.lsn, exists);
         table->upsert(tuple, write_xid, constant::UNKNOWN_EXTENT);
@@ -866,7 +886,7 @@ namespace springtail::sys_tbl_mgr {
             drop.table_id = create.table.id;
             drop.xid = create.xid;
             drop.lsn = create.lsn - 1;
-            drop.namespace_id = create.table.namespace_id;
+            drop.namespace_name = create.table.namespace_name;
             drop.name = create.table.name;
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}",
@@ -895,7 +915,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
 
-    Service::TableInfoPtr
+    Service::TableCacheRecordPtr
     Service::_get_table_info(uint64_t db_id,
                              uint64_t table_id,
                              const XidLsn &xid)
@@ -937,7 +957,7 @@ namespace springtail::sys_tbl_mgr {
         }
 
         // read the row from the extent and retrieve the FQN
-        auto info = std::make_shared<TableInfo>();
+        auto info = std::make_shared<TableCacheRecord>();
         info->id = fields->at(sys_tbl::TableNames::Data::TABLE_ID)->get_uint64(*row_i);
         info->xid = fields->at(sys_tbl::TableNames::Data::XID)->get_uint64(*row_i);
         info->lsn = fields->at(sys_tbl::TableNames::Data::LSN)->get_uint64(*row_i);
@@ -949,9 +969,23 @@ namespace springtail::sys_tbl_mgr {
         return info;
     }
 
-    std::string
-    Service::_read_namespace_name(uint64_t db_id, uint64_t namespace_id, const XidLsn &xid)
+    Service::NamespaceCacheRecordPtr
+    Service::_get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn &xid)
     {
+        // check the cache of un-finalized records
+        {
+            boost::unique_lock lock(_mutex);
+            auto namespace_i = _namespace_id_cache[db_id].find(namespace_id);
+            if (namespace_i != _namespace_id_cache[db_id].end()) {
+                // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
+                auto info_i = namespace_i->second.lower_bound(xid);
+                if (info_i != namespace_i->second.end()) {
+                    return info_i->second;
+                }
+            }
+        }
+
+        // read from disk
         auto table = _get_system_table(db_id, sys_tbl::NamespaceNames::ID);
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
@@ -976,13 +1010,62 @@ namespace springtail::sys_tbl_mgr {
             return nullptr;
         }
 
-        std::string name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i));
-        return name;
+        // create and populate the namespace info
+        return std::make_shared<NamespaceCacheRecord>(
+            namespace_id, fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i),
+            fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i));
+    }
+
+    Service::NamespaceCacheRecordPtr
+    Service::_get_namespace_info(uint64_t db_id, const std::string &name, const XidLsn &xid)
+    {
+        // check the cache of un-finalized records
+        {
+            boost::unique_lock lock(_mutex);
+            auto namespace_i = _namespace_name_cache[db_id].find(name);
+            if (namespace_i != _namespace_name_cache[db_id].end()) {
+                // note: we keep XID/LSN in reverse order to allow use of lower_bound() for lookup
+                auto info_i = namespace_i->second.lower_bound(xid);
+                if (info_i != namespace_i->second.end()) {
+                    return info_i->second;
+                }
+            }
+        }
+
+        // read from disk
+        auto table = _get_system_table(db_id, sys_tbl::NamespaceNames::ID);
+        auto schema = table->extent_schema();
+        auto fields = schema->get_fields();
+
+        auto search_key = sys_tbl::NamespaceNames::Secondary::key_tuple(name, xid.xid, xid.lsn);
+
+        // find the row that matches the name at the given XID/LSN
+        auto row_i = table->inverse_lower_bound(search_key, 1);
+
+        // verify that the name is present and exists
+        if (row_i == table->end(1)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+            return nullptr;
+        }
+
+        if (name != fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*row_i)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}", name, xid.xid, xid.lsn);
+            return nullptr;
+        }
+        if (!fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i)) {
+            SPDLOG_WARN("Namespace marked as not-exists {} @ {}:{}", name, xid.xid, xid.lsn);
+            return nullptr;
+        }
+
+        // return the namespace ID
+        return std::make_shared<NamespaceCacheRecord>(
+            fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*row_i), name,
+            fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*row_i));
     }
 
     void
     Service::_set_table_info(uint64_t db_id,
-                             TableInfoPtr table_info)
+                             TableCacheRecordPtr table_info)
     {
         XidLsn xid(table_info->xid, table_info->lsn);
 
@@ -1011,7 +1094,7 @@ namespace springtail::sys_tbl_mgr {
         _table_cache.erase(db_id);
     }
 
-    Service::RootsInfoPtr
+    Service::RootsCacheRecordPtr
     Service::_get_roots_info(uint64_t db_id,
                              uint64_t table_id,
                              const XidLsn &xid)
@@ -1106,7 +1189,7 @@ namespace springtail::sys_tbl_mgr {
     Service::_set_roots_info(uint64_t db_id,
                              uint64_t table_id,
                              const XidLsn &xid,
-                             RootsInfoPtr roots_info)
+                             RootsCacheRecordPtr roots_info)
     {
         // cache the roots info
         boost::unique_lock lock(_mutex);
@@ -1173,14 +1256,14 @@ namespace springtail::sys_tbl_mgr {
         // construct the primary index from cache history
         if (info->indexes.empty()) {
             auto table_info = _get_table_info(db_id, table_id, access_xid);
+            auto ns_info = _get_namespace_info(db_id, table_info->namespace_id, access_xid);
 
             IndexInfo index;
             index.id = constant::INDEX_PRIMARY;
             index.is_unique = true;
             index.name =  "primary_key";
             index.table_id = table_id;
-            index.namespace_id = table_info->namespace_id;
-            index.schema = _read_namespace_name(db_id, table_info->namespace_id, access_xid);
+            index.namespace_name = ns_info->name;
             index.state = static_cast<uint8_t>(sys_tbl::IndexNames::State::READY);
             for (auto const& [pos, col]: info->columns) {
                 if (col.__isset.pk_position) {
@@ -1296,8 +1379,9 @@ namespace springtail::sys_tbl_mgr {
                 SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Found not-ready index {}@{}:{} - {}", tid, index_xid.xid, index_xid.lsn, info.id);
             }
 
-            info.namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
-            info.schema = _read_namespace_name(db_id, info.namespace_id, access_xid);
+            uint64_t namespace_id = names_fields->at(sys_tbl::IndexNames::Data::NAMESPACE_ID)->get_uint64(row);
+            auto ns_info = _get_namespace_info(db_id, namespace_id, access_xid);
+            info.namespace_name = ns_info->name;
 
             info.name = names_fields->at(sys_tbl::IndexNames::Data::NAME)->get_text(row);
             info.table_id = tid;

@@ -71,14 +71,14 @@ namespace springtail {
          * @param schema_id schema id
          * @param schema additional schema information
          */
-        void create_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema);
+        void create_schema(uint32_t schema_id, std::string_view schema);
 
         /**
          * @brief Alter a schema
          * @param schema_id schema id
          * @param schema additional schema information
          */
-        void alter_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema);
+        void alter_schema(uint32_t schema_id, std::string_view schema);
 
         /**
          * @brief Start a transaction, every begin must end with a commit

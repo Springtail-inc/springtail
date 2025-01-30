@@ -410,7 +410,7 @@ namespace springtail
             request.xid = xid.xid;
             request.lsn = 1;
             request.table.id = table_oid;
-            request.table.namespace_id = _schema.schema_oid;
+            request.table.namespace_name = _schema.schema_name;
             request.table.name = _schema.table_name;
             for (const auto &col : _schema.columns) {
                 sys_tbl_mgr::TableColumn column;

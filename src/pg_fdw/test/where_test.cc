@@ -164,7 +164,7 @@ namespace {
             create_msg.lsn = 0;
             create_msg.oid = table_id;
             create_msg.xid = xid;
-            create_msg.schema = "public";
+            create_msg.namespace_name = "public";
             create_msg.table = "test_table";
             create_msg.columns = _columns;
 
@@ -181,7 +181,7 @@ namespace {
 
             msg.lsn = 0;
             msg.xid = xid;
-            msg.schema_name = "public";
+            msg.namespace_name = "public";
             msg.index = "secondary_index";
             msg.is_unique = false;
             msg.table_oid = table_id;
@@ -202,7 +202,7 @@ namespace {
 
             msg.lsn = 0;
             msg.xid = xid;
-            msg.schema = "public";
+            msg.namespace_name = "public";
             msg.oid = index_id;
 
             XidLsn xid_lsn{xid};

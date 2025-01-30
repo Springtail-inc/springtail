@@ -29,7 +29,7 @@ struct TableColumn {
 
 struct TableInfo {
     1: i64 id,
-    2: i64 namespace_id,
+    2: string namespace_name,
     3: string name,
     4: list<TableColumn> columns
 }
@@ -47,7 +47,7 @@ struct DropTableRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 table_id,
-    5: i64 namespace_id,
+    5: string namespace_name,
     6: string name
 }
 
@@ -83,14 +83,13 @@ struct IndexColumn {
 
 struct IndexInfo {
     1: i64 id,
-    2: string schema,
+    2: string namespace_name,
     3: string name,
     4: bool is_unique,
-    5: i64 namespace_id,
-    6: i64 table_id,
-    7: string table_name,
-    8: i8 state,
-    9: list<IndexColumn> columns
+    5: i64 table_id,
+    6: string table_name,
+    7: i8 state,
+    8: list<IndexColumn> columns
 }
 
 struct IndexRequest {
@@ -114,7 +113,7 @@ struct DropIndexRequest {
     2: i64 xid,
     3: i64 lsn,
     4: i64 index_id,
-    5: i64 namespace_id,
+    5: string namespace_name,
     6: string name
 }
 

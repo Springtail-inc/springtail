@@ -382,7 +382,7 @@ public:
         static TuplePtr tuple(
             uint32_t namespace_id, const std::string &name, uint64_t xid, uint64_t lsn, bool exists)
         {
-            auto fields = std::make_shared<FieldArray>(4);
+            auto fields = std::make_shared<FieldArray>(5);
             fields->at(NAMESPACE_ID) = std::make_shared<ConstTypeField<uint64_t>>(namespace_id);
             fields->at(NAME) = std::make_shared<ConstTypeField<std::string>>(name);
             fields->at(XID) = std::make_shared<ConstTypeField<uint64_t>>(xid);

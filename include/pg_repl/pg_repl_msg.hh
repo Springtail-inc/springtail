@@ -154,14 +154,6 @@ namespace springtail
         int32_t sub_xid;
     };
 
-    /** Struct for a Schema msg */
-    struct PgMsgSchema {
-        LSN_t lsn;
-        uint32_t oid;
-        int32_t xid;
-        std::string schema_name;
-    };
-
     /** Column schema for a single column used by Create table and Alter table */
     struct PgMsgSchemaColumn {
         std::string column_name;
@@ -180,9 +172,8 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        uint32_t schema_oid;
+        std::string namespace_name;
         std::string table;
-        std::string schema;
         std::vector<PgMsgSchemaColumn> columns;
     };
 
@@ -191,9 +182,8 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        uint32_t schema_oid;
+        std::string namespace_name;
         std::string table;
-        std::string schema;
     };
 
     /** Column schema for a single column used by Create index */
@@ -207,12 +197,11 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        uint32_t schema_oid;
         std::string index;
         bool is_unique;
         uint32_t table_oid;
         std::string table_name;
-        std::string schema_name;
+        std::string namespace_name;
         std::vector<PgMsgSchemaIndexColumn> columns;
     };
 
@@ -220,9 +209,8 @@ namespace springtail
         LSN_t lsn;
         uint32_t oid;
         int32_t xid;        // proto vers 2+ only if streaming
-        uint32_t schema_oid;
         std::string index;
-        std::string schema;
+        std::string namespace_name;
     };
 
     struct PgMsgNamespace {
@@ -250,7 +238,9 @@ namespace springtail
         // version 2
         STREAM_START, STREAM_STOP, STREAM_COMMIT, STREAM_ABORT,
         // decoded messages
-        CREATE_TABLE, ALTER_TABLE, DROP_TABLE, CREATE_SCHEMA, ALTER_SCHEMA, CREATE_INDEX, DROP_INDEX, COPY_SYNC
+        CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
+        CREATE_NAMESPACE, ALTER_NAMESPACE, DROP_NAMESPACE,
+        CREATE_INDEX, DROP_INDEX, COPY_SYNC
     };
 
     /**
@@ -278,7 +268,6 @@ namespace springtail
          PgMsgStreamAbort,
          PgMsgTable,
          PgMsgDropTable,
-         PgMsgSchema,
          PgMsgIndex,
          PgMsgDropIndex,
          PgMsgNamespace,
@@ -356,8 +345,9 @@ namespace springtail
         static inline constexpr char MSG_PREFIX_CREATE_INDEX[] = "springtail:CREATE INDEX";
         static inline constexpr char MSG_PREFIX_DROP_INDEX[] = "springtail:DROP INDEX";
         static inline constexpr char MSG_PREFIX_COPY_SYNC[] = "springtail:COPY SYNC";
-        static inline constexpr char MSG_PREFIX_CREATE_SCHEMA[] = "springtail:CREATE SCHEMA";
-        static inline constexpr char MSG_PREFIX_ALTER_SCHEMA[] = "springtail:ALTER SCHEMA";
+        static inline constexpr char MSG_PREFIX_CREATE_NAMESPACE[] = "springtail:CREATE SCHEMA";
+        static inline constexpr char MSG_PREFIX_ALTER_NAMESPACE[] = "springtail:ALTER SCHEMA";
+        static inline constexpr char MSG_PREFIX_DROP_NAMESPACE[] = "springtail:DROP SCHEMA";
 
         /**
          * @brief convert a message to a printable string

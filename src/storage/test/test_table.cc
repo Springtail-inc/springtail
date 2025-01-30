@@ -106,6 +106,33 @@ namespace {
         std::filesystem::path _base_dir;
         uint64_t _db_id = 1;
 
+        void _init_sys_tbls(uint64_t target_xid, uint64_t table_oid)
+        {
+            auto client = sys_tbl_mgr::Client::get_instance();
+
+            // create the namespace and table in the sys_tbl_mgr
+            PgMsgNamespace ns_msg;
+            ns_msg.oid = 900;
+            ns_msg.name = "public";
+            client->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
+
+            PgMsgTable tbl_msg;
+            tbl_msg.oid = table_oid;
+            tbl_msg.table = "test";
+            tbl_msg.namespace_name = "public";
+            tbl_msg.columns = std::vector<PgMsgSchemaColumn>(
+                {{"table_id", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 1, -1,
+                  false, false, false},
+                 {"name", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 2, 0, false,
+                  true, false},
+                 {"offset", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 3, -1, false,
+                  false, false}});
+
+            client->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
+
+            client->finalize(_db_id, target_xid);
+        }
+
         // secondary keys
         std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
         {
@@ -224,6 +251,9 @@ namespace {
     TEST_P(Table_Test, CreateEmpty) {
         uint64_t access_xid = 1, target_xid = 1;
 
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1000);
+
         // create a mutable table
         TableMetadata metadata;
         metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
@@ -250,6 +280,9 @@ namespace {
 
     TEST_P(Table_Test, Inserts) {
         uint64_t access_xid = 1, target_xid = 2;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1001);
 
         // create a mutable table
         TableMetadata metadata;
@@ -299,6 +332,9 @@ namespace {
 
     TEST_P(Table_Test, SingleXactMutations) {
         uint64_t access_xid = 2, target_xid = 3;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1002);
 
         // create a mutable table
         TableMetadata metadata;
@@ -409,6 +445,9 @@ namespace {
 
     TEST_P(Table_Test, MultiXactMutations) {
         uint64_t access_xid = 3, target_xid = 4;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1003);
 
         // create a mutable table
         TableMetadata metadata;
@@ -769,6 +808,9 @@ namespace {
     TEST_P(Table_Test, MultiThreadMutations) {
         uint64_t access_xid = 8, target_xid = 9;
 
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1004);
+
         // create a mutable table
         TableMetadata metadata;
         metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT} };
@@ -860,6 +902,9 @@ namespace {
 
     TEST_P(Table_Test, SecondaryIndex) {
         uint64_t access_xid = 1, target_xid = 2;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1001);
 
         // create a mutable table
         TableMetadata metadata;

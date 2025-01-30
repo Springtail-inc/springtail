@@ -283,27 +283,29 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::create_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema)
+    PgMsgLogGen::create_schema(uint32_t schema_id, std::string_view schema)
     {
         nlohmann::json msg;
 
         msg["cmd"] = "CREATE SCHEMA";
         msg["oid"] = schema_id;
+        msg["name"] = schema;
         msg["obj"] = "schema";
 
-        _write_message(pg_msg::MSG_PREFIX_CREATE_SCHEMA, msg);
+        _write_message(pg_msg::MSG_PREFIX_CREATE_NAMESPACE, msg);
     }
 
     void
-    PgMsgLogGen::alter_schema(uint32_t schema_id, const std::vector<PgMsgSchema> &schema)
+    PgMsgLogGen::alter_schema(uint32_t schema_id, std::string_view schema)
     {
         nlohmann::json msg;
 
         msg["cmd"] = "ALTER SCHEMA";
         msg["oid"] = schema_id;
+        msg["name"] = schema;
         msg["obj"] = "schema";
 
-        _write_message(pg_msg::MSG_PREFIX_ALTER_SCHEMA, msg);
+        _write_message(pg_msg::MSG_PREFIX_ALTER_NAMESPACE, msg);
     }
 
     void
