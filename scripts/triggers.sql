@@ -244,6 +244,37 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION springtail_event_trigger_for_schema_ddl()
+        RETURNS event_trigger LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+    schema_obj record;
+    msg text;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
+    LOOP
+        RAISE NOTICE 'springtail: obj.command_tag % ', obj.command_tag;
+
+        EXECUTE format('SELECT
+                nsp.oid as schema_oid,
+                nsp.nspname as schema_name
+            FROM pg_catalog.pg_namespace nsp
+            WHERE nsp.oid = %s', obj.objid) INTO schema_obj;
+
+        msg := json_build_object('xid', txid_current(),
+            'cmd', obj.command_tag,
+            'oid', schema_obj.schema_oid::bigint,
+            'obj', obj.object_type,
+            'name', schema_obj.schema_name);
+
+        -- command_tag is CREATE SCHEMA or ALTER SCHEMA
+        RAISE NOTICE 'springtail: %', msg::text;
+
+        PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
+    END LOOP;
+END;
+$$;
+
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
@@ -253,8 +284,14 @@ CREATE EVENT TRIGGER springtail_event_trigger_for_drops
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_table_ddl
    ON ddl_command_end
-   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE', 'CREATE SCHEMA' )
+   WHEN TAG IN ( 'CREATE TABLE', 'ALTER TABLE' )
    EXECUTE FUNCTION springtail_event_trigger_for_table_ddl();
+
+DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_schema_ddl;
+CREATE EVENT TRIGGER springtail_event_trigger_for_schema_ddl
+   ON ddl_command_end
+   WHEN TAG IN ( 'CREATE SCHEMA', 'ALTER SCHEMA' )
+   EXECUTE FUNCTION springtail_event_trigger_for_schema_ddl();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_index_ddl;
 CREATE EVENT TRIGGER springtail_event_trigger_for_index_ddl

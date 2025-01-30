@@ -366,16 +366,16 @@ namespace springtail::pg_fdw {
         // start a transaction
         conn->start_transaction();
 
-        // go through each new schema and create it
-        for (const auto &schema : schemas) {
-            std::string escaped_schema = conn->escape_identifier(schema);
+        // // go through each new schema and create it
+        // for (const auto &schema : schemas) {
+        //     std::string escaped_schema = conn->escape_identifier(schema);
 
-            conn->exec(fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username));
-            conn->clear();
-        }
+        //     conn->exec(fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
+        //                            escaped_schema, _fdw_username,
+        //                            escaped_schema, _fdw_username,
+        //                            escaped_schema, _fdw_username));
+        //     conn->clear();
+        // }
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
@@ -506,6 +506,24 @@ namespace springtail::pg_fdw {
         else if (action == "drop_index") {
             // TODO: do something?
             SPDLOG_ERROR("DROP INDEX");
+            return "";
+        }
+        else if (action == "ns_create") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+            return fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
+                                   escaped_schema, _fdw_username,
+                                   escaped_schema, _fdw_username,
+                                   escaped_schema, _fdw_username);
+        }
+        else if (action == "ns_alter") {
+            // TODO: Handle this
+            SPDLOG_ERROR("ALTER SCHEMA");
+            return "";
+        }
+        else if (action == "ns_drop") {
+            // TODO: Handle this
+            SPDLOG_ERROR("DROP SCHEMA");
             return "";
         }
 

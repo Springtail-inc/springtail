@@ -1,7 +1,5 @@
 #include <cstdlib>
 #include <sstream>
-#include <variant>
-#include <algorithm>
 
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
@@ -340,6 +338,21 @@ namespace pg_msg {
                 ss << "  LSN=" << drop_table.lsn << std::endl;
                 ss << "  namespace=" << drop_table.namespace_name << std::endl;
                 ss << "  table=" << drop_table.table << std::endl;
+                break;
+            }
+
+            case CREATE_NAMESPACE: {
+                // XXX To implement
+                break;
+            }
+
+            case ALTER_NAMESPACE: {
+                // XXX To implement
+                break;
+            }
+
+            case DROP_NAMESPACE: {
+                // XXX To implement
                 break;
             }
 

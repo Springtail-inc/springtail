@@ -65,6 +65,8 @@ namespace springtail {
                     return _convert_columns(sys_tbl::TableStats::Data::SCHEMA);
                 case sys_tbl::IndexNames::ID:
                     return _convert_columns(sys_tbl::IndexNames::Data::SCHEMA);
+                case sys_tbl::NamespaceNames::ID:
+                    return _convert_columns(sys_tbl::NamespaceNames::Data::SCHEMA);
                 default:
                     assert(false);
                     break;

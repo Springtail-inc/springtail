@@ -733,22 +733,15 @@ namespace springtail {
     void
     PgLogGenJson::_parse_create_schema(const nlohmann::json &json)
     {
-        std::string table = json["table"];
-
-        std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
-        uint32_t table_id = _log_gen.create_table(table, columns);
-
-        _table_name_to_id[table] = table_id;
+        // XXX TODO Handle this
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_create_schema, {}", json.dump());
     }
 
     void
     PgLogGenJson::_parse_alter_schema(const nlohmann::json &json)
     {
-        std::string table = json["table"];
-
-        std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
-        uint32_t table_id = _get_table_id(table);
-        _log_gen.alter_table(table_id, columns);
+        // XXX TODO Handle this
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_alter_schema, {}", json.dump());
     }
 
     void

@@ -262,6 +262,8 @@ namespace springtail::pg_log_mgr {
             // XXX should we do a truncate here?  it could improve performance if this follows a set
             //     of mutations, but it's not clear we actually need it since the mutations would be
             //     dropped either way
+        } else if (msg->msg_type == PgMsgEnum::CREATE_NAMESPACE) {
+            // XXX Implement this
         }
 
         // save the change to process once we see a commit
@@ -412,6 +414,23 @@ namespace springtail::pg_log_mgr {
                 redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
+        case PgMsgEnum::CREATE_NAMESPACE:
+            {
+                auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
+                std::string &&ddl_stmt = client->create_namespace(_db, xidlsn, namespace_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
+                break;
+            }
+        case PgMsgEnum::ALTER_NAMESPACE:
+            {
+                // XXX TODO implement alter schema functionality
+                break;
+            }
+        case PgMsgEnum::DROP_NAMESPACE:
+            {
+                // XXX TODO implement drop schema functionality
+                break;
+            }
         case PgMsgEnum::CREATE_INDEX:
             {
                 auto &index_msg = std::get<PgMsgIndex>(change->msg);
@@ -559,6 +578,22 @@ namespace springtail::pg_log_mgr {
             {
                 PgMsgDropTable &drop_msg = std::get<PgMsgDropTable>(msg->msg);
                 _process_ddl(drop_msg.oid, drop_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::CREATE_NAMESPACE:
+            {
+                PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
+                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
+                break;
+            }
+        case PgMsgEnum::ALTER_NAMESPACE:
+            {
+                // XXX Handle alter schema
+                break;
+            }
+        case PgMsgEnum::DROP_NAMESPACE:
+            {
+                // XXX Handle drop schema
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:

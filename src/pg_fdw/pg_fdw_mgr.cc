@@ -871,6 +871,7 @@ namespace springtail::pg_fdw {
         import_catalog.operator()<sys_tbl::Schemas>(CATALOG_TABLE_SCHEMAS);
         import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
         import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
+        import_catalog.operator()<sys_tbl::NamespaceNames>(CATALOG_NAMESPACE_NAMES);
 
         return commands;
     }
