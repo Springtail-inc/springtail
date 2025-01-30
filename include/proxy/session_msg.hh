@@ -7,6 +7,9 @@
 #include <vector>
 #include <queue>
 #include <optional>
+#include <deque>
+#include <map>
+#include <shared_mutex>
 
 #include <proxy/buffer_pool.hh>
 #include <proxy/history_cache.hh>
@@ -42,7 +45,11 @@ namespace springtail::pg_proxy {
         /** Constructor with data */
         SessionMsg(Type type, QueryStmtPtr data, uint64_t seq_id)
             : _type(type), _data(data), _seq_id(seq_id)
-        {}
+        {
+            if (data != nullptr) {
+                _is_readsafe = data->is_read_safe;
+            }
+        }
 
         SessionMsg(Type type, MsgStatus &status)
             : _type(type), _status(status)
@@ -119,12 +126,17 @@ namespace springtail::pg_proxy {
             return _seq_id;
         }
 
+        bool is_read_safe() const {
+            return _is_readsafe;
+        }
+
         /** Clone the message */
         std::shared_ptr<SessionMsg> clone() {
             auto msg = std::make_shared<SessionMsg>(_type, _data, _seq_id);
             msg->_status = _status;
             msg->_completed = _completed;
             msg->_dependencies = _dependencies;
+            msg->_is_readsafe = _is_readsafe;
             return msg;
         }
 
@@ -149,7 +161,110 @@ namespace springtail::pg_proxy {
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
         uint64_t _seq_id=0;                      ///< sequence id for this message
+        bool _is_readsafe=false;                 ///< is read-only
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
+
+
+    /**
+     * Message queue for session messages from client to server
+     * Provides a batch interface for messages that can be run without
+     * waiting for a response from the server.
+     */
+    template<typename T>
+    class SessionMsgQueue {
+    public:
+        /** Constructor */
+        SessionMsgQueue() = default;
+
+        /**
+         * @brief Add a new batch to the queue
+         */
+        void push_batch(std::deque<T> new_batch) {
+            std::unique_lock lock(_mutex);
+            if (new_batch.empty()) {
+                return;
+            }
+            _msg_queue.push(std::move(new_batch));
+        }
+
+        /**
+         * @brief Load the next processing batch if current one is empty
+         * @return true if one was loaded, or false if queue is empty
+         */
+        bool load_processing_batch() {
+            std::unique_lock lock(_mutex);
+            if (_processing_batch.empty()) {
+                if (_msg_queue.empty()) {
+                    return false;
+                }
+                _processing_batch = std::move(_msg_queue.front());
+                _msg_queue.pop();
+            }
+            return true;
+        }
+
+        /** Get iterator to start of processing batch -- not thread safe */
+        auto processing_batch_start() {
+            return _processing_batch.begin();
+        }
+
+        /** Get iterator to end of processing batch -- not thread safe */
+        auto processing_batch_end() {
+            return _processing_batch.end();
+        }
+
+        /**
+         * @brief Get first message from processing batch; without removing it
+         * @return first message or nullopt if empty
+         */
+        std::optional<T> front_processing_msg() {
+            std::shared_lock lock(_mutex);
+            if (_processing_batch.empty()) {
+                return std::nullopt;
+            }
+            return _processing_batch.front();
+        }
+
+        /**
+         * @brief Pop/remove first message from processing batch
+         * @return first message or nullopt if empty
+         */
+        std::optional<T> pop_processing_msg() {
+            std::unique_lock lock(_mutex);
+            if (_processing_batch.empty()) {
+                return std::nullopt;
+            }
+            auto msg = _processing_batch.front();
+            _processing_batch.pop_front();
+            return msg;
+        }
+
+        /**
+         * Check if batch being processed has more message
+         * @returns true if processing batch is not empty, false if empty
+         */
+        bool processing_empty() {
+            std::shared_lock lock(_mutex);
+            return _processing_batch.empty();
+        }
+
+        /** Reset the queue to empty state */
+        void reset() {
+            std::unique_lock lock(_mutex);
+            _processing_batch.clear();
+            while (!_msg_queue.empty()) {
+                _msg_queue.pop();
+            }
+        }
+
+    private:
+        std::shared_mutex _mutex;  ///< mutex for queues
+
+        /** current batch of messages that are being processed, popped from queue */
+        std::deque<T> _processing_batch;
+        /** queue of pending message batches */
+        std::queue<std::deque<T>> _msg_queue;
+    };
 
 } // namespace springtail::pg_proxy
