@@ -236,7 +236,7 @@ def decode_data(data_with_header, header, db_conn=None):
     data = data_with_header[5:] # strip out code and length
     code = code.decode("utf-8")
 
-    print("{}, ClientID: {}, SessionID: {}, SeqID: {}, Code: {}, Length: {}"
+    print("decode_data: {}, ClientID: {}, SessionID: {}, SeqID: {}, Code: {}, Length: {}"
           .format(header['type_str'], header['seq_id_client_id'],
                   header['session_id'], header['seq_id_seq_id'], code, pkt_len))
 

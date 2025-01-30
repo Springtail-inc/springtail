@@ -134,6 +134,14 @@ namespace springtail {
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
+        /** Shutdown for singleton */
+        static void shutdown() {
+            if (_instance != nullptr) {
+                delete _instance;
+                _instance = nullptr;
+            }
+        }
+
     private:
         /** static _instance singleton */
         static Properties *_instance;
