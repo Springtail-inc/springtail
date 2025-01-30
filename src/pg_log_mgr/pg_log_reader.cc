@@ -649,15 +649,6 @@ namespace springtail::pg_log_mgr {
 
         assert (xact->type == PgTransaction::TYPE_COMMIT);
 
-        // Record latency between postgres commit time and when we process it
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now() -
-            PostgresTimestamp(commit_msg.commit_ts).to_system_time());
-        _postgres_log_reader_latencies->Record(duration.count(), _context);
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
-                            "Commit processed {} milliseconds after postgres commit",
-                            duration.count());
-
         // set transaction path and end offset
         xact->commit_path = _current_path;
         xact->commit_offset = _reader.offset();
@@ -675,6 +666,15 @@ namespace springtail::pg_log_mgr {
 
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
+
+        // Record latency between postgres commit time and when we process it
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            PostgresTimestamp(commit_msg.commit_ts).to_system_time());
+        _postgres_log_reader_latencies->Record(duration.count(), _context);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                            "Commit processed {} milliseconds after postgres commit",
+                            duration.count());
 
         // message the Committer
         SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
