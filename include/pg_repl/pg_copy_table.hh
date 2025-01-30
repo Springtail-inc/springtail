@@ -92,7 +92,7 @@ namespace springtail
         uint64_t schema_oid;
         std::vector<SchemaColumn> columns;
         std::vector<std::string> pkeys;  // primary keys as columns
-        std::vector<std::vector<std::string>> secondary_keys;  // secondary keys as columns
+        std::vector<Index> secondary_keys;  // secondary keys as columns
     };
 
     /**

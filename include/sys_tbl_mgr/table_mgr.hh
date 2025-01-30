@@ -45,7 +45,7 @@ namespace springtail {
          *                     available until a later stable XID.
          * @param schema The ExtentSchema of the table.
          */
-        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema);
+        MutableTablePtr get_snapshot_table(uint64_t db_id, uint64_t table_id, uint64_t snapshot_xid, ExtentSchemaPtr schema, const std::vector<Index>& secondary_keys);
 
         // Functions for managing system metadata
 

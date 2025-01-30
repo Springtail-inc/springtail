@@ -223,7 +223,9 @@ namespace springtail::gc {
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
-        uint64_t row_id = 0;
+        uint64_t row_cnt = 0;
+        uint64_t current_extent_id = 0;
+        uint32_t current_row_id = 0;
 
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
@@ -232,21 +234,30 @@ namespace springtail::gc {
                 return {};
             }
             // check if the index was dropped
-            if (row_id % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
+            if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
                 return root;
             }
             auto extent_id = row_i.extent_id();
 
+            if (extent_id != current_extent_id) {
+                // We are scanning in primary key order. It guarantees that
+                // row IDs start from zero and be in ascending order for 
+                // each new extent. Note: The extent IDs (offsets) may 
+                // be at any order.
+                current_extent_id = extent_id;
+                current_row_id = 0;
+            }
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(static_cast<uint32_t>(row_id));
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
             root->insert(svalue);
 
-            ++row_id;
+            ++current_row_id;
+            ++row_cnt;
         }
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_id);
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return root;
     }
 
@@ -275,14 +286,14 @@ namespace springtail::gc {
 
         IndexParams work_item;
 
-        {
-            std::unique_lock g(_m);
+        std::unique_lock g(_m);
 
-            // fetch the latest state of the work item before we erase it
-            work_item = _work_set[key];
-            _work_set.erase(key);
-            _cv_done.notify_one();
-        }
+        // fetch the latest state of the work item before we erase it
+        work_item = _work_set[key];
+
+        _work_set.erase(key);
+        _cv_done.notify_one();
+
         auto client = sys_tbl_mgr::Client::get_instance();
         if (!work_item._ddl.is_null()) {
             auto extent_id = root->finalize();
@@ -297,5 +308,9 @@ namespace springtail::gc {
             XidLsn xid{work_item._xid};
             client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
+
+        // TODO: revisit it when we support asynchronous index builds 
+        // so that the lock and _cv_done are not required while
+        // root->finalize() and sys table updates.
     }
 }

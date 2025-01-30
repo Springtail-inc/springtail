@@ -78,7 +78,7 @@ namespace springtail::sys_tbl_mgr {
         /** Performs a drop (if needed), create, and update_roots for a given table to swap it's
             newly synced data into place at a given XID.  Returns a JSON array of DDL statements to
             update the FDWs. */
-        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
+        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const std::vector<IndexRequest> &indexes, const UpdateRootsRequest &roots) override;
 
     private:
         Service() = default;
