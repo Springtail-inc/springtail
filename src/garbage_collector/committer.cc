@@ -112,11 +112,16 @@ namespace springtail::gc {
                     //       table mutations up to this XID have already been applied, otherwise we
                     //       could potentially get a stray column added before the swap XID showing
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[0]);
+                    auto schema = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
+                    auto ddl_str_schema = client->create_namespace(schema);
+                    auto ddl_ops_schema = nlohmann::json::parse(ddl_str_schema);
+                    ddls.push_back(ddl_ops_schema);
+
+                    auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
                     create.xid = completed_xid;
                     create.lsn = constant::MAX_LSN - 1;
 
-                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+                    auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
                     roots.xid = completed_xid;
 
                     // note: this will also invalidate the table's client cache entry

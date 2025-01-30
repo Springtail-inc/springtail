@@ -565,6 +565,22 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
     }
 
     std::string
+    Client::create_namespace(const NamespaceRequest &request)
+    {
+        DDLStatement result;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+        
+        return result.statement;
+    }
+
+    std::string
     Client::swap_sync_table(const TableRequest &create,
                             const UpdateRootsRequest &roots)
     {
