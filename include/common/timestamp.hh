@@ -47,7 +47,7 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const PostgresTimestamp& ts);
 
 private:
-    int64_t _micros;  // Microseconds since 2000-01-01
+    int64_t _micros;  ///< Microseconds since 2000-01-01
 };
 
 }  // namespace springtail
