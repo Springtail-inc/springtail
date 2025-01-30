@@ -47,7 +47,7 @@ namespace springtail::pg_proxy {
             : _type(type), _data(data), _seq_id(seq_id)
         {
             if (data != nullptr) {
-                _is_readsafe = data->is_read_safe;
+                _is_read_safe = data->is_read_safe;
             }
         }
 
@@ -127,7 +127,7 @@ namespace springtail::pg_proxy {
         }
 
         bool is_read_safe() const {
-            return _is_readsafe;
+            return _is_read_safe;
         }
 
         /** Clone the message */
@@ -136,7 +136,7 @@ namespace springtail::pg_proxy {
             msg->_status = _status;
             msg->_completed = _completed;
             msg->_dependencies = _dependencies;
-            msg->_is_readsafe = _is_readsafe;
+            msg->_is_read_safe = _is_read_safe;
             return msg;
         }
 
@@ -161,7 +161,7 @@ namespace springtail::pg_proxy {
         int _completed=0;                        ///< number of completed queries (for multi-statement queries)
         std::vector<QueryStmtPtr> _dependencies; ///< query statements
         uint64_t _seq_id=0;                      ///< sequence id for this message
-        bool _is_readsafe=false;                 ///< is read-only
+        bool _is_read_safe=false;                 ///< is read-only
     };
     using SessionMsgPtr = std::shared_ptr<SessionMsg>;
 
