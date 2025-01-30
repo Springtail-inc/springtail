@@ -71,7 +71,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_ACTIVE_DEBUG )
   set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 else()
-  add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE )
+  add_definitions( -D SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO )
 endif()
 
 ## include external projects
