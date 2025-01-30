@@ -6,6 +6,7 @@ import platform
 import re
 import logging
 from typing import Dict, List, Optional
+import time
 
 def connect_db(dbname : str, username : str, password : str, host : str, port : int, autocommit : bool=True) -> psycopg2.extensions.connection:
     """Connect to the given database with the given username, password, host, and port."""
@@ -222,3 +223,49 @@ def parse_bool(value: str) -> bool:
     Convert a string to a boolean. Useful for parsing environment variables.
     """
     return value.lower() in ('true', '1', 't', 'y', 'yes')
+
+
+def wait_for_replica_condition(
+    replica_conn: psycopg2.extensions.connection,
+    check_sql: str,
+    check_result,
+    timeout: float = 30,
+    poll_interval: float = 0.001,
+) -> float:
+    """Wait for a condition to be true in the replica database.
+
+    Args:
+        replica_conn: Connection to replica database
+        check_sql: SQL query to check condition
+        check_result: Expected result or function(result) -> bool to validate result
+        timeout: Maximum time to wait in seconds
+        poll_interval: Time between checks in seconds
+
+    Returns:
+        Time taken to meet condition in seconds
+
+    Raises:
+        TimeoutError if condition not met within timeout
+    """
+    start = time.time()
+    while True:
+        with replica_conn.cursor() as cursor:
+            cursor.execute(check_sql)
+            result = cursor.fetchone()
+
+            # Allow either direct comparison or custom validation function
+            is_valid = (
+                check_result(result) if callable(check_result)
+                else result == check_result
+            )
+
+            if is_valid:
+                return time.time() - start
+
+        if time.time() - start > timeout:
+            raise TimeoutError(
+                f"Replica condition not met within {timeout}s. "
+                f"Last result: {result}"
+            )
+
+        time.sleep(poll_interval)

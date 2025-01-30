@@ -1,0 +1,3 @@
+test_folder: 'test_cases'
+system_json_path: '../../system.json.test'
+build_dir: '../../debug'
