@@ -147,8 +147,8 @@ namespace springtail::thrift {
                 socket->open();
             }
 
-            [[maybe_unused]] int fd = socket->getSocketFD();
-            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Acquired thrift client: fd = {}, client = {}", _type_name, fd, (void *)client.get());
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Acquired thrift client: fd = {}, client = {}", _type_name,
+                    socket->getSocketFD(), (void *)client.get());
         }
 
         /**

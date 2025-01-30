@@ -1126,7 +1126,7 @@ namespace springtail {
                 throw PgIOError();
             }
 
-            char c = stream.get(); // read the message type
+            [[maybe_unused]] char c = stream.get(); // read the message type
 
             SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Header: start_lsn: {}, end_lsn: {}, msg_length: {}, msg_type: {}",
                                 header.start_lsn, header.end_lsn, header.msg_length, c);
