@@ -719,9 +719,11 @@ namespace springtail::pg_proxy {
         }
 
         // send ready for query message to client
-        auto cs = get_client_session();
-        CHECK_NE(cs, nullptr);
-        cs->server_ready_msg(xact_status);
+        if (!_is_shadow) {
+            auto cs = get_client_session();
+            CHECK_NE(cs, nullptr);
+            cs->server_ready_msg(xact_status);
+        }
 
         // if all queries complete, set state to ready and check for pending messages
         if (_pending_queue.empty()) {

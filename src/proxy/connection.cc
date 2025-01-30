@@ -351,7 +351,7 @@ namespace springtail::pg_proxy {
     ProxyConnection::_handle_ssl_error(int rc)
     {
         int err = SSL_get_error(rc);
-        char *msg = ::ERR_error_string(err, NULL);
+        char *msg = ::ERR_error_string(err, nullptr);
         switch (err) {
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:

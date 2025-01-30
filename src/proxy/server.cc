@@ -284,7 +284,7 @@ namespace springtail::pg_proxy {
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
 
             // accept a new connection
-            int client_socket = accept(_socket, NULL, NULL);
+            int client_socket = accept(_socket, nullptr, nullptr);
             if (client_socket == -1) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;

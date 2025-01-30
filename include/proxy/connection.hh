@@ -22,7 +22,7 @@ namespace springtail::pg_proxy {
     public:
         using ProxyConnectionPtr = std::shared_ptr<ProxyConnection>;
 
-        ProxyConnection(int socket);
+        explicit ProxyConnection(int socket);
 
         ~ProxyConnection() {
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Destroying connection to {}", _socket);
