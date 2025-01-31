@@ -123,7 +123,10 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call swap_sync_table() on the SysTblMgr.
          */
-        std::string swap_sync_table(const TableRequest &create, const std::vector<IndexRequest> indexes, const UpdateRootsRequest &roots);
+        std::string swap_sync_table(const NamespaceRequest &namespace_req,
+                                    const TableRequest &create_req,
+                                    const std::vector<IndexRequest> index_reqs,
+                                    const UpdateRootsRequest &roots_req);
 
         /**
          * Invalidates the schema entry for a given table from a given XID/LSN

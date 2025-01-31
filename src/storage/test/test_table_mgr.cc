@@ -94,7 +94,7 @@ namespace {
         auto row_i = table->begin();
 
         // verify the name exists at 2 and 3, deleted at 4
-        auto tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 0, true);
+        auto tuple = sys_tbl::TableNames::Data::tuple(90000, "x", 100000, 2, 1, true);
         auto tuple2 = std::make_shared<FieldTuple>(fields, *row_i);
         ASSERT_TRUE(tuple->equal(*tuple2));
         ++row_i;

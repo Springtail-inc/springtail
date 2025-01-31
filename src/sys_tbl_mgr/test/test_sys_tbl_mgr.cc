@@ -33,6 +33,19 @@ namespace {
             springtail_init(std::nullopt, std::nullopt, LOG_ALL ^ (LOG_CACHE | LOG_STORAGE));
 
             _services.init();
+
+            // create the public namespace
+            auto client = sys_tbl_mgr::Client::get_instance();
+
+            // create the public namespace in the sys_tbl_mgr
+            PgMsgNamespace ns_msg;
+            ns_msg.oid = 90000;
+            ns_msg.name = "public";
+            client->create_namespace(1, _xid, ns_msg);
+
+            // move to the next XID
+            ++_xid.xid;
+            _xid.lsn = 0;
         }
 
         static void TearDownTestSuite() {
@@ -43,6 +56,7 @@ namespace {
         static test::Services _services;
         static std::mutex _mutex;
         static XidLsn _xid;
+        static uint64_t _db;
 
     protected:
         XidLsn _next_xid();
@@ -58,12 +72,12 @@ namespace {
         void _set_index_state(uint64_t table_id, uint64_t index_id, sys_tbl::IndexNames::State state);
 
         sys_tbl_mgr::Client *_client = sys_tbl_mgr::Client::get_instance();
-        uint64_t _db = 1;
     };
 
     test::Services SysTblMgr_Test::_services(true, true, false);
     XidLsn SysTblMgr_Test::_xid(1, 0);
     std::mutex SysTblMgr_Test::_mutex;
+    uint64_t SysTblMgr_Test::_db = 1;
 
     XidLsn
     SysTblMgr_Test::_next_xid()

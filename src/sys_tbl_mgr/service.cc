@@ -865,9 +865,10 @@ namespace springtail::sys_tbl_mgr {
 
     void
     Service::swap_sync_table(DDLStatement &_return,
-                             const TableRequest &create,
-                             const std::vector<IndexRequest> &indexes,
-                             const UpdateRootsRequest &roots)
+                             const NamespaceRequest &namespace_req,
+                             const TableRequest &create_req,
+                             const std::vector<IndexRequest> &index_reqs,
+                             const UpdateRootsRequest &roots_req)
     {
         SPDLOG_INFO("got swap_sync_table()");
 
@@ -876,19 +877,28 @@ namespace springtail::sys_tbl_mgr {
         // 1. acquire a shared lock to ensure no one is doing a finalize
         boost::shared_lock lock(_write_mutex);
 
-        // 2. retrieve the table information at the end of the target XID
-        XidLsn xid(create.xid, constant::MAX_LSN);
-        auto info = _get_table_info(create.db_id, create.table.id, xid);
+        // 2. check if the namespace exists at the end of the target XID, if it doesn't create it
+        XidLsn ns_xid(namespace_req.xid, namespace_req.lsn);
+        auto ns_info = _get_namespace_info(namespace_req.db_id, namespace_req.name, ns_xid);
+        if (!ns_info) {
+            auto &&ns_ddl = _mutate_namespace(namespace_req.db_id, namespace_req.namespace_id,
+                                              namespace_req.name, ns_xid, true);
+            ddls.push_back(ns_ddl);
+        }
 
-        // 3. if the table exists at the end of the XID, perform a drop
+        // 3. retrieve the table information at the end of the target XID
+        XidLsn xid(create_req.xid, constant::MAX_LSN);
+        auto info = _get_table_info(create_req.db_id, create_req.table.id, xid);
+
+        // 4. if the table exists at the end of the XID, perform a drop
         if (info != nullptr) {
             DropTableRequest drop;
-            drop.db_id = create.db_id;
-            drop.table_id = create.table.id;
-            drop.xid = create.xid;
-            drop.lsn = create.lsn - 1;
-            drop.namespace_name = create.table.namespace_name;
-            drop.name = create.table.name;
+            drop.db_id = create_req.db_id;
+            drop.table_id = create_req.table.id;
+            drop.xid = create_req.xid;
+            drop.lsn = create_req.lsn - 1;
+            drop.namespace_name = create_req.table.namespace_name;
+            drop.name = create_req.table.name;
 
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop table: {}:{} @ {}:{}",
                                 drop.db_id, drop.table_id, drop.xid, drop.lsn);
@@ -897,15 +907,15 @@ namespace springtail::sys_tbl_mgr {
             ddls.push_back(drop_ddl);
         }
 
-        // 4. perform a create table
+        // 5. perform a create table
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create table: {}:{} @ {}:{}",
-                            create.db_id, create.table.id, create.xid, create.lsn);
+                            create_req.db_id, create_req.table.id, create_req.xid, create_req.lsn);
 
-        assert(create.lsn == constant::MAX_LSN - 1);
-        auto &&create_ddl = this->_create_table(create);
+        assert(create_req.lsn == constant::MAX_LSN - 1);
+        auto &&create_ddl = this->_create_table(create_req);
         ddls.push_back(create_ddl);
         
-        for (const IndexRequest &index : indexes) {
+        for (const IndexRequest &index : index_reqs) {
             SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create index: {}:{} @ {}:{}",
                             index.db_id, index.index.id, index.xid, index.lsn);
 
@@ -914,12 +924,12 @@ namespace springtail::sys_tbl_mgr {
             ddls.push_back(index_ddl);
         }
 
-        // 5. update the metadata of the table
+        // 6. update the metadata of the table
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Update roots: {}:{} @ {}:{}",
-                            create.db_id, create.table.id, create.xid, create.lsn);
-        this->_update_roots(roots);
+                            create_req.db_id, create_req.table.id, create_req.xid, create_req.lsn);
+        this->_update_roots(roots_req);
 
-        // 6. serialize the ddl json and return
+        // 7. serialize the ddl json and return
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Response: {}", nlohmann::to_string(ddls));
         _return.__set_statement(nlohmann::to_string(ddls));
     }
@@ -1264,7 +1274,7 @@ namespace springtail::sys_tbl_mgr {
 
         // If no index is found in sys tables, they probably haven't been finalized
         // construct the primary index from cache history
-        if (info->indexes.empty()) {
+        if (info->indexes.empty() && !info->columns.empty()) {
             auto table_info = _get_table_info(db_id, table_id, access_xid);
             auto ns_info = _get_namespace_info(db_id, table_info->namespace_id, access_xid);
 

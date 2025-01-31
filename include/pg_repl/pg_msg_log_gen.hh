@@ -149,7 +149,7 @@ namespace springtail {
         int _header_offset = 0;           ///< header offset; where to write header of current message
         uint64_t _begin_lsn;              ///< begin lsn
 
-        uint32_t _next_table_id = 0;      ///< next table id
+        uint32_t _next_table_id = 1000;   ///< next table id
         uint32_t _xid = 0;                ///< transaction id
         uint64_t _lsn = 1;                ///< lsn
         uint64_t _commit_ts = 0;          ///< commit timestamp

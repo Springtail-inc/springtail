@@ -112,10 +112,9 @@ namespace springtail::gc {
                     //       table mutations up to this XID have already been applied, otherwise we
                     //       could potentially get a stray column added before the swap XID showing
                     //       up in the schema since it wouldn't get deleted by the DROP TABLE
-                    auto schema = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
-                    auto ddl_str_schema = client->create_namespace(schema);
-                    auto ddl_ops_schema = nlohmann::json::parse(ddl_str_schema);
-                    ddls.push_back(ddl_ops_schema);
+                    auto namespace_req = common::json_to_thrift<sys_tbl_mgr::NamespaceRequest>(json[0]);
+                    namespace_req.xid = completed_xid;
+                    namespace_req.lsn = constant::MAX_LSN - 2;
 
                     auto create = common::json_to_thrift<sys_tbl_mgr::TableRequest>(json[1]);
                     create.xid = completed_xid;
@@ -131,14 +130,11 @@ namespace springtail::gc {
                     roots.xid = completed_xid;
 
                     // note: this will also invalidate the table's client cache entry
-                    auto ddl_str = client->swap_sync_table(create, indexes, roots);
+                    auto ddl_str = client->swap_sync_table(namespace_req, create, indexes, roots);
 
                     // store the ddl mutations for the FDWs
-                    auto ddl_ops = nlohmann::json::parse(ddl_str);
-                    assert(ddl_ops.is_array());
-                    for (int i = 0; i < ddl_ops.size(); ++i) {
-                        ddls.push_back(ddl_ops[i]);
-                    }
+                    ddls = nlohmann::json::parse(ddl_str);
+                    assert(ddls.is_array());
 
                     // clear the hash entry for the table
                     redis->hdel(key, fmt::format("{}", table_id));

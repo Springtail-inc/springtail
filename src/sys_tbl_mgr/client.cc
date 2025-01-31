@@ -581,14 +581,15 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
     }
 
     std::string
-    Client::swap_sync_table(const TableRequest &create,
-                            const std::vector<IndexRequest> indexes,
-                            const UpdateRootsRequest &roots)
+    Client::swap_sync_table(const NamespaceRequest &namespace_req,
+                            const TableRequest &create_req,
+                            const std::vector<IndexRequest> index_reqs,
+                            const UpdateRootsRequest &roots_req)
     {
         DDLStatement result;
 
-        _invoke_with_retries([&result, &create, &indexes, &roots](ThriftClient &c) {
-            c.client->swap_sync_table(result, create, indexes, roots);
+        _invoke_with_retries([&result, &namespace_req, &create_req, &index_reqs, &roots_req](ThriftClient &c) {
+            c.client->swap_sync_table(result, namespace_req, create_req, index_reqs, roots_req);
         });
 
         if (result.statement.empty()) {
@@ -596,7 +597,8 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
         }
 
         // auto-invalidate the cache for the swapped table
-        invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
+        invalidate_table(create_req.db_id, create_req.table.id,
+                         XidLsn(create_req.xid, create_req.lsn));
 
         return result.statement;
     }
