@@ -245,10 +245,12 @@ namespace springtail::pg_proxy {
         Session::read_msg(_connection, blist);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client handle request: buffers={}", _id, blist.buffers.size());
-        int i = 0;
+
         _msg_queue.clear();
 
         // iterate through message buffers
+        [[maybe_unused]] int i = 0;
+
         for (auto buffer: blist.buffers) {
             char code = buffer->get();
             int32_t len = buffer->get32();

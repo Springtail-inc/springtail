@@ -500,11 +500,8 @@ namespace springtail::pg_proxy {
                 // parameter status: either during authentication or as a result of a SET
 
                 // Parameter status
-                std::string_view key = buffer->get_string();
-                std::string_view value = buffer->get_string();
-
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}",
-                        _id, key, value);
+                        _id, buffer->get_string(), buffer->get_string());
 
                 // this is a result of a SET operation
                 _send_to_remote_session(code, buffer, _seq_id);

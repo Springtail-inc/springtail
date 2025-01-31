@@ -114,7 +114,7 @@ namespace springtail::pg_proxy {
 
         // read in the message from connection
         ssize_t n = connection->read(buffer->current_data(), msg_length, msg_length);
-        assert(n == msg_length);
+        CHECK_EQ(n, msg_length);
         buffer->set_size(msg_length + 5);
 
         // log the data, current_data points past header
