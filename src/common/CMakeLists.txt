@@ -4,7 +4,6 @@ find_package(GTest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(opentelemetry-cpp CONFIG REQUIRED)
-find_package(protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 
 set(COMMON_LIB_SOURCES

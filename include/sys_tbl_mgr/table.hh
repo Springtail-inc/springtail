@@ -564,7 +564,7 @@ namespace springtail {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx].first;
+            return _secondary_indexes.at(idx).first;
         }
 
         /** This will convert column positions to column names based on the table schema

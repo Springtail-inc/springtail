@@ -126,6 +126,7 @@ namespace springtail::pg_proxy {
             while (!_pending_queue.empty()) {
                 _pending_queue.pop();
             }
+            _batch_queue.reset();
             // reset base session - clears associated session, etc
             Session::reset_session();
         }
@@ -157,9 +158,12 @@ namespace springtail::pg_proxy {
         void process_connection(uint64_t seq_id);
 
         /**
-         * @brief Process message from client session; queue message if busy
-         * @param msg message to process
+         * @brief Queue message from client session to current batch
+         * @param msg_batch messages to process
          */
+        void queue_msg_batch(std::deque<SessionMsgPtr> msg_batch);
+
+        /** Process single message -- most messages should go through queue_msg_batch() */
         void process_msg(SessionMsgPtr msg);
 
         /**
@@ -189,8 +193,9 @@ namespace springtail::pg_proxy {
 
         std::weak_ptr<ClientSession> _client_session; ///< client session
 
-        // message state for current client query (for state=QUERY)
-        std::queue<QueryStatusPtr> _pending_queue; ///< queue of pending messages
+        SessionMsgQueue<SessionMsgPtr> _batch_queue; ///< queue for client msg batches
+
+        std::queue<QueryStatusPtr> _pending_queue;   ///< queue of pending (inflight) messages
 
         std::set<std::string> _stmts;    ///< completed prepared statement ids
         std::string _db_prefix;          ///< database name prefix to be used for this server session
@@ -198,6 +203,9 @@ namespace springtail::pg_proxy {
         uint64_t _seq_id = 0;            ///< sequence id from client session
 
         ServerAuthorizationPtr _auth;    ///< authorization object
+
+        /** Process next batch of processing messages from _batch_queue */
+        void _process_next_batch();
 
         /** Send shutdown to server */
         void _send_shutdown();

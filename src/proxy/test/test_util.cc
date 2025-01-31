@@ -37,6 +37,8 @@ namespace {
             {"-123.45", true},
             {"some;value", false},
             {"'value''with''quotes'", true},
+            {"'value ' with quote", false},
+            {"\"value\" with quote", false}
         };
 
         for (const auto &test : test_values) {

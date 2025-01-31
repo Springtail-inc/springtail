@@ -133,12 +133,56 @@ namespace springtail::pg_proxy {
         _seq_id = 0;
         _state = READY;
 
+        // check for any pending messages
+        _process_next_batch();
+
         // XXX these params may have to be merged with the ones we just set
 
         // do callback to client session
         auto cs = get_client_session();
         CHECK_NE(cs, nullptr);
         cs->server_auth_done(shared_from_this(), _auth->server_parameters());
+    }
+
+    void
+    ServerSession::queue_msg_batch(std::deque<SessionMsgPtr> msg_batch)
+    {
+        _wrap_error_handler([this, &msg_batch] {
+            // queue the message batch
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session queueing message batch: size={}, state={}",
+                        _id, msg_batch.size(), (int8_t)_state);
+
+            _batch_queue.push_batch(std::move(msg_batch));
+
+            // if not processing anything, start processing this batch
+            if (_pending_queue.empty() && _state == READY) {
+                _process_next_batch();
+            }
+        });
+    }
+
+    void
+    ServerSession::_process_next_batch()
+    {
+        // process the next queued message batch
+        // typically we'll just go through this once, however if the batch is just
+        // a forward message, we'll just send it to the server and then be ready
+        // for the next batch if there is one
+        PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session processing next batch", _id);
+
+        while (_pending_queue.empty() && _state == READY) {
+            if (!_batch_queue.load_processing_batch()) {
+                // batch queue is empty
+                PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[S:{}] Server session batch queue is empty", _id);
+                return;
+            }
+            while (!_batch_queue.processing_empty()) {
+                // process the message
+                auto msg = _batch_queue.pop_processing_msg();
+                CHECK(msg.has_value());
+                process_msg(msg.value());
+            }
+        }
     }
 
     void
@@ -155,7 +199,7 @@ namespace springtail::pg_proxy {
                 _seq_id = msg->seq_id();
             }
 
-            // entry point for message processing from client session
+            // process the message
             switch(msg->type()) {
                 case SessionMsg::MSG_CLIENT_SERVER_SIMPLE_QUERY:
                 case SessionMsg::MSG_CLIENT_SERVER_PARSE:
@@ -168,13 +212,12 @@ namespace springtail::pg_proxy {
                     _handle_msg_to_server(msg);
                     break;
 
-                case SessionMsg::MSG_CLIENT_SERVER_FORWARD: {
+                case SessionMsg::MSG_CLIENT_SERVER_FORWARD:
                     // forward the message to the server
                     // usually things like copy data, etc.
                     // write out the buffer
                     _send_buffer(msg->buffer(), msg->seq_id());
                     break;
-                }
 
                 default:
                     SPDLOG_WARN("Unknown message: {}", (int8_t)msg->type());
@@ -226,6 +269,9 @@ namespace springtail::pg_proxy {
                 if (_auth->process_auth_data(seq_id)) {
                     // auth done, ready for queries
                     _state = READY;
+
+                    // check for pending messages
+                    _process_next_batch();
 
                     // notify client session that auth is done
                     auto cs = get_client_session();
@@ -279,7 +325,7 @@ namespace springtail::pg_proxy {
         while (msg_length > 0) {
             int to_read = std::min(msg_length, 1024);
             ssize_t n = _connection->read(buffer, to_read, to_read);
-            assert(n == to_read);
+            CHECK_EQ(n, to_read);
             msg_length -= n;
         }
     }
@@ -296,7 +342,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        assert(msg_length < 10000); // sanity check
+        DCHECK_LE(msg_length, 10000); // sanity check
 
         switch (code) {
             case 'Z': {                 // Ready for query
@@ -316,7 +362,7 @@ namespace springtail::pg_proxy {
 
                 if (_state == RESET_SESSION) {
                     // sent reset query, now ready to be added to pool
-                    assert(status == 'I');
+                    DCHECK_EQ(status, 'I');
                     _seq_id = 0;
                     _state = RESET_SESSION_READY;
                     _release_session(false);
@@ -324,7 +370,7 @@ namespace springtail::pg_proxy {
                 }
 
                 if (_state == RESET_SESSION_PARAMS) {
-                    assert(status == 'I');
+                    DCHECK_EQ(status, 'I');
                     // reset is complete move to ready state
                     set_ready_reset_done();
                     return;
@@ -381,11 +427,11 @@ namespace springtail::pg_proxy {
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session message: code={}, length={}, state={}", _id, code, msg_length, (int8)_state);
 
-        assert(msg_length < 1000000); // sanity check
+        DCHECK_LE(msg_length, 1000000); // sanity check
 
         // first handle messages where we just need to forward to client
         switch(code) {
-            // responses to extended query protocol
+            // these are messages that are a direct responses to queries
             case 'T': // Row description (describe)
                 // 'T' can be a response to a simple query for a select or for a describe
                 if (_get_pending_query_type() == QueryStmt::Type::SIMPLE_QUERY) {
@@ -406,6 +452,7 @@ namespace springtail::pg_proxy {
             case 'C': // Command complete (execute, simple query)
             case 'n': // No data - response to (describe)
             case 't': // Parameter description (describe)
+            case 'V': // Function call response
                 CHECK_NE(_state, EXTENDED_ERROR);
 
                 if (_state == DEPENDENCIES) {
@@ -426,12 +473,13 @@ namespace springtail::pg_proxy {
 
                 // fall through, forward message to client
 
+            // these messages are not direct responses to queries are either
+            // purely async or are intermediate messages
             case 'G': // Copy in response
-            case 'V': // Function call response
             case 'f': // Copy fail
             case 'c': // Copy done
             case 'H': // Copy out response
-            case 'W': // Copy both response
+            case 'W': // Copy both response -- streaming repl only
             case 'D': // Data row -- this may be large
             case 'N': // Notice response
             case 'A': // Notification response (async from a listen)
@@ -452,11 +500,8 @@ namespace springtail::pg_proxy {
                 // parameter status: either during authentication or as a result of a SET
 
                 // Parameter status
-                std::string_view key = buffer->get_string();
-                std::string_view value = buffer->get_string();
-
                 PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[S:{}] Parameter status from server: {}={}",
-                        _id, key, value);
+                        _id, buffer->get_string(), buffer->get_string());
 
                 // this is a result of a SET operation
                 _send_to_remote_session(code, buffer, _seq_id);
@@ -519,7 +564,6 @@ namespace springtail::pg_proxy {
                 }
 
                 // forward to client
-                // forward to client
                 _send_to_remote_session(code, buffer, seq_id);
 
                 break;
@@ -573,10 +617,10 @@ namespace springtail::pg_proxy {
     ServerSession::_handle_dependency_response(bool error)
     {
         // response to dependency
-        assert (_state == DEPENDENCIES);
-        assert (!error);
+        CHECK_EQ(_state, DEPENDENCIES);
+        DCHECK(!error);
 
-        assert(!_pending_queue.empty());
+        CHECK(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
 
         // add dependency to cache
@@ -672,14 +716,17 @@ namespace springtail::pg_proxy {
         }
 
         // send ready for query message to client
-        auto cs = get_client_session();
-        CHECK_NE(cs, nullptr);
-        cs->server_ready_msg(xact_status);
+        if (!_is_shadow) {
+            auto cs = get_client_session();
+            CHECK_NE(cs, nullptr);
+            cs->server_ready_msg(xact_status);
+        }
 
-        // if all queries complete, set state to ready
+        // if all queries complete, set state to ready and check for pending messages
         if (_pending_queue.empty()) {
             _state = READY;
             _seq_id = 0;
+            _process_next_batch();
         }
     }
 

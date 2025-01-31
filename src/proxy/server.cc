@@ -55,12 +55,13 @@ namespace springtail::pg_proxy {
             _ssl_ctx_client = _setup_SSL_context();
         }
 
-        _socket = socket(AF_INET, SOCK_STREAM, 0);
+        _socket = socket(AF_INET6, SOCK_STREAM, 0);
 
-        struct sockaddr_in serv_addr;
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_addr.s_addr = INADDR_ANY;
-        serv_addr.sin_port = htons(proxy_port);
+        struct sockaddr_in6 serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sin6_family = AF_INET6;
+        serv_addr.sin6_addr = in6addr_any;
+        serv_addr.sin6_port = htons(proxy_port);
 
         int flags = 1;
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(int)) < 0) {
@@ -110,14 +111,14 @@ namespace springtail::pg_proxy {
     }
 
     /** Callback to get more info about what is going on in SSL */
-    static void
+    [[maybe_unused]] static void
     ssl_info_callback(const SSL *s, int where, int ret)
     {
-        const char *str;
+        [[maybe_unused]] const char *str;
         int w = where & ~SSL_ST_MASK;
 
         ProxyConnection *conn = static_cast<ProxyConnection *>(SSL_get_ex_data(s, 0));
-        int fd = conn->get_socket();
+        [[maybe_unused]] int fd = conn->get_socket();
 
         if (w & SSL_ST_CONNECT) {
             str = "SSL_connect";
@@ -282,11 +283,8 @@ namespace springtail::pg_proxy {
             // accept is non-blocking and will return when no more connections
             PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Accepting new connection");
 
-            struct sockaddr_in client_address;
-            socklen_t client_address_size = sizeof(client_address);
-
             // accept a new connection
-            int client_socket = accept(_socket, (struct sockaddr*)&client_address, &client_address_size);
+            int client_socket = accept(_socket, nullptr, nullptr);
             if (client_socket == -1) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
@@ -302,7 +300,7 @@ namespace springtail::pg_proxy {
             }
 
             // create the connection and attach it to a client session
-            ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket, client_address);
+            ProxyConnectionPtr connection = std::make_shared<ProxyConnection>(client_socket);
             ClientSessionPtr session = std::make_shared<ClientSession>(connection);
             log_connect(session);
 
@@ -316,10 +314,9 @@ namespace springtail::pg_proxy {
     ProxyServer::_internal_shutdown()
     {
         // send signal to shutdown
+        SPDLOG_INFO("Proxy server shutting down");
         _shutdown = true;
-
         _wake_event_loop();
-
         // other cleanup is down after while loop in run()
     }
 
@@ -374,7 +371,7 @@ namespace springtail::pg_proxy {
             if (fds[1].revents & POLLIN) {
                 // drain the pipe (we don't care about the data, just the signal)
                 uint64_t val;
-                int ret = read(_efd, &val, 8);
+                [[maybe_unused]] int ret = read(_efd, &val, 8);
                 PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Draining eventfd: {}", ret);
                 n--;
             }
@@ -553,7 +550,7 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Waking up event loop");
         uint64_t val = 1;
-        int ret = write(_efd, &val, sizeof(uint64_t));
+        [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
     }
 

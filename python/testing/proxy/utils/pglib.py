@@ -423,6 +423,9 @@ def decode_row_description(message):
     fields = []
 
     for _ in range(num_fields):
+        if offset >= message_length:
+            raise ValueError(f"Offset {offset} exceeded message length {message_length}")
+
         # Read the field name (null-terminated string)
         end = message.find(b'\x00', offset)
         field_name = message[offset:end].decode('utf-8')

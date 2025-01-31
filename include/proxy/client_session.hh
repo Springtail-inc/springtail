@@ -93,7 +93,6 @@ namespace springtail::pg_proxy {
             return _replica_session;
         }
 
-
         /**
          * @brief Get a shared pointer to this client session
          * @return std::shared_ptr<ClientSession> shared pointer to this client session
@@ -140,6 +139,16 @@ namespace springtail::pg_proxy {
         bool _primary_mode = false; ///< primary mode flag; if true, send to primary only
 
         ClientAuthorizationPtr _auth; ///< client authorization
+
+        std::deque<SessionMsgPtr> _msg_queue; ///< queue of messages to be processed
+
+        /** Helper to queue message internally, for batch push to server session */
+        void _queue_msg(SessionMsgPtr msg) {
+            _msg_queue.push_back(msg);
+        }
+
+        /** Helper to send message queue to server */
+        void _send_msg_queue();
 
         /**
          * @brief Check for pending data on any associated connections
@@ -215,9 +224,6 @@ namespace springtail::pg_proxy {
          * @return ServerSessionPtr server session
          */
         ServerSessionPtr _select_session(Type type, uint64_t seq_id);
-
-        /** Helper to send a message to session, if session is null, select session first */
-        void _send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session=nullptr);
 
         /** Helper associated session as a server session ptr */
         ServerSessionPtr _get_associated_session() {
