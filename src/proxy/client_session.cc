@@ -245,7 +245,12 @@ namespace springtail::pg_proxy {
         Session::read_msg(_connection, blist);
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client handle request: buffers={}", _id, blist.buffers.size());
+
+        _msg_queue.clear();
+
+        // iterate through message buffers
         [[maybe_unused]] int i = 0;
+
         for (auto buffer: blist.buffers) {
             char code = buffer->get();
             int32_t len = buffer->get32();
@@ -305,30 +310,111 @@ namespace springtail::pg_proxy {
                 _handle_sync(buffer, seq_id);
                 break;
 
-            case 'c': // copy done
-            case 'd': // copy data
+            case 'c':   // copy done
+            case 'd':   // copy data
+            case 'f': { // copy fail
                 if (get_associated_session() == nullptr) {
                     SPDLOG_WARN("[C:{}] No associated server session", _id);
                     // a c/d could come after an error message after ready for query
                     // in this case we drop it.
                     break;
                 }
-                // fall through if we have an associated session
-                // to forward the message
-            case 'H':   // flush
-            case 'f': { // copy fail
+
                 // forward to server, should have associated server session
+                // and associated session should be primary since this is copy data
+                ServerSessionPtr session = std::static_pointer_cast<ServerSession>(get_associated_session());
+                CHECK_EQ(session->type(), Session::Type::PRIMARY);
+
+                // NOTE: normally we'd queue the message and send it as a batch, however
+                // this data is expected out of band and it will never be sent to a replica
+                // since it is copy in data.  It can be sent directly to the primary
+                // bypassing the batch queue.  These messages should only be sent by the
+                // client after the server has sent a copy in response 'G'.
+
+                // forward message bypassing the batch queue
+                DCHECK(_msg_queue.empty());
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
-                auto session = get_associated_session();
-                CHECK_NE(session, nullptr);
-                _send_to_remote_session(code, buffer, seq_id);
+                session->process_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id));
                 break;
             }
+
+            case 'H':   // flush (extended protocol)
+                PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Forwarding to server: code={}, len={}", _id, code, len);
+                _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FORWARD, buffer, seq_id));
+                break;
+
             default:
                 SPDLOG_ERROR("Unsupported request code: {}", code);
                 throw ProxyMessageError();
             }
         }
+
+        // go through msg queue and send batch to server
+        _send_msg_queue();
+    }
+
+    void
+    ClientSession::_send_msg_queue()
+    {
+        // send batch msg queue to server
+        if (_msg_queue.empty()) {
+            return;
+        }
+
+        bool is_read_safe = _primary_mode ? false : true;
+
+        // go through all messages and check that they are all read-safe
+        if (!_primary_mode) {
+            for (auto &msg: _msg_queue) {
+                if (!msg->is_read_safe()) {
+                    is_read_safe = false;
+                    break;
+                }
+            }
+        }
+
+        ServerSessionPtr server_session;
+        uint64_t seq_id = _msg_queue.front()->seq_id();
+
+        // not in shadow mode or not readonly, send to single server
+        if (!_shadow_mode || !is_read_safe) {
+            // select a server session and notify it of this message
+            server_session = _select_session(is_read_safe ? REPLICA : PRIMARY, seq_id);
+            server_session->queue_msg_batch(std::move(_msg_queue));
+            _msg_queue.clear();
+            return;
+        }
+
+        // both shadow mode and readonly; we send to both primary and replica
+        CHECK(_shadow_mode && is_read_safe);
+
+        // make sure to send to primary first; so get PRIMARY session
+        server_session = _select_session(PRIMARY, seq_id);
+
+        // clone the message queue
+        std::deque<SessionMsgPtr> clone_queue;
+        for (auto &msg: _msg_queue) {
+            clone_queue.push_back(msg->clone());
+        }
+
+        server_session->queue_msg_batch(std::move(_msg_queue));
+        _msg_queue.clear();
+
+        // get a replica session
+        // don't use _select_session() as it uses/sets the associated session
+        server_session = nullptr;
+        if (_replica_session != nullptr) {
+            // have a replica session use it
+            server_session = _replica_session;
+        } else {
+            // create a new replica session; shouldn't be common to get here
+            server_session = _create_server_session(REPLICA, seq_id);
+        }
+
+        DCHECK(server_session != nullptr);
+        server_session->queue_msg_batch(std::move(clone_queue));
+
+        return;
     }
 
     void
@@ -343,7 +429,7 @@ namespace springtail::pg_proxy {
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_FUNCTION, qs, seq_id);
 
         // select a server session and queue message
-        _send_msg(msg, false);
+        _queue_msg(msg);
     }
 
     void
@@ -381,7 +467,7 @@ namespace springtail::pg_proxy {
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_PARSE, query_stmt, seq_id);
 
         // select a server session and queue message
-        _send_msg(msg, is_read_safe);
+        _queue_msg(msg);
     }
 
     void
@@ -421,7 +507,7 @@ namespace springtail::pg_proxy {
         }
 
         // queue message to server session
-        _send_msg(msg, prepared_stmt->is_read_safe);
+        _queue_msg(msg);
     }
 
     void
@@ -469,7 +555,7 @@ namespace springtail::pg_proxy {
         }
 
         // queue message to server session
-        _send_msg(msg, query_stmt->is_read_safe);
+        _queue_msg(msg);
     }
 
     void
@@ -516,7 +602,7 @@ namespace springtail::pg_proxy {
         SessionMsgPtr msg = SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_EXECUTE, qs, seq_id);
 
         // select a server session and notify it of this message
-        _send_msg(msg, query_stmt->is_read_safe);
+        _queue_msg(msg);
     }
 
     void
@@ -562,24 +648,16 @@ namespace springtail::pg_proxy {
         }
 
         // notify server session
-        _send_msg(msg, qs->is_read_safe);
+        _queue_msg(msg);
     }
 
     void
     ClientSession::_handle_sync(BufferPtr buffer, uint64_t seq_id)
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG2, "[C:{}] Sync request", _id);
-        ServerSessionPtr session = _get_associated_session();
-        if (session == nullptr) {
-            // this is a weird case as it doesn't make sense to issue
-            // a sync without a set of other extended queries preceeding it
-            // but we'll handle it anyway, just issue a sync to the server
-            session = _select_session(REPLICA, seq_id);
-        }
+        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer, true);
 
-        QueryStmtPtr qs = std::make_shared<QueryStmt>(QueryStmt::SYNC, buffer,
-            session->type() == REPLICA);
-        session->process_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs, seq_id));
+        _queue_msg(SessionMsg::create(SessionMsg::MSG_CLIENT_SERVER_SYNC, qs, seq_id));
     }
 
     void
@@ -607,59 +685,9 @@ namespace springtail::pg_proxy {
         msg->set_dependencies(std::move(dependencies));
 
         // select session and queue msg
-        _send_msg(msg, qs->is_read_safe);
+        _queue_msg(msg);
     }
 
-    void
-    ClientSession::_send_msg(SessionMsgPtr msg, bool is_readonly, SessionPtr session)
-    {
-        ServerSessionPtr server_session = std::static_pointer_cast<ServerSession>(session);
-
-        // explicit session send, not usual
-        if (server_session) {
-            server_session->process_msg(msg);
-            return;
-        }
-
-        // session == nullptr, select a session based on the message type
-
-        if (_primary_mode) {
-            // send to primary session force to !readonly
-            is_readonly = false;
-        }
-
-        // not in shadow mode or not readonly, send to single server
-        if (!_shadow_mode || !is_readonly) {
-            // select a server session and notify it of this message
-            server_session = _select_session(is_readonly ? REPLICA : PRIMARY, msg->seq_id());
-            server_session->process_msg(msg);
-            return;
-        }
-
-        // both shadow mode and readonly; we send to both primary and replica
-        assert(_shadow_mode && is_readonly);
-
-        // make sure to send to primary first; so get PRIMARY session
-        server_session = _select_session(PRIMARY, msg->seq_id());
-        server_session->process_msg(msg);
-
-        // then clone msg and get a replica session
-        // don't use _select_session() as it uses/sets the associated session
-        msg = msg->clone();
-        server_session = nullptr;
-        if (_replica_session != nullptr) {
-            // have a replica session use it
-            server_session = _replica_session;
-        } else {
-            // create a new replica session; shouldn't be common to get here
-            server_session = _create_server_session(REPLICA, msg->seq_id());
-        }
-
-        assert (server_session != nullptr);
-        server_session->process_msg(msg);
-
-        return;
-    }
 
     ServerSessionPtr
     ClientSession::_select_session(Session::Type type, uint64_t seq_id)
@@ -699,17 +727,17 @@ namespace springtail::pg_proxy {
             // use replica session
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Using replica session; setting associated session", _id);
             session = _replica_session;
-            assert (!_shadow_mode);
+            CHECK(!_shadow_mode);
             set_associated_session(session);
             return session;
         }
 
-        assert(!_shadow_mode || type == PRIMARY);
+        CHECK(!_shadow_mode || type == PRIMARY);
 
         //// Shouldn't get here in common case; only if we need to allocate a new session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Creating new server session: type={}", _id, type == PRIMARY ? "PRIMARY" : "REPLICA");
         session = _create_server_session(type, seq_id);
-        assert (session != nullptr);
+        DCHECK_NE(session, nullptr);
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Created new server session: id={}", _id, session->id());
 
         // set associated session
