@@ -105,7 +105,7 @@ namespace springtail::pg_log_mgr {
             }
 
             for (auto &xact: committed_xacts) {
-                assert (xact->springtail_xid >= current_xid);
+                CHECK(xact->springtail_xid >= current_xid);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
             }
 

@@ -77,7 +77,7 @@ namespace springtail::pg_proxy {
         void dump() const {
             std::shared_lock lock(_mutex);
             SPDLOG_DEBUG("DatabasePool size: {}", count);
-            for (const auto &it : _free_sessions) {
+            for ([[maybe_unused]] const auto &it : _free_sessions) {
                 SPDLOG_DEBUG("DatabasePool db_id: {} username: {} size: {}", it.first.first, it.first.second, it.second.size());
             }
         }

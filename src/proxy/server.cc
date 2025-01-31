@@ -110,14 +110,14 @@ namespace springtail::pg_proxy {
     }
 
     /** Callback to get more info about what is going on in SSL */
-    static void
+    [[maybe_unused]] static void
     ssl_info_callback(const SSL *s, int where, int ret)
     {
-        const char *str;
+        [[maybe_unused]] const char *str;
         int w = where & ~SSL_ST_MASK;
 
         ProxyConnection *conn = static_cast<ProxyConnection *>(SSL_get_ex_data(s, 0));
-        int fd = conn->get_socket();
+        [[maybe_unused]] int fd = conn->get_socket();
 
         if (w & SSL_ST_CONNECT) {
             str = "SSL_connect";
@@ -374,7 +374,7 @@ namespace springtail::pg_proxy {
             if (fds[1].revents & POLLIN) {
                 // drain the pipe (we don't care about the data, just the signal)
                 uint64_t val;
-                int ret = read(_efd, &val, 8);
+                [[maybe_unused]] int ret = read(_efd, &val, 8);
                 PROXY_DEBUG(LOG_LEVEL_DEBUG3, "Draining eventfd: {}", ret);
                 n--;
             }
@@ -553,7 +553,7 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Waking up event loop");
         uint64_t val = 1;
-        int ret = write(_efd, &val, sizeof(uint64_t));
+        [[maybe_unused]] int ret = write(_efd, &val, sizeof(uint64_t));
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Wrote to eventfd: {}", ret);
     }
 
