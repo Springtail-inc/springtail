@@ -471,6 +471,7 @@ namespace springtail
                 request.lsn = constant::MAX_LSN-1;
                 request.index.id = index.id;
                 request.index.table_id = _schema.table_oid;
+                request.index.namespace_name = _schema.schema_name;
                 request.index.is_unique = index.is_unique;
                 for (const auto &column : index.columns){
                     sys_tbl_mgr::IndexColumn index_column;

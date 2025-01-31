@@ -57,7 +57,7 @@ namespace springtail::sys_tbl_mgr {
         /**
          * Call drop_namespace() on the SysTblMgr.
          */
-        std::string drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgDropNamespace &msg);
+        std::string drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
 
         /**
          * Call create_index() on the SysTblMgr.

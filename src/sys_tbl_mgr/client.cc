@@ -235,15 +235,16 @@ namespace springtail::sys_tbl_mgr {
     }
 
     std::string
-    Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgDropNamespace &msg)
+    Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
     {
         DDLStatement result;
 
-        DropNamespaceRequest request;
+        NamespaceRequest request;
         request.db_id = db_id;
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.namespace_id = msg.oid;
+        request.name = msg.name;
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->drop_namespace(result, request);

@@ -1048,7 +1048,7 @@ namespace springtail {
     {
         // same data as in create namespace, call that to do the decode and then just switch the
         // type so we know it is an alter namespace
-        PgMsgPtr msg = _decode_create_table(message, buffer, len);
+        PgMsgPtr msg = _decode_create_namespace(message, buffer, len);
         if (msg == nullptr) {
             return msg;
         }
@@ -1060,7 +1060,7 @@ namespace springtail {
     PgMsgPtr
     PgMsgStreamReader::_decode_drop_namespace(PgMsgMessage &message, char *buffer, int len)
     {
-        PgMsgDropNamespace ns_msg;
+        PgMsgNamespace ns_msg;
 
         // convert msg data to string (it is not null terminated)
         // and convert string to json
@@ -1078,11 +1078,12 @@ namespace springtail {
         ns_msg.xid = message.xid; // only valid in streaming mode
         ns_msg.lsn = message.lsn;
         json["oid"].get_to(ns_msg.oid);
+        json["name"].get_to(ns_msg.name);
 
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop namespace: json: {}", json.dump());
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
-        msg->msg.emplace<PgMsgDropNamespace>(ns_msg);
+        msg->msg.emplace<PgMsgNamespace>(ns_msg);
 
         return msg;
     }

@@ -46,6 +46,12 @@ namespace springtail::pg_fdw {
         "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
         "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
 
+    static constexpr char ALTER_SCHEMA_WITH_GRANTS[] = 
+        "ALTER SCHEMA {} RENAME TO {} "
+        "  GRANT USAGE ON SCHEMA {} TO {} "
+        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
+        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
+
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
 
@@ -445,7 +451,7 @@ namespace springtail::pg_fdw {
         }
 
         else if (action == "drop") {
-            return fmt::format("DROP FOREIGN TABLE {}.{};",
+            return fmt::format("DROP FOREIGN TABLE IF EXISTS {}.{};",
                                conn->escape_identifier(ddl.at("schema").get<std::string>()),
                                conn->escape_identifier(ddl.at("table").get<std::string>()));
         }
@@ -517,14 +523,20 @@ namespace springtail::pg_fdw {
                                    escaped_schema, _fdw_username);
         }
         else if (action == "ns_alter") {
-            // TODO: Handle this
-            SPDLOG_ERROR("ALTER SCHEMA");
-            return "";
+            // XXX Need to check alter schema old column
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
+            const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
+            const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+
+            return fmt::format(ALTER_SCHEMA_WITH_GRANTS, old_schema, new_schema,
+                                   new_schema, _fdw_username,
+                                   new_schema, _fdw_username,
+                                   new_schema, _fdw_username);
         }
         else if (action == "ns_drop") {
-            // TODO: Handle this
-            SPDLOG_ERROR("DROP SCHEMA");
-            return "";
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
+            const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
+            return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
         }
 
         // can't currently support other kinds of DDL mutations

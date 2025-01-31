@@ -423,12 +423,16 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
-                // XXX TODO implement alter schema functionality
+                auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
+                std::string &&ddl_stmt = client->alter_namespace(_db, xidlsn, namespace_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
-                // XXX TODO implement drop schema functionality
+                auto &namespace_msg = std::get<PgMsgNamespace>(change->msg);
+                std::string &&ddl_stmt = client->drop_namespace(_db, xidlsn, namespace_msg);
+                redis_ddl.add_ddl(_db, xidlsn.xid, ddl_stmt);
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:
@@ -588,12 +592,14 @@ namespace springtail::pg_log_mgr {
             }
         case PgMsgEnum::ALTER_NAMESPACE:
             {
-                // XXX Handle alter schema
+                PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
+                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::DROP_NAMESPACE:
             {
-                // XXX Handle drop schema
+                PgMsgNamespace &namespace_msg = std::get<PgMsgNamespace>(msg->msg);
+                _process_ddl(namespace_msg.oid, namespace_msg.xid, msg->is_streaming, msg);
                 break;
             }
         case PgMsgEnum::CREATE_INDEX:

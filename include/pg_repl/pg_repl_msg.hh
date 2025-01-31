@@ -220,12 +220,6 @@ namespace springtail
         std::string name;
     };
 
-    struct PgMsgDropNamespace {
-        LSN_t lsn;
-        uint32_t oid;
-        int32_t xid; // pg xid; proto vers 2+ only if streaming
-    };
-
     struct PgMsgCopySync {
         int64_t target_xid;
         int32_t pg_xid;
@@ -271,7 +265,6 @@ namespace springtail
          PgMsgIndex,
          PgMsgDropIndex,
          PgMsgNamespace,
-         PgMsgDropNamespace,
          PgMsgCopySync
         > msg;                 ///< message data
 

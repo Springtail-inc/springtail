@@ -619,7 +619,7 @@ namespace springtail::sys_tbl_mgr {
     }
 
     void
-    Service::drop_namespace(DDLStatement &_return, const DropNamespaceRequest &request)
+    Service::drop_namespace(DDLStatement &_return, const NamespaceRequest &request)
     {
         SPDLOG_INFO("got drop_namespace() -- db {} namespace_id {} xid {} lsn {}",
                     request.db_id, request.namespace_id, request.xid, request.lsn);
@@ -631,6 +631,7 @@ namespace springtail::sys_tbl_mgr {
         XidLsn xid(request.xid, request.lsn);
         auto ddl = _mutate_namespace(request.db_id, request.namespace_id, std::nullopt, xid, false);
         ddl["action"] = "ns_drop";
+        ddl["name"] = request.name;
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
@@ -883,6 +884,7 @@ namespace springtail::sys_tbl_mgr {
         if (!ns_info) {
             auto &&ns_ddl = _mutate_namespace(namespace_req.db_id, namespace_req.namespace_id,
                                               namespace_req.name, ns_xid, true);
+            ns_ddl["action"] = "ns_create";
             ddls.push_back(ns_ddl);
         }
 

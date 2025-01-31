@@ -234,6 +234,7 @@ namespace springtail {
         static constexpr char PG_OP_ALTER_TABLE[] = "alter table";
         static constexpr char PG_OP_CREATE_SCHEMA[] = "create schema";
         static constexpr char PG_OP_ALTER_SCHEMA[] = "alter schema";
+        static constexpr char PG_OP_DROP_SCHEMA[] = "drop schema";
         static constexpr char PG_OP_CREATE_TABLE[] = "create table";
         static constexpr char PG_OP_DROP_TABLE[] = "drop table";
         static constexpr char PG_OP_CREATE_INDEX[] = "create index";
@@ -300,6 +301,9 @@ namespace springtail {
 
         /** Parse alter schema op -- calls into _log_gen */
         void _parse_alter_schema(const nlohmann::json &json);
+
+        /** Parse drop schema op -- calls into _log_gen */
+        void _parse_drop_schema(const nlohmann::json &json);
 
         /** Parse begin op -- calls into _log_gen */
         void _parse_begin(const nlohmann::json &json);

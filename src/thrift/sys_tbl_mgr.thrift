@@ -59,13 +59,6 @@ struct NamespaceRequest {
     5: i64 lsn
 }
 
-struct DropNamespaceRequest {
-    1: i64 db_id,
-    2: i64 namespace_id,
-    3: i64 xid,
-    4: i64 lsn
-}
-
 struct TableStats {
     1: i64 row_count
 }
@@ -229,7 +222,7 @@ service Service {
     DDLStatement alter_namespace(1: NamespaceRequest request),
 
     // drop a namespace at a given xid/lsn
-    DDLStatement drop_namespace(1: DropNamespaceRequest request),
+    DDLStatement drop_namespace(1: NamespaceRequest request),
 
     // update the index root pointers and stats for a given table at a given xid
     Status update_roots(1: UpdateRootsRequest request),

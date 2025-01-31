@@ -52,7 +52,7 @@ namespace springtail::sys_tbl_mgr {
         void alter_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
 
         /** Drops a namespace in the system tables. */
-        void drop_namespace(DDLStatement &_return, const DropNamespaceRequest &request) override;
+        void drop_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
 
         /** Updates the roots extents of the indexes of the table as well as the table stats. */
         void update_roots(Status& _return, const UpdateRootsRequest &request) override;

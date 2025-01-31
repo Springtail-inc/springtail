@@ -12,13 +12,15 @@ BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         -- Check for table or index drops
-        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index') AND obj.schema_name NOT LIKE 'pg_%' THEN
+        IF NOT obj.is_temporary AND (obj.object_type = 'table' OR obj.object_type = 'index' OR obj.object_type = 'schema') AND (obj.schema_name IS NULL OR obj.schema_name NOT LIKE 'pg_%') THEN
 
             -- sometimes tg_tag is DROP TABLE even if type is index
             IF obj.object_type = 'table' THEN
                 tag_name := 'DROP TABLE';
-            ELSE
+            ELSIF obj.object_type = 'index' THEN
                 tag_name := 'DROP INDEX';
+            ELSIF obj.object_type = 'schema' THEN
+                tag_name := 'DROP SCHEMA';
             END IF;
 
             -- generate message same for DROP TABLE/INDEX
@@ -31,7 +33,7 @@ BEGIN
 
             --- RAISE NOTICE 'springtail: % op, %.%', tag_name, obj.schema_name, obj.object_name;
 
-            -- tag_name is DROP TABLE or DROP INDEX
+            -- tag_name is DROP TABLE or DROP INDEX or DROP SCHEMA
             PERFORM pg_logical_emit_message(true, 'springtail:' || tag_name, msg::text);
         END IF;
     END LOOP;
@@ -278,7 +280,7 @@ $$;
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_drops;
 CREATE EVENT TRIGGER springtail_event_trigger_for_drops
    ON sql_drop
-   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX')
+   WHEN TAG IN ( 'DROP TABLE', 'DROP INDEX', 'DROP SCHEMA' )
    EXECUTE FUNCTION springtail_event_trigger_for_drops();
 
 DROP EVENT TRIGGER IF EXISTS springtail_event_trigger_for_table_ddl;

@@ -618,6 +618,10 @@ namespace springtail {
             _parse_alter_schema(json);
             return;
         }
+        if (cmd == PG_OP_DROP_SCHEMA) {
+            _parse_drop_schema(json);
+            return;
+        }
         if (cmd == PG_OP_DROP_TABLE) {
             _parse_drop_table(json);
             return;
@@ -742,6 +746,13 @@ namespace springtail {
     {
         // XXX TODO Handle this
         SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_alter_schema, {}", json.dump());
+    }
+
+    void
+    PgLogGenJson::_parse_drop_schema(const nlohmann::json &json)
+    {
+        // XXX TODO Handle this
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_drop_schema, {}", json.dump());
     }
 
     void

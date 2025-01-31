@@ -342,7 +342,14 @@ namespace pg_msg {
             }
 
             case CREATE_NAMESPACE: {
-                // XXX To implement
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nCREATE SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
+                ss << "  namespace=" << create_namespace.name << std::endl;
                 break;
             }
 
@@ -352,7 +359,13 @@ namespace pg_msg {
             }
 
             case DROP_NAMESPACE: {
-                // XXX To implement
+                PgMsgNamespace create_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nDROP SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << create_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << create_namespace.oid << std::endl;
+                ss << "  LSN=" << create_namespace.lsn << std::endl;
                 break;
             }
 
