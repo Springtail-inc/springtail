@@ -23,7 +23,7 @@
 namespace springtail::pg_proxy {
 
     /** reset query string; similar to rollback, discard all, set search path, but discard all can't be run with other statements */
-    constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT";
+    constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT;";
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  UserPtr user,
@@ -233,28 +233,30 @@ namespace springtail::pg_proxy {
         // called from _handle_error when the client is shutting down
         _seq_id = seq_id;
 
-        if (_state == RESET_SESSION || is_shutdown()) {
-            // if we are in reset session state, or shutdown return
-            return;
-        }
+        _wrap_error_handler([this, seq_id] {
+            if (_state == RESET_SESSION || is_shutdown()) {
+                // if we are in reset session state, or shutdown return
+                return;
+            }
 
-        if (_state != READY) {
-            // if not in ready state, we do a hard shutdown and close the connection
-            _send_shutdown();
-            _state = ERROR;
-            return;
-        }
+            if (_state != READY) {
+                // if not in ready state, we do a hard shutdown and close the connection
+                _send_shutdown();
+                _state = ERROR;
+                return;
+            }
 
-        // reset server_session and the private session state
-        reset_session();
+            // reset server_session and the private session state
+            reset_session();
 
-        _state = RESET_SESSION;
+            _state = RESET_SESSION;
 
-        // register the session with the server
-        ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
+            // register the session with the server
+            ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
 
-        // send the reset simple query to server
-        _send_reset();
+            // send the reset simple query to server
+            _send_reset();
+        });
     }
 
     void
@@ -262,54 +264,51 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
 
-        // entry point for connection message processing
-        // called from run in client session
-        switch(_state) {
-            case AUTH_SERVER:
-                if (_auth->process_auth_data(seq_id)) {
-                    // auth done, ready for queries
-                    _state = READY;
+        _wrap_error_handler([this, seq_id] {
+            // entry point for connection message processing
+            // called from run in client session
+            switch(_state) {
+                case AUTH_SERVER:
+                    if (_auth->process_auth_data(seq_id)) {
+                        // auth done, ready for queries
+                        _state = READY;
 
-                    // check for pending messages
-                    _process_next_batch();
+                        // check for pending messages
+                        _process_next_batch();
 
-                    // notify client session that auth is done
-                    auto cs = get_client_session();
-                    CHECK_NE(cs, nullptr);
-                    auto &&params = _auth->server_parameters();
-                    cs->server_auth_done(shared_from_this(), params);
-                }
-                break;
+                        // notify client session that auth is done
+                        auto cs = get_client_session();
+                        CHECK_NE(cs, nullptr);
+                        auto &&params = _auth->server_parameters();
+                        cs->server_auth_done(shared_from_this(), params);
+                    }
+                    break;
 
-            case READY:
-            case QUERY:
-            case DEPENDENCIES:
-            case EXTENDED_ERROR:
-                // ready for query, handle requests
-                _handle_message_from_server();
-                break;
+                case READY:
+                case QUERY:
+                case DEPENDENCIES:
+                case EXTENDED_ERROR:
+                    // ready for query, handle requests
+                    _handle_message_from_server();
+                    break;
 
-            case RESET_SESSION_READY:
-            case RESET_SESSION_PARAMS:
-                // session is being or has just been reset
-                // mostly dropping messages or handling error waiting for client
-                _handle_reset_session_message();
-                break;
+                case RESET_SESSION_READY:
+                case RESET_SESSION_PARAMS:
+                    // session is being or has just been reset
+                    // mostly dropping messages or handling error waiting for client
+                    _handle_reset_session_message();
+                    break;
 
-            case RESET_SESSION:
-                CHECK_NE(_state, RESET_SESSION);
-                break;
+                case RESET_SESSION:
+                    CHECK_NE(_state, RESET_SESSION);
+                    break;
 
-            default:
-                SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
-                _state = ERROR;
-                break;
-        }
-
-        if (_state == ERROR) {
-            // XXX figure this out...
-            _handle_error();
-        }
+                default:
+                    SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
+                    _state = ERROR;
+                    break;
+            }
+        });
     }
 
     void

@@ -121,7 +121,7 @@ namespace springtail {
          * @brief Stop the thread
          *
          */
-        void stop_thread() {
+        virtual void stop_thread() {
             _shutting_down = true;
         }
 

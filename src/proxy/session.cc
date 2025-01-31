@@ -172,8 +172,8 @@ namespace springtail::pg_proxy {
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         CHECK_EQ(n, buffer->size());
 
-        // log the buffer
-        _log_buffer(false, code, buffer->size(), buffer->data(), seq_id);
+        // log the buffer; data should point past header (length + code 5B)
+        _log_buffer(false, code, buffer->size() - 5, buffer->data() + 5, seq_id);
     }
 
     void

@@ -219,61 +219,6 @@ namespace springtail::pg_proxy {
             return _state == READY;
         }
 
-        /**
-         * Add a msg to the queue; to be executed after current message completes
-         * @param msg SessionMsgPtr message to enqueue
-         */
-        void queue_msg(SessionMsgPtr msg, SessionPtr remote_session) {
-            if (_associated_session == nullptr) {
-                set_associated_session(remote_session);
-            } else if (_associated_session != remote_session) {
-                SPDLOG_WARN("Associated session not cleared");
-                clear_associated_session();
-                set_associated_session(remote_session);
-            }
-            remote_session->_msg_queue.push(msg);
-        }
-
-        /**
-         * @brief Queue message on associated session
-         * @param msg Message to queue
-         */
-        void queue_msg(SessionMsgPtr msg) {
-            if (_is_shadow) {
-                return;
-            }
-            assert (_associated_session != nullptr);
-            _associated_session->_msg_queue.push(msg);
-        }
-
-        /**
-         * @brief Queue a shutdown message on this session; higher priority than other messages
-         * Clears the message queue and sets the session to ready for message
-         * @param msg Message to queue
-         */
-        void queue_shutdown_msg(SessionMsgPtr msg)
-        {
-            _msg_queue.clear();
-            _msg_queue.push(msg);
-        }
-
-        /**
-         * @brief Check if message queue is empty
-         * @return true if empty
-         */
-        bool is_msg_queue_empty() {
-            return _msg_queue.empty();
-        }
-
-        /**
-         * @brief Get a queued msg if one exists
-         * @return SessionMsgPtr or nullptr if no queued msg
-         */
-        SessionMsgPtr get_msg() {
-            SessionMsgPtr msg = _msg_queue.try_pop();
-            return msg;
-        }
-
         /** Get session id */
         uint32_t id() const {
             return _id;
@@ -343,7 +288,6 @@ namespace springtail::pg_proxy {
             _is_shadow = false;
             _in_transaction = false;
             _associated_session.reset();
-            _msg_queue.clear();
             _state = RESET_SESSION;
         }
 
@@ -480,9 +424,6 @@ namespace springtail::pg_proxy {
         std::atomic_flag _shut_down_flag = ATOMIC_FLAG_INIT;
 
         std::atomic_flag _running = ATOMIC_FLAG_INIT;
-
-        /** queue of messages to process */
-        ConcurrentQueue<SessionMsg> _msg_queue;
 
         std::set<int> _fds;     ///< set of fds to pass to run()
 

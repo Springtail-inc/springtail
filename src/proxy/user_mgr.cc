@@ -8,8 +8,7 @@
 #include <proxy/auth/scram.hh>
 #include <proxy/exception.hh>
 
-namespace springtail {
-namespace pg_proxy {
+namespace springtail::pg_proxy {
 
     /** SELECT query for fetching users from primary for authentication */
     static constexpr char USER_SELECT[] = "select username, password, databases from public.springtail_get_user_access()";
@@ -117,7 +116,8 @@ namespace pg_proxy {
                 } catch (Error &e) {
                     SPDLOG_ERROR("Failed to connect to primary database; will retry in {} seconds", _sleep_interval);
                     SPDLOG_ERROR("error message: {}\n", conn.error_message());
-                    sleep(_sleep_interval);
+                    std::unique_lock sleep_lock(_sleep_mutex);
+                    _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
                 }
             }
 
@@ -126,7 +126,8 @@ namespace pg_proxy {
             } catch (Error &e) {
                 SPDLOG_ERROR(fmt::format("Error: {}. Failed to excute the query; will try to reconnect", e.what()));
                 conn.disconnect();
-                sleep(_sleep_interval);
+                std::unique_lock sleep_lock(_sleep_mutex);
+                _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
                 continue;
             }
 
@@ -168,10 +169,12 @@ namespace pg_proxy {
             conn.clear();
             conn.disconnect();
 
-            sleep(_sleep_interval);
+            { // iteruptible sleep
+                std::unique_lock sleep_lock(_sleep_mutex);
+                _sleep_cv.wait_for(sleep_lock, std::chrono::seconds(_sleep_interval));
+            }
         }
 
         conn.disconnect();
     }
-} // namespace pg_proxy
-} // namespace springtail
+} // namespace springtail::pg_proxy

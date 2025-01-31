@@ -200,11 +200,19 @@ namespace springtail::pg_proxy {
             // replica session is shutting down
             PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Replica session shutting down", _id);
             _replica_session = nullptr;
+
             // XXX need to failover to new replica
+            if (_shadow_mode) {
+                // for now ignore the replica failure, we will get a new one
+                // XXX we should really replay any session state on startup...
+                return;
+            }
         }
 
         // XXX right now can't handle this
-        clear_associated_session();
+        if (get_associated_session()) {
+            clear_associated_session();
+        }
         _state = ERROR;
     }
 
