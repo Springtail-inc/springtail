@@ -41,16 +41,16 @@ namespace springtail::pg_fdw {
 
     /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
     static constexpr char CREATE_SCHEMA_WITH_GRANTS[] =
-        "CREATE SCHEMA {} "
-        "  GRANT USAGE ON SCHEMA {} TO {} "
-        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
-        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
+        "CREATE SCHEMA {};"
+        "  GRANT USAGE ON SCHEMA {} TO {};"
+        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};";
 
     static constexpr char ALTER_SCHEMA_WITH_GRANTS[] = 
-        "ALTER SCHEMA {} RENAME TO {} "
-        "  GRANT USAGE ON SCHEMA {} TO {} "
-        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {} "
-        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {} ";
+        "ALTER SCHEMA {} RENAME TO {};"
+        "  GRANT USAGE ON SCHEMA {} TO {};"
+        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};";
 
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
@@ -539,6 +539,15 @@ namespace springtail::pg_fdw {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
             return fmt::format("DROP SCHEMA IF EXISTS {} CASCADE", escaped_schema);
+        }
+        else if (action == "set_namespace") {
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Set namespace with JSON: {}", ddl.dump());
+            const auto schema = conn->escape_identifier(ddl.at("schema").get<std::string>());
+            const auto table = conn->escape_identifier(ddl.at("table").get<std::string>());
+            const auto old_schema = conn->escape_identifier(ddl.at("old_schema").get<std::string>());
+
+            return fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
+                               old_schema, table, schema);
         }
 
         // can't currently support other kinds of DDL mutations

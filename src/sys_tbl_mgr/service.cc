@@ -498,7 +498,7 @@ namespace springtail::sys_tbl_mgr {
             _set_table_info(request.db_id, new_info);
 
             // set the DDL statement
-            ddl["action"] = "set_schema";
+            ddl["action"] = "set_namespace";
 
             auto old_ns_info = _get_namespace_info(request.db_id, table_info->namespace_id,
                                                    XidLsn(request.xid, request.lsn));
@@ -660,11 +660,16 @@ namespace springtail::sys_tbl_mgr {
 
         // acquire a shared lock to ensure no one is doing a finalize
         boost::shared_lock lock(_write_mutex);
+        XidLsn xid(request.xid, request.lsn);
+
+        // retrieve the old namespace name
+        auto ns_info = _get_namespace_info(request.db_id, request.namespace_id, xid);
+        CHECK(ns_info != nullptr);
 
         // update the namespace_names table
-        XidLsn xid(request.xid, request.lsn);
         auto ddl = _mutate_namespace(request.db_id, request.namespace_id, request.name, xid, true);
         ddl["action"] = "ns_alter";
+        ddl["old_name"] = ns_info->name;
 
         // serialize the JSON and return
         _return.__set_statement(nlohmann::to_string(ddl));
