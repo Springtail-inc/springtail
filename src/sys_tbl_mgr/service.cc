@@ -519,6 +519,14 @@ namespace springtail::sys_tbl_mgr {
             ddl["action"] = "rename";
             ddl["old_table"] = table_info->name;
 
+            if (table_info->namespace_id != ns_info->id) {
+                auto old_ns_info = _get_namespace_info(request.db_id, table_info->namespace_id,
+                                                       XidLsn(request.xid, request.lsn));
+                ddl["old_schema"] = old_ns_info->name;
+            } else {
+                ddl["old_schema"] = request.table.namespace_name;
+            }
+
             _set_primary_index(request.db_id, ns_info->id, request.table.id, table_info->name,
                                ns_info->name, xid);
         } else {
@@ -926,10 +934,19 @@ namespace springtail::sys_tbl_mgr {
         XidLsn ns_xid(namespace_req.xid, namespace_req.lsn);
         auto ns_info = _get_namespace_info(namespace_req.db_id, namespace_req.name, ns_xid);
         if (!ns_info) {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create namespace; db {}, name {}, id {}, xid {}:{}",
+                                namespace_req.db_id, namespace_req.name, namespace_req.namespace_id,
+                                ns_xid.xid, ns_xid.lsn);
+
             auto &&ns_ddl = _mutate_namespace(namespace_req.db_id, namespace_req.namespace_id,
                                               namespace_req.name, ns_xid, true);
             ns_ddl["action"] = "ns_create";
             ddls.push_back(ns_ddl);
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Create namespace name {}, id {}",
+                                namespace_req.name, namespace_req.namespace_id);
+        } else {
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Skip create namespace name {}, id {}",
+                                namespace_req.name, namespace_req.namespace_id);
         }
 
         // 3. retrieve the table information at the end of the target XID
@@ -1100,6 +1117,14 @@ namespace springtail::sys_tbl_mgr {
 
         // read from disk
         auto table = _get_system_table(db_id, sys_tbl::NamespaceNames::ID);
+
+        // check if the table is empty
+        // note: this is a hack to get around the fact that doing a secondary index search on a
+        //       vacant table is broken right now, otherwise we could follow the main path
+        if (table->empty()) {
+            return nullptr;
+        }
+
         auto schema = table->extent_schema();
         auto fields = schema->get_fields();
 

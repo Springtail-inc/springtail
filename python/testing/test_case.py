@@ -9,6 +9,8 @@ import springtail
 import sysutils
 import time
 
+import common
+
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
     test case and stores the result of the test.

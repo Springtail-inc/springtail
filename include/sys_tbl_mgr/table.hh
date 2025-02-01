@@ -321,6 +321,8 @@ namespace springtail {
             return _id;
         }
 
+        bool empty() const;
+
         /** This will convert column positions to column names based on the table schema
          */
         std::vector<std::string> get_column_names(const std::vector<uint32_t>& col_position);

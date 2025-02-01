@@ -440,10 +440,12 @@ namespace springtail::pg_fdw {
                                              conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
                                              conn->escape_identifier(ddl.at("old_table").get<std::string>()),
                                              conn->escape_identifier(ddl.at("table").get<std::string>()));
+
+            // XXX it's not clear to me that we need to support a schema change here?
             if (ddl.at("schema").get<std::string>() != ddl.at("old_schema").get<std::string>()) {
                 return rename + fmt::format("ALTER FOREIGN TABLE {}.{} SET SCHEMA {};",
                                             conn->escape_identifier(ddl.at("old_schema").get<std::string>()),
-                                            conn->escape_identifier(ddl.at("old_table").get<std::string>()),
+                                            conn->escape_identifier(ddl.at("table").get<std::string>()),
                                             conn->escape_identifier(ddl.at("schema").get<std::string>()));
             } else {
                 return rename;
