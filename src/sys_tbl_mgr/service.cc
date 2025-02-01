@@ -371,6 +371,7 @@ namespace springtail::sys_tbl_mgr {
 
         {
             boost::unique_lock lock(_mutex);
+            index_info.state = static_cast<int8_t>(sys_tbl::IndexNames::State::DELETED);
             _index_cache[db_id][index_info.table_id][index_info.id].emplace_back(xid, index_info);
         }
     }
@@ -1906,8 +1907,8 @@ namespace springtail::sys_tbl_mgr {
 
     void
     Service::_set_primary_index(uint64_t db_id,
-                                uint64_t table_id,
                                 uint64_t namespace_id,
+                                uint64_t table_id,
                                 const std::string &namespace_name,
                                 const std::string &table_name,
                                 const XidLsn &xid)
