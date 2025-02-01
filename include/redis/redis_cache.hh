@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -260,28 +261,6 @@ namespace springtail {
         std::tuple<nlohmann::json, RedisType> _read_key_value(const std::string &key);
 
         /**
-         * @brief Check if this path goes into an array object for the given json pointer.
-         *      Both _storage and _old_storage are examined.
-         *
-         * @param json_ptr - json pointer
-         * @return true
-         * @return false
-         */
-        inline bool
-        _is_array_path(const nlohmann::json::json_pointer &json_ptr)
-        {
-            std::optional<std::reference_wrapper<const nlohmann::json>> json_object_old = _get_value(json_ptr, _old_storage);
-            if (json_object_old.has_value() && json_object_old.value().get().type() != nlohmann::json::value_t::array) {
-                return false;
-            }
-            std::optional<std::reference_wrapper<const nlohmann::json>> json_object_new = _get_value(json_ptr, _storage);
-            if (json_object_new.has_value() && json_object_new.value().get().type() != nlohmann::json::value_t::array) {
-                return false;
-            }
-            return true;
-        }
-
-        /**
          * @brief Check if this path goes into an array object for the give json pointer and json storage.
          *
          * @param json_ptr - json pointer
@@ -297,117 +276,6 @@ namespace springtail {
                 return false;
             }
             return true;
-        }
-
-        /**
-         * @brief Check if there is an array inside of json path
-         *
-         * @param path - json path
-         * @return true
-         * @return false
-         */
-        inline bool
-        _check_array_in_path(const std::string &path)
-        {
-            nlohmann::json::json_pointer json_ptr(path);
-
-            while (true) {
-                if (_is_array_path(json_ptr)) {
-                    return true;
-                }
-                if (!json_ptr.empty()) {
-                    json_ptr = json_ptr.parent_pointer();
-                } else {
-                    break;
-                }
-            }
-            return false;
-        }
-
-        /**
-         * @brief This function performs finds a json value for the given path and performs callback using callback object
-         *
-         * @param path - path to json object
-         * @param prefix - prefix string
-         * @param cb_object - callback object
-         */
-        inline void
-        _perform_callback(const std::string &path, const std::string &prefix, std::shared_ptr<springtail::RedisCache::RedisCacheChangeCallback> cb_object) {
-            std::string item_path = path.substr(prefix.length());
-            std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object = _get_value(path, _storage);
-            if (json_optional_object.has_value()) {
-                cb_object->change_callback(item_path, json_optional_object.value().get());
-            } else {
-                cb_object->change_callback(item_path, {});
-            }
-        }
-
-        /**
-         * @brief Verify if the specified path is in json object
-         *
-         * @param path - json path
-         * @param storage - storage json object
-         * @return true
-         * @return false
-         */
-        static inline bool
-        _check_storage(const std::string &path, const nlohmann::json &storage)
-        {
-            nlohmann::json::json_pointer path_ptr(path);
-            if (storage.contains(path_ptr)) {
-                std::deque<std::string> json_path_queue;
-                common::split_string("/", path.substr(1), json_path_queue);
-                std::string storage_path;
-
-                while (!json_path_queue.empty()) {
-                    const std::string &path_item = json_path_queue.front();
-                    storage_path += "/" + path_item;
-                    json_path_queue.pop_front();
-                    nlohmann::json::json_pointer storage_json_ptr(storage_path);
-                    if (_is_array_path(storage_json_ptr, storage)) {
-                        if (!json_path_queue.empty()) {
-                            return false;
-                        }
-                    }
-                }
-                return true;
-            }
-            return false;
-        }
-
-        /**
-         * @brief Figure out the condition for triggering path notification for given path
-         *
-         * @param path - json path
-         * @return true
-         * @return false
-         */
-        inline bool
-        _notify_path(const std::string &path)
-        {
-            if (_check_storage(path, _old_storage) || _check_storage(path, _storage)) {
-                return true;
-            }
-            return false;
-        }
-
-        /**
-         * @brief Find out if the item exists in the given json array.
-         *
-         * @param json_array - json array
-         * @param json_element - json element
-         * @return true
-         * @return false
-         */
-        static inline bool
-        _find_in_array(const nlohmann::json &json_array, const nlohmann::json &json_element)
-        {
-            assert(json_array.type() == nlohmann::json::value_t::array);
-            nlohmann::json::const_iterator it = std::find_if(json_array.begin(), json_array.end(),
-                [&json_element](const nlohmann::json& item) {
-                    return item == json_element;
-                });
-            return (it != json_array.end());
         }
 
         /**
@@ -461,6 +329,57 @@ namespace springtail {
                 }
             }
             return std::make_pair(u, v);
+        }
+
+        bool
+        _has_array_in_path(const nlohmann::json::json_pointer &json_ptr, const nlohmann::json &storage)
+        {
+            nlohmann::json::json_pointer local_json_ptr = json_ptr;
+            while (true) {
+                std::optional<std::reference_wrapper<const nlohmann::json>> json_object = _get_value(local_json_ptr, storage);
+                if (json_object.has_value() && json_object.value().get().type() == nlohmann::json::value_t::array) {
+                    // std::cout << "pointer: " << json_ptr.to_string() << " is an array" << std::endl;
+                    return true;
+                }
+                if (!local_json_ptr.empty()) {
+                    local_json_ptr = local_json_ptr.parent_pointer();
+                } else {
+                    break;
+                }
+            }
+            return false;
+        }
+
+        bool
+        _has_array_in_path(const std::string &path, const nlohmann::json &storage)
+        {
+            nlohmann::json::json_pointer json_ptr(path);
+            return _has_array_in_path(json_ptr, storage);
+        }
+
+        bool
+        _inside_array_path(const std::string &path, const nlohmann::json &storage)
+        {
+            nlohmann::json::json_pointer json_ptr(path);
+            return _has_array_in_path(json_ptr.parent_pointer(), storage);
+        }
+
+        std::string
+        _get_array_path(const std::string &path, const nlohmann::json &storage) {
+            std::deque<std::string> json_path_queue;
+            common::split_string("/", path.substr(1), json_path_queue);
+            std::string storage_path;
+
+            while (!json_path_queue.empty()) {
+                const std::string &path_item = json_path_queue.front();
+                storage_path += "/" + path_item;
+                json_path_queue.pop_front();
+                nlohmann::json::json_pointer storage_json_ptr(storage_path);
+                if (_is_array_path(storage_json_ptr, storage)) {
+                    return storage_path;
+                }
+            }
+            return "";
         }
     };
 };

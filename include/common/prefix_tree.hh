@@ -86,11 +86,11 @@ namespace springtail {
          *                      then all the nodes under this path will be visited
          * @param select_fun - function for selection criteria
          */
-        void collect_items(std::vector<std::pair<std::string, T>> &out_queue, const std::string path, std::deque<std::string> &node_path,
-                std::function<bool (const T&)> select_fun) {
+        void collect_items(std::vector<std::pair<std::string, T>> &out_queue, const std::string &path, std::deque<std::string> &node_path,
+                std::function<bool (const std::string &, const T&)> select_fun) {
             // get the values from the current node
             for (const auto & value: _values) {
-                if (select_fun(value)) {
+                if (select_fun(path, value)) {
                     out_queue.push_back(std::make_pair(path, value));
                 }
             }
@@ -115,27 +115,30 @@ namespace springtail {
          * @brief Count the number of items stored in the tree that satisfy selection criteria
          *
          * @param node_path - path to follow through the tree
+         * @param path - prefix path to use on each level
          * @param select_fun - function for selection criteria
          * @return size_t - number of items on the path and under it that satisfy selectio criteria
          */
-        size_t count_items(std::deque<std::string> &node_path, std::function<bool (const T&)> select_fun) {
+        size_t count_items(std::deque<std::string> &node_path, const std::string &path, std::function<bool (const std::string &, const T&)> select_fun) {
             size_t count = 0;
             for (const auto & value: _values) {
-                if (select_fun(value)) {
+                if (select_fun(path, value)) {
                     count++;
                 }
             }
             if (node_path.empty()) {
                 // once the the in_queue is empty, walk the tree depth first
                 for (const auto &child: _children) {
-                    count += child.second->count_items(node_path, select_fun);
+                    std::string next_path = path + "/" + child.first;
+                    count += child.second->count_items(node_path, next_path, select_fun);
                 }
             } else {
                 // as long as the in_queue is not empty, follow the path
                 std::string top_key = node_path.front();
                 node_path.pop_front();
                 if (_children.contains(top_key)) {
-                    count += _children[top_key]->count_items(node_path, select_fun);
+                    std::string next_path = path + "/" + top_key;
+                    count += _children[top_key]->count_items(node_path, next_path, select_fun);
                 }
             }
             return count;
@@ -148,7 +151,7 @@ namespace springtail {
          */
         size_t size() {
             std::deque<std::string> node_path = {};
-            return count_items(node_path, [](const T&){ return true; });
+            return count_items(node_path, [](const std::string &, const T&){ return true; });
         }
     private:
         /**

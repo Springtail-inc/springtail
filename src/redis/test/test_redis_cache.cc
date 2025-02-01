@@ -383,94 +383,135 @@ namespace {
         _cache->add_callback("top_level_hash/top_key5", redis_watcher);
 
         // add string
+        std::cout << "add string" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key1", nlohmann::to_string(hash_values["top_key1"]));
         c.wait();
 
+        // char ch;
+        // std::cin >> ch;
         // add string
+        // std::cout << "add string" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key2", nlohmann::to_string(hash_values["top_key2"]));
         c.wait();
 
+        // std::cin >> ch;
         // add hash
+        // std::cout << "add hash" << std::endl;
         c.increment_by(4);
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
         c.wait();
 
+        // std::cin >> ch;
         // add array
+        // std::cout << "add array" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // replace first key by a different string
+        // std::cout << "replace first key by a different string" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key1", "new_value1");
         c.wait();
 
+        // std::cin >> ch;
         // replace second key by a different string
+        // std::cout << "replace second key by a different string" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key2", "new_value2");
         c.wait();
 
+        // std::cin >> ch;
         // change hash value
+        // std::cout << "change hash value" << std::endl;
         c.increment_by(3);
         hash_values.at("/top_key3/bottom_key1"_json_pointer) = "new_value1";
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
         c.wait();
 
+        // std::cin >> ch;
         // change hash value
+        // std::cout << "change hash value" << std::endl;
         c.increment_by(3);
         hash_values.at("/top_key3/bottom_key2"_json_pointer) = "new_value2";
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
         c.wait();
 
+        // std::cin >> ch;
         // delete hash
+        // std::cout << "delete hash" << std::endl;
         nlohmann::json top_key3_value = hash_values["top_key3"];
         c.increment_by(4);
         _test_client->hdel(hash_key, "top_key3");
         c.wait();
 
+        // std::cin >> ch;
         // add hash back
+        // std::cout << "add hash back" << std::endl;
         c.increment_by(4);
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(top_key3_value));
         c.wait();
 
+        // std::cin >> ch;
         // Replace hash by string
+        // std::cout << "replace hash by string" << std::endl;
         c.increment_by(4);
         _test_client->hset(hash_key, "top_key3", "some string for top_key3");
         c.wait();
 
+        // std::cin >> ch;
+        // assign different string to a former hash
+        // std::cout << "assign different string to a former hash" << std::endl;
+        c.increment_by(2);
+        _test_client->hset(hash_key, "top_key3", "some other string for top_key3");
+        c.wait();
+
+        // std::cin >> ch;
         // Replace string by hash
+        // std::cout << "Replace string by hash" << std::endl;
         c.increment_by(4);
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(top_key3_value));
         c.wait();
 
+        // std::cin >> ch;
         // change array value
+        // std::cout << "change array value" << std::endl;
         nlohmann::json top_key4_value = hash_values["top_key4"];
         c.increment_by(2);
         hash_values.at("/top_key4/0"_json_pointer) = 5;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // change array value
+        std::cout << "change array value" << std::endl;
         c.increment_by(2);
         hash_values.at("/top_key4/1"_json_pointer) = 6;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // remove array value
+        // std::cout << "remove array value" << std::endl;
         c.increment_by(2);
         hash_values.at("top_key4").erase(0);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // add array value at the beginning
+        // std::cout << "add array value at the beginning" << std::endl;
         c.increment_by(2);
         hash_values.at("top_key4").insert(hash_values.at("top_key4").begin(), 1);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // add hash to an array
+        // std::cout << "assign array element to hash" << std::endl;
         c.increment_by(2);
         hash_values["top_key4"][4] = R"({
             "item_key1": "item_value1",
@@ -481,19 +522,25 @@ namespace {
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
-        // remove first elemen from the array
+        // std::cin >> ch;
+        // remove first element from the array
+        // std::cout << "remove first element from the array" << std::endl;
         c.increment_by(2);
         hash_values.at("top_key4").erase(0);
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // restore original array values
+        // std::cout << "restore original array values" << std::endl;
         c.increment_by(2);
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // Replace array by hash
+        // std::cout << "assign array to hash" << std::endl;
         c.increment_by(3);
         hash_values["top_key4"] = R"({
             "key1": "item1",
@@ -503,25 +550,33 @@ namespace {
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // restore original array values
+        // std::cout << "assign array to array" << std::endl;
         c.increment_by(3);
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // Replace array by string
+        // std::cout << "assign array to string" << std::endl;
         c.increment_by(2);
         hash_values["top_key4"] = R"("string for top_key4")"_json;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // restore original array values
+        // std::cout << "assign array to top_key4" << std::endl;
         c.increment_by(2);
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // Replace array by hash with keys identical to array indices
+        // std::cout << "assign hash to top_key4" << std::endl;
         c.increment_by(4);
         hash_values["top_key4"] = R"({
             "0": "item1",
@@ -531,24 +586,32 @@ namespace {
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // TODO: this change generates wrong notifications
         // restore original array values
+        // std::cout << "assign array to top_key4" << std::endl;
         c.increment_by(4);
         hash_values["top_key4"] = top_key4_value;
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
 
+        // std::cin >> ch;
         // add string to hash
+        // std::cout << "add string to hash" << std::endl;
         c.increment_by(2);
         _test_client->hset(hash_key, "top_key5", "value5");
         c.wait();
 
+        // std::cin >> ch;
         // remove string from hash
+        // std::cout << "remove string from hash" << std::endl;
         c.increment_by(2);
         _test_client->hdel(hash_key, "top_key5");
         c.wait();
 
+        // std::cin >> ch;
         // remove key of the hash
+        // std::cout << "remove key of the hash" << std::endl;
         c.increment_by(7);
         _test_client->del(hash_key);
         c.wait();
