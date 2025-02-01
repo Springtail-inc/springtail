@@ -33,10 +33,10 @@ RedisCache::RedisCache(bool config_db)
 
 RedisCache::~RedisCache()
 {
-    SPDLOG_INFO("Stopping subscriber thread {}", _id);
+    SPDLOG_DEBUG("Stopping subscriber thread {}", _id);
     _shutdown = true;
     _subscriber_thread.join();
-    SPDLOG_INFO("Joined subscriber thread {}", _id);
+    SPDLOG_DEBUG("Joined subscriber thread {}", _id);
     _subscriber->punsubscribe(_subscribe_pattern);
 }
 
@@ -45,7 +45,7 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 {
     // msg contains action performed on the data: hset, hdel, sadd, etc.
     // channel will contain the key that fits the pattern, it needs to be extracted
-    SPDLOG_INFO("received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
+    SPDLOG_DEBUG("received notification: pattern: {}; channel: {}; msg = {}", pattern, channel, msg);
 
     // extract the key from the notification
     std::string key;
@@ -59,14 +59,13 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
 
     // lock the storage
     std::unique_lock storage_lock(_storage_mutex);
-    SPDLOG_INFO("{}: entered", __FUNCTION__);
 
     // get the new value of the key from redis (if the key is removed, it can be nullptr)
     nlohmann::json new_key_value;
     RedisType new_key_type;
     tie(new_key_value, new_key_type) = _read_key_value(key);
 
-    SPDLOG_INFO("key: {}, new_value: {}", key, new_key_value.dump(4));
+    SPDLOG_DEBUG("key: {}, new_value: {}", key, new_key_value.dump(4));
 
     // get the diff and update storage
     nlohmann::json key_value_diff = nullptr;
@@ -85,13 +84,12 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
         key_value_diff = nlohmann::json::diff(_old_storage, _storage);
     }
     _process_diff(key_value_diff, top_level_path);
-    SPDLOG_INFO("{}: exited", __FUNCTION__);
 }
 
 void
 RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path)
 {
-    SPDLOG_INFO("key_value_diff: {}", diff.dump(4));
+    SPDLOG_DEBUG("key_value_diff: {}", diff.dump(4));
     std::string prefix = "/" + std::to_string(_instance_id) + ":";
     // lock callback storage
     std::shared_lock callback_lock(_callback_mutex);
@@ -305,7 +303,6 @@ bool
 RedisCache::set_value(const std::string &path, const nlohmann::json &value)
 {
     std::unique_lock lock(_storage_mutex);
-    SPDLOG_INFO("{}: entered", __FUNCTION__);
 
     std::string json_path = "/" + std::to_string(_instance_id) + ":" + path;
     nlohmann::json::json_pointer json_path_ptr(json_path);
@@ -316,7 +313,12 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
     json_path_queue.pop_front();
 
     _old_storage = _storage;
-    if (!_set_value(json_path_ptr, _storage, value)) {
+
+    try {
+        _storage[json_path_ptr] = value;
+    } catch (const nlohmann::json::out_of_range& e) {
+        return false;
+    } catch (const nlohmann::json::parse_error& e) {
         return false;
     }
 
@@ -379,11 +381,9 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
         _process_diff(key_value_diff, "");
     } else {
-        SPDLOG_INFO("Storage update failed: reverting the changes");
+        SPDLOG_ERROR("Storage update failed: reverting the changes");
         _storage = _old_storage;
     }
-    SPDLOG_INFO("{}: exited", __FUNCTION__);
-
     return ret;
 }
 
@@ -394,10 +394,10 @@ RedisCache::add_callback(const std::string &path, const std::shared_ptr<RedisCac
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        SPDLOG_INFO("adding callback for json_path = {}", json_path);
+        SPDLOG_DEBUG("adding callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        SPDLOG_INFO("adding callback for empty json_path");
+        SPDLOG_DEBUG("adding callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
@@ -411,14 +411,56 @@ RedisCache::remove_callback(const std::string &path, const std::shared_ptr<Redis
     if (!path.empty()) {
         // do not add leading "/" because we are going to use it as a delimiter
         std::string json_path = std::to_string(_instance_id) + ":" + path;
-        SPDLOG_INFO("removing callback for json_path = {}", json_path);
+        SPDLOG_DEBUG("removing callback for json_path = {}", json_path);
         common::split_string("/", json_path, json_path_queue);
     } else {
-        SPDLOG_INFO("removing callback for empty json_path");
+        SPDLOG_DEBUG("removing callback for empty json_path");
     }
 
     std::unique_lock lock(_callback_mutex);
     _callbacks.remove_item(json_path_queue, cb);
+}
+
+std::pair<std::vector<std::string>, std::vector<std::string>>
+RedisCache::_array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, bool arr1_unique, bool arr2_unique)
+{
+    assert(arr1.type() == nlohmann::json::value_t::array);
+    assert(arr2.type() == nlohmann::json::value_t::array);
+
+    std::vector<std::string> u, v;
+    for (uint32_t i = 0; i < arr1.size(); i++) {
+        u.push_back(nlohmann::to_string(arr1[i]));
+    }
+    for (uint32_t i = 0; i < arr2.size(); i++) {
+        v.push_back(nlohmann::to_string(arr2[i]));
+    }
+    std::sort(u.begin(), u.end());
+    std::sort(v.begin(), v.end());
+
+    // remove unique elements if required
+    if (arr1_unique) {
+        auto last = std::unique(u.begin(), u.end());
+        u.erase(last, u.end());
+    }
+    if (arr2_unique) {
+        auto last = std::unique(v.begin(), v.end());
+        v.erase(last, v.end());
+    }
+
+    uint32_t i = 0;
+    uint32_t j = 0;
+
+    while ((u.begin() + i) != u.end() && (v.begin() + j) != v.end()) {
+        if (u[i] == v[j]) {
+            u.erase(u.begin() + i);
+            v.erase(v.begin() + j);
+        } else if (u[i] < v[j]) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+    return std::make_pair(u, v);
 }
 
 };

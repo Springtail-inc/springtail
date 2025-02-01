@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -201,28 +200,6 @@ namespace springtail {
         }
 
         /**
-         * @brief Set the value of specified json object at specified json path to specified json value
-         *
-         * @param json_ptr - json pointer
-         * @param json_object - json object
-         * @param json_value - json value
-         * @return true - on success
-         * @return false - on failure
-         */
-        static inline bool
-        _set_value(const nlohmann::json::json_pointer &json_ptr, nlohmann::json &json_object, const nlohmann::json &json_value)
-        {
-            try {
-                json_object[json_ptr] = json_value;
-                return true;
-            } catch (const nlohmann::json::out_of_range& e) {
-                return false;
-            } catch (const nlohmann::json::parse_error& e) {
-                return false;
-            }
-        }
-
-        /**
          * @brief Process notification for given pattern, channel, and message. This function is called by
          *          the subscriber thread.
          *
@@ -291,54 +268,23 @@ namespace springtail {
          *          the elements of the second array that are not in the first array
          */
         static inline std::pair<std::vector<std::string>, std::vector<std::string>>
-        _array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, bool arr1_unique = true, bool arr2_unique = true) {
-            assert(arr1.type() == nlohmann::json::value_t::array);
-            assert(arr2.type() == nlohmann::json::value_t::array);
+        _array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, bool arr1_unique = true, bool arr2_unique = true);
 
-            std::vector<std::string> u, v;
-            for (uint32_t i = 0; i < arr1.size(); i++) {
-                u.push_back(nlohmann::to_string(arr1[i]));
-            }
-            for (uint32_t i = 0; i < arr2.size(); i++) {
-                v.push_back(nlohmann::to_string(arr2[i]));
-            }
-            std::sort(u.begin(), u.end());
-            std::sort(v.begin(), v.end());
-
-            // remove unique elements if required
-            if (arr1_unique) {
-                auto last = std::unique(u.begin(), u.end());
-                u.erase(last, u.end());
-            }
-            if (arr2_unique) {
-                auto last = std::unique(v.begin(), v.end());
-                v.erase(last, v.end());
-            }
-
-            uint32_t i = 0;
-            uint32_t j = 0;
-
-            while ((u.begin() + i) != u.end() && (v.begin() + j) != v.end()) {
-                if (u[i] == v[j]) {
-                    u.erase(u.begin() + i);
-                    v.erase(v.begin() + j);
-                } else if (u[i] < v[j]) {
-                    i++;
-                } else {
-                    j++;
-                }
-            }
-            return std::make_pair(u, v);
-        }
-
-        bool
+        /**
+         * @brief Find if the given json pointer has array in the json path it points to in the give storage
+         *
+         * @param json_ptr - json pointer
+         * @param storage - json storage to check for array
+         * @return true
+         * @return false
+         */
+        static bool
         _has_array_in_path(const nlohmann::json::json_pointer &json_ptr, const nlohmann::json &storage)
         {
             nlohmann::json::json_pointer local_json_ptr = json_ptr;
             while (true) {
                 std::optional<std::reference_wrapper<const nlohmann::json>> json_object = _get_value(local_json_ptr, storage);
                 if (json_object.has_value() && json_object.value().get().type() == nlohmann::json::value_t::array) {
-                    // std::cout << "pointer: " << json_ptr.to_string() << " is an array" << std::endl;
                     return true;
                 }
                 if (!local_json_ptr.empty()) {
@@ -350,21 +296,44 @@ namespace springtail {
             return false;
         }
 
-        bool
+        /**
+         * @brief Find if the given json pointer has array in the json path it points to in the give storage
+         *
+         * @param path - json pointer in string form
+         * @param storage - json storage to check for array
+         * @return true
+         * @return false
+         */
+        static inline bool
         _has_array_in_path(const std::string &path, const nlohmann::json &storage)
         {
             nlohmann::json::json_pointer json_ptr(path);
             return _has_array_in_path(json_ptr, storage);
         }
 
-        bool
+        /**
+         * @brief Find out if json object pointed by the given json pointer is inside an array
+         *
+         * @param path - json pointer as string
+         * @param storage - json object for look up
+         * @return true
+         * @return false
+         */
+        static inline bool
         _inside_array_path(const std::string &path, const nlohmann::json &storage)
         {
             nlohmann::json::json_pointer json_ptr(path);
             return _has_array_in_path(json_ptr.parent_pointer(), storage);
         }
 
-        std::string
+        /**
+         * @brief Get the json pointer in string form to the first array from the top if found
+         *
+         * @param path - json pointer
+         * @param storage - json object for lookup
+         * @return std::string - json pointer to the first array inside the path
+         */
+        static inline std::string
         _get_array_path(const std::string &path, const nlohmann::json &storage) {
             std::deque<std::string> json_path_queue;
             common::split_string("/", path.substr(1), json_path_queue);

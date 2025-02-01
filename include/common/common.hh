@@ -110,25 +110,20 @@ namespace springtail {
             }
         }
 
-        // TODO: maybe use a template here
+        /**
+         * @brief Split a string based on a delimiter
+         * @param delimiter delimiter string (e.g., ":")
+         * @param string_value string to split (e.g., "this:is:a:string")
+         * @param out_queue output queue of strings
+         */
         static inline void
         split_string(const std::string &delimiter,
                      const std::string &string_value,
-                     std::deque<std::string> &outvec)
+                     std::deque<std::string> &out_queue)
         {
-            size_t start_pos = 0, end_pos = 0;
-            std::string token;
-            // iterate through string getting substring from past last delimiter
-            while ((end_pos = string_value.find(delimiter, start_pos)) != std::string::npos) {
-                token = string_value.substr(start_pos, end_pos - start_pos);
-                outvec.push_back(std::move(token));
-                start_pos = end_pos + delimiter.size();
-            }
-            // handle last token
-            if (start_pos < string_value.size()) {
-                token = string_value.substr(start_pos);
-                outvec.push_back(std::move(token));
-            }
+            std::vector<std::string> out_vector;
+            split_string(delimiter, string_value, out_vector);
+            std::move(out_vector.begin(), out_vector.end(), out_queue.begin());
         }
 
         template <typename T>
