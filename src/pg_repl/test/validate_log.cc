@@ -16,14 +16,14 @@ int main(int argc, char* argv[])
     std::string file;
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("file,f", boost::program_options::value<std::string>(&file)->default_value("wal.log"), "WAL file to process");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("file,f", po::value<std::string>(&file)->default_value("wal.log"), "WAL file to process");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

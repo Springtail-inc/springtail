@@ -17,6 +17,7 @@ set(PROXY_SOURCES
     parser.cc
     buffer_pool.cc
     history_cache.cc
+    authorization.cc
 )
 
 add_library(springtail_proxy ${PROXY_SOURCES})
@@ -131,6 +132,26 @@ target_link_libraries(test_database
 )
 add_dsymutil_command(test_database)
 gtest_discover_tests(test_database)
+
+add_executable(test_util test/test_util.cc)
+target_include_directories(test_util
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_util
+    PUBLIC springtail_common
+    PRIVATE GTest::gtest_main
+)
+gtest_discover_tests(test_util)
+
+add_executable(test_msg_queue test/test_msg_queue.cc)
+target_include_directories(test_msg_queue
+    PRIVATE ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_msg_queue
+    PUBLIC springtail_common
+    PRIVATE GTest::gtest_main
+)
+gtest_discover_tests(test_msg_queue)
 
 # install proxy to install directory
 install(TARGETS

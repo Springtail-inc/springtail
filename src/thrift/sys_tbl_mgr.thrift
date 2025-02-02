@@ -162,9 +162,17 @@ struct ColumnHistory {
 }
 
 struct GetSchemaResponse {
-    1: list<TableColumn> columns,
+    1: map<i32, TableColumn> columns,
     2: list<ColumnHistory> history,
-    3: list<IndexInfo> indexes
+    3: list<IndexInfo> indexes,
+    4: i64 access_xid_start,
+    5: i64 access_lsn_start,
+    6: i64 access_xid_end,
+    7: i64 access_lsn_end,
+    8: i64 target_xid_start,
+    9: i64 target_lsn_start,
+    10: i64 target_xid_end,
+    11: i64 target_lsn_end
 }
 
 struct ExistsRequest {
@@ -219,5 +227,5 @@ service Service {
 
     // performs a drop + create + update_roots as a single operation
     // to support swapping a newly synced table into place
-    DDLStatement swap_sync_table(1: TableRequest create, 2: UpdateRootsRequest roots);
+    DDLStatement swap_sync_table(1: TableRequest create, 2: list<IndexRequest> indexes, 3: UpdateRootsRequest roots);
 }

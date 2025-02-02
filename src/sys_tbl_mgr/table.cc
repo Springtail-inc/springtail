@@ -321,22 +321,34 @@ namespace springtail {
     }
 
     Table::Iterator
-    Table::begin()
+    Table::begin(uint32_t index_id)
     {
-        // check if the table is vacant
-        if (_primary_index == nullptr) {
-            return end();
-        }
+        if (index_id == constant::INDEX_PRIMARY) {
+            // check if the table is vacant
+            if (_primary_index == nullptr) {
+                return end();
+            }
 
-        // check if the table is empty
-        auto &&index_i = _primary_index->begin();
-        if (index_i == _primary_index->end()) {
-            return end();
-        }
+            // check if the table is empty
+            auto &&index_i = _primary_index->begin();
+            if (index_i == _primary_index->end()) {
+                return end();
+            }
 
-        auto page = _read_page_via_primary(index_i);
-        auto begin = page->begin();
-        return Iterator(this, _primary_index, index_i, std::move(page), begin);
+            auto page = _read_page_via_primary(index_i);
+            auto begin = page->begin();
+            return Iterator(this, _primary_index, index_i, std::move(page), begin);
+        } else {
+            auto const& [btree, cols] = _secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(_schema, cols);
+
+            // find the extent that could contain the lower_bound() key
+            auto i = btree->begin();
+            if (i == btree->end()) {
+                return end(index_id);
+            }
+            return Iterator(this, btree, i, index_schema);
+        }
     }
 
     StorageCache::SafePagePtr
@@ -1218,6 +1230,8 @@ namespace springtail {
 
     void Table::Iterator::Secondary::update_page()
     {
+        CHECK(_btree_i != _btree->end());
+
         uint64_t eid = _extent_id_f->get_uint64(*_btree_i);
         if (_page.empty() || _extent_id != eid) {
             _extent_id = eid;
@@ -1230,5 +1244,20 @@ namespace springtail {
     const Extent::Row& Table::Iterator::Secondary::row() const
     {
         return *_page_i;
+    }
+
+    Table::Iterator::Iterator(const Table *table, uint32_t index_id)
+    { 
+        if (index_id == constant::INDEX_PRIMARY) {
+            _tracker.emplace<Primary>(table, table->_primary_index, 
+                    table->_primary_index->end(), 
+                    StorageCache::SafePagePtr{}, 
+                    StorageCache::Page::Iterator{});
+        } else {
+            auto const& [btree, cols] = table->_secondary_indexes.at(index_id);
+            auto index_schema = _create_index_schema(table->_schema, cols);
+            _tracker.emplace<Secondary>(table, btree, 
+                    btree->end(), index_schema );
+        }
     }
 }

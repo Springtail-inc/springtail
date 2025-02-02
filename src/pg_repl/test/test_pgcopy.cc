@@ -103,10 +103,12 @@ namespace {
             create.xid = xid;
             create.lsn = constant::MAX_LSN - 1;
 
-            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[1]);
+            auto indexes = common::json_to_thrift_vector<sys_tbl_mgr::IndexRequest>(json[1]);
+
+            auto roots = common::json_to_thrift<sys_tbl_mgr::UpdateRootsRequest>(json[2]);
             roots.xid = xid;
 
-            client->swap_sync_table(create, roots);
+            client->swap_sync_table(create, indexes, roots);
 
             // clear the table entry from the hash
             redis->hdel(key, hkey);
@@ -126,7 +128,7 @@ namespace {
 
         // verify stats
         auto &&metadata = client->get_roots(db_id, oid, xid);
-        ASSERT_EQ(metadata.stats.row_count, 5000);
+        ASSERT_EQ(metadata->stats.row_count, 5000);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)

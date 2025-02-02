@@ -53,7 +53,8 @@ namespace pg_proxy {
             SYNC = 25,          ///< sync for extended query
             DESCRIBE = 26,      ///< describe statement
             SIMPLE_QUERY = 27,  ///< simple query statement parent (not cached)
-            ANONYMOUS = 28,     ///< anonymous statement (no name)
+            FUNCTION = 28,      ///< function call
+            ANONYMOUS = 29,     ///< anonymous statement (no name)
         };
 
         /** Type of cached query string */
@@ -125,7 +126,7 @@ namespace pg_proxy {
         Data         data;          ///< query string or packet data
         std::string  name;          ///< name of the statement (if named, e.g., prepared, portal, savepoint)
         std::string  hashed_name;   ///< hashed name of the statement
-        bool         is_read_safe;  ///< is associated query read-only
+        bool         is_read_safe;   ///< is associated query read-only
         std::shared_ptr<QueryStmt> dependency;  ///< dependent statement (e.g., bind depends on prepare)
         std::vector<std::shared_ptr<QueryStmt>> children; ///< children statements (e.g., of a simple query)
     };

@@ -19,17 +19,17 @@ main(int argc, char **argv)
     springtail_init();
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("get,g", "Get latest committed xid")
-        ("set,s", "Set latest committed xid")
-        ("dbid,d", boost::program_options::value<uint64_t>(&db_id)->default_value(1), "DB ID.")
-        ("xid,x", boost::program_options::value<uint64_t>(&xid)->default_value(0), "Xid to set");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("get,g", "Get latest committed xid");
+    desc.add_options()("set,s", "Set latest committed xid");
+    desc.add_options()("dbid,d", po::value<uint64_t>(&db_id)->default_value(1), "DB ID.");
+    desc.add_options()("xid,x", po::value<uint64_t>(&xid)->default_value(0), "Xid to set");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

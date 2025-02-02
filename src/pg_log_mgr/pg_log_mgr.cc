@@ -105,7 +105,7 @@ namespace springtail::pg_log_mgr {
             }
 
             for (auto &xact: committed_xacts) {
-                assert (xact->springtail_xid >= current_xid);
+                CHECK(xact->springtail_xid >= current_xid);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
             }
 
@@ -180,13 +180,15 @@ namespace springtail::pg_log_mgr {
             }
 
             // if the new state is running, then we should have been in the replay done state
-            if (internal_state == STATE_REPLAYING) {
-                // if in replaying, wait for replay done before switching to running
-                // XXX this blocks the pubsub thread until replay is done
+            // otherwise ignore the state change
+            if (internal_state == STATE_SYNC_STALL ||
+                internal_state == STATE_STARTUP_SYNC) {
+                // if in replaying, ignore message will switch to running when replay is done
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Received state change to running from replaying");
-                _internal_state.wait_and_set(STATE_REPLAYING, STATE_RUNNING);
+                return;
             }
-            // if in replay done set to running
+
+            // if in replay done set to running XXX
             _internal_state.test_and_set(STATE_REPLAYING, STATE_RUNNING);
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Current state is running: {}", (_internal_state.get() == STATE_RUNNING));
         }
@@ -284,8 +286,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogMgr::_do_table_copies(std::optional<std::vector<uint32_t>> table_ids)
     {
-        // set state to sync stall
-        _internal_state.set(STATE_SYNC_STALL);
+        // set state to sync stall, make sure we are in the running or startup sync state first
+        _internal_state.wait_and_set({STATE_RUNNING, STATE_STARTUP_SYNC}, STATE_SYNC_STALL);
 
         // notify xact handler to rollover log
         _notify_xact_start_sync();
@@ -498,23 +500,31 @@ namespace springtail::pg_log_mgr {
             // get log entry from queue
             PgLogQueueEntryPtr log_entry = this->_logger_queue.pop(constant::COORDINATOR_KEEP_ALIVE_TIMEOUT);
             if (log_entry == nullptr) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Timeout waiting for log entry");
                 continue;
             }
+
+            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Got log entry: path={}, start_offset={}, num_messages={}",
+                                log_entry->path, log_entry->start_offset, log_entry->num_messages);
 
             // check for stall message, if so then wait for sync to complete
             if (log_entry->is_stall_message) {
                 assert (_internal_state.is(STATE_SYNC_STALL));
                 // wait for sync to complete
                 _internal_state.set(STATE_SYNCING);
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Waiting for sync to complete");
                 _internal_state.wait_for_state({ STATE_REPLAYING, STATE_RUNNING });
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Sync to complete");
                 continue;
             }
 
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Processing log entry: path={}, start_offset={}, num_messages={}",
                                 log_entry->path, log_entry->start_offset, log_entry->num_messages);
+
             _pg_log_reader.process_log(log_entry->path, log_entry->start_offset,
                                        log_entry->num_messages);
         }
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Exiting log reader thread");
     }
 
     PgLogWriterPtr

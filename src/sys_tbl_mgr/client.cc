@@ -28,14 +28,21 @@ namespace springtail::sys_tbl_mgr {
     {
         nlohmann::json json = Properties::get(Properties::SYS_TBL_MGR_CONFIG);
         nlohmann::json rpc_json;
+        uint64_t cache_size;
 
         // fetch RPC properties for the sys_tbl_mgr client
         if (!Json::get_to(json, "rpc_config", rpc_json)) {
             throw Error("SysTblMgr RPC settings are not found");
         }
 
-        std::string server = Properties::get_sys_tbl_mgr_hostname();
+        if (!Json::get_to<uint64_t>(json, "cache_size", cache_size)) {
+            throw Error("Sys tbl mgr cache size settings not found");
+        }
 
+        // create the cache
+        _schema_cache = std::make_shared<SchemaCache>(cache_size);
+
+        std::string server = Properties::get_sys_tbl_mgr_hostname();
         init(server, rpc_json);
     }
 
@@ -148,6 +155,9 @@ namespace springtail::sys_tbl_mgr {
             throw SysTblMgrError();
         }
 
+        // automaticaly invalidate the schema cache from the provided XID
+        invalidate_table(db_id, msg.oid, xid);
+
         return result.statement;
     }
 
@@ -174,6 +184,9 @@ namespace springtail::sys_tbl_mgr {
             throw SysTblMgrError();
         }
 
+        // automaticaly invalidate the schema cache from the provided XID
+        invalidate_table(db_id, msg.oid, xid);
+
         return result.statement;
     }
 
@@ -193,6 +206,9 @@ namespace springtail::sys_tbl_mgr {
         if (result.statement.empty()) {
             throw SysTblMgrError();
         }
+
+        // automaticaly invalidate the schema cache from the provided XID
+        invalidate_table(db_id, msg.table_oid, xid);
 
         return result.statement;
     }
@@ -216,6 +232,9 @@ namespace springtail::sys_tbl_mgr {
         if (result.status != StatusCode::SUCCESS) {
             throw SysTblMgrError(result.message);
         }
+
+        // automaticaly invalidate the schema cache from the provided XID
+        invalidate_table(db_id, table_id, xid);
     }
 
 
@@ -257,6 +276,9 @@ namespace springtail::sys_tbl_mgr {
         if (result.statement.empty()) {
             throw SysTblMgrError();
         }
+
+        // automaticaly invalidate the schema cache from the provided XID
+        _schema_cache->invalidate_by_index(db_id, msg.oid, xid);
 
         return result.statement;
     }
@@ -311,112 +333,137 @@ namespace springtail::sys_tbl_mgr {
         }
     }
 
-    TableMetadata
+    TableMetadataPtr
     Client::get_roots(uint64_t db_id,
                       uint64_t table_id,
                       uint64_t xid)
     {
-        GetRootsResponse result;
-
         GetRootsRequest request;
         request.db_id = db_id;
-        request.xid = xid;
         request.table_id = table_id;
+        request.xid = xid;
 
+        GetRootsResponse result;
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->get_roots(result, request);
         });
 
-        TableMetadata metadata;
-        for (auto const &r: result.roots) {
-            metadata.roots.emplace_back(r.index_id, r.extent_id);
+        auto metadata = std::make_shared<TableMetadata>();
+        for (const auto &root : result.roots) {
+            metadata->roots.push_back([](const RootInfo &root) {
+                return TableRoot(root.index_id, root.extent_id);
+            }(root));
         }
-        metadata.stats.row_count = result.stats.row_count;
-        metadata.snapshot_xid = result.snapshot_xid;
+        metadata->stats.row_count = result.stats.row_count;
+        metadata->snapshot_xid = result.snapshot_xid;
 
         return metadata;
     }
 
-    SchemaMetadata
+SchemaMetadataPtr
+Client::_pack_metadata(const GetSchemaResponse &result) {
+    auto metadata = std::make_shared<SchemaMetadata>();
+    for (const auto &col_entry : result.columns) {
+        const auto &column = col_entry.second;
+        SchemaColumn value(column.name,
+                           column.position,
+                           static_cast<SchemaType>(column.type),
+                           column.pg_type,
+                           column.is_nullable);
+        if (column.__isset.pk_position) {
+            value.pkey_position = column.pk_position;
+        }
+        if (column.__isset.default_value) {
+            value.default_value = column.default_value;
+        }
+
+        metadata->columns.push_back(value);
+    }
+
+    for (auto history : result.history) {
+        SchemaColumn value(history.xid,
+                           history.lsn,
+                           history.column.name,
+                           history.column.position,
+                           static_cast<SchemaType>(history.column.type),
+                           history.column.pg_type,
+                           history.exists,
+                           history.column.is_nullable);
+        value.update_type = static_cast<SchemaUpdateType>(history.update_type);
+        if (history.column.__isset.pk_position) {
+            value.pkey_position = history.column.pk_position;
+        }
+        if (history.column.__isset.default_value) {
+            value.default_value = history.column.default_value;
+        }
+
+        metadata->history.push_back(value);
+    }
+
+    for (auto const& idx: result.indexes) {
+        Index info;
+        info.id = idx.id;
+        info.name = idx.name;
+        info.schema = idx.schema;
+        info.state = idx.state;
+        info.table_id = idx.table_id;
+        info.is_unique = idx.is_unique;
+        for (auto const& col: idx.columns) {
+            info.columns.emplace_back(col.idx_position, col.position);
+        }
+        //sort by index position
+        std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
+        metadata->indexes.push_back(std::move(info));
+    }
+
+    XidLsn access_start(static_cast<uint64_t>(result.access_xid_start),
+                        static_cast<uint64_t>(result.access_lsn_start));
+    XidLsn access_end(static_cast<uint64_t>(result.access_xid_end),
+                      static_cast<uint64_t>(result.access_lsn_end));
+    XidLsn target_start(static_cast<uint64_t>(result.target_xid_start),
+                        static_cast<uint64_t>(result.target_lsn_start));
+    XidLsn target_end(static_cast<uint64_t>(result.target_xid_end),
+                      static_cast<uint64_t>(result.target_lsn_end));
+
+    metadata->access_range = XidRange(access_start, access_end);
+    metadata->target_range = XidRange(target_start, target_end);
+
+    return metadata;
+}
+
+    std::shared_ptr<const SchemaMetadata>
     Client::get_schema(uint64_t db_id,
                        uint64_t table_id,
                        const XidLsn &xid)
     {
-        GetSchemaResponse result;
+        auto populate = [this](uint64_t db, uint64_t tid, const XidLsn &xid) {
+            ThriftClient c = _get_client();
 
-        GetSchemaRequest request;
-        request.db_id = db_id;
-        request.table_id = table_id;
-        request.xid = xid.xid;
-        request.lsn = xid.lsn;
+            GetSchemaRequest request;
+            request.db_id = db;
+            request.table_id = tid;
+            request.xid = xid.xid;
+            request.lsn = xid.lsn;
 
-        _invoke_with_retries([&result, &request](ThriftClient &c) {
-            c.client->get_schema(result, request);
-        });
+            GetSchemaResponse result;
+            _invoke_with_retries([&result, &request](ThriftClient &c) {
+                c.client->get_schema(result, request);
+            });
 
-        SchemaMetadata metadata;
-        for (auto column : result.columns) {
-            SchemaColumn value(column.name,
-                               column.position,
-                               static_cast<SchemaType>(column.type),
-                               column.pg_type,
-                               column.is_nullable);
-            if (column.__isset.pk_position) {
-                value.pkey_position = column.pk_position;
-            }
-            if (column.__isset.default_value) {
-                value.default_value = column.default_value;
-            }
+            return _pack_metadata(result);
+        };
 
-            metadata.columns.push_back(value);
-        }
-
-        for (auto history : result.history) {
-            SchemaColumn value(history.xid,
-                               history.lsn,
-                               history.column.name,
-                               history.column.position,
-                               static_cast<SchemaType>(history.column.type),
-                               history.column.pg_type,
-                               history.exists,
-                               history.column.is_nullable);
-            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-            if (history.column.__isset.pk_position) {
-                value.pkey_position = history.column.pk_position;
-            }
-            if (history.column.__isset.default_value) {
-                value.default_value = history.column.default_value;
-            }
-
-            metadata.history.push_back(value);
-        }
-
-        for (auto const& idx: result.indexes) {
-            Index info;
-            info.id = idx.id;
-            info.name = idx.name;
-            info.schema = idx.schema;
-            info.state = idx.state;
-            info.table_id = idx.table_id;
-            info.is_unique = idx.is_unique;
-            for (auto const& col: idx.columns) {
-                info.columns.emplace_back(col.idx_position, col.position);
-            }
-            //sort by index position
-            std::ranges::sort(info.columns, [](auto const& a, auto const& b) {return a.idx_position < b.idx_position;});
-            metadata.indexes.push_back(std::move(info));
-        }
-
-        return metadata;
+        // retrieve through the schema cache
+        return _schema_cache->get(db_id, table_id, xid, populate);
     }
 
-    SchemaMetadata
+    SchemaMetadataPtr
     Client::get_target_schema(uint64_t db_id,
                               uint64_t table_id,
                               const XidLsn &access_xid,
                               const XidLsn &target_xid)
     {
-        GetSchemaResponse result;
+        ThriftClient c = _get_client();
 
         GetTargetSchemaRequest request;
         request.db_id = db_id;
@@ -426,48 +473,12 @@ namespace springtail::sys_tbl_mgr {
         request.target_xid = target_xid.xid;
         request.target_lsn = target_xid.lsn;
 
+        GetSchemaResponse result;
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->get_target_schema(result, request);
         });
 
-        SchemaMetadata metadata;
-        for (auto column : result.columns) {
-            SchemaColumn value(column.name,
-                               column.position,
-                               static_cast<SchemaType>(column.type),
-                               column.pg_type,
-                               column.is_nullable);
-            if (column.__isset.pk_position) {
-                value.pkey_position = column.pk_position;
-            }
-            if (column.__isset.default_value) {
-                value.default_value = column.default_value;
-            }
-
-            metadata.columns.push_back(value);
-        }
-
-        for (auto history : result.history) {
-            SchemaColumn value(history.xid,
-                               history.lsn,
-                               history.column.name,
-                               history.column.position,
-                               static_cast<SchemaType>(history.column.type),
-                               history.column.pg_type,
-                               history.exists,
-                               history.column.is_nullable);
-            value.update_type = static_cast<SchemaUpdateType>(history.update_type);
-            if (history.column.__isset.pk_position) {
-                value.pkey_position = history.column.pk_position;
-            }
-            if (history.column.__isset.default_value) {
-                value.default_value = history.column.default_value;
-            }
-
-            metadata.history.push_back(value);
-        }
-
-        return metadata;
+        return _pack_metadata(result);
     }
 
     bool
@@ -491,19 +502,38 @@ namespace springtail::sys_tbl_mgr {
 
     std::string
     Client::swap_sync_table(const TableRequest &create,
+                            const std::vector<IndexRequest> indexes,
                             const UpdateRootsRequest &roots)
     {
         DDLStatement result;
 
-        _invoke_with_retries([&result, &create, &roots](ThriftClient &c) {
-            c.client->swap_sync_table(result, create, roots);
+        _invoke_with_retries([&result, &create, &indexes, &roots](ThriftClient &c) {
+            c.client->swap_sync_table(result, create, indexes, roots);
         });
 
         if (result.statement.empty()) {
             throw SysTblMgrError();
         }
 
+        // auto-invalidate the cache for the swapped table
+        invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
+
         return result.statement;
+    }
+
+    void
+    Client::invalidate_table(uint64_t db_id,
+                             uint64_t table_id,
+                             const XidLsn &xid)
+    {
+        _schema_cache->invalidate_table(db_id, table_id, xid);
+    }
+
+    void
+    Client::invalidate_db(uint64_t db_id,
+                          const XidLsn &xid)
+    {
+        _schema_cache->invalidate_db(db_id, xid);
     }
 
 } // namespace

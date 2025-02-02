@@ -47,20 +47,34 @@ namespace springtail::common {
             wait_for_state(std::set<StateEnum>{desired_state});
         }
 
-        /** Wait for sepecific state and then atomically switch to a new state */
-        void wait_and_set(StateEnum desired_state,
+        /** Wait for desired state change and then atomically switch to new state */
+        void wait_and_set(std::set<StateEnum> desired_states,
                           StateEnum new_state)
         {
             std::unique_lock<std::shared_mutex> lock(_mutex);
-            if (_current_state != desired_state) {
-                _cv.wait(lock, [this, desired_state]() {
-                    return _current_state == desired_state;
-                });
+            if (desired_states.contains(_current_state)) {
+                _current_state = new_state;
+                lock.unlock();
+                _cv.notify_all();
+                return;
             }
+
+            // wait for desired state
+            _cv.wait(lock, [this, desired_states]() {
+                return desired_states.contains(_current_state);
+            });
             _current_state = new_state;
             lock.unlock();
 
             _cv.notify_all();
+        }
+
+
+        /** Wait for specific state and then atomically switch to new state */
+        void wait_and_set(StateEnum desired_state,
+                          StateEnum new_state)
+        {
+            wait_and_set(std::set<StateEnum>{desired_state}, new_state);
         }
 
         /** Test and set state */
@@ -83,12 +97,12 @@ namespace springtail::common {
             return _current_state;
         }
 
-    /** Check if the current state is equal to the given state */
-    bool is(StateEnum state) const
-    {
-        std::shared_lock<std::shared_mutex> lock(_mutex);
-        return _current_state == state;
-    }
+        /** Check if the current state is equal to the given state */
+        bool is(StateEnum state) const
+        {
+            std::shared_lock<std::shared_mutex> lock(_mutex);
+            return _current_state == state;
+        }
 
     private:
         StateEnum _current_state;         ///< Current state

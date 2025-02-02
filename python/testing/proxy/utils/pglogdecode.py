@@ -135,9 +135,9 @@ def db_insert_msg(conn, header, code, message, data_row=None):
 def dump_hex(data):
     """Dump the data in hex format."""
     for (i, c) in enumerate(data):
-        print("{:02x}".format(c), end=' ')
+        logging.debug("{:02x}".format(c), end=' ')
         if i % 4 == 0:
-            print()
+            logging.debug("\n")
 
 def decode_header(file):
     """Decode the header of a log record.
@@ -236,8 +236,8 @@ def decode_data(data_with_header, header, db_conn=None):
     data = data_with_header[5:] # strip out code and length
     code = code.decode("utf-8")
 
-    print("{}, ClientID: {}, SessionID: {}, SeqID: {}, Code: {}, Length: {}"
-          .format(header['type_str'], header['seq_id_client_id'],
+    logging.debug("decode_data: {}, ClientID: {}, SessionID: {}, SeqID: {}, Code: {}, Length: {}"
+           .format(header['type_str'], header['seq_id_client_id'],
                   header['session_id'], header['seq_id_seq_id'], code, pkt_len))
 
     # get request or response type
@@ -246,15 +246,19 @@ def decode_data(data_with_header, header, db_conn=None):
     if code == '*':
         # session connect
         endpoint, _ = pglib.decode_string(data)
-        print("Session connect: endpoint={}, session_id={}".format(endpoint, header['session_id']))
+        logging.debug("Session connect: endpoint={}, session_id={}".format(endpoint, header['session_id']))
         db_insert_session(db_conn, header, endpoint)
         return
 
     if code == '!':
-        #session disconnect
-        print("Session disconnect: session_id={}".format(header['session_id']))
+        # session disconnect
+        logging.debug("Session disconnect: session_id={}".format(header['session_id']))
         db_update_session_disconnect(db_conn, header)
         return
+
+    if code == '-':
+        # ssl request packet
+        logging.debug("SSL request packet")
 
     msg = None
     data_row = None
@@ -350,11 +354,37 @@ def decode_data(data_with_header, header, db_conn=None):
         msg = "Row description: fields={}".format(len(fields))
         for i, field in enumerate(fields):
             msg += "\nField {}: name={}, type_oid={}".format(i+1, field['field_name'], field['data_type_oid'])
+    elif code == 'N':
+        # notice response
+        msg = "Notice response: "
+        msgs = pglib.decode_notice(data_with_header)
+        msg += f"C: {msgs['C']}, M: {msgs['M']}"
+    elif code == 'V':
+        # function call response
+        msg = "Function call response"
+    elif code == 'G':
+        # copy in response
+        msg = "Copy in response"
+    elif code == 'H':
+        # copy out response
+        msg = "Copy out response/Flush"
+    elif code == 'd':
+        # copy data
+        msg = "Copy data"
+    elif code == 'c':
+        # copy done
+        msg = "Copy done"
+    elif code == 'f':
+        # copy fail
+        msg = "Copy fail"
+    elif code == 'X':
+        # terminate by client
+        msg = "Terminate"
     else:
         msg = "Unhandled code: {}".format(code)
 
-    print(msg)
-    print()
+    logging.debug(msg)
+    logging.debug("\n")
 
     # insert message into database; if db_conn == None, it will do nothing
     db_insert_msg(db_conn, header, code, msg, data_row)
@@ -394,8 +424,8 @@ def parse_arguments():
 
     parser.add_argument('-H', '--hostname', type=str, default='127.0.0.1', help="The hostname of the database server")
     parser.add_argument('-p', '--port', type=int, default=5432, help="The port number on which the database server is listening")
-    parser.add_argument('-U', '--username', type=str, default='postgres', help="The username for connecting to the database")
-    parser.add_argument('-P', '--password', type=str, default='postgres', help="The password for connecting to the database")
+    parser.add_argument('-U', '--username', type=str, default='springtail', help="The username for connecting to the database")
+    parser.add_argument('-P', '--password', type=str, default='springtail', help="The password for connecting to the database")
     parser.add_argument('-s', '--requires_ssl', action='store_true', help="Flag to indicate if SSL is required")
     parser.add_argument('-d', '--database', type=str, default='proxy_logs', help="The name of the database to connect to")
 

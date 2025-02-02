@@ -77,7 +77,7 @@ namespace springtail::pg_proxy {
         void dump() const {
             std::shared_lock lock(_mutex);
             SPDLOG_DEBUG("DatabasePool size: {}", count);
-            for (const auto &it : _free_sessions) {
+            for ([[maybe_unused]] const auto &it : _free_sessions) {
                 SPDLOG_DEBUG("DatabasePool db_id: {} username: {} size: {}", it.first.first, it.first.second, it.second.size());
             }
         }
@@ -142,14 +142,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
          * Virtual to allow override in testing.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters);
 
@@ -208,14 +206,12 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) = 0;
 
@@ -238,15 +234,13 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @param instance DatabaseInstancePtr instance
          * @return ServerSessionPtr session
          */
-        virtual ServerSessionPtr _allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        virtual ServerSessionPtr _allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters,
             DatabaseInstancePtr instance);
@@ -320,14 +314,12 @@ namespace springtail::pg_proxy {
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
          * Allocated sessions are tracked by the _instance_sessions and _db_sessions maps.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) override;
 
@@ -373,14 +365,12 @@ namespace springtail::pg_proxy {
 
         /**
          * @brief Allocate a session from the db instance.  Creates a new session.
-         * @param server ProxyServerPtr server object
          * @param user UserPtr user
          * @param db_id uint64_t database id
          * @param parameters std::unordered_map<std::string, std::string> parameters
          * @return ServerSessionPtr session
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-            UserPtr user,
+        ServerSessionPtr allocate_session(UserPtr user,
             uint64_t db_id,
             const std::unordered_map<std::string, std::string> &parameters) override;
 
@@ -607,17 +597,16 @@ namespace springtail::pg_proxy {
          * @param parameters - startup parameters
          * @return ServerSessionPtr
          */
-        ServerSessionPtr allocate_session(ProxyServerPtr server,
-                                          const Session::Type type,
+        ServerSessionPtr allocate_session(const Session::Type type,
                                           const uint64_t db_id,
                                           UserPtr user,
                                           const std::unordered_map<std::string, std::string> &parameters) {
             if (type == Session::Type::PRIMARY) {
                 assert(_primary_set != nullptr);
-                return _primary_set->allocate_session(server, user, db_id, parameters);
+                return _primary_set->allocate_session(user, db_id, parameters);
             } else if (type == Session::Type::REPLICA) {
                 assert(_replica_set != nullptr);
-                return _replica_set->allocate_session(server, user, db_id, parameters);
+                return _replica_set->allocate_session(user, db_id, parameters);
             }
             assert (0);
             return nullptr;

@@ -258,6 +258,8 @@ class TestCase:
             return None
         except psycopg2.OperationalError as e:
             self._raise_failure(f'Query timed out: {e}')
+        except Exception as e:
+            self._raise_failure(f'Unknown error: {e}')
         
 
     def _execute_command(self, command: dict, do_fetch: bool = False) -> list:
@@ -290,20 +292,14 @@ class TestCase:
                 self._sync_step += 1
                 self._execute_sql(cursor, f"BEGIN; INSERT INTO sync_control (sync, test) VALUES ({self._sync_step}, '{self._name}'); COMMIT;", False)
 
-                # wait for it to appear in the replica
-                with self._fdw.cursor() as rc:
-                    done = False
-                    start = time.time()
-                    while not done and time.time() < start + self._metadata['sync_timeout']:
-                        result = self._execute_sql(rc, f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}';", True)
-                        if len(result) > 0 and result[0][0] == self._sync_step:
-                            done = True
-                        else:
-                            time.sleep(1)
+                # Wait for sync row to appear in replica
+                sync_time = common.wait_for_replica_condition(
+                    self._fdw,
+                    f"SELECT MAX(sync) FROM sync_control WHERE test = '{self._name}'",
+                    (self._sync_step,),
+                    timeout=self._metadata['sync_timeout']
+                )
 
-                    if not done:
-                        # fail if it takes longer than the timeout
-                        self._raise_failure(f'"sync" operation timed out after {self._metadata["sync_timeout"]} seconds')
                 return []
 
             elif command['type'] == 'schema_check':

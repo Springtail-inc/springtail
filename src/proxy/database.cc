@@ -266,14 +266,13 @@ namespace springtail::pg_proxy
     }
 
     ServerSessionPtr
-    DatabaseSet::_allocate_session(ProxyServerPtr server,
-                                   UserPtr user,
+    DatabaseSet::_allocate_session(UserPtr user,
                                    uint64_t db_id,
                                    const std::unordered_map<std::string, std::string> &parameters,
                                    DatabaseInstancePtr instance)
     {
         // create a new session from instance
-        auto session = instance->allocate_session(server, user, db_id, parameters);
+        auto session = instance->allocate_session(user, db_id, parameters);
 
         std::unique_lock lock(_mutex); // lock after getting the session, since it is blocking
 
@@ -343,8 +342,7 @@ namespace springtail::pg_proxy
 
 
     ServerSessionPtr
-    DatabaseReplicaSet::allocate_session(ProxyServerPtr server,
-                                         UserPtr user,
+    DatabaseReplicaSet::allocate_session(UserPtr user,
                                          uint64_t db_id,
                                          const std::unordered_map<std::string, std::string> &parameters)
     {
@@ -360,7 +358,7 @@ namespace springtail::pg_proxy
             return nullptr;
         }
 
-        return _allocate_session(server, user, db_id, parameters, instance);
+        return _allocate_session(user, db_id, parameters, instance);
     }
 
     /*********** Database Primary Set *************/
@@ -382,8 +380,7 @@ namespace springtail::pg_proxy
     }
 
     ServerSessionPtr
-    DatabasePrimarySet::allocate_session(ProxyServerPtr server,
-                                         UserPtr user,
+    DatabasePrimarySet::allocate_session(UserPtr user,
                                          uint64_t db_id,
                                          const std::unordered_map<std::string, std::string> &parameters)
     {
@@ -397,7 +394,7 @@ namespace springtail::pg_proxy
         lock.unlock();
 
         // allocate session
-        auto session = DatabaseSet::_allocate_session(server, user, db_id, parameters, instance);
+        auto session = DatabaseSet::_allocate_session(user, db_id, parameters, instance);
 
         return session;
     }
@@ -405,8 +402,7 @@ namespace springtail::pg_proxy
     /*********** Database Instance *************/
 
     ServerSessionPtr
-    DatabaseInstance::allocate_session(ProxyServerPtr server,
-                                       UserPtr user,
+    DatabaseInstance::allocate_session(UserPtr user,
                                        uint64_t db_id,
                                        const std::unordered_map<std::string, std::string> &parameters)
     {
@@ -416,7 +412,7 @@ namespace springtail::pg_proxy
         }
 
         // create a new session; this is a blocking activity as it requires creating a connection
-        return ServerSession::create(server, user, db_name.value(), prefix(), shared_from_this(), _type, parameters);
+        return ServerSession::create(user, db_name.value(), prefix(), shared_from_this(), _type, parameters);
     }
 
     /*********** Database *************/

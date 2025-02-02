@@ -208,19 +208,19 @@ int main(int argc, char *argv[])
     springtail::springtail_init();
 
     // parse the arguments
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("db,d", boost::program_options::value<uint64_t>(&db_id), "Database ID")
-        ("table,t", boost::program_options::value<std::string>(&table), "Table name to dump")
-        ("schema,s", boost::program_options::value<std::string>(&schema)->default_value("public"), "Schema name")
-        ("xid,x", boost::program_options::value<uint64_t>(&xid), "XID")
-        ("tid,i", boost::program_options::value<uint64_t>(&tid), "Table ID")
-        ("list,l", boost::program_options::bool_switch(&list)->default_value(false), "List tables");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("db,d", po::value<uint64_t>(&db_id), "Database ID");
+    desc.add_options()("table,t", po::value<std::string>(&table), "Table name to dump");
+    desc.add_options()("schema,s", po::value<std::string>(&schema)->default_value("public"), "Schema name");
+    desc.add_options()("xid,x", po::value<uint64_t>(&xid), "XID");
+    desc.add_options()("tid,i", po::value<uint64_t>(&tid), "Table ID");
+    desc.add_options()("list,l", po::bool_switch(&list)->default_value(false), "List tables");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {

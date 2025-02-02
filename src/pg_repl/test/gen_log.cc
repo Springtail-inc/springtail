@@ -15,16 +15,16 @@ int main(int argc, char **argv)
     bool dump;
 
     // Declare the supported options
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help", "Generate a Postgres log file from a JSON input file.")
-        ("input,i", boost::program_options::value<std::string>(&input_file), "json input file")
-        ("output,o", boost::program_options::value<std::string>(&output_file), "output file")
-        ("dump,d", boost::program_options::bool_switch(&dump), "dump");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help", "Generate a Postgres log file from a JSON input file.");
+    desc.add_options()("input,i", po::value<std::string>(&input_file), "json input file");
+    desc.add_options()("output,o", po::value<std::string>(&output_file), "output file");
+    desc.add_options()("dump,d", po::bool_switch(&dump), "dump");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     if (vm.count("help")) {
         std::cout << desc << "\n";

@@ -5,10 +5,11 @@ set(SYS_TBL_MGR_SOURCES
     client.cc
     server.cc
     service.cc
-    table_mgr.cc
+    schema_cache.cc
     schema_mgr.cc
-    table.cc
     system_tables.cc
+    table.cc
+    table_mgr.cc
 )
 
 # add the library target
@@ -38,9 +39,18 @@ target_link_libraries(test_sys_tbl_mgr
 )
 add_dsymutil_command(test_sys_tbl_mgr)
 
+add_executable(test_schema_cache test/test_schema_cache.cc)
+target_include_directories(test_schema_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_schema_cache
+  PUBLIC springtail_test
+  PRIVATE GTest::gtest_main
+)
+add_dsymutil_command(test_schema_cache)
+
 
 # hook tests into gtest framework
 gtest_discover_tests(test_sys_tbl_mgr)
+gtest_discover_tests(test_schema_cache)
 
 # install daemon to install directory
 install(TARGETS sys_tbl_mgr_daemon RUNTIME DESTINATION bin/system)

@@ -147,8 +147,8 @@ namespace springtail::thrift {
                 socket->open();
             }
 
-            int fd = socket->getSocketFD();
-            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Acquired thrift client: fd = {}, client = {}", _type_name, fd, (void *)client.get());
+            SPDLOG_LOGGER_DEBUG(spdlog::default_logger_raw(), "{}: Acquired thrift client: fd = {}, client = {}", _type_name,
+                    socket->getSocketFD(), (void *)client.get());
         }
 
         /**
@@ -302,7 +302,7 @@ namespace springtail::thrift {
                     api_call(c);
                     call_successful = true;
                 } catch (const apache::thrift::transport::TTransportException &e) {
-                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : ", _type_name, e.what());
+                    SPDLOG_LOGGER_ERROR(spdlog::default_logger_raw(), "{}: Failed API call : {}", _type_name, e.what());
                     if (_shutting_down) {
                         throw e;
                     }

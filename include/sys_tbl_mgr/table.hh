@@ -35,6 +35,7 @@ namespace springtail {
         TableStats stats;
         uint64_t snapshot_xid = 0;
     };
+    using TableMetadataPtr = std::shared_ptr<TableMetadata>;
 
     /**
      * Read-only interface to a table at a fixed XID.  Provides interfaces for accessing table
@@ -138,9 +139,9 @@ namespace springtail {
                         ExtentSchemaPtr schema )
                     : Tracker{table, btree, btree_i}
                 {
-                    if (schema) {
-                        _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
-                        _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
+                    _extent_id_f = schema->get_field(constant::INDEX_EID_FIELD);
+                    _row_id_f = schema->get_field(constant::INDEX_RID_FIELD);
+                    if (_btree_i != btree->end()) {
                         update_page();
                     }
                 }
@@ -242,19 +243,7 @@ namespace springtail {
             }
 
             /** Specifically for the end() iterator. */
-            Iterator(const Table *table, uint32_t index_id)
-            { 
-                if (index_id == constant::INDEX_PRIMARY) {
-                    _tracker.emplace<Primary>(table, table->_primary_index, 
-                            table->_primary_index->end(), 
-                            StorageCache::SafePagePtr{}, 
-                            StorageCache::Page::Iterator{});
-                } else {
-                    auto btree = table->index(index_id);
-                    _tracker.emplace<Secondary>(table, btree, 
-                            btree->end(), ExtentSchemaPtr{} );
-                }
-            }
+            Iterator(const Table *table, uint32_t index_id);
 
             /** For constructing an Iterator from the Table functions. */
             Iterator(const Table *table,
@@ -353,7 +342,7 @@ namespace springtail {
         /**
          * An iterator to the start of the table.
          */
-        Iterator begin();
+        Iterator begin(uint32_t index_id = constant::INDEX_PRIMARY);
 
         /**
          * An iterator to the end of the table.
@@ -575,7 +564,7 @@ namespace springtail {
             if (idx == 0) {
                 return _primary_index;
             }
-            return _secondary_indexes[idx].first;
+            return _secondary_indexes.at(idx).first;
         }
 
         /** This will convert column positions to column names based on the table schema

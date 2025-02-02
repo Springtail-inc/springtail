@@ -158,6 +158,7 @@ namespace springtail::gc {
         }
 
         XidLsn xid{idx._xid};
+
         sys_tbl_mgr::IndexInfo info = client->get_index_info(db_id, index_id, xid);
         if (info.id == 0) {
             //TODO: it seems like PG generates DROP INDEX with table ids, need
@@ -165,8 +166,6 @@ namespace springtail::gc {
             SPDLOG_INFO("The index is not valid: {}", index_id);
             return;
         }
-
-        SPDLOG_INFO("Drop index table id: {}", info.table_id);
 
         auto exists = TableMgr::get_instance()->exists(db_id, info.table_id, xid.xid, xid.lsn);
         if (!exists) {
@@ -176,21 +175,30 @@ namespace springtail::gc {
             return;
         }
 
+        // index column positions
+        std::vector<uint32_t> idx_cols;
+        for (auto const& col: info.columns) {
+            idx_cols.push_back(col.position);
+        }
+
+        auto meta = client->get_roots(db_id, info.table_id, idx._xid);
+        auto it = std::ranges::find_if(meta->roots, [&](auto const& v) {
+            return index_id == v.index_id;
+        });
+        CHECK(it != meta->roots.end());
+
         auto table = TableMgr::get_instance()->get_mutable_table(db_id, info.table_id, idx._xid, idx._xid);
-        auto root = table->index(index_id);
-        assert(root);
-
-
-        TableMetadata meta = client->get_roots(db_id, info.table_id, idx._xid);
-        auto it = std::ranges::find_if(meta.roots, [&](auto const& v) {
-                    return index_id == v.index_id;
-                });
-        assert(it != meta.roots.end());
-        meta.roots.erase(it);
-        client->update_roots(db_id, info.table_id, idx._xid, meta);
-
+        auto root = table->create_index_root(index_id, idx_cols);
+        if (it->extent_id != constant::UNKNOWN_EXTENT) {
+            root->init(it->extent_id);
+        } else {
+            root->init_empty();
+        }
         root->truncate();
         root->finalize();
+
+        meta->roots.erase(it);
+        client->update_roots(db_id, info.table_id, idx._xid, *meta);
 
         SPDLOG_INFO("Index dropped: {}:{}", db_id, index_id);
     }
@@ -224,7 +232,9 @@ namespace springtail::gc {
 
         // additional fields in the root schema to keep extent and row ids
         auto value_fields = std::make_shared<FieldArray>(2);
-        uint64_t row_id = 0;
+        uint64_t row_cnt = 0;
+        uint64_t current_extent_id = 0;
+        uint32_t current_row_id = 0;
 
         auto table = TableMgr::get_instance()->get_table(db_id, tid, idx._xid);
         for (auto row_i = table->begin(); row_i != table->end(); ++row_i) {
@@ -233,21 +243,30 @@ namespace springtail::gc {
                 return {};
             }
             // check if the index was dropped
-            if (row_id % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
+            if (row_cnt % DROP_CHECK_PERIOD == 0 && _was_dropped(key)) {
                 return root;
             }
             auto extent_id = row_i.extent_id();
 
+            if (extent_id != current_extent_id) {
+                // We are scanning in primary key order. It guarantees that
+                // row IDs start from zero and be in ascending order for 
+                // each new extent. Note: The extent IDs (offsets) may 
+                // be at any order.
+                current_extent_id = extent_id;
+                current_row_id = 0;
+            }
             (*value_fields)[0] = std::make_shared<ConstTypeField<uint64_t>>(extent_id);
-            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(static_cast<uint32_t>(row_id));
+            (*value_fields)[1] = std::make_shared<ConstTypeField<uint32_t>>(current_row_id);
 
             // insert key
             auto &&svalue = std::make_shared<KeyValueTuple>(key_fields, value_fields, *row_i);
             root->insert(svalue);
 
-            ++row_id;
+            ++current_row_id;
+            ++row_cnt;
         }
-        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_id);
+        SPDLOG_DEBUG_MODULE(LOG_GC, "Index build finished: {}:{}, rows={}", db_id, index_id, row_cnt);
         return root;
     }
 
@@ -276,20 +295,20 @@ namespace springtail::gc {
 
         IndexParams work_item;
 
-        {
-            std::unique_lock g(_m);
+        std::unique_lock g(_m);
 
-            // fetch the latest state of the work item before we erase it
-            work_item = _work_set[key];
-            _work_set.erase(key);
-            _cv_done.notify_one();
-        }
+        // fetch the latest state of the work item before we erase it
+        work_item = _work_set[key];
+
+        _work_set.erase(key);
+        _cv_done.notify_one();
+
         auto client = sys_tbl_mgr::Client::get_instance();
         if (!work_item._ddl.is_null()) {
             auto extent_id = root->finalize();
-            auto&& meta = client->get_roots(db_id, tid, idx._xid);
-            meta.roots.emplace_back(key.second, extent_id);
-            client->update_roots(db_id, tid, idx._xid, meta);
+            auto meta = client->get_roots(db_id, tid, idx._xid);
+            meta->roots.emplace_back(key.second, extent_id);
+            client->update_roots(db_id, tid, idx._xid, *meta);
         } else{
             // the index was deleted while we were building it
             root->truncate();
@@ -298,5 +317,9 @@ namespace springtail::gc {
             XidLsn xid{work_item._xid};
             client->set_index_state(db_id, xid, tid, index_id, sys_tbl::IndexNames::State::DELETED);
         }
+
+        // TODO: revisit it when we support asynchronous index builds 
+        // so that the lock and _cv_done are not required while
+        // root->finalize() and sys table updates.
     }
 }

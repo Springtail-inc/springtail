@@ -69,7 +69,7 @@ namespace springtail::sys_tbl_mgr {
         /** Performs a drop (if needed), create, and update_roots for a given table to swap it's
             newly synced data into place at a given XID.  Returns a JSON array of DDL statements to
             update the FDWs. */
-        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const UpdateRootsRequest &roots) override;
+        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const std::vector<IndexRequest> &indexes, const UpdateRootsRequest &roots) override;
 
     private:
         Service() = default;
@@ -171,6 +171,17 @@ namespace springtail::sys_tbl_mgr {
                 const std::vector<ColumnHistory> &columns);
 
         /**
+         * Set primary index information according to the current state 
+         * of the table columns.
+         * @param db_id The database ID.
+         * @param table_id The table that the schema is for.
+         * @param schema The table schema.
+         * @param table_name The table name.
+         */
+
+        void _set_primary_index(uint64_t db_id, uint64_t table_id, const std::string& schema,
+               const std::string& table_name, const XidLsn& xid);
+        /**
          * Clears the cache of schema data.  Called by finalize() once the system tables are
          * all committed to disk.
          */
@@ -181,7 +192,7 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::map<uint32_t, TableColumn> _read_schema_columns(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+        void _read_schema_columns(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to read the table indexes.
@@ -189,7 +200,8 @@ namespace springtail::sys_tbl_mgr {
          * @param table_id The table for which we are constructing a schema.
          * @param access_xid The XID/LSN at which we are querying the schema.
          */
-        std::vector<IndexInfo> _read_schema_indexes(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
+        void _read_schema_indexes(SchemaInfoPtr schema_info,
+                                  uint64_t db_id, uint64_t table_id, const XidLsn &access_xid);
 
         /**
          * Helper function to apply any in-memory changes to the schema columns that might be
@@ -199,7 +211,17 @@ namespace springtail::sys_tbl_mgr {
          * @param columns A set of columns already constructed by calling _read_schema_columns()
          *                that will be updated by this function.
          */
-        void _apply_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &xid, std::map<uint32_t, TableColumn> &columns);
+        void _apply_schema_cache_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+
+        /**
+         * Helper function to apply any in-memory changes to the indexes that might be
+         * required to bring them up-to-date to the provided XID/LSN.
+         * @param[out] info The schema indexes that will be updated.
+         * @param db_id The database ID.
+         * @param table_id The table for which we are constructing a schema.
+         * @param xid The XID/LSN at which we are querying the schema.
+         */
+        void _apply_index_cache_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -208,7 +230,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _read_schema_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        void _read_schema_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to read any schema changes recorded between the provided access_xid and
@@ -218,7 +240,7 @@ namespace springtail::sys_tbl_mgr {
          * @param access_xid The XID/LSN at which we are constructing a schema.
          * @param target_xid The XID/LSN up to which we are capturing changes to that schema.
          */
-        std::vector<ColumnHistory> _get_schema_cache_history(uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
+        void _get_schema_cache_history(SchemaInfoPtr info, uint64_t db_id, uint64_t table_id, const XidLsn &access_xid, const XidLsn &target_xid);
 
         /**
          * Helper function to extract a change entry for a schema by comparing the old and new
@@ -227,7 +249,7 @@ namespace springtail::sys_tbl_mgr {
          * @param new_schema The schema after the alteration.
          * @param xid The XID/LSN at which the alteration occurred.
          */
-        ColumnHistory _generate_update(const std::vector<TableColumn> &old_schema,
+        ColumnHistory _generate_update(const std::map<int32_t, TableColumn> &old_schema,
                                        const std::vector<TableColumn> &new_schema,
                                        const XidLsn &xid,
                                        nlohmann::json &ddl);
@@ -306,6 +328,9 @@ namespace springtail::sys_tbl_mgr {
         std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id,
                 const XidLsn& xid, std::optional<uint64_t> tid);
 
+        std::optional<std::pair<IndexInfo, XidLsn>> _find_cached_index(uint64_t db_id, uint64_t index_id,
+                const XidLsn& xid, std::optional<uint64_t> tid);
+
         /**
          * Retrieve the current read XID for a db.
          */
@@ -381,5 +406,25 @@ namespace springtail::sys_tbl_mgr {
                  std::map<uint64_t,
                           std::map<uint32_t,
                                    std::vector<ColumnHistory>>>> _schema_cache;
+        /**
+         * Cache of unapplied index changes.
+         * Stored as a map of DB -> Table ID -> (vector<IndexCacheItem>) (in ascending XID/LSN order)
+         */
+        struct IndexCacheItem
+        {
+            XidLsn xid;
+            IndexInfo info;
+        };
+        // The map is keyed the index ID.
+        // The cache items  are in ascending XID order
+        using TableIndexCache = std::map<uint64_t, std::vector<IndexCacheItem>>;
+
+        // index cache per table
+        using TableId = uint64_t;
+        using TableIndexMap = std::map<TableId, TableIndexCache>;
+
+        // index cache per DB
+        using DbId = uint64_t;
+        std::map<DbId, TableIndexMap> _index_cache;
     };
 }

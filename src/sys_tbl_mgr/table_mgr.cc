@@ -64,14 +64,12 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
-        }
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<Table>(db_id, table_id, xid, _table_base,
-                                       schema->get_sort_keys(), meta.indexes,
-                                       tbl_meta, schema);
+                                       schema->get_sort_keys(), secondary_indexes,
+                                       *tbl_meta, schema);
     }
 
     bool
@@ -108,28 +106,25 @@ namespace springtail {
         auto &&meta = sys_tbl_mgr::Client::get_instance()->get_schema(db_id, table_id, XidLsn{xid});
 
         // pass secondary indexes only
-        auto it = std::ranges::find_if(meta.indexes, [](auto const& v) { return v.id == constant::INDEX_PRIMARY; } );
-        if (it != meta.indexes.end()) {
-            meta.indexes.erase(it);
-        }
+        auto filtered = std::views::filter(meta->indexes, [](auto const& v) { return v.id != constant::INDEX_PRIMARY; });
+        std::vector<Index> secondary_indexes(filtered.begin(), filtered.end());
 
         return std::make_shared<MutableTable>(db_id, table_id, access_xid, target_xid,
-                                              _table_base, schema->get_sort_keys(), meta.indexes,
-                                              tbl_meta, schema, for_gc);
+                                              _table_base, schema->get_sort_keys(), secondary_indexes,
+                                              *tbl_meta, schema, for_gc);
     }
 
     MutableTablePtr
     TableMgr::get_snapshot_table(uint64_t db_id,
                                  uint64_t table_id,
                                  uint64_t snapshot_xid,
-                                 ExtentSchemaPtr schema)
+                                 ExtentSchemaPtr schema,
+                                 const std::vector<Index>& secondary_keys)
     {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
         // construct an empty mutable table with the provided snapshot XID and return it
-        // XXX we need to eventually get these secondary keys passed down from the table copy code
-        std::vector<Index> secondary_keys;
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                               _table_base, schema->get_sort_keys(), secondary_keys,
                                               tbl_meta, schema, false);

@@ -13,26 +13,23 @@
 using namespace springtail;
 using namespace springtail::pg_proxy;
 
-static ProxyServerPtr server = nullptr;
-
 static void
 handle_sigint(int signal)
 {
-    if (server != nullptr) {
-        server->shutdown();
-    }
+    ProxyServer *server = ProxyServer::get_instance();
+    server->shutdown();
 }
 
 int main(int argc, char* argv[])
 {
-    boost::program_options::options_description desc("Allowed options");
-    desc.add_options()
-        ("help,h", "Help message.")
-        ("daemonize", "Start the server as a daemon");
+    namespace po = boost::program_options;
+    po::options_description desc("Allowed options");
+    desc.add_options()("help,h", "Help message.");
+    desc.add_options()("daemonize", "Start the server as a daemon");
 
-    boost::program_options::variables_map vm;
-    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-    boost::program_options::notify(vm);
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
 
     // check if we need to print the help message
     if (vm.count("help")) {
@@ -70,21 +67,28 @@ int main(int argc, char* argv[])
 
     // setup the mode
     LoggerPtr logger = nullptr;
-    ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
-    std::string mode = Json::get_or<std::string>(json, "mode", "normal");
-    if (mode == "shadow") {
-        std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
-        if (log.empty()) {
-            throw Error("shadow_log_path is not defined");
-        }
+    std::filesystem::path log = Json::get_or<std::filesystem::path>(json, "shadow_log_path", "");
+    if (!log.empty()) {
         std::fstream log_file;
-        log_file.open(log, std::ios::out | std::ios::trunc | std::ios::binary);
-        log_file.close();
+        try {
+            // create and truncate the file
+            log_file.open(log, std::ios::out | std::ios::trunc | std::ios::binary);
+            log_file.close();
+        } catch (const std::ios_base::failure &e) {
+            throw Error(fmt::format("Error creating shadow log file {}: {}", log, e.what()));
+        }
 
         SPDLOG_INFO("Logging initialized to: {}", log.string());
         logger = std::make_shared<Logger>(log, 1024*1024*100, 5);
+    } else {
+        SPDLOG_INFO("Shadow logging disabled: log={}", log.string());
+    }
 
+    ProxyServer::MODE server_mode = ProxyServer::MODE::NORMAL;
+    std::string mode = Json::get_or<std::string>(json, "mode", "normal");
+    if (mode == "shadow") {
         server_mode = ProxyServer::MODE::SHADOW;
+        CHECK_NE(logger, nullptr);
     } else if (mode == "normal") {
         server_mode = ProxyServer::MODE::NORMAL;
     } else if (mode == "primary") {
@@ -93,9 +97,9 @@ int main(int argc, char* argv[])
         throw Error("Invalid mode specified");
     }
 
-    server = std::make_shared<ProxyServer>(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
+    ProxyServer *server = ProxyServer::get_instance();
+    server->init(port, num_threads, certificate, key, server_mode, enable_ssl, logger);
     server->set_log_level(log_level);
 
     server->run();
-    server->cleanup();
 }

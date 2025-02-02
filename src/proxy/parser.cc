@@ -9,6 +9,7 @@
 #include <proxy/logging.hh>
 
 extern "C" {
+    #include <postgres.h>
     #include "pg_query.h"
     #include "pg_query_internal.h"
     #include "nodes/nodeFuncs.h"
@@ -470,7 +471,7 @@ namespace springtail::pg_proxy {
         }
 
         case T_RangeVar: {
-            char *catalog = ((RangeVar*)node)->catalogname;
+            [[maybe_unused]] char *catalog = ((RangeVar*)node)->catalogname;
             char *schema = ((RangeVar*)node)->schemaname;
             char *relname = ((RangeVar*)node)->relname;
 

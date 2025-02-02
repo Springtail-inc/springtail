@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <set>
+#include <optional>
 
 #include <nlohmann/json.hpp>
 
@@ -43,9 +44,9 @@ namespace springtail::pg_fdw {
          * @param hostname optional hostname for connection
          */
         void init(const std::string &fdw_id,
-                     const std::string &username,
-                     const std::string &password,
-                     const std::optional<std::string> &hostname = std::nullopt);
+                  const std::string &username,
+                  const std::string &password,
+                  const std::optional<std::string> &hostname = std::nullopt);
 
     private:
         LruObjectCache<uint64_t, LibPqConnection> _fdw_conn_cache;  ///< FDW connections
@@ -83,7 +84,7 @@ namespace springtail::pg_fdw {
         void _internal_run() override;
 
         /** Helper to connect to fdw db */
-        LibPqConnectionPtr _connect_fdw(uint64_t db_id, const std::string &db_name);
+        LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
 
         /** Helper to connect to primary db */
         LibPqConnectionPtr _connect_primary(uint64_t db_id, const std::string &db_name);

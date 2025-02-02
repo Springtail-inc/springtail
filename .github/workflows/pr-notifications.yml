@@ -1,0 +1,103 @@
+name: PR Notifications
+
+on:
+  pull_request:
+    types:
+      - review_requested
+  pull_request_review:
+    types:
+      - submitted
+
+jobs:
+  notify-slack:
+    name: Notify Slack
+    permissions:
+      contents: read
+      pull-requests: read
+    # Only run if the event is pull request review requested or pull request review approved
+    if: |
+      (github.event_name == 'pull_request' && github.event.action == 'review_requested') ||
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install jq
+        uses: dcarbone/install-jq-action@v3.0.1
+      - name: Get PR information
+        id: info
+        run: |
+          echo "repo_name=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "pr_title=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          echo "pr_author=${{ github.event.pull_request.user.login }}" >> $GITHUB_OUTPUT
+          echo "pr_url=${{ github.event.pull_request.html_url }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.action }}" == "review_requested" ]; then
+            echo "event_type=reviews_requested" >> $GITHUB_OUTPUT
+            echo "event_name=PR Reviews Requested" >> $GITHUB_OUTPUT
+            echo "reviewers_title=Requested Reviewers" >> $GITHUB_OUTPUT
+            url="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers"
+            reviewers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              $url | jq -r '.users[].login' | sort | uniq | tr -d ' ' | tr '\n' ', ' | sed 's/,$//')
+            echo "reviewers=${reviewers}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.review.state }}" == "approved" ]; then
+            echo "event_type=pr_approved" >> $GITHUB_OUTPUT
+            echo "event_name=PR Approved" >> $GITHUB_OUTPUT
+            echo "reviewers_title=Approved By" >> $GITHUB_OUTPUT
+            url="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews"
+            approvers=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer  ${{ secrets.GITHUB_TOKEN }}" \
+              $url | jq -r '.[] | select(.state == "APPROVED") | .user.login' | sort | uniq | tr '\n' ', ' | sed 's/,$//')
+            echo "reviewers=${approvers}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # This step will generate review mentions
+      - name: Generate Reviewer Mentions
+        id: gen_reviewers
+        env:
+          MEMBER_ID_MAP: ${{ vars.MEMBER_ID_MAP }}
+        run: python3 -c "import sys, os, json; VAR_NAME='reviewers_mentions'; MEMBER_ID_MAP=json.loads(os.environ['MEMBER_ID_MAP']); reviewers=sys.argv[1].split(','); mentions=' '.join([f'<@{MEMBER_ID_MAP[n.strip()]}> ' for n in reviewers if n.strip() in MEMBER_ID_MAP]); print(f'{VAR_NAME}={mentions}', end='')" "${{ steps.info.outputs.reviewers }}" >> $GITHUB_OUTPUT
+
+      - name: Send notification to Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "*${{ steps.info.outputs.event_name }}*  :face_holding_back_tears: \n ${{ steps.gen_reviewers.outputs.reviewers_mentions }}",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ steps.info.outputs.repo_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "PR Title",
+                      "value": "${{ steps.info.outputs.pr_title }}",
+                      "short": false
+                    },
+                    {
+                      "title": "PR Author",
+                      "value": "${{ steps.info.outputs.pr_author }}",
+                      "short": true
+                    },
+                    {
+                      "title": "PR URL",
+                      "value": "${{ steps.info.outputs.pr_url }}",
+                      "short": false
+                    },
+                    {
+                      "title": "${{ steps.info.outputs.reviewers_title }}",
+                      "value": "${{ steps.info.outputs.reviewers }}",
+                      "short": true
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
