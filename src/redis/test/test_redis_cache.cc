@@ -800,11 +800,9 @@ namespace {
         EXPECT_EQ(array_values, stored_array_values);
 
         // test add duplicate
-        // c.increment();
         array_values = _cache->get_value("top_level_array");
         array_values[4] = "value2";
         ASSERT_FALSE(_cache->set_value("top_level_array/4", array_values[4]));
-        // c.wait();
         stored_array_values = _cache->get_value("top_level_array");
         EXPECT_NE(array_values, stored_array_values);
 

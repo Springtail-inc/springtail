@@ -123,7 +123,7 @@ namespace springtail {
         {
             std::vector<std::string> out_vector;
             split_string(delimiter, string_value, out_vector);
-            std::move(out_vector.begin(), out_vector.end(), out_queue.begin());
+            std::move(out_vector.begin(), out_vector.end(), std::back_inserter(out_queue));
         }
 
         template <typename T>
