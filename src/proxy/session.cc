@@ -166,14 +166,14 @@ namespace springtail::pg_proxy {
     }
 
     void
-    Session::_send_buffer(BufferPtr buffer, uint64_t seq_id, char code)
+    Session::_send_buffer(BufferPtr buffer, uint64_t seq_id)
     {
         // send the buffer to the server
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         CHECK_EQ(n, buffer->size());
 
         // log the buffer; data should point past header (length + code 5B)
-        _log_buffer(false, code, buffer->size() - 5, buffer->data() + 5, seq_id);
+        _log_buffer(false, buffer->data()[0], buffer->size() - 5, buffer->data() + 5, seq_id);
     }
 
     void

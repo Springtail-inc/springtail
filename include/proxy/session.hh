@@ -403,7 +403,7 @@ namespace springtail::pg_proxy {
         void _send_to_remote_session(char code, const BufferPtr buffer, uint64_t seq_id);
 
         /** Send data to session connection, assumes buffer contains code and length */
-        void _send_buffer(BufferPtr buffer, uint64_t seq_id, char code='\0');
+        void _send_buffer(BufferPtr buffer, uint64_t seq_id);
 
         /** Internal call to Session::read_message() */
         BufferPtr _read_message(char code, int32_t msg_length, uint64_t seq_id) {

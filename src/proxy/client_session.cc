@@ -232,11 +232,13 @@ namespace springtail::pg_proxy {
         // notify server replica/primary sessions via shutdown_server_sessions()
         uint64_t seq_id = _gen_seq_id();
         if (_primary_session != nullptr) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client primary use count: {}", _id, _primary_session.use_count());
             _primary_session->process_shutdown(seq_id);
             _primary_session = nullptr;
         }
 
         if (_replica_session != nullptr) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG3, "[C:{}] Client replica use count: {}", _id, _primary_session.use_count());
             _replica_session->process_shutdown(seq_id);
             _replica_session = nullptr;
         }
