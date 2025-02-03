@@ -353,6 +353,8 @@ namespace springtail::pg_proxy {
             ssize_t n = _connection->read(buffer, to_read, to_read);
             CHECK_EQ(n, to_read);
             msg_length -= n;
+
+            // XXX add logging of buffer if enabled
         }
     }
 
@@ -455,6 +457,12 @@ namespace springtail::pg_proxy {
 
         DCHECK_LE(msg_length, 1000000); // sanity check
 
+        if (_state == TRANSACTION_ERROR && code != 'Z') {
+            // we are in a transaction error state, ignore all messages until a 'Z'
+            _read_and_drop_message(msg_length);
+            return;
+        }
+
         // first handle messages where we just need to forward to client
         switch(code) {
             // these are messages that are a direct responses to queries
@@ -543,11 +551,11 @@ namespace springtail::pg_proxy {
                 _cancel_key = buffer->get32();
                 break;
 
-            case 'E':
+            case 'E': {
                 // Error response
                 // handle the error code, this determines if error is fatal
                 // it also sends the error response to the client
-                _decode_error_buffer(buffer, _seq_id);
+                std::string err_code = _decode_error_buffer(buffer, _seq_id);
                 PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error", _id);
                 if (_state == ERROR) {
                     // TODO: possible this is a dependency error, which for now will be fatal
@@ -560,9 +568,8 @@ namespace springtail::pg_proxy {
                 if (_state == QUERY) {
                     PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] error in query state, forwarding", _id);
                     // error during query
-                    _handle_query_error();
-                    // forward to client
-                    _send_to_remote_session(code, buffer, _seq_id);
+                    _handle_query_error(buffer, err_code);
+                    return;
                 }
 
                 if (_state == DEPENDENCIES) {
@@ -572,10 +579,12 @@ namespace springtail::pg_proxy {
                 }
 
                 break;
+            }
 
             case 'Z': {
                 // Ready for query
                 // I - Idle, T - Transaction, E - Error in transaction
+                auto old_state = _state;
                 char status = buffer->get();
                 uint64_t seq_id = _seq_id; // it may get reset in the handle functions
 
@@ -585,7 +594,7 @@ namespace springtail::pg_proxy {
                 // regardless of state
                 _handle_ready_for_query_response(status);
 
-                if (_state == DEPENDENCIES) {
+                if (old_state == DEPENDENCIES || old_state == TRANSACTION_ERROR) {
                     return;
                 }
 
@@ -679,9 +688,10 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::_handle_query_error()
+    ServerSession::_handle_query_error(BufferPtr buffer,
+                                       const std::string &err_code)
     {
-        assert (!_pending_queue.empty());
+        CHECK(!_pending_queue.empty());
         QueryStatusPtr query_status = _pending_queue.front();
 
         // pop the query from the queue, and issue response
@@ -689,12 +699,15 @@ namespace springtail::pg_proxy {
         query_status->msg->set_msg_response(query_status->query_complete_count);
         _client_msg_response(query_status->msg, false);
 
-        // if we are in extended error state, we need to wait for
-        // sync message and won't get any responses until then
+        // check if we are in an extended query
         if (!query_status->msg->data()->is_extended()) {
+            // forward to client
+            _send_to_remote_session('E', buffer, _seq_id);
             return;
         }
 
+        // if we are in extended error state, we need to wait for
+        // sync message and won't get any responses until then
         _state = EXTENDED_ERROR;
 
         // iterate through all pending messages and set them to error
@@ -702,13 +715,16 @@ namespace springtail::pg_proxy {
             query_status = _pending_queue.front();
             if (query_status->msg->data()->type == QueryStmt::Type::SYNC) {
                 // wait for query ready
-                return;
+                break;
             }
 
             // pop the query from the queue, and issue response
             _pending_queue.pop();
             _client_msg_response(query_status->msg, false);
         }
+
+        // forward to client
+        _send_to_remote_session('E', buffer, _seq_id);
     }
 
     void
@@ -734,7 +750,7 @@ namespace springtail::pg_proxy {
             return;
         }
 
-        DCHECK(_state == QUERY || _state == EXTENDED_ERROR);
+        DCHECK(_state == QUERY || _state == EXTENDED_ERROR || _state == TRANSACTION_ERROR);
 
         // check if current message is a sync message
         if (query_status != nullptr && query_status->msg->data()->type == QueryStmt::Type::SYNC) {
@@ -742,16 +758,24 @@ namespace springtail::pg_proxy {
         }
 
         // send ready for query message to client
-        if (!_is_shadow) {
+        if (!_is_shadow && _state != TRANSACTION_ERROR) {
             auto cs = get_client_session();
             CHECK_NE(cs, nullptr);
             cs->server_ready_msg(xact_status);
         }
 
         // if pending queue is not empty need to wait for them to complete
+        DCHECK(_pending_queue.empty());
         if (!_pending_queue.empty()) {
             return;
         }
+
+        if (_state == TRANSACTION_ERROR && xact_status != 'I') {
+            // we are in transaction error state
+            // not idle, wait for next ready for query
+            // XXX send a rollback()?
+            return;
+         }
 
         // no pending message, set state to ready and process next batch
         _state = READY;

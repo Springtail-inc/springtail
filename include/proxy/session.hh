@@ -57,19 +57,16 @@ namespace springtail::pg_proxy {
             DEPENDENCIES=6,   ///< waiting on dependencies
             QUERY=7,          ///< query in progress
             EXTENDED_ERROR=8, ///< extended message error state
+            TRANSACTION_ERROR=9, ///< transaction error state
 
             // reset session states; states after this session is reset
             // and released back to the session free pool
-            RESET_SESSION=9,         ///< reset session state, e.g. after error
-            RESET_SESSION_READY=10,  ///< reset session ready for allocation
-            RESET_SESSION_PARAMS=11, ///< reset session, sending startup parameters
+            RESET_SESSION=20,        ///< reset session state, e.g. after error
+            RESET_SESSION_READY=21,  ///< reset session ready for allocation
+            RESET_SESSION_PARAMS=22, ///< reset session, sending startup parameters
 
             ERROR=99          ///< fatal error state
         };
-
-        // max number of iterations to read packets on single socket
-        // before giving thread up
-        constexpr static int    PKT_ITER_MAX_COUNT = 5;
 
         /**
          * @brief Construct a session with a connection and server ptr.  Type forced to client.
