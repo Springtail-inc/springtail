@@ -65,6 +65,8 @@ namespace springtail {
             virtual void change_callback(const std::string &, const nlohmann::json &) = 0;
         };
 
+        using RedisCacheChangeCallbackPtr = std::shared_ptr<RedisCacheChangeCallback>;
+
         /**
          * @brief Get the value of json object at the specified path.
          *      The path will be turned into a json_pointer, format should be:
@@ -103,7 +105,7 @@ namespace springtail {
          * @param path - path into json document
          * @param cb - callback class derived from RedisCacheChangeCallback
          */
-        void add_callback(const std::string &path, const std::shared_ptr<RedisCacheChangeCallback> &cb);
+        void add_callback(const std::string &path, const RedisCacheChangeCallbackPtr &cb);
 
         /**
          * @brief Remove callback for the specified path notifications
@@ -111,7 +113,7 @@ namespace springtail {
          * @param path - path into json document
          * @param cb - callback class derived from RedisCacheChangeCallback
          */
-        void remove_callback(const std::string &path, const std::shared_ptr<RedisCacheChangeCallback> &cb);
+        void remove_callback(const std::string &path, const RedisCacheChangeCallbackPtr &cb);
 
         /**
          * @brief Get the total number of callbacks registered with RedisCache for the specified path.
@@ -133,7 +135,7 @@ namespace springtail {
         nlohmann::json _storage;                    ///> json document that holds all the values stored in redis
         nlohmann::json _old_storage;                ///> old storage is used when we change something in storage
         std::shared_mutex _callback_mutex;          ///> mutex for _callbacks access
-        PrefixNode<std::shared_ptr<RedisCacheChangeCallback>> _callbacks; ///> prefix tree for storing callback objects
+        PrefixNode<RedisCacheChangeCallbackPtr> _callbacks; ///> prefix tree for storing callback objects
         uint64_t _instance_id;                      ///> database instance id
         int _db_id;                                 ///> redis database id
 
@@ -215,7 +217,7 @@ namespace springtail {
          * @param diff - json diff
          * @param top_level_path - path string
          */
-        void _process_diff(const nlohmann::json &diff, const std::string &top_level_path);
+        void _process_diff(const nlohmann::json &diff, const std::string &top_level_path, std::unique_lock<std::shared_mutex> &storage_lock);
 
         /**
          * @brief Initialize storage from redis database

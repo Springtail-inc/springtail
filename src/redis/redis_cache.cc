@@ -1,5 +1,7 @@
 #include <functional>
+#include <queue>
 #include <set>
+#include <shared_mutex>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -83,17 +85,22 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
         }
         key_value_diff = nlohmann::json::diff(_old_storage, _storage);
     }
-    _process_diff(key_value_diff, top_level_path);
+    _process_diff(key_value_diff, top_level_path, storage_lock);
 }
 
+// TODO: add comments for this function
 void
-RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path)
+RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path, std::unique_lock<std::shared_mutex> &storage_lock)
 {
     SPDLOG_DEBUG("key_value_diff: {}", diff.dump(4));
     std::string prefix = "/" + std::to_string(_instance_id) + ":";
     // lock callback storage
     std::shared_lock callback_lock(_callback_mutex);
 
+    // when we have array changes, we get many diffs that basically reflect shifting of array elements
+    // since we want to stub out all these changes, we only need the path of the most top-level array
+    // we will insert this path only once so that all subsequent reference to the elements of the same
+    // array do not result in any extra callbacks
     std::set<std::string> diff_paths;
     for (nlohmann::json::const_iterator it = diff.begin(); it != diff.end(); it++) {
         const std::string &op = (*it)["op"];
@@ -102,38 +109,52 @@ RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_lev
         // complete the path
         std::string storage_path = top_level_path + path;
 
+        // check if there is an array path in the old or new version of the storage
         if (_has_array_in_path(storage_path, _storage)) {
+            // array found in _storage
             // stub out everything under array and add it only once
             std::string array_path = _get_array_path(storage_path, _storage);
             if (!diff_paths.contains(array_path)) {
                 diff_paths.insert(array_path);
             }
         } else if (_has_array_in_path(storage_path, _old_storage)) {
+            // array found in _old_storage
+            // stub out everything under array and add it only once
             std::string array_path = _get_array_path(storage_path, _old_storage);
             if (!diff_paths.contains(array_path)) {
                 diff_paths.insert(array_path);
             }
         } else {
+            // no array found
             diff_paths.insert(storage_path);
         }
     }
 
-    std::vector<std::pair<std::string, std::shared_ptr<RedisCacheChangeCallback>>> all_callbacks;
+    // collect all callbacks for the identified paths and store them in a vector
+    // it is possible that the user of this class has done something stupid and registered
+    // callbacks on specific array elements; those callbacks will be filtered out
+    // in the next loop
+    // another scenario is when an array becomes a hash with ids identical to array indices or vise versa;
+    // in this case those callbacks would have to be called and this is all handled correctly in the next loop
+    std::vector<std::pair<std::string, RedisCacheChangeCallbackPtr>> all_callbacks;
     for (const auto &diff_path: diff_paths) {
-        std::vector<std::pair<std::string, std::shared_ptr<RedisCacheChangeCallback>>> path_callbacks;
+        std::vector<std::pair<std::string, RedisCacheChangeCallbackPtr>> path_callbacks;
         std::deque<std::string> json_path_queue;
         common::split_string("/", diff_path.substr(1), json_path_queue);
         _callbacks.collect_items(path_callbacks, "", json_path_queue,
-            [](const std::string &tree_path, const std::shared_ptr<RedisCacheChangeCallback>& cb) {
+            [](const std::string &tree_path, const RedisCacheChangeCallbackPtr& cb) {
                 return true;
             });
         all_callbacks.insert(all_callbacks.end(), std::make_move_iterator(path_callbacks.begin()), std::make_move_iterator(path_callbacks.end()));
     }
 
-    for (std::vector<std::pair<std::string, std::shared_ptr<RedisCacheChangeCallback>>>::const_iterator it = all_callbacks.begin();
+    // go through all the callbacks and remove those that are exclusively applicable only to array elements
+    // the rest of the callbacks are put into the queue together with the path and the json value
+    std::queue<std::tuple<RedisCacheChangeCallbackPtr, std::string, nlohmann::json>> cb_queue;
+    for (std::vector<std::pair<std::string, RedisCacheChangeCallbackPtr>>::const_iterator it = all_callbacks.begin();
             it != all_callbacks.end(); it++) {
         const std::string &path = it->first;
-        std::shared_ptr<RedisCacheChangeCallback> cb_object = it->second;
+        RedisCacheChangeCallbackPtr cb_object = it->second;
         std::string item_path = path.substr(prefix.length());
 
         std::optional<std::reference_wrapper<const nlohmann::json>> new_json_object = _get_value(path, _storage);
@@ -146,17 +167,31 @@ RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_lev
             if (new_inside_array) {
                 if (old_jsonl_object.has_value() && !old_inside_array) {
                     // non-array item got removed and replaced with array
-                    cb_object->change_callback(item_path, empty_value);
+                    cb_queue.push(std::make_tuple(cb_object, item_path, empty_value));
                 }
             } else {
-                cb_object->change_callback(item_path, new_json_object.value().get());
+                cb_queue.push(std::make_tuple(cb_object, item_path, new_json_object.value().get()));
             }
         } else {
             if (old_jsonl_object.has_value() && !old_inside_array) {
                 // non-array item got removed and replaced with array
-                cb_object->change_callback(item_path, empty_value);
+                cb_queue.push(std::make_tuple(cb_object, item_path, empty_value));
             }
         }
+    }
+
+    // release all the locks
+    callback_lock.unlock();
+    storage_lock.unlock();
+
+    // call all callbacks
+    while (!cb_queue.empty()) {
+        auto cb_tuple = cb_queue.front();
+        cb_queue.pop();
+        auto cb_object = std::get<0>(cb_tuple);
+        auto path = std::get<1>(cb_tuple);
+        auto json_object = std::get<2>(cb_tuple);
+        cb_object->change_callback(path, json_object);
     }
 }
 
@@ -170,7 +205,7 @@ RedisCache::get_callback_count(const std::string &path)
     }
 
     return _callbacks.count_items(json_path_queue, "",
-        [](const std::string &path, const std::shared_ptr<RedisCacheChangeCallback> &cb_pair) {
+        [](const std::string &path, const RedisCacheChangeCallbackPtr &cb_pair) {
             return true;
         });
 }
@@ -379,7 +414,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
     if (ret) {
         // generate diff and process it
         nlohmann::json key_value_diff = nlohmann::json::diff(_old_storage, _storage);
-        _process_diff(key_value_diff, "");
+        _process_diff(key_value_diff, "", lock);
     } else {
         SPDLOG_ERROR("Storage update failed: reverting the changes");
         _storage = _old_storage;
@@ -388,7 +423,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
 }
 
 void
-RedisCache::add_callback(const std::string &path, const std::shared_ptr<RedisCacheChangeCallback> &cb)
+RedisCache::add_callback(const std::string &path, const RedisCacheChangeCallbackPtr &cb)
 {
     std::deque<std::string> json_path_queue = {};
     if (!path.empty()) {
@@ -405,7 +440,7 @@ RedisCache::add_callback(const std::string &path, const std::shared_ptr<RedisCac
 }
 
 void
-RedisCache::remove_callback(const std::string &path, const std::shared_ptr<RedisCacheChangeCallback> &cb)
+RedisCache::remove_callback(const std::string &path, const RedisCacheChangeCallbackPtr &cb)
 {
     std::deque<std::string> json_path_queue = {};
     if (!path.empty()) {
