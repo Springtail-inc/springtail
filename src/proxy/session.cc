@@ -172,7 +172,8 @@ namespace springtail::pg_proxy {
         ssize_t n = _connection->write(buffer->data(), buffer->size());
         CHECK_EQ(n, buffer->size());
 
-        // log the buffer; data should point past header (length + code 5B)
+        // log the buffer; data should point past header (1B code + 4B length)
+        // see: https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-MESSAGE-CONCEPTS
         _log_buffer(false, buffer->data()[0], buffer->size() - 5, buffer->data() + 5, seq_id);
     }
 
