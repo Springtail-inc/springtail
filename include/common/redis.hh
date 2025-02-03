@@ -103,6 +103,12 @@ namespace springtail {
 
     private:
         int _db_id;
-        static sw::redis::ConnectionOptions get_connect_options(bool config_db=true);
+        static bool _inited;
+        static int _config_db_id;
+        static int _data_db_id;
+        static std::mutex _connect_options_mutex;
+        static sw::redis::ConnectionOptions _connect_options;
+
+        static sw::redis::ConnectionOptions _get_connect_options(bool config_db=true);
     };
 }

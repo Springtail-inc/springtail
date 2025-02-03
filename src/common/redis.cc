@@ -1,5 +1,4 @@
 #include <mutex>
-#include <iostream>
 
 #include <sw/redis++/redis++.h>
 
@@ -11,55 +10,52 @@
 
 namespace springtail {
 
-    sw::redis::ConnectionOptions RedisMgr::get_connect_options(bool config_db) {
-        static sw::redis::ConnectionOptions connect_options = {};
-        static bool inited = false;
-        static std::mutex connect_options_mutex;
-        static int config_db_id;
-        static int data_db_id;
+    bool RedisMgr::_inited = false;
+    int RedisMgr::_config_db_id;
+    int RedisMgr::_data_db_id;
+    std::mutex RedisMgr::_connect_options_mutex;
+    sw::redis::ConnectionOptions RedisMgr::_connect_options = {};
 
-        std::unique_lock lock(connect_options_mutex);
-        if (inited) {
-            int db_id = (config_db)? config_db_id : data_db_id;
-            if (connect_options.db != db_id) {
-                sw::redis::ConnectionOptions connect_options_clone = connect_options;
+
+    sw::redis::ConnectionOptions RedisMgr::_get_connect_options(bool config_db) {
+        std::unique_lock lock(_connect_options_mutex);
+        if (_inited) {
+            int db_id = (config_db)? _config_db_id : _data_db_id;
+            if (_connect_options.db != db_id) {
+                sw::redis::ConnectionOptions connect_options_clone = _connect_options;
                 connect_options_clone.db = db_id;
                 return connect_options_clone;
             }
-            return connect_options;
         } else {
             nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
 
-            connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
-            connect_options.user = Json::get_or<std::string>(json, "user", "user");
-            connect_options.password = Json::get_or<std::string>(json, "password", "");
-            connect_options.port = Json::get_or<int>(json, "port", 6379);
-            if (config_db) {
-                config_db_id = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_DATA_DB);
-            } else {
-                data_db_id = Json::get_or<int>(json, "db", RedisMgr::REDIS_DATA_DB);
-            }
-            connect_options.db = (config_db)? config_db_id : data_db_id;
+            _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
+            _connect_options.user = Json::get_or<std::string>(json, "user", "user");
+            _connect_options.password = Json::get_or<std::string>(json, "password", "");
+            _connect_options.port = Json::get_or<int>(json, "port", 6379);
+            _config_db_id = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_DATA_DB);
+            _data_db_id = Json::get_or<int>(json, "db", RedisMgr::REDIS_DATA_DB);
+            _connect_options.db = (config_db)? _config_db_id : _data_db_id;
             int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
             bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
 
-            connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
-            connect_options.keep_alive = true;
-            connect_options.resp = 3;
-            connect_options.socket_timeout = std::chrono::milliseconds(0);
-            connect_options.tls.enabled = ssl_enabled;
+            _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
+            _connect_options.keep_alive = true;
+            _connect_options.resp = 3;
+            _connect_options.socket_timeout = std::chrono::milliseconds(0);
+            _connect_options.tls.enabled = ssl_enabled;
 
             nlohmann::json pool_json;
             if (!Json::get_to(json, "pool", pool_json)) {
                 throw Error("Redis connection pool settings not found");
             }
-            inited = true;
+            _inited = true;
         }
-        return connect_options;
+        return _connect_options;
     }
 
     std::tuple<int, RedisClientPtr> RedisMgr::create_client(bool config_db) {
-        sw::redis::ConnectionOptions     connect_options = get_connect_options(config_db);
+        sw::redis::ConnectionOptions     connect_options = _get_connect_options(config_db);
         sw::redis::ConnectionPoolOptions pool_options;
 
         nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
@@ -89,7 +85,7 @@ namespace springtail {
     RedisMgr::SubscriberPtr
     RedisMgr::get_subscriber(int timeoutsecs, bool config_db)
     {
-        sw::redis::ConnectionOptions connect_options = get_connect_options(config_db);
+        sw::redis::ConnectionOptions connect_options = _get_connect_options(config_db);
 
         // this is the real timeout for the subscriber consume() call
         connect_options.socket_timeout = std::chrono::seconds(timeoutsecs);
