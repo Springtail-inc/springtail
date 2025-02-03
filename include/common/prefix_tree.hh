@@ -12,6 +12,9 @@ namespace springtail {
  * @brief PrefixNode class that implements prefix tree
  *
  * @tparam T - value type for the list of values stored at each node
+ *              NOTE: this class is not multithread safe. If you need to support
+ *                  concurrent access to this data structure, then you need to use
+ *                  appropriate mutex locks when calling the methods of this class.
  */
 template <typename T> class PrefixNode {
   public:

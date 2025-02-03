@@ -10,13 +10,6 @@
 
 namespace springtail {
 
-    bool RedisMgr::_inited = false;
-    int RedisMgr::_config_db_id;
-    int RedisMgr::_data_db_id;
-    std::mutex RedisMgr::_connect_options_mutex;
-    sw::redis::ConnectionOptions RedisMgr::_connect_options = {};
-
-
     sw::redis::ConnectionOptions RedisMgr::_get_connect_options(bool config_db) {
         std::unique_lock lock(_connect_options_mutex);
         if (_inited) {

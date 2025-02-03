@@ -3,7 +3,6 @@
 #include <mutex>
 #include <memory>
 #include <string>
-#include <type_traits>
 
 #include <sw/redis++/redis++.h>
 
@@ -103,11 +102,11 @@ namespace springtail {
 
     private:
         int _db_id;
-        static bool _inited;
-        static int _config_db_id;
-        static int _data_db_id;
-        static std::mutex _connect_options_mutex;
-        static sw::redis::ConnectionOptions _connect_options;
+        static inline bool _inited = false;
+        static inline int _config_db_id;
+        static inline int _data_db_id;
+        static inline std::mutex _connect_options_mutex;
+        static inline sw::redis::ConnectionOptions _connect_options = {};
 
         static sw::redis::ConnectionOptions _get_connect_options(bool config_db=true);
     };
