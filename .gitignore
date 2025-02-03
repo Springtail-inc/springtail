@@ -18,3 +18,4 @@ system.json.test
 .cache
 **/core
 python/testing/__pycache__
+python/benchmarks/__pycache__
