@@ -436,7 +436,8 @@ def gen_dump_tarball(props : Properties, build_dir : str) -> str:
 def start(config_file: str,
           build_dir: str,
           sql_file: str = None,
-          do_cleanup: bool = True) -> None:
+          do_cleanup: bool = True,
+          start_xid: int = None) -> None:
     """Main function to start the Springtail system."""
     # get absolute path for config_file
     config_file = os.path.abspath(config_file)
@@ -478,9 +479,19 @@ def start(config_file: str,
     check_log_writable(props)
     start_replication(props, build_dir)
 
-    # start daemons
+    # start daemons with XID if specified
     print("\nStarting daemons...")
-    start_daemons(build_dir, CORE_DAEMONS)
+    if start_xid is not None:
+        # Modify xid_mgr_daemon args to include starting XID
+        modified_daemons = []
+        for daemon in CORE_DAEMONS:
+            if daemon[0] == 'xid_mgr_daemon':
+                modified_daemons.append((daemon[0], daemon[1], f'-x,{start_xid}'))
+            else:
+                modified_daemons.append(daemon)
+        start_daemons(build_dir, modified_daemons)
+    else:
+        start_daemons(build_dir, CORE_DAEMONS)
 
     # wait for running state
     print("\nWaiting for running state...")
@@ -644,6 +655,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-f', '--config-file', type=str, required=True, help='Path to the configuration file')
     parser.add_argument('-b', '--build-dir', type=str, required=True, help='Path to the build directory')
     parser.add_argument('-s', '--sql-file', type=str, required=False, help='Path to a sql file to execute prior to startup')
+    parser.add_argument('-x', '--start-xid', type=int, required=False, help='Start the system at a specific XID')
+    parser.add_argument('--no-cleanup', action='store_true', help="Start without reinitializing the system")
     parser.add_argument('--start', action=argparse.BooleanOptionalAction, help="Start the Springtail system")
     parser.add_argument('--status', action=argparse.BooleanOptionalAction, help="Check the status of the Springtail daemons")
     parser.add_argument('--kill', action=argparse.BooleanOptionalAction, help="Kill the Springtail daemons")
@@ -683,11 +696,12 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.kill:
-            stop(args.config_file)
+            stop(args.config_file, do_cleanup=not args.no_cleanup)
             sys.exit(0)
 
         if args.start:
-            start(args.config_file, args.build_dir, args.sql_file)
+            start(args.config_file, args.build_dir, args.sql_file, 
+                  do_cleanup=not args.no_cleanup, start_xid=args.start_xid)
 
         if args.check:
             check_logs(args.config_file)
