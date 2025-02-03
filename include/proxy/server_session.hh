@@ -97,6 +97,18 @@ namespace springtail::pg_proxy {
         }
 
         /**
+         * @brief Unpin the client session and disassociate it
+         */
+        void unpin_client_session() {
+            if (!_is_pinned) {
+                return;
+            }
+            clear_associated_session();
+            _client_session.reset();
+            _is_pinned = false;
+        }
+
+        /**
          * @brief Get the client session object
          * @return SessionPtr
          */
@@ -120,8 +132,8 @@ namespace springtail::pg_proxy {
          * @brief Reset the session, override base session (and call it)
          */
         void reset_session() override {
-            _is_pinned = false;
-            _client_session.reset();
+            unpin_client_session();
+            _defer_shadow_shutdown = false;
             _stmts.clear();
             while (!_pending_queue.empty()) {
                 _pending_queue.pop();
@@ -197,12 +209,15 @@ namespace springtail::pg_proxy {
 
         std::queue<QueryStatusPtr> _pending_queue;   ///< queue of pending (inflight) messages
 
-        std::set<std::string> _stmts;    ///< completed prepared statement ids
-        std::string _db_prefix;          ///< database name prefix to be used for this server session
+        std::set<std::string> _stmts;        ///< completed prepared statement ids
 
-        uint64_t _seq_id = 0;            ///< sequence id from client session
+        std::string _db_prefix;              ///< database name prefix (for testing)
 
-        ServerAuthorizationPtr _auth;    ///< authorization object
+        uint64_t _seq_id = 0;                ///< sequence id from client session
+
+        ServerAuthorizationPtr _auth;        ///< authorization object
+
+        bool _defer_shadow_shutdown = false; ///< defer shutdown until all messages processed
 
         /** Process next batch of processing messages from _batch_queue */
         void _process_next_batch();
