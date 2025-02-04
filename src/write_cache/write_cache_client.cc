@@ -74,7 +74,7 @@ namespace springtail {
 
     std::vector<WriteCacheClient::WriteCacheExtent>
     WriteCacheClient::get_extents(uint64_t db_id, uint64_t tid, uint64_t xid,
-                                  uint32_t count, uint64_t &cursor)
+                                  uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts)
     {
         thrift::write_cache::GetExtentsRequest request;
         thrift::write_cache::GetExtentsResponse response;
@@ -91,7 +91,7 @@ namespace springtail {
 
         CHECK_EQ(response.table_id, tid);
         cursor = response.cursor;
-
+        commit_ts = PostgresTimestamp(response.commit_ts);
         std::vector<WriteCacheExtent> extents;
         for (const auto &e: response.extents) {
             WriteCacheExtent extent;

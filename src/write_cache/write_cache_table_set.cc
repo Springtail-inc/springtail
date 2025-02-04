@@ -92,7 +92,7 @@ namespace springtail
     int
     WriteCacheTableSet::get_extents(uint64_t tid, uint64_t xid, uint32_t count,
                                     uint64_t start_offset, uint64_t &cursor,
-                                    std::vector<WriteCacheIndexExtentPtr> &result)
+                                    std::vector<WriteCacheIndexExtentPtr> &result, PostgresTimestamp &commit_ts)
     {
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Searching for extents for XID: {}, TID: {}\n", xid, tid);
 
@@ -100,7 +100,8 @@ namespace springtail
         cursor = 0;
 
         // lookup pg_xid
-        std::set<uint64_t> pg_xids = lookup_pgxid(xid);
+        std::set<uint64_t> pg_xids = lookup_pgxid(xid, &commit_ts);
+
         if (pg_xids.empty()) {
             SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "XID {} not found\n", xid);
             return 0;
@@ -162,6 +163,7 @@ namespace springtail
         }
         pg_xid = itr->second;
         _xid_map.erase(itr);
+        _xid_ts_map.erase(xid);
         lock.unlock();
 
         abort(pg_xid);
@@ -184,7 +186,7 @@ namespace springtail
     }
 
     void
-    WriteCacheTableSet::commit(uint64_t pg_xid, uint64_t xid)
+    WriteCacheTableSet::commit(uint64_t pg_xid, uint64_t xid, PostgresTimestamp commit_ts)
     {
         SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", pg_xid, xid);
 
@@ -192,10 +194,11 @@ namespace springtail
         // XXX should we check if there is an existing pg_xid with data and skip if not?
         std::unique_lock<std::shared_mutex> lock(_xid_map_mutex);
         _xid_map.insert({xid, pg_xid});
+        _xid_ts_map.insert({xid, commit_ts});
     }
 
     void
-    WriteCacheTableSet::commit(std::vector<uint64_t> pg_xids, uint64_t xid)
+    WriteCacheTableSet::commit(std::vector<uint64_t> pg_xids, uint64_t xid, PostgresTimestamp commit_ts)
     {
         // insert xid into xid map
         // XXX should we check if there is an existing pg_xid with data and skip if not?
@@ -204,6 +207,7 @@ namespace springtail
             SPDLOG_DEBUG_MODULE(LOG_WRITE_CACHE_SERVER, "Committing PG XID: {} -> XID: {}\n", pg_xid, xid);
             _xid_map.insert({xid, pg_xid});
         }
+        _xid_ts_map.insert({xid, commit_ts});
     }
 
     void
@@ -267,7 +271,7 @@ namespace springtail
     }
 
     std::set<uint64_t>
-    WriteCacheTableSet::lookup_pgxid(uint64_t pg_xid)
+    WriteCacheTableSet::lookup_pgxid(uint64_t pg_xid, PostgresTimestamp *commit_ts)
     {
         // use a set to ensure xids are sorted
         std::set<uint64_t> result;
@@ -275,6 +279,12 @@ namespace springtail
         auto range = _xid_map.equal_range(pg_xid);
         for (auto itr = range.first; itr != range.second; itr++) {
             result.insert(itr->second);
+        }
+        if (commit_ts != nullptr) {
+            auto it = _xid_ts_map.find(pg_xid);
+            if (it != _xid_ts_map.end()) {
+                *commit_ts = it->second;
+            }
         }
         return result;
     }
