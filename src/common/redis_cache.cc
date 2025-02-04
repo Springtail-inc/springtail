@@ -11,7 +11,7 @@
 #include <common/json.hh>
 #include <common/logging.hh>
 #include <common/properties.hh>
-#include <redis/redis_cache.hh>
+#include <common/redis_cache.hh>
 
 namespace springtail {
 

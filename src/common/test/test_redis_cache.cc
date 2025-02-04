@@ -2,7 +2,7 @@
 
 #include <common/common.hh>
 #include <common/counter.hh>
-#include <redis/redis_cache.hh>
+#include <common/redis_cache.hh>
 
 using namespace springtail;
 

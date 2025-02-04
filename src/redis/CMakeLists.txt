@@ -2,7 +2,6 @@ find_package(redis++ CONFIG REQUIRED)
 
 set(REDIS_LIB_SOURCES
   redis_ddl.cc
-  redis_cache.cc
 )
 
 add_library(springtail_redis ${REDIS_LIB_SOURCES})
@@ -25,11 +24,5 @@ target_include_directories(test_pubsub_thread PRIVATE ${CMAKE_SOURCE_DIR}/includ
 target_link_libraries(test_pubsub_thread PRIVATE springtail_common Boost::thread GTest::gtest_main)
 add_dsymutil_command(test_pubsub_thread)
 
-add_executable(test_redis_cache test/test_redis_cache.cc)
-target_include_directories(test_redis_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_redis_cache PRIVATE springtail_common springtail_redis Boost::thread GTest::gtest_main)
-add_dsymutil_command(test_redis_cache)
-
 gtest_discover_tests(test_redis)
 gtest_discover_tests(test_pubsub_thread)
-gtest_discover_tests(test_redis_cache)
