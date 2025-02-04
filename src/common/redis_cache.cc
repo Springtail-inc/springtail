@@ -1,3 +1,4 @@
+#include <fmt/core.h>
 #include <functional>
 #include <queue>
 #include <set>
@@ -88,7 +89,6 @@ RedisCache::_process_notification(const std::string &pattern, const std::string 
     _process_diff(key_value_diff, top_level_path, storage_lock);
 }
 
-// TODO: add comments for this function
 void
 RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_level_path, std::unique_lock<std::shared_mutex> &storage_lock)
 {
@@ -496,6 +496,32 @@ RedisCache::_array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, 
         }
     }
     return std::make_pair(u, v);
+}
+
+std::string
+RedisCache::_get_array_path(const std::string &path, const nlohmann::json &storage)
+{
+    std::deque<std::string> json_path_queue;
+    common::split_string("/", path.substr(1), json_path_queue);
+    std::string storage_path;
+
+    while (!json_path_queue.empty()) {
+        const std::string &path_item = json_path_queue.front();
+        storage_path += "/" + path_item;
+        json_path_queue.pop_front();
+        nlohmann::json::json_pointer storage_json_ptr(storage_path);
+        if (_is_array_path(storage_json_ptr, storage)) {
+            return storage_path;
+        }
+    }
+    return "";
+}
+
+long long
+RedisCache::publish(const std::string &channel_template, const std::string_view &message)
+{
+    std::string channel = fmt::format(fmt::runtime(channel_template), _instance_id);
+    return _client->publish(channel, message);
 }
 
 };

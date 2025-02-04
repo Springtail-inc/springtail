@@ -129,6 +129,8 @@ namespace springtail {
          */
         void dump();
 
+        long long publish(const std::string &channel_template, const std::string_view &message);
+
     private:
         std::atomic<bool> _shutdown = false;        ///> flag to signal to subscriber thread to shutdown
         std::shared_mutex _storage_mutex;           ///> mutex for _storage and _old_storage access
@@ -336,21 +338,6 @@ namespace springtail {
          * @return std::string - json pointer to the first array inside the path
          */
         static inline std::string
-        _get_array_path(const std::string &path, const nlohmann::json &storage) {
-            std::deque<std::string> json_path_queue;
-            common::split_string("/", path.substr(1), json_path_queue);
-            std::string storage_path;
-
-            while (!json_path_queue.empty()) {
-                const std::string &path_item = json_path_queue.front();
-                storage_path += "/" + path_item;
-                json_path_queue.pop_front();
-                nlohmann::json::json_pointer storage_json_ptr(storage_path);
-                if (_is_array_path(storage_json_ptr, storage)) {
-                    return storage_path;
-                }
-            }
-            return "";
-        }
+        _get_array_path(const std::string &path, const nlohmann::json &storage);
     };
 };
