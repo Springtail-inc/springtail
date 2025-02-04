@@ -21,6 +21,13 @@ namespace springtail::tracing {
 /** Convenience name */
 using SpanPtr = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 
+/**
+ * @brief A custom span exporter that logs OpenTelemetry spans using spdlog
+ * 
+ * This exporter implements the OpenTelemetry SpanExporter interface to export
+ * tracing spans by logging them through spdlog. It processes each span's name,
+ * attributes, and other properties and outputs them as structured log messages.
+ */
 class SpdlogExporter : public opentelemetry::sdk::trace::SpanExporter {
 public:
     std::unique_ptr<opentelemetry::sdk::trace::Recordable> MakeRecordable() noexcept override

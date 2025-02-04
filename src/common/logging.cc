@@ -17,6 +17,7 @@
 #include <common/logging.hh>
 #include <common/properties.hh>
 #include <common/json.hh>
+#include <common/opentelemetry_sink.hh>
 
 namespace springtail {
 
@@ -150,12 +151,26 @@ public:
         set_level(file_sink, log_level);
         sinks.push_back(file_sink);
 
-        // auto otel_sink = std::make_shared<OpenTelemetrySinkMt>();
-        // auto logger = std::make_shared<spdlog::logger>("otel_logger", otel_sink);
-        // spdlog::register_logger(logger);
-        // spdlog::set_default_logger(logger);
+        // Check OpenTelemetry configuration
+        auto otel_config = Properties::get(Properties::OTEL_CONFIG);
+        bool otel_enabled = Json::get_or<bool>(otel_config, "enabled", true);
 
-        // create the logger for both console and file sink
+        if (otel_enabled) {
+            auto host = Json::get<std::string>(otel_config, "host");
+            auto port = Json::get<int>(otel_config, "port");
+
+            if (host && port) {
+                std::string endpoint = fmt::format("http://{}:{}", *host, *port);
+                auto otel_sink = std::make_shared<OpenTelemetrySinkMt>("springtail", endpoint);
+                set_level(otel_sink, log_level);
+                sinks.push_back(otel_sink);
+                SPDLOG_INFO("Enabling OTel logging sink with endpoint: {}", endpoint);
+            }
+        } else {
+            SPDLOG_INFO("OpenTelemetry logging sink disabled via configuration");
+        }
+
+        // create the logger with all sinks
         auto logger = std::make_shared<spdlog::logger>("springtail",
                                                        std::begin(sinks), std::end(sinks));
         logger->set_pattern(pattern);
