@@ -1019,7 +1019,7 @@ namespace springtail {
 
         // convert msg data to string (it is not null terminated)
         // and convert string to json
-        std::string data_str(buffer, len);
+        std::string_view data_str(buffer, len);
         nlohmann::json json = nlohmann::json::parse(data_str);
 
         // check object type, should be of type namespace

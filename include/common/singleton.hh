@@ -13,9 +13,7 @@ namespace springtail {
          * @return the pointer to the derived class T
          */
         static T *get_instance() {
-            if (!_running.exchange(true)) {
-                _init();
-            }
+            std::call_once(_init_flag, _init);
             return _instance;
         }
 
@@ -32,9 +30,7 @@ namespace springtail {
          *
          */
         static void shutdown() {
-            if (_running.exchange(false)) {
-                _shutdown();
-            }
+            std::call_once(_shutdown_flag, _shutdown);
         }
 
     protected:
@@ -58,8 +54,9 @@ namespace springtail {
         virtual ~Singleton() = default;
 
     private:
-        static inline T* _instance = nullptr;  ///< derived class instance
-        static inline std::atomic<bool> _running = false; ///< state flag
+        static inline T* _instance = nullptr;             ///< derived class instance
+        static inline std::once_flag _init_flag;          ///< initialization flag
+        static inline std::once_flag _shutdown_flag;      ///< shutdown flag
 
         /**
          * @brief Object creation function
@@ -92,9 +89,7 @@ namespace springtail {
          * @return the pointer to the derived class T
          */
         static T *get_instance() {
-            if (!_running.exchange(true)) {
-                _init();
-            }
+            std::call_once(_init_flag, _init);
             return _instance;
         }
 
@@ -111,9 +106,7 @@ namespace springtail {
          *
          */
         static void shutdown() {
-            if (_running.exchange(false)) {
-                _shutdown();
-            }
+            std::call_once(_shutdown_flag, _shutdown);
         }
 
         /**
@@ -128,7 +121,7 @@ namespace springtail {
          * @brief Stop the thread
          *
          */
-        void stop_thread() {
+        virtual void stop_thread() {
             _shutting_down = true;
         }
 
@@ -170,7 +163,8 @@ namespace springtail {
 
     private:
         static inline T* _instance = nullptr;             ///< derived class instance
-        static inline std::atomic<bool> _running = false; ///< state flag
+        static inline std::once_flag _init_flag;          ///< initialization flag
+        static inline std::once_flag _shutdown_flag;      ///< shutdown flag
         std::thread _thread;                              ///< thread ran by the object
         std::atomic<bool> _shutting_down = false;         ///< atomic flag to stop the thread execution
 

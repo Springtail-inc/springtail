@@ -257,11 +257,11 @@ BEGIN
     LOOP
         RAISE NOTICE 'springtail: obj.command_tag % ', obj.command_tag;
 
-        EXECUTE format('SELECT
-                nsp.oid as schema_oid,
-                nsp.nspname as schema_name
-            FROM pg_catalog.pg_namespace nsp
-            WHERE nsp.oid = %s', obj.objid) INTO schema_obj;
+	SELECT nsp.oid AS schema_oid,
+	       nsp.nspname AS schema_name
+	  INTO schema_obj
+	  FROM pg_catalog.pg_namespace nsp
+	 WHERE nsp.oid = obj.objid;
 
         msg := json_build_object('xid', txid_current(),
             'cmd', obj.command_tag,

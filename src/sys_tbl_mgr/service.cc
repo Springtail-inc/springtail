@@ -95,8 +95,11 @@ namespace springtail::sys_tbl_mgr {
         index_info.state = request.state;
 
         // lookup the namespace ID
-        // XXX it seems like we shouldn't need to look this up -- we just retrieved all of the index
-        //     info above in _read_schema_indexes() -- we should optimize this whole flow
+        // XXX it seems like we shouldn't need to look up the namespace info at this point -- we
+        //     just retrieved all of the index info above in _read_schema_indexes() so it's a
+        //     duplication of effort to perform the lookup again here.  Further, the code itself is
+        //     somewhat ugly / hard to follow.  We should revist this whole flow to improve
+        //     performance and readability.
         auto ns_info = _get_namespace_info(request.db_id, index_info.namespace_name, xid);
 
         auto index_names_t = _get_mutable_system_table(request.db_id, sys_tbl::IndexNames::ID);
@@ -1125,7 +1128,8 @@ namespace springtail::sys_tbl_mgr {
 
         // check if the table is empty
         // note: this is a hack to get around the fact that doing a secondary index search on a
-        //       vacant table is broken right now, otherwise we could follow the main path
+        //       vacant table is broken right now, otherwise we could follow the main path.  See
+        //       ticket SPR-520.
         if (table->empty()) {
             return nullptr;
         }

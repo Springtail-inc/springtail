@@ -703,7 +703,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids)
+                                 std::vector<TableMetadata> &table_oids)
     {
         // do the tables query
         _connection.exec(query);
@@ -718,9 +718,9 @@ namespace springtail
             // get the table name, schema name, and oid
             std::string table_name = _connection.get_string(i, 0);
             std::string schema_name = _connection.get_string(i, 1);
-            int32_t table_oid = _connection.get_int32(i, 2);
-            int32_t schema_oid = _connection.get_int32(i, 3);
-            table_oids.push_back({table_name, schema_name, table_oid, schema_oid});
+            uint32_t table_oid = _connection.get_int32(i, 2);
+            uint32_t schema_oid = _connection.get_int32(i, 3);
+            table_oids.push_back({schema_name, table_name, schema_oid, table_oid});
         }
 
         return;
@@ -728,7 +728,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids)
+                                 std::vector<TableMetadata> &table_oids)
     {
         // get schemas array from json into vector of strings
 
@@ -903,7 +903,7 @@ namespace springtail
         copy_table.connect(db_id);
 
         // fetch the table oids
-        std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> table_oids;
+        std::vector<TableMetadata> table_oids;
 
         // get the table oids, depends on input
         if (schema_name.has_value()) {
@@ -942,13 +942,13 @@ namespace springtail
         }
 
         // iterate through the tables and copy them
-        for (const auto &table_tuple : table_oids) {
-            SPDLOG_DEBUG("Dumping table {}", std::get<0>(table_tuple));
+        for (const auto &table_md : table_oids) {
+            SPDLOG_DEBUG("Dumping table {}", table_md.table_name);
 
             // add the table to the copy queue
-            copy_queue->push(std::make_shared<CopyRequest>(std::get<0>(table_tuple),  // table name
-                                                           std::get<1>(table_tuple),  // schema name
-                                                           std::get<2>(table_tuple))); // table oid
+            copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,
+                                                           table_md.namespace_name,
+                                                           table_md.table_oid));
         }
 
         // shutdown the copy queue; blocks until queue is empty

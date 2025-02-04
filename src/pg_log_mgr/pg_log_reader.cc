@@ -262,8 +262,6 @@ namespace springtail::pg_log_mgr {
             // XXX should we do a truncate here?  it could improve performance if this follows a set
             //     of mutations, but it's not clear we actually need it since the mutations would be
             //     dropped either way
-        } else if (msg->msg_type == PgMsgEnum::CREATE_NAMESPACE) {
-            // XXX Implement this
         }
 
         // save the change to process once we see a commit

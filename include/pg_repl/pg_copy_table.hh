@@ -119,6 +119,25 @@ namespace springtail
         using CopyQueue = ConcurrentQueue<CopyRequest>;
         using CopyQueuePtr = std::shared_ptr<CopyQueue>;
 
+        /** Struct for holding table metadata */
+        struct TableMetadata {
+            std::string namespace_name;
+            std::string table_name;
+            uint32_t namespace_oid;
+            uint32_t table_oid;
+
+            TableMetadata(std::string_view n_name,
+                          std::string_view t_name,
+                          uint32_t n_pgoid,
+                          uint32_t t_pgoid)
+                : namespace_name(n_name),
+                  table_name(t_name),
+                  namespace_oid(n_pgoid),
+                  table_oid(t_pgoid)
+            { }
+            TableMetadata() = default;
+        };
+
         LibPqConnection _connection;
         std::string _db_name;
         std::string _schema_name;
@@ -195,7 +214,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids);
+                             std::vector<TableMetadata> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -203,7 +222,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<std::tuple<std::string, std::string, int32_t, int32_t>> &table_oids);
+                             std::vector<TableMetadata> &table_oids);
 
         /**
          * @brief Copy table from remote system

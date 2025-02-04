@@ -125,7 +125,7 @@ namespace springtail::sys_tbl_mgr {
          */
         std::string swap_sync_table(const NamespaceRequest &namespace_req,
                                     const TableRequest &create_req,
-                                    const std::vector<IndexRequest> index_reqs,
+                                    const std::vector<IndexRequest> &index_reqs,
                                     const UpdateRootsRequest &roots_req);
 
         /**

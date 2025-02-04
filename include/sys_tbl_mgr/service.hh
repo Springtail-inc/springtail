@@ -436,51 +436,37 @@ namespace springtail::sys_tbl_mgr {
          * Cache of unapplied namespace changes by namespace ID.
          * Stored as a map of DB -> Namespace ID -> XID/LSN (in reverse order) -> NamespaceInfo
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<XidLsn,
-                                   NamespaceCacheRecordPtr,
-                                   std::greater<XidLsn>>>> _namespace_id_cache;
+        using XidLsnToNamespaceInfoMap = std::map<XidLsn, NamespaceCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToNamespaceInfoMap>> _namespace_id_cache;
 
         /**
          * Cache of unapplied namespace changes by namespace name.
          * Stored as a map of DB -> Namespace name -> XID/LSN (in reverse order) -> NamespaceInfo
          */
-        std::map<uint64_t,
-                 std::map<std::string,
-                          std::map<XidLsn,
-                                   NamespaceCacheRecordPtr,
-                                   std::greater<XidLsn>>>> _namespace_name_cache;
+        std::unordered_map<uint64_t, std::unordered_map<std::string, XidLsnToNamespaceInfoMap>> _namespace_name_cache;
 
         /**
          * Cache of unapplied table info changes.
          * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> TableCacheRecord
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<XidLsn,
-                                   TableCacheRecordPtr,
-                                   std::greater<XidLsn>>>> _table_cache;
+        using XidLsnToTableInfoMap = std::map<XidLsn, TableCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToTableInfoMap>> _table_cache;
 
         /**
          * Cache of unapplied table roots/stats changes.
          * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> RootsCacheRecord
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<XidLsn,
-                                   RootsCacheRecordPtr,
-                                   std::greater<XidLsn>>>> _roots_cache;
+        using XidLsnToRootsInfoMap = std::map<XidLsn, RootsCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToRootsInfoMap>> _roots_cache;
 
         /**
          * Cache of unapplied schema changes.
          * Stored as a map of DB -> Table ID -> Column ID -> vector<ColumnHistory> (in ascending XID/LSN order)
          * Using vector because there may be multiple entries at the same XID/LSN on table create.
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<uint32_t,
-                                   std::vector<ColumnHistory>>>> _schema_cache;
+        using ColumnIdToInfoMap = std::map<uint32_t, std::vector<ColumnHistory>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, ColumnIdToInfoMap>> _schema_cache;
+
         /**
          * Cache of unapplied index changes.
          * Stored as a map of DB -> Table ID -> (vector<IndexCacheItem>) (in ascending XID/LSN order)

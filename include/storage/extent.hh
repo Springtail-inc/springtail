@@ -152,10 +152,6 @@ namespace springtail {
                 return (extent == rhs.extent && offset == rhs.offset);
             }
 
-            bool invalid() const {
-                return (extent == nullptr);
-            }
-
         private:
             // grant Iterator access to the Row internals
             friend Iterator;

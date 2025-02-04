@@ -354,7 +354,14 @@ namespace pg_msg {
             }
 
             case ALTER_NAMESPACE: {
-                // XXX To implement
+                PgMsgNamespace alter_namespace = std::get<PgMsgNamespace>(msg.msg);
+                ss << "\nALTER SCHEMA" << std::endl;
+                if (msg.is_streaming) {
+                    ss << "  xid=" << alter_namespace.xid << std::endl;
+                }
+                ss << "  oid=" << alter_namespace.oid << std::endl;
+                ss << "  LSN=" << alter_namespace.lsn << std::endl;
+                ss << "  namespace=" << alter_namespace.name << std::endl;
                 break;
             }
 

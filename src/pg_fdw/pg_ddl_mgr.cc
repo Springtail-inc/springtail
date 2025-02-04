@@ -341,17 +341,8 @@ namespace springtail::pg_fdw {
                                       SPRINGTAIL_FDW_SCHEMA_XID_OPTION,
                                       schema_xid));
 
-            // find the difference between the schemas in the db and the schemas in the DDL
-            // these will be added as new schemas
-            std::set<std::string> new_schemas;
-            std::shared_lock db_lock(_db_mutex);
-            std::set_difference(schemas.begin(), schemas.end(),
-                                _db_schemas[db_id].begin(), _db_schemas[db_id].end(),
-                                std::inserter(new_schemas, new_schemas.begin()));
-            db_lock.unlock();
-
             // execute the set of statements
-            _execute_ddl(conn, db_id, schema_xid, txn, new_schemas);
+            _execute_ddl(conn, db_id, schema_xid, txn);
 
             return true;
 
@@ -366,22 +357,10 @@ namespace springtail::pg_fdw {
     PgDDLMgr::_execute_ddl(LibPqConnectionPtr conn,
                            uint64_t db_id,
                            uint64_t schema_xid,
-                           const std::vector<std::string> &txn,
-                           const std::set<std::string> &schemas)
+                           const std::vector<std::string> &txn)
     {
         // start a transaction
         conn->start_transaction();
-
-        // // go through each new schema and create it
-        // for (const auto &schema : schemas) {
-        //     std::string escaped_schema = conn->escape_identifier(schema);
-
-        //     conn->exec(fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
-        //                            escaped_schema, _fdw_username,
-        //                            escaped_schema, _fdw_username,
-        //                            escaped_schema, _fdw_username));
-        //     conn->clear();
-        // }
 
         // exectute each DDL statement
         for (const auto &sql : txn) {
@@ -391,11 +370,6 @@ namespace springtail::pg_fdw {
         }
 
         conn->end_transaction();
-
-        // add the new schemas to the set after commit
-        std::unique_lock db_lock(_db_mutex);
-        _db_schemas[db_id].insert(schemas.begin(), schemas.end());
-        db_lock.unlock();
     }
 
     std::string
@@ -741,12 +715,8 @@ namespace springtail::pg_fdw {
                                 escaped_schema));
         conn->clear();
 
-        std::unique_lock db_lock(_db_mutex);
-        // add all schemas to _db_schema
-        for (const auto &schema: schemas) {
-            _db_schemas[db_id].insert(schema);
-        }
         // set the schema xid in the map
+        std::unique_lock db_lock(_db_mutex);
         _db_xid_map[db_id] = xid;
         db_lock.unlock();
 
@@ -810,7 +780,6 @@ namespace springtail::pg_fdw {
         // remove it from internal storage
         std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
-        _db_schemas.erase(db_id);
     }
 
     void
