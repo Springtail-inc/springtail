@@ -17,7 +17,7 @@ namespace {
             //      this unit test and to ensure that no memory is leaked, corrupted, or not cleaned up
             //      properly. Unfortunately, springtail_init() brings a lot of noise that I did not want
             //      to deal with at the moment.
-            Properties::init(true);
+            Properties::get_instance()->init(true);
             init_exception();
         }
 

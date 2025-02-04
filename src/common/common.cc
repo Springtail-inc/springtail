@@ -20,7 +20,7 @@ namespace springtail {
         void
         daemonize(const std::string &pid_file)
         {
-            std::string pid_path = Properties::get_pid_path();
+            std::string pid_path = Properties::get_instance()->get_pid_path();
 
             std::filesystem::path pid_filename(pid_path);
             pid_filename /= pid_file;
@@ -77,7 +77,7 @@ namespace springtail {
 
         // init system properties
         // only load redis from properties if no daemon pid is set
-        Properties::init(!daemon_pid.has_value());
+        Properties::get_instance()->init(!daemon_pid.has_value());
 
         // if requested, daemonize the process
         if (daemon_pid) {

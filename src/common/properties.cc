@@ -1,7 +1,7 @@
 #include <string>
-#include <stdexcept>
+// #include <stdexcept>
 #include <fstream>
-#include <iostream>
+// #include <iostream>
 
 #include <absl/log/check.h>
 #include <nlohmann/json.hpp>
@@ -17,17 +17,10 @@
 
 namespace springtail {
 
-    Properties* Properties::_instance {nullptr};
-    std::once_flag Properties::_init_flag;
-    std::once_flag Properties::_shutdown_flag;
-
     nlohmann::json
     Properties::get(const std::string &key)
     {
-        if (_instance == nullptr) {
-            throw Error("Error Properties instance not initialized");
-        }
-        return _instance->_json[key];
+        return get_instance()->_json[key];
     }
 
     void
@@ -273,7 +266,8 @@ namespace springtail {
         }
     }
 
-    Properties::Properties(bool load_redis)
+    void
+    Properties::init(bool load_redis)
     {
         // check for an override properties file;
         // if it exists use it rather than reading the config from redis
@@ -350,12 +344,12 @@ namespace springtail {
     }
 
     std::map<uint64_t, std::string>
-    Properties::get_databases()
+    Properties::_get_databases()
     {
         std::map<uint64_t, std::string> dbnames;
 
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // lookup the db ids from the db_instance config
         std::string db_instance_key = std::format(redis::DB_INSTANCE_CONFIG, db_instance_id);
@@ -393,10 +387,10 @@ namespace springtail {
     }
 
     nlohmann::json
-    Properties::get_db_config(uint64_t db_id)
+    Properties::_get_db_config(uint64_t db_id)
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // otherwise, we are using redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -413,10 +407,10 @@ namespace springtail {
     }
 
     std::string
-    Properties::get_db_state(uint64_t db_id)
+    Properties::_get_db_state(uint64_t db_id)
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // need to use redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -432,10 +426,10 @@ namespace springtail {
     }
 
     void
-    Properties::set_db_state(uint64_t db_id, const std::string &state)
+    Properties::_set_db_state(uint64_t db_id, const std::string &state)
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // need to use redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -449,10 +443,10 @@ namespace springtail {
     }
 
     void
-    Properties::publish_liveness_notification(const std::string &msg)
+    Properties::_publish_liveness_notification(const std::string &msg)
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // need to use redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -462,19 +456,19 @@ namespace springtail {
     }
 
     std::string
-    Properties::get_db_name(uint64_t db_id)
+    Properties::_get_db_name(uint64_t db_id)
     {
-        nlohmann::json db_config = get_db_config(db_id);
+        nlohmann::json db_config = _get_db_config(db_id);
         assert (db_config.contains("name"));
 
         return db_config["name"];
     }
 
     std::vector<std::string>
-    Properties::get_fdw_ids()
+    Properties::_get_fdw_ids()
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // get the redis client and lookup the db ids from the db_instance config
         RedisClientPtr redis_client = _get_redis_client();
@@ -490,10 +484,10 @@ namespace springtail {
     Properties::_get_primary_db_config()
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // get the org config and see if there is a replication_user_password
-        nlohmann::json org = _instance->_json[ORG_CONFIG];
+        nlohmann::json org = _json[ORG_CONFIG];
         std::string replication_user_password;
         if (org.contains("replication_user_password")) {
             Json::get_to<std::string>(org, "replication_user_password", replication_user_password);
@@ -517,8 +511,8 @@ namespace springtail {
         return json;
     }
 
-    void Properties::get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
-        auto primary_config = Properties::_get_primary_db_config();
+    void Properties::_get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
+        auto primary_config = _get_primary_db_config();
 
         auto optional_host = Json::get<std::string>(primary_config, "host");
         auto optional_port = Json::get<uint16_t>(primary_config, "port");
@@ -537,10 +531,10 @@ namespace springtail {
     }
 
     nlohmann::json
-    Properties::get_fdw_config(const std::string &fdw_id)
+    Properties::_get_fdw_config(const std::string &fdw_id)
     {
         // get the db_instance_id (initially set from env or system.json)
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         // otherwise, we are using redis
         RedisClientPtr redis_client = _get_redis_client();
@@ -554,7 +548,7 @@ namespace springtail {
         }
 
         // get the org config and see if there is a fdw_user_password
-        nlohmann::json org = _instance->_json[ORG_CONFIG];
+        nlohmann::json org = _json[ORG_CONFIG];
         std::string fdw_user_password;
         if (org.contains("fdw_user_password")) {
             Json::get_to<std::string>(org, "fdw_user_password", fdw_user_password);
@@ -574,7 +568,7 @@ namespace springtail {
     std::string
     Properties::_get_ingestion_hostname()
     {
-        uint64_t db_instance_id = get_db_instance_id();
+        uint64_t db_instance_id = _get_db_instance_id();
 
         RedisClientPtr redis_client = _get_redis_client();
         std::optional<std::string> hostname = redis_client->hget(std::format(redis::DB_INSTANCE_CONFIG, db_instance_id), "hostname:ingestion");
@@ -587,19 +581,8 @@ namespace springtail {
     std::string
     Properties::get_pid_path()
     {
-        nlohmann::json props = Properties::get(Properties::LOGGING_CONFIG);
+        nlohmann::json props = _json[Properties::LOGGING_CONFIG];
         std::string pid_path = Json::get_or<std::string>(props, Properties::PID_PATH, "/var/springtail/pids");
         return pid_path;
-    }
-
-    void
-    Properties::init(bool load_redis)
-    {
-        if (_instance == nullptr) {
-            // once init
-            std::call_once(_init_flag, [load_redis]() {
-                _instance = new Properties(load_redis);
-            });
-        }
     }
 }
