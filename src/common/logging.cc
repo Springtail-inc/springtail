@@ -150,6 +150,11 @@ public:
         set_level(file_sink, log_level);
         sinks.push_back(file_sink);
 
+        // auto otel_sink = std::make_shared<OpenTelemetrySinkMt>();
+        // auto logger = std::make_shared<spdlog::logger>("otel_logger", otel_sink);
+        // spdlog::register_logger(logger);
+        // spdlog::set_default_logger(logger);
+
         // create the logger for both console and file sink
         auto logger = std::make_shared<spdlog::logger>("springtail",
                                                        std::begin(sinks), std::end(sinks));
