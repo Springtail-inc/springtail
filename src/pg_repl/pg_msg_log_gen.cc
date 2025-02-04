@@ -283,29 +283,42 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::create_schema(uint32_t schema_id, std::string_view schema)
+    PgMsgLogGen::create_schema(uint32_t schema_id, std::string schema_name)
     {
         nlohmann::json msg;
 
         msg["cmd"] = "CREATE SCHEMA";
         msg["oid"] = schema_id;
-        msg["name"] = schema;
+        msg["name"] = schema_name;
         msg["obj"] = "schema";
 
         _write_message(pg_msg::MSG_PREFIX_CREATE_NAMESPACE, msg);
     }
 
     void
-    PgMsgLogGen::alter_schema(uint32_t schema_id, std::string_view schema)
+    PgMsgLogGen::alter_schema(uint32_t schema_id, std::string schema_name)
     {
         nlohmann::json msg;
 
         msg["cmd"] = "ALTER SCHEMA";
         msg["oid"] = schema_id;
-        msg["name"] = schema;
+        msg["name"] = schema_name;
         msg["obj"] = "schema";
 
         _write_message(pg_msg::MSG_PREFIX_ALTER_NAMESPACE, msg);
+    }
+
+    void
+    PgMsgLogGen::drop_schema(uint32_t schema_id, std::string schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DROP SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_DROP_NAMESPACE, msg);
     }
 
     void
@@ -737,22 +750,25 @@ namespace springtail {
     void
     PgLogGenJson::_parse_create_schema(const nlohmann::json &json)
     {
-        // XXX TODO Handle this
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_create_schema, {}", json.dump());
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.create_schema(schema_id, name);
     }
 
     void
     PgLogGenJson::_parse_alter_schema(const nlohmann::json &json)
     {
-        // XXX TODO Handle this
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_alter_schema, {}", json.dump());
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.alter_schema(schema_id, name);
     }
 
     void
     PgLogGenJson::_parse_drop_schema(const nlohmann::json &json)
     {
-        // XXX TODO Handle this
-        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "LOG_REMOVE Inside of _parse_drop_schema, {}", json.dump());
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.drop_schema(schema_id, name);
     }
 
     void
