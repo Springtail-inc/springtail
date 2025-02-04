@@ -38,10 +38,6 @@ namespace springtail {
             _connect_options.socket_timeout = std::chrono::milliseconds(0);
             _connect_options.tls.enabled = ssl_enabled;
 
-            nlohmann::json pool_json;
-            if (!Json::get_to(json, "pool", pool_json)) {
-                throw Error("Redis connection pool settings not found");
-            }
             _inited = true;
         }
         return _connect_options;
