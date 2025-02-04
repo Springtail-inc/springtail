@@ -53,6 +53,14 @@ namespace springtail {
          */
         virtual ~Singleton() = default;
 
+        /**
+         * @brief Assert if the singleton object has not been created yet
+         *
+         */
+        static void _assert_instance() {
+            assert(_instance != nullptr);
+        }
+
     private:
         static inline T* _instance = nullptr;             ///< derived class instance
         static inline std::once_flag _init_flag;          ///< initialization flag
