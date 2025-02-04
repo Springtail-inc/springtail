@@ -145,15 +145,13 @@ namespace springtail::pg_fdw {
 
         // otherwise all schemas, need to query the primary
         // use libpq to connect to the database
-        LibPqConnectionPtr conn = _connect_primary(db_id, db_name);
-        conn->exec(SCHEMA_SELECT);
+        auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, 0);
+        auto fields = table->extent_schema()->get_fields();
 
-        // iterate through the results and get the schema names
-        for (int i = 0; i < conn->ntuples(); i++) {
-            schemas.insert(conn->get_string(i, 0));
+        for (auto row : (*table)) {
+            std::string namespace_name(fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(row));
+            schemas.insert(namespace_name);
         }
-        conn->clear();
-        conn->disconnect();
 
         return schemas;
     }
@@ -278,21 +276,6 @@ namespace springtail::pg_fdw {
                 assert(0); // assert in debug
             }
         }
-    }
-
-    LibPqConnectionPtr
-    PgDDLMgr::_connect_primary(uint64_t db_id, const std::string &db_name)
-    {
-        // get db config and parse it
-        std::string host, user, password;
-        int port;
-        Properties::get_primary_db_config(host, port, user, password);
-
-        // use libpq to connect to the database
-        LibPqConnectionPtr conn = std::make_shared<LibPqConnection>();
-        conn->connect(host, db_name, user, password, port);
-
-        return conn;
     }
 
     LibPqConnectionPtr

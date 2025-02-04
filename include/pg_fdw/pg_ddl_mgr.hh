@@ -16,6 +16,9 @@
 #include <redis/redis_ddl.hh>
 #include <redis/pubsub_thread.hh>
 
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+
 #include <pg_repl/libpq_connection.hh>
 
 
@@ -23,6 +26,7 @@
  * must be undefined before including postgres.h */
 #undef PACKAGE_STRING
 #undef PACKAGE_VERSION
+#undef UINT64CONST
 
 namespace springtail::pg_fdw {
 
