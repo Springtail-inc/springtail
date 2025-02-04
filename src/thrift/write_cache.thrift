@@ -25,7 +25,9 @@ struct GetExtentsRequest {
 struct GetExtentsResponse {
     1: i64 table_id,
     2: i64 cursor,
-    3: list<Extent> extents
+    3: list<Extent> extents,
+    // Postgres timestamp in microseconds since 2000-01-01
+    4: i64 commit_ts
 }
 
 // list of tables for a db_id; cursor is 0 if no more

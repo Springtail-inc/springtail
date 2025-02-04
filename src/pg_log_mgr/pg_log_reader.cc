@@ -2,29 +2,38 @@
 
 #include <common/logging.hh>
 #include <common/tracing.hh>
-
 #include <garbage_collector/xid_ready.hh>
-
-#include <pg_repl/pg_types.hh>
-#include <pg_repl/pg_repl_msg.hh>
-
-#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/pg_log_reader.hh>
+#include <pg_log_mgr/pg_log_writer.hh>
 #include <pg_log_mgr/sync_tracker.hh>
-
 #include <pg_repl/pg_msg_stream.hh>
-
+#include <pg_repl/pg_repl_msg.hh>
+#include <pg_repl/pg_types.hh>
 #include <storage/xid.hh>
-
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/schema_mgr.hh>
-
 #include <write_cache/write_cache_func.hh>
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/provider.h>
 
 namespace springtail::pg_log_mgr {
 
+    PgLogReader::PgLogReader(uint64_t db_id, const PgTransactionQueuePtr queue)
+        : _db_id(db_id),
+          _queue(queue)
+    {
+        auto meter = opentelemetry::metrics::Provider::GetMeterProvider()->GetMeter("pg_log_mgr");
+        _postgres_log_reader_latencies = std::shared_ptr<opentelemetry::metrics::Histogram<double>>(
+            meter
+                ->CreateDoubleHistogram("postgres_log_reader_latencies",
+                                        "Latency between when Postgres committed the transaction "
+                                        "and when we process it in the log reader",
+                                        "ms")
+                .release());
+    }
+
     void
-    PgLogReader::Batch::commit(uint64_t xid)
+    PgLogReader::Batch::commit(uint64_t xid, PostgresTimestamp commit_ts)
     {
         auto scope = tracing::tracer("PgLogReader")->WithActiveSpan(_span);
 
@@ -58,7 +67,7 @@ namespace springtail::pg_log_mgr {
         }
 
         // assign an XID to the committed transaction and update the mappings in the write cache
-        WriteCacheFuncImpl::commit(_db, xid, pg_xids);
+        WriteCacheFuncImpl::commit(_db, xid, pg_xids, commit_ts);
 
         // stop timing for this transaction
         _span->SetAttribute("xid", static_cast<int64_t>(xid));
@@ -646,7 +655,7 @@ namespace springtail::pg_log_mgr {
 
         // update the write cache and system tables as needed
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         _batch_map.erase(xact->xid);
         _current_batch = nullptr;
 
@@ -657,6 +666,15 @@ namespace springtail::pg_log_mgr {
 
         // check if we need to perform a table swap / commit before proceeding
         _check_sync_commit(_db_id, xact->xid, xid);
+
+        // Record latency between postgres commit time and when we process it
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() -
+            PostgresTimestamp(commit_msg.commit_ts).to_system_time());
+        _postgres_log_reader_latencies->Record(duration.count(), _context);
+        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR,
+                            "Commit processed {} milliseconds after postgres commit",
+                            duration.count());
 
         // message the Committer
         SPDLOG_DEBUG_MODULE(LOG_GC, "Issue XID to committer on {} @ {}", _db_id, xid);
@@ -724,7 +742,7 @@ namespace springtail::pg_log_mgr {
 
         // commit the current batch
         uint64_t xid = this->get_next_xid();
-        _current_batch->commit(xid);
+        _current_batch->commit(xid, PostgresTimestamp(commit_msg.commit_ts));
         _batch_map.erase(commit_msg.xid);
 
         // message the Committer
