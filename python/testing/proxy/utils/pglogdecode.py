@@ -236,9 +236,11 @@ def decode_data(data_with_header, header, db_conn=None):
     data = data_with_header[5:] # strip out code and length
     code = code.decode("utf-8")
 
-    logging.debug("decode_data: {}, ClientID: {}, SessionID: {}, SeqID: {}, Code: {}, Length: {}"
+    seq_id = ((header['seq_id_client_id'] & 0xFFFFFFFF) << 32) | (header['seq_id_seq_id'] & 0xFFFFFFFF)
+
+    logging.debug("Data: {}, ClientID: {}, SessionID: {}, SeqID: {} ({}), Code: {}, Length: {}"
            .format(header['type_str'], header['seq_id_client_id'],
-                  header['session_id'], header['seq_id_seq_id'], code, pkt_len))
+                  header['session_id'], header['seq_id_seq_id'], seq_id, code, pkt_len))
 
     # get request or response type
     req_resp_type = TYPE_REQ_RESP_MAP[header['type_flag']]
@@ -246,13 +248,13 @@ def decode_data(data_with_header, header, db_conn=None):
     if code == '*':
         # session connect
         endpoint, _ = pglib.decode_string(data)
-        logging.debug("Session connect: endpoint={}, session_id={}".format(endpoint, header['session_id']))
+        logging.debug("Session connect: endpoint={}, session_id={}\n".format(endpoint, header['session_id']))
         db_insert_session(db_conn, header, endpoint)
         return
 
     if code == '!':
         # session disconnect
-        logging.debug("Session disconnect: session_id={}".format(header['session_id']))
+        logging.debug("Session disconnect: session_id={}\n".format(header['session_id']))
         db_update_session_disconnect(db_conn, header)
         return
 
@@ -383,8 +385,7 @@ def decode_data(data_with_header, header, db_conn=None):
     else:
         msg = "Unhandled code: {}".format(code)
 
-    logging.debug(msg)
-    logging.debug("\n")
+    logging.debug(msg + "\n")
 
     # insert message into database; if db_conn == None, it will do nothing
     db_insert_msg(db_conn, header, code, msg, data_row)
@@ -466,7 +467,7 @@ def main():
             if not header:
                 break
 
-            logging.debug(header)
+            # logging.debug(header)
 
             # read in file data based on the length
             data = file.read(header['length'])

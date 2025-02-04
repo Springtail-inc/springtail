@@ -23,7 +23,7 @@
 namespace springtail::pg_proxy {
 
     /** reset query string; similar to rollback, discard all, set search path, but discard all can't be run with other statements */
-    constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT";
+    constexpr char RESET_QUERY[] = "ROLLBACK;CLOSE ALL;SET SESSION AUTHORIZATION DEFAULT;RESET ALL;DEALLOCATE ALL;UNLISTEN *;SELECT pg_advisory_unlock_all();DISCARD PLANS;DISCARD TEMP;DISCARD SEQUENCES;SET SEARCH_PATH TO DEFAULT;";
 
     ServerSession::ServerSession(ProxyConnectionPtr connection,
                                  UserPtr user,
@@ -42,11 +42,18 @@ namespace springtail::pg_proxy {
     void
     ServerSession::run(std::set<int> &fds)
     {
-        // should only be called when session is in reset state
-        CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
+        // should only be called when session is in reset state or deferred shutdown
+        CHECK(_defer_shadow_shutdown || (_state == RESET_SESSION || _state == RESET_SESSION_READY));
         DCHECK_EQ(_client_session.lock(), nullptr);
 
         _wrap_error_handler([this] {
+            if (_defer_shadow_shutdown) {
+                // process any pending messages
+                process_connection(_seq_id);
+                return;
+            }
+
+            CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
             // process the reset query response
             _handle_reset_session_message();
         });
@@ -233,28 +240,50 @@ namespace springtail::pg_proxy {
         // called from _handle_error when the client is shutting down
         _seq_id = seq_id;
 
-        if (_state == RESET_SESSION || is_shutdown()) {
-            // if we are in reset session state, or shutdown return
-            return;
-        }
+        _wrap_error_handler([this, seq_id] {
 
-        if (_state != READY) {
+            if (_state == RESET_SESSION || is_shutdown()) {
+                // if we are in reset session state, or shutdown return
+                return;
+            }
+
+            // clear the client before going forward to avoid loops in shutdown handling
+            unpin_client_session();
+
+            if (_state == READY) {
+                // if in ready state, we can reuse this session, and add back to pool
+                // reset server_session and the private session state
+                DCHECK(_batch_queue.empty() && _pending_queue.empty());
+
+                reset_session();
+                _state = RESET_SESSION;
+                // register the session with the server
+                ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
+                // send the reset simple query to server
+                _send_reset();
+
+                return;
+            }
+
+            // NOT in a READY state
+            if (is_shadow() && (_state == QUERY || _state == DEPENDENCIES)) {
+                // if in shadow mode, we can defer the shutdown until we done
+                // with all the messages in the message queue
+                _defer_shadow_shutdown = true;
+                // re-register the session with the server to receive updates
+                ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
+
+                return;
+            }
+
             // if not in ready state, we do a hard shutdown and close the connection
+            // this will return us through Session::_handle_error() and to shutdown_session()
+            SPDLOG_WARN("[S:{}] Server session shutting down, state not ready {}", _id, (int8_t)_state);
             _send_shutdown();
             _state = ERROR;
+
             return;
-        }
-
-        // reset server_session and the private session state
-        reset_session();
-
-        _state = RESET_SESSION;
-
-        // register the session with the server
-        ProxyServer::get_instance()->register_session(shared_from_this(), nullptr, _connection->get_socket(), true);
-
-        // send the reset simple query to server
-        _send_reset();
+        });
     }
 
     void
@@ -262,54 +291,51 @@ namespace springtail::pg_proxy {
     {
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing packet: state={:d}", _id, (int8_t)_state);
 
-        // entry point for connection message processing
-        // called from run in client session
-        switch(_state) {
-            case AUTH_SERVER:
-                if (_auth->process_auth_data(seq_id)) {
-                    // auth done, ready for queries
-                    _state = READY;
+        _wrap_error_handler([this, seq_id] {
+            // entry point for connection message processing
+            // called from run in client session
+            switch(_state) {
+                case AUTH_SERVER:
+                    if (_auth->process_auth_data(seq_id)) {
+                        // auth done, ready for queries
+                        _state = READY;
 
-                    // check for pending messages
-                    _process_next_batch();
+                        // check for pending messages
+                        _process_next_batch();
 
-                    // notify client session that auth is done
-                    auto cs = get_client_session();
-                    CHECK_NE(cs, nullptr);
-                    auto &&params = _auth->server_parameters();
-                    cs->server_auth_done(shared_from_this(), params);
-                }
-                break;
+                        // notify client session that auth is done
+                        auto cs = get_client_session();
+                        CHECK_NE(cs, nullptr);
+                        auto &&params = _auth->server_parameters();
+                        cs->server_auth_done(shared_from_this(), params);
+                    }
+                    break;
 
-            case READY:
-            case QUERY:
-            case DEPENDENCIES:
-            case EXTENDED_ERROR:
-                // ready for query, handle requests
-                _handle_message_from_server();
-                break;
+                case READY:
+                case QUERY:
+                case DEPENDENCIES:
+                case EXTENDED_ERROR:
+                    // ready for query, handle requests
+                    _handle_message_from_server();
+                    break;
 
-            case RESET_SESSION_READY:
-            case RESET_SESSION_PARAMS:
-                // session is being or has just been reset
-                // mostly dropping messages or handling error waiting for client
-                _handle_reset_session_message();
-                break;
+                case RESET_SESSION_READY:
+                case RESET_SESSION_PARAMS:
+                    // session is being or has just been reset
+                    // mostly dropping messages or handling error waiting for client
+                    _handle_reset_session_message();
+                    break;
 
-            case RESET_SESSION:
-                CHECK_NE(_state, RESET_SESSION);
-                break;
+                case RESET_SESSION:
+                    CHECK_NE(_state, RESET_SESSION);
+                    break;
 
-            default:
-                SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
-                _state = ERROR;
-                break;
-        }
-
-        if (_state == ERROR) {
-            // XXX figure this out...
-            _handle_error();
-        }
+                default:
+                    SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
+                    _state = ERROR;
+                    break;
+            }
+        });
     }
 
     void
@@ -412,7 +438,7 @@ namespace springtail::pg_proxy {
         buffer->put32(length-1); // don't include code byte
         buffer->put_string(reset_query);
 
-        _send_buffer(buffer, _seq_id, 'Q');
+        _send_buffer(buffer, _seq_id);
     }
 
     void
@@ -586,7 +612,7 @@ namespace springtail::pg_proxy {
         write_buffer->put32(4 + query.size() + 1); // length
         write_buffer->put_string(query);
 
-        _send_buffer(write_buffer, seq_id, 'Q');
+        _send_buffer(write_buffer, seq_id);
     }
 
     std::string
@@ -722,12 +748,26 @@ namespace springtail::pg_proxy {
             cs->server_ready_msg(xact_status);
         }
 
-        // if all queries complete, set state to ready and check for pending messages
-        if (_pending_queue.empty()) {
-            _state = READY;
-            _seq_id = 0;
-            _process_next_batch();
+        // if pending queue is not empty need to wait for them to complete
+        if (!_pending_queue.empty()) {
+            return;
         }
+
+        // no pending message, set state to ready and process next batch
+        _state = READY;
+        _seq_id = 0;
+
+        if (_defer_shadow_shutdown && _batch_queue.empty()) {
+            // we are in shadow mode with a deferred shutdown and no more messages to process
+            // we can reset the session and release it to the pool
+            CHECK(_is_shadow);
+            reset_session();
+            _state = RESET_SESSION;
+            _send_reset();
+            return;
+        }
+
+        _process_next_batch();
     }
 
     QueryStmt::Type
@@ -886,7 +926,7 @@ namespace springtail::pg_proxy {
             _send_simple_query(qs->query(), msg->seq_id());
         } else {
             // send the data buffer
-            assert (qs->data_type == QueryStmt::DataType::PACKET);
+            DCHECK_EQ(qs->data_type, QueryStmt::DataType::PACKET);
             _send_buffer(qs->buffer(), msg->seq_id());
         }
     }
@@ -921,7 +961,7 @@ namespace springtail::pg_proxy {
         buffer->put('X');
         buffer->put32(4); // length
 
-        _send_buffer(buffer, _seq_id, 'X');
+        _send_buffer(buffer, _seq_id);
     }
 
     bool
@@ -991,7 +1031,7 @@ namespace springtail::pg_proxy {
 
         PROXY_DEBUG(LOG_LEVEL_DEBUG4, "[S:{}] Server session: encode status query: {}", _id, query_str);
 
-        _send_buffer(buffer, _seq_id, 'Q');
+        _send_buffer(buffer, _seq_id);
 
         return true;
     }

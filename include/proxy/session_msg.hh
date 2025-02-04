@@ -249,13 +249,23 @@ namespace springtail::pg_proxy {
             return _processing_batch.empty();
         }
 
-        /** Reset the queue to empty state */
+        /**
+         * Reset the queue to empty state
+         */
         void reset() {
             std::unique_lock lock(_mutex);
             _processing_batch.clear();
             while (!_msg_queue.empty()) {
                 _msg_queue.pop();
             }
+        }
+
+        /**
+         * Is msg queue empty
+         */
+        bool empty() {
+            std::shared_lock lock(_mutex);
+            return _msg_queue.empty();
         }
 
     private:
