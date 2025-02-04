@@ -39,19 +39,6 @@ namespace springtail::pg_fdw {
     static constexpr char CREATE_FDW_USER[] =
         "CREATE USER {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{}'";
 
-    /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
-    static constexpr char CREATE_SCHEMA_WITH_GRANTS[] =
-        "CREATE SCHEMA {};"
-        "  GRANT USAGE ON SCHEMA {} TO {};"
-        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
-        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};";
-
-    static constexpr char ALTER_SCHEMA_WITH_GRANTS[] = 
-        "ALTER SCHEMA {} RENAME TO {};"
-        "  GRANT USAGE ON SCHEMA {} TO {};"
-        "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
-        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};";
-
     static constexpr char DROP_DATABASE[] =
         "DROP DATABASE IF EXISTS {} WITH (FORCE)";
 
@@ -201,6 +188,34 @@ namespace springtail::pg_fdw {
         for (const auto &[db_id, db_name] : dbs) {
             _create_schemas(conn, db_id, db_name);
         }
+    }
+
+    std::string
+    PgDDLMgr::_get_create_schema_with_grants_query(std::string schema)
+    {
+        /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
+        return fmt::format("CREATE SCHEMA {};"
+                "  GRANT USAGE ON SCHEMA {} TO {};"
+                "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+                "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};", 
+                schema,
+                schema, _fdw_username,
+                schema, _fdw_username,
+                schema, _fdw_username);
+    }
+
+    std::string
+    PgDDLMgr::_get_alter_schema_with_grants_query(std::string old_schema, std::string new_schema)
+    {
+        /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
+        return fmt::format("ALTER SCHEMA {} RENAME TO {};"
+            "  GRANT USAGE ON SCHEMA {} TO {};"
+            "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
+            "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};", 
+                old_schema, new_schema, 
+                new_schema, _fdw_username,
+                new_schema, _fdw_username,
+                new_schema, _fdw_username);
     }
 
     void
@@ -493,21 +508,14 @@ namespace springtail::pg_fdw {
         else if (action == "ns_create") {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Creating schema with JSON: {}", ddl.dump());
             const auto escaped_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
-            return fmt::format(CREATE_SCHEMA_WITH_GRANTS, escaped_schema,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username,
-                                   escaped_schema, _fdw_username);
+            return _get_create_schema_with_grants_query(escaped_schema);
         }
         else if (action == "ns_alter") {
-            // XXX Need to check alter schema old column
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Altering schema with JSON: {}", ddl.dump());
             const auto old_schema = conn->escape_identifier(ddl.at("old_name").get<std::string>());
             const auto new_schema = conn->escape_identifier(ddl.at("name").get<std::string>());
 
-            return fmt::format(ALTER_SCHEMA_WITH_GRANTS, old_schema, new_schema,
-                                   new_schema, _fdw_username,
-                                   new_schema, _fdw_username,
-                                   new_schema, _fdw_username);
+            return _get_alter_schema_with_grants_query(old_schema, new_schema);
         }
         else if (action == "ns_drop") {
             SPDLOG_DEBUG_MODULE(LOG_FDW, "Dropping schema with JSON: {}", ddl.dump());
