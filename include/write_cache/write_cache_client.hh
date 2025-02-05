@@ -7,7 +7,9 @@
 #include <string_view>
 #include <iostream>
 
+#include <common/common.hh>
 #include <common/singleton.hh>
+#include <common/timestamp.hh>
 
 #include <thrift/write_cache/ThriftWriteCache.h> // generated file
 #include <thrift/common/thrift_client.hh>
@@ -40,9 +42,10 @@ namespace springtail {
          * @param xid springtail XID
          * @param count Max. number of extents to fetch; done when count >= vector size
          * @param cursor In/Out cursor, in: set to 0 for start of range, out: current position
+         * @param commit_ts out; postgres-reported commit ts of xid
          * @return std::vector<std::string>
          */
-        std::vector<WriteCacheExtent> get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor);
+        std::vector<WriteCacheExtent> get_extents(uint64_t db_id, uint64_t tid, uint64_t xid, uint32_t count, uint64_t &cursor, PostgresTimestamp &commit_ts);
 
         /**
          * @brief Remove extents for a table at a given XID

@@ -88,13 +88,13 @@ namespace springtail {
         init_logging(logging_mask, log_filename, daemon_pid.has_value());
 
         // initialize the tracing infrastructure
-        tracing::init_tracing();
+        tracing::init_tracing_and_metrics(log_filename.value_or(""));
     }
 
-    void springtail_init(const std::string &log_filename,
-                         uint32_t logging_mask)
+    void
+    springtail_init(const std::string &log_filename, uint32_t logging_mask)
     {
         springtail_init(log_filename, std::nullopt, logging_mask);
     }
 
-}
+}  // namespace springtail

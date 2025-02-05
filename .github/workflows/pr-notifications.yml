@@ -19,7 +19,17 @@ jobs:
       (github.event_name == 'pull_request' && github.event.action == 'review_requested') ||
       (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
     runs-on: ubuntu-latest
+    concurrency:
+      group: pr-${{ github.event.pull_request.number }}-review-request
+      cancel-in-progress: true
     steps:
+      # This step will wait for a certain period to batch events. If there are multiple events within this period of time,
+      # they will be batched together.
+      - name: Wait to batch events
+        env:
+          PR_BATCHING_WAIT_TIME: ${{ vars.PR_BATCHING_WAIT_TIME || 30 }}
+        run: sleep $PR_BATCHING_WAIT_TIME
+
       - name: Install jq
         uses: dcarbone/install-jq-action@v3.0.1
       - name: Get PR information

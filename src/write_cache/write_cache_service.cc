@@ -24,10 +24,10 @@ namespace springtail {
         WriteCacheIndexPtr index = server->get_index(request.db_id);
 
         uint64_t cursor = request.cursor;
-
+        PostgresTimestamp commit_ts;
         std::vector<WriteCacheIndexExtentPtr> extents =
             index->get_extents(request.table_id, request.xid,
-                               request.count, cursor);
+                               request.count, cursor, commit_ts);
 
         for (const auto &e: extents) {
             thrift::write_cache::Extent extent;
@@ -42,6 +42,7 @@ namespace springtail {
 
         _return.cursor = cursor;
         _return.table_id = request.table_id;
+        _return.commit_ts = commit_ts.micros();
     }
 
     void
