@@ -1,0 +1,76 @@
+name: Nightly Build Workflow
+
+on:
+  schedule:
+    # Runs at 07:00 UTC, which corresponds to 11:00 PM PT
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  checks: write
+
+
+jobs:
+  nightly_job:
+    name: Nightly Job
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: ${{ inputs.builder_image_version_tag }}
+      credentials:
+        username: AWS
+        password: ${{ secrets.aws_ecr_docker_password }}
+
+    # You can use this environment variable to access the current working directory
+    env:
+      VCPKG_ROOT: /home/dev/external/vcpkg
+      ZIC: true
+      VCPKG_FORCE_SYSTEM_BINARIES: 1
+      CWD: ${{ github.workspace }}
+      DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
+      PACKAGES_S3_PREFIX: packages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: install-aws-cli-action
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2                         # default
+          verbose: false                     # default
+          arch: arm64
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-session-name: tempSession
+          aws-region: us-east-1
+
+      - name: Prepare Tests
+        run: |
+          git config --global --add safe.directory /__w/springtail/springtail
+          cp system.json.settings system.json.test
+          mkdir -p /opt/springtail/pids
+          service redis-server start
+
+      - name: Run nightly tests
+        run: |
+          # TODO: Add tests command here.
+
+      - name: Run nightly build (if above tests pass)
+        if: success()
+        run: |
+          rm -rf releases
+          cd debug
+          make install -j ${NUM_PROCS}
+          cd ..
+          ./package.sh
+
+      - name: Upload Build artifacts to S3
+        if: success()
+        run: |
+          aws s3 cp "releases/$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
