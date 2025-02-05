@@ -77,6 +77,9 @@ namespace springtail::pg_proxy {
             auto ts = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
             int64_t timestamp = ts.count();
 
+            SPDLOG_DEBUG("Logging data: proxy_id={} session_id={} seq_id={} code={} data_length={} final={}",
+                         proxy_id, session_id, seq_id, code, data_length, final);
+
             // generate header:
             // 1B: type
             // 1B: final flag -- 1 if the last part in the msg

@@ -435,7 +435,6 @@ namespace springtail::pg_proxy {
 
         // shutdown ssl
         if (_enable_ssl) {
-            ::SSL_CTX_free(_ssl_ctx_server);
             ::SSL_CTX_free(_ssl_ctx_client);
         }
 

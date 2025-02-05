@@ -8,6 +8,7 @@
 #include <shared_mutex>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 
 #include <common/logging.hh>
 #include <common/singleton.hh>
@@ -182,12 +183,16 @@ namespace springtail::pg_proxy {
     public:
         /**
          * @brief Initialize UserMgr object
-         *
          * @param sleep_interval - UserMgr thread sleep interval in seconds
          */
         void init(const uint32_t sleep_interval) {
             _sleep_interval = sleep_interval;
             start_thread();
+        }
+
+        void stop_thread() override {
+            SingletonWithThread<UserMgr>::stop_thread();
+            _sleep_cv.notify_all();
         }
 
         /**
@@ -246,6 +251,9 @@ namespace springtail::pg_proxy {
 
         std::thread::id _id;                    ///< user manager thread id
         uint32_t _sleep_interval;               ///< sleep interval in seconds
+
+        std::mutex _sleep_mutex;                ///< mutex for sleep
+        std::condition_variable _sleep_cv;      ///< condition variable for sleep
 
         /**
          * @brief Add new user to the user map

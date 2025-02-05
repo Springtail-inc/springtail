@@ -1,5 +1,6 @@
 #pragma once
 
+#include <common/timestamp.hh>
 #include <write_cache/write_cache_index.hh>
 #include <write_cache/write_cache_server.hh>
 #include <storage/extent.hh>
@@ -52,10 +53,10 @@ namespace springtail {
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
          */
-        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids)
+        static void commit(uint64_t db_id, uint64_t xid, std::vector<uint64_t> pg_xids, PostgresTimestamp commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xids, xid);
+            index->commit(pg_xids, xid, commit_ts);
         }
 
         /**
@@ -63,11 +64,12 @@ namespace springtail {
          * @param db_id database ID
          * @param xid Springtail XID
          * @param pg_xid Postgres XIDs
+         * @param commit_ts Postgres commit ts
          */
-        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid)
+        static void commit(uint64_t db_id, uint64_t xid, uint64_t pg_xid, PostgresTimestamp commit_ts)
         {
             WriteCacheIndexPtr index = WriteCacheServer::get_instance()->get_index(db_id);
-            index->commit(pg_xid, xid);
+            index->commit(pg_xid, xid, commit_ts);
         }
 
         /**
