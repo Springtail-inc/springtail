@@ -101,13 +101,19 @@ namespace springtail {
         ~RedisMgr() override = default;
 
     private:
-        int _db_id;
-        static inline bool _inited = false;
-        static inline int _config_db_id;
-        static inline int _data_db_id;
-        static inline std::mutex _connect_options_mutex;
-        static inline sw::redis::ConnectionOptions _connect_options = {};
+        int _db_id;                         ///< redis database id
+        static inline bool _inited = false; ///< connect options initialization flag
+        static inline int _config_db_id;    ///< redis config database id
+        static inline int _data_db_id;      ///< redis data database id
+        static inline std::mutex _connect_options_mutex;    ///< connect options mutex
+        static inline sw::redis::ConnectionOptions _connect_options = {};   ///< connect options
 
+        /**
+         * @brief Internal connect options initialization function
+         *
+         * @param config_db - config database flag
+         * @return sw::redis::ConnectionOptions - connect option
+         */
         static sw::redis::ConnectionOptions _get_connect_options(bool config_db=true);
     };
 }

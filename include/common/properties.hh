@@ -81,6 +81,7 @@ namespace springtail {
             return get_instance()->_make_absolute_path(path);
         }
 
+        /** Helper to get fdw ids */
         static inline std::string get_fdw_id() {
             _assert_instance();
             return get_instance()->_get_fdw_id();
@@ -146,12 +147,23 @@ namespace springtail {
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
+        /** Get access to redis cache in case the user need to make the changes to config database */
+
+        /**
+         * @brief Get access to redis cache in case the user need to make
+         *          the changes to config database
+         *
+         * @return std::shared_ptr<RedisCache> - RedisCache shared pointer
+         */
         std::shared_ptr<RedisCache> get_cache() { return _cache; }
 
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
-
+        /**
+         * @brief RedisCache object
+         *
+         */
         std::shared_ptr<RedisCache> _cache;
 
         /**
@@ -182,46 +194,120 @@ namespace springtail {
          */
         void _load_redis(const std::string &config_file);
 
+        /**
+         * @brief Internal get database instance id
+         *
+         * @return uint64_t
+         */
         uint64_t _get_db_instance_id() {
             assert (_json.contains(ORG_CONFIG));
             assert (_json[ORG_CONFIG].contains("db_instance_id"));
             return _json[ORG_CONFIG]["db_instance_id"];
         }
 
+        /**
+         * @brief Internal get mount point
+         *
+         * @return std::string
+         */
         std::string _get_mount_point() {
             assert (_json.contains(FS_CONFIG));
             assert (_json[FS_CONFIG].contains("mount_point"));
             return _json[FS_CONFIG]["mount_point"];
         }
 
+        /**
+         * @brief Get absolute path for given file path
+         *
+         * @param path - file path
+         * @return std::filesystem::path
+         */
         std::filesystem::path
         _make_absolute_path(const std::string &path) {
             assert (!_get_mount_point().empty());
             return std::filesystem::path(_get_mount_point()) / path;
         }
 
+        /**
+         * @brief Internal get fdw id
+         *
+         * @return std::string
+         */
         std::string _get_fdw_id() {
             assert (_json.contains(ORG_CONFIG));
             assert (_json[ORG_CONFIG].contains("fdw_id"));
             return _json[ORG_CONFIG]["fdw_id"];
         }
 
+        /**
+         * @brief Internal get databases
+         *
+         * @return std::map<uint64_t, std::string>
+         */
         std::map<uint64_t, std::string> _get_databases();
 
+        /**
+         * @brief Internal get database name for a given database
+         *
+         * @param db_id - database id
+         * @return std::string
+         */
         std::string _get_db_name(uint64_t db_id);
 
+        /**
+         * @brief Internal get fdw ids
+         *
+         * @return std::vector<std::string>
+         */
         std::vector<std::string> _get_fdw_ids();
 
+        /**
+         * @brief Internal get database config for the given database id
+         *
+         * @param db_id - database id
+         * @return nlohmann::json
+         */
         nlohmann::json _get_db_config(uint64_t db_id);
 
+        /**
+         * @brief Internal get primary database config and store them in input arguments
+         *
+         * @param host - host name
+         * @param port - port value
+         * @param user - user name
+         * @param password - user password
+         */
         void _get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
 
+        /**
+         * @brief Internal get database state for given database id
+         *
+         * @param db_id - database id
+         * @return std::string - state string
+         */
         std::string _get_db_state(uint64_t db_id);
 
+        /**
+         * @brief Internal set database state for given database id
+         *
+         * @param db_id - database id
+         * @param state - database state
+         */
         void _set_db_state(uint64_t db_id, const std::string &state);
 
+        /**
+         * @brief Internal get fdw config for given fdw id
+         *
+         * @param fdw_id - fdw id
+         * @return nlohmann::json - fdw config
+         */
         nlohmann::json _get_fdw_config(const std::string &fdw_id);
 
+        /**
+         * @brief Internal publish liveness notification message
+         *
+         * @param msg - message tp publish
+         */
         void _publish_liveness_notification(const std::string &msg);
 
         /**
