@@ -366,7 +366,8 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         {
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object = _get_value("/" + redis_key, _storage);
             if (json_optional_object.has_value()) {
-                ret = _client->set(redis_key, nlohmann::to_string(json_optional_object.value().get()));
+                const nlohmann::json &json_object = json_optional_object.value().get();
+                ret = _client->set(redis_key, _json_to_string(json_object));
             }
             break;
         }
@@ -377,7 +378,8 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object =
                 _get_value("/" + redis_key + "/" + hash_key, _storage);
             if (json_optional_object.has_value()) {
-                _client->hset(redis_key, hash_key, nlohmann::to_string(json_optional_object.value().get()));
+                const nlohmann::json &json_object = json_optional_object.value().get();
+                _client->hset(redis_key, hash_key, _json_to_string(json_object));
                 ret = true;
             }
             break;
@@ -523,5 +525,38 @@ RedisCache::publish(const std::string &channel_template, const std::string_view 
     std::string channel = fmt::format(fmt::runtime(channel_template), _instance_id);
     return _client->publish(channel, message);
 }
+
+std::string
+RedisCache::_json_to_string(const nlohmann::json &json_value) {
+    std::string out_string;
+    switch (json_value.type()) {
+        case nlohmann::json::value_t::boolean:
+            out_string = fmt::format("{}", json_value.get<bool>());
+            break;
+        case nlohmann::json::value_t::string:
+            out_string = json_value.get<std::string>();
+            break;
+        case nlohmann::json::value_t::number_integer:
+            out_string = fmt::format("{}", json_value.get<int64_t>());
+            break;
+        case nlohmann::json::value_t::number_unsigned:
+            out_string = fmt::format("{}", json_value.get<uint64_t>());
+            break;
+        case nlohmann::json::value_t::number_float:
+            out_string = fmt::format("{}", json_value.get<float>());
+            break;
+        case nlohmann::json::value_t::object:
+        case nlohmann::json::value_t::array:
+            out_string = nlohmann::to_string(json_value);
+            break;
+        case nlohmann::json::value_t::null:
+        case nlohmann::json::value_t::binary:
+        case nlohmann::json::value_t::discarded:
+            SPDLOG_ERROR("Unsupported type {} for storing value {} in redis",
+                json_value.type_name(), nlohmann::to_string(json_value));
+    }
+    return out_string;
+}
+
 
 };

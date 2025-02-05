@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fmt/core.h>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -339,5 +340,14 @@ namespace springtail {
          */
         static inline std::string
         _get_array_path(const std::string &path, const nlohmann::json &storage);
+
+        /**
+         * @brief Convert json object to an appropriate string
+         *
+         * @param json_value - json value
+         * @return std::string - output string
+         */
+        static inline std::string
+        _json_to_string(const nlohmann::json &json_value);
     };
 };
