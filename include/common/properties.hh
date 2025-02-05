@@ -5,7 +5,6 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <iostream>
 
 #include <nlohmann/json.hpp>
 
@@ -170,28 +169,18 @@ namespace springtail {
          */
         void _read_redis_properties();
 
-        /**
-         * @brief Create redis client from config for config db
-         */
-        void _create_redis_client();
+         /**
+          * @brief Create redis client from config for config db
+          *
+          * @return RedisClientPtr - shared pointer to redis client
+          */
+        RedisClientPtr _create_redis_client();
 
         /**
          * @brief Load redis config from file
          * @param config_file path to config file
          */
         void _load_redis(const std::string &config_file);
-
-        /**
-         * @brief Get config redis client
-         */
-        RedisClientPtr _get_redis_client() {
-            _assert_instance();
-            if (_redis_config_client == nullptr) {
-                _create_redis_client();
-            }
-            assert(_redis_config_client != nullptr);
-            return _redis_config_client;
-        }
 
         uint64_t _get_db_instance_id() {
             assert (_json.contains(ORG_CONFIG));
@@ -242,8 +231,5 @@ namespace springtail {
 
         /** Helper to get primary db json for current db instance */
         nlohmann::json _get_primary_db_config();
-
-        /** Redis client connected to config db */
-        RedisClientPtr _redis_config_client = nullptr;
     };
 }

@@ -52,15 +52,10 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_ADD, db_id);
-            ts.publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
-
             // hset instance_state:1234 2 running
             key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
             std::string db_id_str = std::to_string(db_id);
             ts.hset(key, db_id_str, "running");
-            msg = fmt::format("{}:running", db_id);
-            ts.publish(fmt::format(redis::PUBSUB_DB_STATE_CHANGES, instance_id), msg);
 
             // hset db_config:1234 2 "{\"name\": \"springtail_1\", \"replication_slot\": \"springtail_slot\", \"publication_name\": \"springtail_pub\", \"include\": {\"schemas\": [\"*\"]}}"
             key = fmt::format(redis::DB_CONFIG, instance_id);
@@ -70,6 +65,13 @@ namespace {
             std::string config_str = "{" + name_str + ", " + replication_slot + ", " + publication_name + ", \"include\": {\"schemas\": [\"*\"]}}";
             ts.hset(key, db_id_str, config_str);
             ts.exec();
+
+            sleep(1);
+
+            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_ADD, db_id);
+            _config_client->publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
+            msg = fmt::format("{}:running", db_id);
+            _config_client->publish(fmt::format(redis::PUBSUB_DB_STATE_CHANGES, instance_id), msg);
 
             sleep(1);
 
@@ -101,9 +103,6 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_REMOVE, db_id);
-            ts.publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
-
             // hdel instance_state:1234 2
             key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
             std::string db_id_str = std::to_string(db_id);
@@ -113,6 +112,11 @@ namespace {
             key = fmt::format(redis::DB_CONFIG, instance_id);
             ts.hdel(key, db_id_str);
             ts.exec();
+
+            sleep(1);
+
+            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_REMOVE, db_id);
+            _config_client->publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
 
             sleep(1);
 
