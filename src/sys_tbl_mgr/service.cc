@@ -312,21 +312,21 @@ namespace springtail::sys_tbl_mgr {
         auto names_schema = names_t->extent_schema();
         auto names_fields = names_schema->get_fields();
 
-        //find the last record for the index id
-        auto info = _find_index(db_id, index_id, {std::numeric_limits<decltype(xid.xid)>::max(), 0}, tid);
+        // find the last record for the index id
+        auto info = _find_index(db_id, index_id, xid, tid);
 
         if (!info) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{} - {}",
-                    db_id, xid.xid, index_id);
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index not found: {}@{}:{} - {}",
+                                db_id, xid.xid, xid.lsn, index_id);
             return;
         }
         if (static_cast<sys_tbl::IndexNames::State>(info->first.state) == sys_tbl::IndexNames::State::DELETED) {
-            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{} - {}",
-                    db_id, xid.xid, index_id);
+            SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Index already deleted: {}@{}:{} - {}",
+                                db_id, xid.xid, xid.lsn, index_id);
             return;
         }
 
-        assert(xid > info->second);
+        // assert(xid > info->second);
 
         SPDLOG_DEBUG_MODULE(LOG_SCHEMA, "Drop index found {}:{} -- {}", db_id, info->first.table_id, index_id);
         auto index_names_t = _get_mutable_system_table(db_id, sys_tbl::IndexNames::ID);

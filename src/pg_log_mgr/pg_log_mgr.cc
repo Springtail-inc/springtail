@@ -73,6 +73,8 @@ namespace springtail::pg_log_mgr {
     uint64_t
     PgLogMgr::_startup_running()
     {
+        SPDLOG_INFO("Starting up from the RUNNING state.");
+
         uint64_t lsn = INVALID_LSN;
 
         // create directories if they don't exist
@@ -88,6 +90,9 @@ namespace springtail::pg_log_mgr {
         }
 
         //// Replay xact logs
+
+        // XXX need to change this to pull individual message batches like the log writer sends to
+        //     the log reader and then exclude ones that shouldn't be committed
 
         // scan xact logs and transfer in progress xacts to log reader
         // fetch xaction list from xact reader, and add them to Redis
@@ -107,6 +112,8 @@ namespace springtail::pg_log_mgr {
             for (auto &xact: committed_xacts) {
                 CHECK(xact->springtail_xid >= current_xid);
                 SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replaying xact to redis: xid={}, type={}", xact->springtail_xid, xact->type);
+
+                _logger_queue.push(xact->begin_offset, xact->commit_offset, );
             }
 
             last_xact = committed_xacts.back();

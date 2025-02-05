@@ -443,8 +443,8 @@ def start(config_file: str,
     config_file = os.path.abspath(config_file)
 
     # Load the system properties from the system.json file
-    # also does a load redis from the system file
-    props = Properties(config_file, True)
+    # also does a load redis from the system file if do_cleanup is True
+    props = Properties(config_file, do_cleanup)
 
     # Print the system properties
     print_sys_props(props, config_file)
@@ -470,14 +470,15 @@ def start(config_file: str,
         print(f"\nExecuting startup SQL file: {sql_file}")
         execute_startup_sql(props, sql_file)
 
-    # install fdw
-    print("\nInstalling foreign data wrapper...")
-    install_fdw(build_dir)
+    if do_cleanup:
+        # install fdw
+        print("\nInstalling foreign data wrapper...")
+        install_fdw(build_dir)
 
-    # start replication on db instance
-    print("\nStarting replication on database instance...")
-    check_log_writable(props)
-    start_replication(props, build_dir)
+        # start replication on db instance
+        print("\nStarting replication on database instance...")
+        check_log_writable(props)
+        start_replication(props, build_dir)
 
     # start daemons with XID if specified
     print("\nStarting daemons...")
@@ -497,10 +498,11 @@ def start(config_file: str,
     print("\nWaiting for running state...")
     wait_for_running(props)
 
-    # import the fdw schemas
-    print("\nImporting foreign data wrapper schemas...")
-    fdw_import(props, build_dir, config_file)
-    fixup_log_perms(props)
+    if do_cleanup:
+        # import the fdw schemas
+        print("\nImporting foreign data wrapper schemas...")
+        fdw_import(props, build_dir, config_file)
+        fixup_log_perms(props)
 
     print("\nSpringtail system started successfully.")
 

@@ -124,6 +124,14 @@ namespace springtail {
         TableMetadata tbl_meta;
         tbl_meta.snapshot_xid = snapshot_xid;
 
+        // note: in the case of a failure, there may be a partially copied table already present in
+        //       the directory structure, so we need to make sure to delete it before we try to
+        //       create it below
+        auto table_dir = table_helpers::get_table_dir(_table_base, db_id, table_id, snapshot_xid);
+        if (std::filesystem::exists(table_dir)) {
+            std::filesystem::remove_all(table_dir);
+        }
+
         // construct an empty mutable table with the provided snapshot XID and return it
         return std::make_shared<MutableTable>(db_id, table_id, snapshot_xid, snapshot_xid,
                                               _table_base, schema->get_sort_keys(), secondary_keys,
