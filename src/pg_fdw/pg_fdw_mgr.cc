@@ -250,8 +250,8 @@ namespace springtail::pg_fdw {
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: ASC={}",
-                    state->scan_asc);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full table scan: tid={}, ASC={}",
+                    state->tid, state->scan_asc);
             state->iter_start.emplace(state->table->begin());
             state->iter_end.emplace(state->table->end());
             return;
@@ -259,8 +259,8 @@ namespace springtail::pg_fdw {
 
         if (state->filtered_quals.empty()) {
             // Usually the index is defined by sortgroup in this case.
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: {}, ASC={}",
-                    state->index->id, state->scan_asc);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for full index scan: tid={}, index={}, ASC={}",
+                    state->tid ,state->index->id, state->scan_asc);
             state->iter_start.emplace(state->table->begin(state->index->id));
             state->iter_end.emplace(state->table->end(state->index->id));
             return;
@@ -273,8 +273,8 @@ namespace springtail::pg_fdw {
         FieldTuplePtr tuple = _gen_qual_tuple(state->filtered_quals, state->qual_fields);
         QualOpName op = qual->base.op;
 
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: op: {}, fields: {}",
-                            qual->base.opname, tuple->to_string());
+        SPDLOG_DEBUG_MODULE(LOG_FDW, "Setting up iterators for qual scan: tid: {}, index: {}, op: {}, fields: {}",
+                            state->tid, state->index->id, qual->base.opname, tuple->to_string());
 
         switch (op) {
             case LESS_THAN:
