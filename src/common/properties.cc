@@ -300,47 +300,48 @@ namespace springtail {
         // check for overrides in the environment variables
         // Note: overrides will only apply to config in _json
         const char *var = std::getenv(environment::ENV_OVERRIDE);
-        if (var == nullptr) {
-            return; // no overrides, exit
+
+        if (var != nullptr) {
+            // overrides are in the form <key>=<val>;<key2>=<val2> where keys are a dot-separated
+            // path within the json configuration
+            std::string_view props(var);
+            std::size_t pos = 0;
+            while (pos < props.size()) {
+                auto *item = &_json;
+                std::string_view key, val;
+                std::size_t start = pos;
+                std::string next_token = ".=";
+                do {
+                    std::size_t token = props.find_first_of(next_token, start);
+                    if (token == std::string_view::npos) {
+                        token = props.size();
+                    }
+
+                    if (token == props.size() || props[token] == ';') {
+                        assert(key.size());
+                        val = props.substr(start, token - start);
+
+                        // set the overridden value
+                        // note: all override values are stored as strings
+                        (*item)[key] = val;
+                    } else if (props[token] == '=') {
+                        key = props.substr(start, token - start);
+                        next_token = ";";
+                    } else {
+                        CHECK_EQ(props[token], '.');
+                        key = props.substr(start, token - start);
+                        item = &((*item)[key]);
+                    }
+
+                    start = token + 1;
+                } while (val.empty() && start < props.size());
+
+                // set the position to the start of the next entry
+                pos = start;
+            }
         }
 
-        // overrides are in the form <key>=<val>;<key2>=<val2> where keys are a dot-separated
-        // path within the json configuration
-        std::string_view props(var);
-        std::size_t pos = 0;
-        while (pos < props.size()) {
-            auto *item = &_json;
-            std::string_view key, val;
-            std::size_t start = pos;
-            std::string next_token = ".=";
-            do {
-                std::size_t token = props.find_first_of(next_token, start);
-                if (token == std::string_view::npos) {
-                    token = props.size();
-                }
-
-                if (token == props.size() || props[token] == ';') {
-                    assert(key.size());
-                    val = props.substr(start, token - start);
-
-                    // set the overridden value
-                    // note: all override values are stored as strings
-                    (*item)[key] = val;
-                } else if (props[token] == '=') {
-                    key = props.substr(start, token - start);
-                    next_token = ";";
-                } else {
-                    CHECK_EQ(props[token], '.');
-                    key = props.substr(start, token - start);
-                    item = &((*item)[key]);
-                }
-
-                start = token + 1;
-            } while (val.empty() && start < props.size());
-
-            // set the position to the start of the next entry
-            pos = start;
-        }
+        _cache = std::make_shared<RedisCache>(true);
     }
 
     std::map<uint64_t, std::string>

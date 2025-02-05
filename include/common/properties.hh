@@ -9,7 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <common/redis.hh>
+#include <common/redis_cache.hh>
 #include <common/singleton.hh>
 
 #ifndef SPRINGTAIL_PROPERTIES
@@ -147,9 +147,13 @@ namespace springtail {
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
+        std::shared_ptr<RedisCache> get_cache() { return _cache; }
+
     private:
         /** json containing parsed settings file */
         nlohmann::json _json;
+
+        std::shared_ptr<RedisCache> _cache;
 
         /**
          * @brief Construct a new Properties object
