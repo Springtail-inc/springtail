@@ -2,8 +2,13 @@
 #include <spdlog/sinks/base_sink.h>
 #include <opentelemetry/logs/provider.h>
 #include <opentelemetry/logs/logger.h>
+#include <opentelemetry/baggage/baggage.h>
+#include <opentelemetry/baggage/baggage_context.h>
 #include <opentelemetry/common/macros.h>
 #include <opentelemetry/common/timestamp.h>
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/context/runtime_context.h>
+#include <opentelemetry/context/context_value.h>
 #include <opentelemetry/sdk/common/global_log_handler.h>
 #include <opentelemetry/version.h>
 #include <opentelemetry/common/key_value_iterable_view.h>
@@ -84,13 +89,7 @@ protected:
         spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
         std::string log_message{formatted.data(), formatted.size()};
 
-        // Create attributes
-        std::vector<std::pair<std::string, std::string>> attributes = {
-            {"source_file", msg.source.filename ? msg.source.filename : ""},
-            {"source_line", std::to_string(msg.source.line)},
-            {"source_func", msg.source.funcname ? msg.source.funcname : ""}
-        };
-
+        std::vector<std::pair<std::string, std::string>> attributes = get_context_attributes(msg);
         auto attributes_view = opentelemetry::common::KeyValueIterableView<decltype(attributes)>{attributes};
 
         // Send to OpenTelemetry with source information
@@ -99,6 +98,31 @@ protected:
             opentelemetry::nostd::string_view{log_message},
             attributes_view
         );
+    }
+
+    std::vector<std::pair<std::string, std::string>>
+    get_context_attributes(const spdlog::details::log_msg &msg)
+    {
+        std::string ctx_xid_str = "-1";
+        std::string ctx_db_id_str = "-1";
+
+        auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+        auto baggage_entries = opentelemetry::baggage::GetBaggage(ctx);
+
+        baggage_entries->GetValue("xid", ctx_xid_str);
+        baggage_entries->GetValue("db_id", ctx_db_id_str);
+
+        // Create attributes
+        std::vector<std::pair<std::string, std::string>> attributes = {
+            {"source_file", msg.source.filename ? msg.source.filename : ""},
+            {"source_line", std::to_string(msg.source.line)},
+            {"source_func", msg.source.funcname ? msg.source.funcname : ""},
+            {"meta", "extra_meta"},
+            {"xid", ctx_xid_str},
+            {"db_id", ctx_db_id_str}
+        };
+
+        return attributes;
     }
 
     void flush_() override {

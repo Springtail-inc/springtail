@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <variant>
 #include <vector>
 #include <optional>
 #include <utility>
@@ -7,10 +9,16 @@
 #include <string>
 #include <optional>
 
+#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <fmt/std.h>
 
+#include <opentelemetry/baggage/baggage.h>
+#include <opentelemetry/baggage/baggage_context.h>
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/context/context_value.h>
+#include <opentelemetry/context/runtime_context.h>
 #include <spdlog/spdlog.h>
 
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
@@ -18,6 +26,8 @@
 #else
     #define SPDLOG_DEBUG_MODULE(module, ...) (void)0
 #endif
+
+#define OTEL_SET_CONTEXT(xid, db_id) springtail::logging::set_otel_context(xid, db_id)
 
 namespace springtail {
     /**
@@ -82,6 +92,18 @@ namespace springtail {
                 return;
             }
             logger->log(spdlog::source_loc{file, line, func}, spdlog::level::debug, fmt, std::forward<Args>(args)...);
+        }
+
+        inline void
+        set_otel_context(uint64_t xid, uint64_t db_id)
+        {
+            auto ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+
+            auto baggage_header = fmt::format("xid={},db_id={}", xid, db_id);
+            auto baggage = opentelemetry::baggage::Baggage().FromHeader(baggage_header);
+
+            auto updated_context = opentelemetry::baggage::SetBaggage(ctx, baggage);
+            opentelemetry::context::RuntimeContext::Attach(updated_context);
         }
     }
 }
