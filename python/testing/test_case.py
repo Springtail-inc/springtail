@@ -8,6 +8,7 @@ import psycopg2
 import springtail
 import sysutils
 import time
+import common
 
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
