@@ -49,7 +49,8 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ClientSession::run(std::set<int> &fds)
+    ClientSession::run(std::set<int> &fds,
+                       std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> &notifications)
     {
         // main entry point for client session
         PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[C:{}] Client session running", _id);
@@ -65,15 +66,29 @@ namespace springtail::pg_proxy {
             }
 
             // check if we have any server sessions
-            if (_primary_session && fds.contains(_primary_session->get_connection()->get_socket())) {
-                _primary_session->process_connection(_gen_seq_id());
+            if (_primary_session) {
+                auto socket = _primary_session->get_connection()->get_socket();
+                if (fds.contains(socket)) {
+                    _primary_session->process_connection(_gen_seq_id());
+                }
+
+                if (notifications.contains(socket)) {
+                    _primary_session->process_notification(notifications[socket]);
+                }
             }
 
-            if (_replica_session && fds.contains(_replica_session->get_connection()->get_socket())) {
-                _replica_session->process_connection(_gen_seq_id());
+            if (_replica_session) {
+                auto socket = _replica_session->get_connection()->get_socket();
+                if (fds.contains(socket)) {
+                    _replica_session->process_connection(_gen_seq_id());
+                }
+                if (notifications.contains(socket)) {
+                    _replica_session->process_notification(notifications[socket]);
+                }
             }
 
             fds.clear();
+            notifications.clear();
 
         } while (_has_pending_data(fds));
 

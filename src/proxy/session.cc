@@ -75,16 +75,26 @@ namespace springtail::pg_proxy {
         }
 
         // call child run method
-        run(_fds);
+        run(_fds, _notifications);
 
-        // clear fds
-        _fds.clear();
+        // clear fds and notifications
+        clear_fds();
+        clear_notifications();
 
         // re-enable processing for this socket
         _running.clear();
         if (!_connection->closed()) {
             ProxyServer::get_instance()->signal(shared_from_this());
         }
+    }
+
+    void
+    Session::instance_removed()
+    {
+        // for primary this is fatal, for replica it is not
+        // either way notify the server so that it can notify
+        // the session through the primary path
+        ProxyServer::get_instance()->notify_session(_connection->get_socket(), NOTIFY_MSG::INSTANCE_SHUTDOWN);
     }
 
     std::pair<char,int32_t>

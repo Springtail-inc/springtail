@@ -58,8 +58,8 @@ namespace springtail::pg_fdw {
             const ListCell *lc{};
             foreach(lc, qual_list) {
                 ConstQualPtr qual = static_cast<ConstQualPtr>(lfirst(lc));
-                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) && 
-                        qual->base.isArray == false &&  
+                if (PgFdwMgr::_is_type_sortable(qual->base.typeoid, qual->base.op) &&
+                        qual->base.isArray == false &&
                         qual->base.varattno == pos ) {
                     return qual;
                 }
@@ -91,10 +91,16 @@ namespace springtail::pg_fdw {
 
     std::once_flag PgFdwMgr::_init_flag;
 
+    static void
+    handle_signal(int signal)
+    {
+        elog(LOG_SERVER_ONLY, "Received signal %d, shutting down", signal);
+    }
+
     PgFdwMgr*
     PgFdwMgr::_init()
     {
-        elog(NOTICE, "Initializing PgFdwMgr");
+        elog(LOG_SERVER_ONLY, "Initializing PgFdwMgr");
 
         // initialize logging
         try {
@@ -102,6 +108,9 @@ namespace springtail::pg_fdw {
         } catch (const std::exception &e) {
             elog(ERROR, "Error initializing logging: %s", e.what());
         }
+
+        pqsignal(SIGTERM, handle_signal);
+        pqsignal(SIGUSR2, handle_signal);
 
         _instance = new PgFdwMgr();
 
@@ -116,7 +125,7 @@ namespace springtail::pg_fdw {
         if (config_file != nullptr) {
             // set env variables based on redis config
             // we don't reload redis config here, just set the env variables
-            elog(NOTICE, "Setting properties from file: %s", config_file);
+            elog(LOG_SERVER_ONLY, "Setting properties from file: %s", config_file);
             Properties::set_env_from_file(config_file);
             ::unsetenv("SPRINGTAIL_PROPERTIES_FILE");
         }
@@ -246,7 +255,7 @@ namespace springtail::pg_fdw {
     PgFdwMgr::_set_scan_iterators(PgFdwState *state)
     {
         // this will return a pair of iterators based on the conditions.
-        // for ASC order, scan from iter_start to iter_end with (iter_start++) 
+        // for ASC order, scan from iter_start to iter_end with (iter_start++)
         // for DESC order, scan from iter_end to iter_end with (iter_end--)
         // make sure to handle the special case for NOT_EQUALS while scanning
         if (!state->index.has_value()) {
@@ -285,7 +294,7 @@ namespace springtail::pg_fdw {
                 state->iter_start.emplace(state->table->begin(state->index->id));
                 state->iter_end.emplace(state->table->upper_bound(tuple, state->index->id));
                 break;
-            case NOT_EQUALS: 
+            case NOT_EQUALS:
                 if (state->scan_asc) {
                     state->iter_start.emplace(state->table->begin(state->index->id));
                     state->iter_end.emplace(state->table->lower_bound(tuple, state->index->id));
@@ -306,7 +315,7 @@ namespace springtail::pg_fdw {
                 state->iter_start.emplace(state->table->upper_bound(tuple, state->index->id));
                 state->iter_end.emplace(state->table->end(state->index->id));
                 break;
-            case UNSUPPORTED: 
+            case UNSUPPORTED:
                 CHECK(false);
                 break;
         }
@@ -542,7 +551,7 @@ namespace springtail::pg_fdw {
                 }
 
                 if (!(pathkey->nulls_first? pathkey->reversed: !pathkey->reversed)) {
-                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}", 
+                    SPDLOG_DEBUG_MODULE(LOG_FDW, "This combination isn't supported: null_first={}, reversed={}",
                             pathkey->nulls_first, pathkey->reversed);
                     return {};
                 }
@@ -628,7 +637,7 @@ namespace springtail::pg_fdw {
                 attnums = list_append_unique_int(attnums, col.position);
             }
             item = lappend(item, attnums);
-            
+
             double rows = 1; // number of rows with unique key
             if (!idx.is_unique) {
                 rows = 100; //just some number to indicate different cost

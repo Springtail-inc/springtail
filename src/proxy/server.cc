@@ -376,43 +376,34 @@ namespace springtail::pg_proxy {
                 n--;
             }
 
-            // go through fds and find the sessions that are now session
-            // remove them from waiting sessions list, insert them into session sessions list
+            // go through fds and find the sessions that have pending data
+            // remove them from waiting sessions list, insert them into runnable sessions set
+            // a socket that is in the waiting sessions list is not yet running, if it isn't in the list
+            // then it is already running so we ignore those
             std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
             for (int i = 2; i < nfds + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
-                    int fd = fds[i].fd;
-                    auto session_itr = _sessions.find(fd);
-                    PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
-
-                    // lookup fd in sessions map
-                    if (session_itr != _sessions.end()) {
-                        // find session object and insert into session sessions
-                        auto session = session_itr->second;
-                        // for this session update the set of fds that have data
-                        session->add_fd(fd);
-                        // insert into set of runnable sessions
-                        auto ins_res = runnable_sessions.insert(session);
-                        if (!ins_res.second) {
-                            // already inserted session into runnable set, socket should not be waiting_sessions
-                            DCHECK_EQ(_waiting_sessions.erase(fd), 0);
-                        } else {
-                            // remove all associated sockets from the waiting sessions list
-                            auto it = _session_sockets.find(session);
-                            CHECK(it != _session_sockets.end());
-
-                            for (auto socket : it->second) {
-                                PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
-                                CHECK_EQ(_waiting_sessions.erase(socket), 1);
-                            }
-                        }
-                    } else {
-                        SPDLOG_WARN("Socket {} not found in sessions map", fd);
-                        CHECK_EQ(_waiting_sessions.erase(fd), 1);
-                    }
+                    // anything that triggered here should be in the waiting sessions list
+                    CHECK(_waiting_sessions.contains(fds[i].fd));
+                    // find the session and insert into runnable sessions
+                    _add_waiting_session(fds[i].fd, true, runnable_sessions, lock2);
                     n--;
                 }
             }
+
+            // go through the rest of the waiting sockets and see if there are any notifications
+            // iterate through notify map since it is usually empty
+            for (auto _notify_itr : _notify_map) {
+                int fd = _notify_itr.first;
+                if (!_waiting_sessions.contains(fd)) {
+                    // this seems unlikely
+                    DCHECK(false);
+                    continue;
+                }
+                // notify map updates and notifications handled in add_waiting_session()
+                _add_waiting_session(fd, false, runnable_sessions, lock2);
+            }
+
             lock2.unlock();
 
             // queue the sessions that are now session
@@ -451,10 +442,58 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ProxyServer::_add_waiting_session(int fd, bool data_ready,
+                                      std::set<SessionPtr, Session::SessionComparator> &runnable_sessions,
+                                      std::unique_lock<std::mutex> &lock)
+    {
+        CHECK(lock.owns_lock());
+
+        auto session_itr = _sessions.find(fd);
+        PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Socket {} is now runnable", fd);
+
+        // lookup fd in sessions map
+        if (session_itr == _sessions.end()) {
+            SPDLOG_WARN("Socket {} not found in sessions map", fd);
+            _waiting_sessions.erase(fd);
+            _notify_map.erase(fd);
+            return;
+        }
+
+        // find session object and insert into runnable sessions
+        auto session = session_itr->second;
+        if (data_ready) {
+            // for this session update the set of fds that have data
+            session->add_fd(fd);
+        }
+
+        // insert into set of runnable sessions
+        auto ins_res = runnable_sessions.insert(session);
+        if (!ins_res.second) {
+            // already exists in runnable sessions
+            return;
+        }
+
+        // remove all associated sockets from the waiting sessions list
+        auto it = _session_sockets.find(session);
+        CHECK(it != _session_sockets.end());
+
+        for (auto socket : it->second) {
+            PROXY_DEBUG(LOG_LEVEL_DEBUG4, "Removing socket {} from waiting sessions for {}", socket, session->name());
+            _waiting_sessions.erase(socket);
+
+            if (_notify_map.contains(socket)) {
+                session->add_notification(socket, _notify_map[socket]);
+                _notify_map.erase(socket);
+            }
+        }
+    }
+
+    void
     ProxyServer::signal(SessionPtr session)
     {
         std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
         session->clear_fds();
+        session->clear_notifications();
 
         // lookup session in the session map
         auto session_itr = _session_sockets.find(session);
@@ -539,6 +578,29 @@ namespace springtail::pg_proxy {
             int n = _waiting_sessions.erase(socket);
             DCHECK_EQ(n, 0);
         }
+        lock.unlock();
+
+        _wake_event_loop();
+    }
+
+    void
+    ProxyServer::notify_session(int socket, Session::NOTIFY_MSG msg)
+    {
+        std::unique_lock<std::mutex> lock(_waiting_sessions_mutex);
+
+        auto session_itr = _sessions.find(socket);
+        if (session_itr == _sessions.end()) {
+            SPDLOG_WARN("Session not found in session sockets map: {}", socket);
+            return;
+        }
+
+        auto notify_itr = _notify_map.find(socket);
+        if (notify_itr == _notify_map.end()) {
+            _notify_map.insert(std::make_pair(socket, msg));
+        } else {
+            notify_itr->second = notify_itr->second | msg;
+        }
+
         lock.unlock();
 
         _wake_event_loop();

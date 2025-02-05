@@ -155,12 +155,27 @@ namespace springtail::pg_proxy
     void
     DatabaseSet::remove_instance(DatabaseInstancePtr instance)
     {
+        std::set<ServerSessionPtr, Session::SessionComparator> sessions;
+
         std::unique_lock lock(_mutex);
 
         // remove from sessions map
         auto instance_it = _sessions.find(instance);
         if (instance_it != _sessions.end()) {
             _sessions.erase(instance_it);
+
+            // get all sessions for the instance
+            auto db_map = instance_it->second;
+            for (auto &db_it : db_map) {
+                auto &list = db_it.second;
+                for (auto &s : list) {
+                    // insert server session into set for processing after lock is released
+                    auto session = s.lock();
+                    if (session != nullptr) {
+                        sessions.insert(session);
+                    }
+                }
+            }
         }
 
         // remove from instance sessions map
@@ -172,8 +187,12 @@ namespace springtail::pg_proxy
         // evict from pool
         _pool->evict(instance);
 
-        // XXX Not handling removing instance with in-use sessions
-        // those should be handled by the session release
+        lock.unlock();
+
+        // go through all sessions and notify them of the instance removal
+        for (auto &s : sessions) {
+            s->instance_removed();
+        }
     }
 
     void

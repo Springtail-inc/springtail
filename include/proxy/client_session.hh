@@ -37,7 +37,8 @@ namespace springtail::pg_proxy {
         ~ClientSession();
 
         /** Entry point from runnable */
-        void run(std::set<int> &fds) override;
+        void run(std::set<int> &fds,
+                 std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> &notifications) override;
 
         /** Runnable name */
         std::string name() const override {

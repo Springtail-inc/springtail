@@ -40,22 +40,30 @@ namespace springtail::pg_proxy {
     }
 
     void
-    ServerSession::run(std::set<int> &fds)
+    ServerSession::run(std::set<int> &fds,
+                       std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> &notifications)
     {
         // should only be called when session is in reset state or deferred shutdown
         CHECK(_defer_shadow_shutdown || (_state == RESET_SESSION || _state == RESET_SESSION_READY));
         DCHECK_EQ(_client_session.lock(), nullptr);
 
-        _wrap_error_handler([this] {
-            if (_defer_shadow_shutdown) {
-                // process any pending messages
-                process_connection(_seq_id);
-                return;
+        _wrap_error_handler([this, &fds, &notifications] {
+            auto socket = _connection->get_socket();
+
+            if (fds.contains(socket)) {
+                if (_defer_shadow_shutdown) {
+                    // process any pending messages
+                    process_connection(_seq_id);
+                } else {
+                    CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
+                    // process the reset query response
+                    _handle_reset_session_message();
+                }
             }
 
-            CHECK(_state == RESET_SESSION || _state == RESET_SESSION_READY);
-            // process the reset query response
-            _handle_reset_session_message();
+            if (notifications.contains(socket)) {
+                process_notification(notifications[socket]);
+            }
         });
     }
 
@@ -334,6 +342,26 @@ namespace springtail::pg_proxy {
                     SPDLOG_ERROR("Unknown state: {:d}", (int8_t)_state);
                     _state = ERROR;
                     break;
+            }
+        });
+    }
+
+    void
+    ServerSession::process_notification(std::underlying_type_t<Session::NOTIFY_MSG> notification)
+    {
+        PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session processing notification: state={:d}, msg={:X}",
+                    _id, (int8_t)_state, (int8_t)notification);
+
+        _wrap_error_handler([this, notification] {
+            if (notification & NOTIFY_MSG::INSTANCE_SHUTDOWN) {
+                // instance is shutting down
+                if (_state == QUERY || _state == DEPENDENCIES) {
+                    // in a query, need to wait until done...
+
+                } else {
+                    // we are not in a query, we can shutdown cleanly and notify the client
+                    shutdown_session();
+                }
             }
         });
     }

@@ -159,6 +159,7 @@ namespace springtail::pg_proxy {
         int _port;                           ///< port of instance
     };
     using DatabaseInstancePtr = std::shared_ptr<DatabaseInstance>;
+    using DatabaseInstanceWeakPtr = std::weak_ptr<DatabaseInstance>;
 
 
     /**
@@ -266,7 +267,7 @@ namespace springtail::pg_proxy {
         /** max sessions per instance, assuming roughly distributed evenly */
         int _max_sessions_per_instance;
 
-        /** map of database instances to session ids */
+        /** map of database instances to map of database ids -> server sessions */
         std::map<DatabaseInstancePtr, std::map<uint64_t, std::list<ServerSessionWeakPtr>>> _sessions;
 
         /* map of instance to number of sessions */

@@ -67,7 +67,8 @@ namespace springtail::pg_proxy {
         ~ServerSession() { PROXY_DEBUG(LOG_LEVEL_DEBUG1, "[S:{}] Server session being deallocated", _id); }
 
         /** Entry point from server */
-        void run(std::set<int> &fds) override;
+        void run(std::set<int> &fds,
+                 std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> &notifications) override;
 
         /** Session name */
         std::string name() const override {
@@ -168,6 +169,12 @@ namespace springtail::pg_proxy {
          * @param seq_id sequence id
          */
         void process_connection(uint64_t seq_id);
+
+        /**
+         * @brief Entry point for processing notifications
+         * @param notification msg (bit OR of NOTIFY_MSG)
+         */
+        void process_notification(std::underlying_type_t<Session::NOTIFY_MSG> notification);
 
         /**
          * @brief Queue message from client session to current batch

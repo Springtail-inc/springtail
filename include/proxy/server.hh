@@ -109,6 +109,9 @@ namespace springtail::pg_proxy {
             return _mode;
         }
 
+        /** Notify sessions */
+        void notify_session(int socket, Session::NOTIFY_MSG msg);
+
         /** Set the global log level */
         void set_log_level(int loglevel);
 
@@ -133,6 +136,8 @@ namespace springtail::pg_proxy {
         std::mutex _waiting_sessions_mutex;   ///< mutex for _waiting_sessions set and _sessions map
         std::set<int> _waiting_sessions;      ///< set of connection sockets waiting for read data
         std::map<int, SessionPtr> _sessions;  ///< map of connection socket to session object
+
+        std::unordered_map<int, std::underlying_type_t<Session::NOTIFY_MSG>> _notify_map;  ///< map of socket to notify message
 
         /** map of session to connection socket */
         std::unordered_map<SessionPtr, std::vector<int>, Session::SessionHash, Session::SessionEqual> _session_sockets;
@@ -159,6 +164,11 @@ namespace springtail::pg_proxy {
 
         /** Wake up intternal event loop to reprocess waiting session */
         void _wake_event_loop();
+
+        /** Helper to add a socket's session to a runnable sessions list, assums lock is held */
+        void _add_waiting_session(int fd, bool data_ready,
+                                  std::set<SessionPtr, Session::SessionComparator> &runnable_sessions,
+                                  std::unique_lock<std::mutex> &lock);
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

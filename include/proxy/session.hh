@@ -67,6 +67,11 @@ namespace springtail::pg_proxy {
             ERROR=99          ///< fatal error state
         };
 
+        /** Notification message for a session, these are bits, should be OR'ed */
+        enum NOTIFY_MSG : int8_t {
+            INSTANCE_SHUTDOWN=0x1,  ///< db instance shutdown
+        };
+
         // max number of iterations to read packets on single socket
         // before giving thread up
         constexpr static int    PKT_ITER_MAX_COUNT = 5;
@@ -115,7 +120,7 @@ namespace springtail::pg_proxy {
         virtual ~Session() { SPDLOG_DEBUG_MODULE(LOG_PROXY, "Session destructor"); };
 
         /** Virtual run to be overriden by child class */
-        virtual void run(std::set<int> &fds) = 0;
+        virtual void run(std::set<int> &fds, std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> &notifications) = 0;
 
         /** Perform a fatal shutdown */
         virtual void shutdown_session() = 0;
@@ -133,6 +138,14 @@ namespace springtail::pg_proxy {
         /** Helper to clear file descriptors */
         void clear_fds() {
             _fds.clear();
+        }
+
+        void add_notification(int fd, std::underlying_type_t<NOTIFY_MSG> msgs) {
+            _notifications[fd] = msgs;
+        }
+
+        void clear_notifications() {
+            _notifications.clear();
         }
 
         /** Less than operator for std::set */
@@ -291,6 +304,9 @@ namespace springtail::pg_proxy {
             _state = RESET_SESSION;
         }
 
+        /** Out-of-band notification that the db instance is shutting down */
+        virtual void instance_removed();
+
         /**
          * Read full message from data connection, returns header: 1B code, 4B length
          * @param connection connection to read from
@@ -426,6 +442,8 @@ namespace springtail::pg_proxy {
         std::atomic_flag _running = ATOMIC_FLAG_INIT;
 
         std::set<int> _fds;     ///< set of fds to pass to run()
+
+        std::unordered_map<int, std::underlying_type_t<NOTIFY_MSG>> _notifications;  ///< notifications for session
 
         uint32_t _seq_id = 0;   ///< sequence id for this session
     };
