@@ -1,8 +1,11 @@
 #include <common/json.hh>
 #include <common/properties.hh>
+#include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/server.hh>
 #include <test/services.hh>
+#include <write_cache/write_cache_client.hh>
 #include <write_cache/write_cache_server.hh>
+#include <xid_mgr/xid_mgr_client.hh>
 #include <xid_mgr/xid_mgr_server.hh>
 
 namespace springtail::test {
@@ -74,6 +77,7 @@ namespace springtail::test {
     {
         // shut down the write_cache
         if (_write_cache) {
+            WriteCacheClient::shutdown();
             WriteCacheServer::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();
@@ -82,6 +86,7 @@ namespace springtail::test {
 
         // shut down the sys_tbl_mgr
         if (_sys_tbl_mgr) {
+            sys_tbl_mgr::Client::shutdown();
             sys_tbl_mgr::Server::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();
@@ -90,6 +95,7 @@ namespace springtail::test {
 
         // shut down the xid_mgr
         if (_xid_mgr) {
+            XidMgrClient::shutdown();
             xid_mgr::XidMgrServer::get_instance()->stop();
             _threads.back().join();
             _threads.pop_back();

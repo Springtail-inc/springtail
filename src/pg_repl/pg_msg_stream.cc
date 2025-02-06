@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <spdlog/spdlog.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -883,9 +884,8 @@ namespace springtail {
 
         msg.xid = message.xid; // only valid in streaming mode
         msg.lsn = message.lsn;
-        json["schema"].get_to(msg.schema);
         json["oid"].get_to(msg.oid);
-        json["schema"].get_to(msg.schema);
+        json["schema"].get_to(msg.namespace_name);
         json["table_name"].get_to(msg.table_name);
         json["table_oid"].get_to(msg.table_oid);
         json["is_unique"].get_to(msg.is_unique);
@@ -923,7 +923,7 @@ namespace springtail {
 
         msg.xid = message.xid; // only valid in streaming mode
         msg.lsn = message.lsn;
-        json["schema"].get_to(msg.schema);
+        json["schema"].get_to(msg.namespace_name);
         json["oid"].get_to(msg.oid);
         json["identity"].get_to(msg.index);
 
@@ -955,7 +955,7 @@ namespace springtail {
         table_msg.xid = message.xid; // only valid in streaming mode
         table_msg.lsn = message.lsn;
         json["table"].get_to(table_msg.table);
-        json["schema"].get_to(table_msg.schema);
+        json["schema"].get_to(table_msg.namespace_name);
         json["oid"].get_to(table_msg.oid);
 
         _decode_schema_columns(json["columns"], table_msg.columns);
@@ -1003,11 +1003,87 @@ namespace springtail {
         drop_table_msg.lsn = message.lsn;
 
         json["oid"].get_to(drop_table_msg.oid);
-        json["schema"].get_to(drop_table_msg.schema);
+        json["schema"].get_to(drop_table_msg.namespace_name);
         json["name"].get_to(drop_table_msg.table);
 
         PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_TABLE);
         msg->msg.emplace<PgMsgDropTable>(drop_table_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_create_namespace(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgNamespace ns_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string_view data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type namespace
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "schema") {
+            SPDLOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        ns_msg.xid = message.xid; // only valid in streaming mode
+        ns_msg.lsn = message.lsn;
+        json["name"].get_to(ns_msg.name);
+        json["oid"].get_to(ns_msg.oid);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded create/alter namespace: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::CREATE_NAMESPACE);
+        msg->msg.emplace<PgMsgNamespace>(ns_msg);
+
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_alter_namespace(PgMsgMessage &message, char *buffer, int len)
+    {
+        // same data as in create namespace, call that to do the decode and then just switch the
+        // type so we know it is an alter namespace
+        PgMsgPtr msg = _decode_create_namespace(message, buffer, len);
+        if (msg == nullptr) {
+            return msg;
+        }
+
+        msg->msg_type = PgMsgEnum::ALTER_NAMESPACE;
+        return msg;
+    }
+
+    PgMsgPtr
+    PgMsgStreamReader::_decode_drop_namespace(PgMsgMessage &message, char *buffer, int len)
+    {
+        PgMsgNamespace ns_msg;
+
+        // convert msg data to string (it is not null terminated)
+        // and convert string to json
+        std::string data_str(buffer, len);
+        nlohmann::json json = nlohmann::json::parse(data_str);
+
+        // check object type, should be of type namespace
+        std::string object_type;
+        json["obj"].get_to(object_type);
+        if (object_type != "schema") {
+            SPDLOG_ERROR("Create/alter namespace msg not for namespace object, for: {}\n", object_type);
+            return nullptr;
+        }
+
+        ns_msg.xid = message.xid; // only valid in streaming mode
+        ns_msg.lsn = message.lsn;
+        json["oid"].get_to(ns_msg.oid);
+        json["name"].get_to(ns_msg.name);
+
+        SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Decoded drop namespace: json: {}", json.dump());
+
+        PgMsgPtr msg = std::make_shared<PgMsg>(PgMsgEnum::DROP_NAMESPACE);
+        msg->msg.emplace<PgMsgNamespace>(ns_msg);
 
         return msg;
     }
@@ -1077,6 +1153,12 @@ namespace springtail {
             return _decode_alter_table(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_TABLE) {
             return _decode_drop_table(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_NAMESPACE) {
+            return _decode_create_namespace(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_ALTER_NAMESPACE) {
+            return _decode_alter_namespace(msg, buffer.data(), data_len);
+        } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_NAMESPACE) {
+            return _decode_drop_namespace(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_CREATE_INDEX) {
             return _decode_create_index(msg, buffer.data(), data_len);
         } else if (msg.prefix_str == pg_msg::MSG_PREFIX_DROP_INDEX) {

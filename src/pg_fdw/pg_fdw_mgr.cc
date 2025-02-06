@@ -871,6 +871,7 @@ namespace springtail::pg_fdw {
         import_catalog.operator()<sys_tbl::Schemas>(CATALOG_TABLE_SCHEMAS);
         import_catalog.operator()<sys_tbl::TableStats>(CATALOG_TABLE_STATS);
         import_catalog.operator()<sys_tbl::IndexNames>(CATALOG_INDEX_NAMES);
+        import_catalog.operator()<sys_tbl::NamespaceNames>(CATALOG_NAMESPACE_NAMES);
 
         return commands;
     }
@@ -903,6 +904,33 @@ namespace springtail::pg_fdw {
             return _import_springtail_catalog(server, table_set, exclude, limit);
         }
 
+        // lookup the namespace_id for the requested schema
+        auto ns_table = TableMgr::get_instance()->get_table(db_id, sys_tbl::NamespaceNames::ID, schema_xid);
+        auto ns_key = sys_tbl::NamespaceNames::Secondary::key_tuple(schema, schema_xid, constant::MAX_LSN);
+        auto ns_i = ns_table->inverse_lower_bound(ns_key, 1);
+
+        // verify that the name is present and exists
+        if (ns_i == ns_table->end(1)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+
+        auto ns_fields = ns_table->extent_schema()->get_fields();
+        if (schema != ns_fields->at(sys_tbl::NamespaceNames::Data::NAME)->get_text(*ns_i)) {
+            SPDLOG_WARN("Couldn't find entry for namespace {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+        if (!ns_fields->at(sys_tbl::NamespaceNames::Data::EXISTS)->get_bool(*ns_i)) {
+            SPDLOG_WARN("Namespace marked as not-exists {} @ {}:{}",
+                        schema, schema_xid, constant::MAX_LSN);
+            return commands;
+        }
+
+        // record the namespace ID
+        uint64_t namespace_id = ns_fields->at(sys_tbl::NamespaceNames::Data::NAMESPACE_ID)->get_uint64(*ns_i);
+
         // get the table names table to iterate over
         auto table = TableMgr::get_instance()->get_table(db_id, sys_tbl::TableNames::ID,
                                                          schema_xid);
@@ -914,23 +942,23 @@ namespace springtail::pg_fdw {
 
         // iterate over the table names table and populate the table map
         for (auto row : (*table)) {
-            std::string schema_name(fields->at(sys_tbl::TableNames::Data::NAMESPACE)->get_text(row));
+            auto table_ns_id = fields->at(sys_tbl::TableNames::Data::NAMESPACE_ID)->get_uint64(row);
 
-            // check for schema match
-            if (schema_name != schema) {
+            // check for schema-namespace match
+            if (table_ns_id != namespace_id) {
                 continue;
             }
 
             std::string table_name(fields->at(sys_tbl::TableNames::Data::NAME)->get_text(row));
             // handle limit and exclude
             if (exclude && table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema_name, table_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Excluding table {}.{}", schema, table_name);
                 continue;
             }
 
             // XXX should really stop after we have found all tables in limit
             if (limit && !table_set.contains(table_name)) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema_name, table_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Limit, skipping table {}.{}", schema, table_name);
                 continue;
             }
 
@@ -950,12 +978,12 @@ namespace springtail::pg_fdw {
                 continue;
             }
 
-            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema_name, table_name, tid, xid);
+            SPDLOG_DEBUG_MODULE(LOG_FDW, "Found table {}.{} tid={}, xid={}", schema, table_name, tid, xid);
 
             // lookup table in map, if found the xid if it is newer
             auto entry = table_map.insert({table_name, {tid, xid}});
             if (entry.second == false) {
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema_name);
+                SPDLOG_DEBUG_MODULE(LOG_FDW, "Table {} already exists in schema {}", table_name, schema);
                 // update if xid is newer
                 if (xid > entry.first->second.second) {
                     entry.first->second = {tid, xid};
