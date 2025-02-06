@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 if [ $(uname -p) == aarch64 ]; then
     export VCPKG_FORCE_SYSTEM_BINARIES=1
 fi
