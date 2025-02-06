@@ -18,6 +18,7 @@ if [ ! -d release ]; then
     if [ $DOCKER -eq 1 ]; then
         echo "Building inside a container; symlinking release dir"
         mkdir -p /home/dev/release
+        mkdir -p /home/dev/install
         ln -s /home/dev/release release
         ln -s /home/dev/install install
     else
