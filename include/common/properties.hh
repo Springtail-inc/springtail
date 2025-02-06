@@ -5,11 +5,11 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <iostream>
 
 #include <nlohmann/json.hpp>
 
-#include <common/redis.hh>
+#include <common/redis_cache.hh>
+#include <common/singleton.hh>
 
 #ifndef SPRINGTAIL_PROPERTIES
 #define SPRINGTAIL_PROPERTIES = "system.json"
@@ -20,7 +20,8 @@ namespace springtail {
     /**
      * @brief Properties singleton object, initialized in springtail_init()
      */
-    class Properties {
+    class Properties : public Singleton<Properties> {
+        friend class Singleton<Properties>;
     public:
         /** Redis config section in properties file */
         static inline constexpr char REDIS_CONFIG[] = "redis";
@@ -59,95 +60,116 @@ namespace springtail {
         /**
          * @brief Init _instance and read from redis
          */
-        static void init(bool load_redis = false);
+        void init(bool load_redis);
 
         /** Helper to get db instance id */
-        static uint64_t get_db_instance_id() {
-            assert (_instance != nullptr);
-            assert (_instance->_json.contains(ORG_CONFIG));
-            assert (_instance->_json[ORG_CONFIG].contains("db_instance_id"));
-            return _instance->_json[ORG_CONFIG]["db_instance_id"];
+        static inline uint64_t get_db_instance_id() {
+            _assert_instance();
+            return  get_instance()->_get_db_instance_id();
         }
 
         /** Helper to get fs mount point */
-        static std::string get_mount_point() {
-            assert (_instance != nullptr);
-            assert (_instance->_json.contains(FS_CONFIG));
-            assert (_instance->_json[FS_CONFIG].contains("mount_point"));
-            return _instance->_json[FS_CONFIG]["mount_point"];
+        static inline std::string get_mount_point() {
+            _assert_instance();
+            return get_instance()->_get_mount_point();
         }
 
         /** Helper to convert relative path to absolute based on mount point */
-        static std::filesystem::path
+        static inline std::filesystem::path
         make_absolute_path(const std::string &path) {
-            assert (_instance != nullptr);
-            assert (!get_mount_point().empty());
-            return std::filesystem::path(get_mount_point()) / path;
+            _assert_instance();
+            return get_instance()->_make_absolute_path(path);
         }
 
-        static std::string get_fdw_id() {
-            assert (_instance != nullptr);
-            assert (_instance->_json.contains(ORG_CONFIG));
-            assert (_instance->_json[ORG_CONFIG].contains("fdw_id"));
-            return _instance->_json[ORG_CONFIG]["fdw_id"];
+        /** Helper to get fdw ids */
+        static inline std::string get_fdw_id() {
+            _assert_instance();
+            return get_instance()->_get_fdw_id();
         }
 
         /** Helper to get set of database names from Redis for this db instance */
-        static std::map<uint64_t, std::string> get_databases();
+        static inline std::map<uint64_t, std::string> get_databases() {
+            return get_instance()->_get_databases();
+        }
 
         /** Helper to get database name from Redis for db id */
-        static std::string get_db_name(uint64_t db_id);
+        static inline std::string get_db_name(uint64_t db_id) {
+            return get_instance()->_get_db_name(db_id);
+        }
 
         /** Helper to get set of FDW ids from Redis */
-        static std::vector<std::string> get_fdw_ids();
+        static inline std::vector<std::string> get_fdw_ids() {
+            return get_instance()->_get_fdw_ids();
+        }
 
         /** Helper to get db config for given database */
-        static nlohmann::json get_db_config(uint64_t db_id);
+        static inline nlohmann::json get_db_config(uint64_t db_id) {
+            return get_instance()->_get_db_config(db_id);
+        }
 
         /** Helper to get host, port, user, and password for the primary database */
-        static void get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
+        static inline void get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password) {
+            get_instance()->_get_primary_db_config(host, port, user, password);
+        }
 
         /** Helper to get db state */
-        static std::string get_db_state(uint64_t db_id);
+        static inline std::string get_db_state(uint64_t db_id) {
+            return  get_instance()->_get_db_state(db_id);
+        }
 
         /** Helper to set db state */
-        static void set_db_state(uint64_t db_id, const std::string &state);
+        static inline void set_db_state(uint64_t db_id, const std::string &state) {
+            get_instance()->_set_db_state(db_id,state);
+        }
 
         /** Helper to get fdw config */
-        static nlohmann::json get_fdw_config(const std::string &fdw_id);
+        static inline nlohmann::json get_fdw_config(const std::string &fdw_id) {
+            return get_instance()->_get_fdw_config(fdw_id);
+        }
 
         /** Helper to get pid path */
-        static std::string get_pid_path();
+        std::string get_pid_path();
 
         /** Helper to send notification on liveness pubsub */
-        static void publish_liveness_notification(const std::string &msg);
+        static inline void publish_liveness_notification(const std::string &msg) {
+            get_instance()->_publish_liveness_notification(msg);
+        }
 
         /** Helper to get xid mgr hostname */
-        static std::string get_xid_mgr_hostname() { return _get_ingestion_hostname(); }
+        static inline std::string get_xid_mgr_hostname() { return get_instance()->_get_ingestion_hostname(); }
 
         /** Helper to get sys tbl mgr hostname */
-        static std::string get_sys_tbl_mgr_hostname() { return _get_ingestion_hostname(); }
+        static inline std::string get_sys_tbl_mgr_hostname() { return get_instance()->_get_ingestion_hostname(); }
 
         /** Helper to get write cache hostname */
-        static std::string get_write_cache_hostname() { return _get_ingestion_hostname(); }
+        static inline std::string get_write_cache_hostname() { return get_instance()->_get_ingestion_hostname(); }
 
         /** Helper to set env vars from config file */
         static void set_env_from_file(const char *config_file);
 
+        /** Get access to redis cache in case the user need to make the changes to config database */
+
+        /**
+         * @brief Get access to redis cache in case the user need to make
+         *          the changes to config database
+         *
+         * @return std::shared_ptr<RedisCache> - RedisCache shared pointer
+         */
+        std::shared_ptr<RedisCache> get_cache() { return _cache; }
+
     private:
-        /** static _instance singleton */
-        static Properties *_instance;
-
-        /** once init flag */
-        static std::once_flag _init_flag;
-
         /** json containing parsed settings file */
         nlohmann::json _json;
+        /**
+         * @brief RedisCache object
+         *
+         */
+        std::shared_ptr<RedisCache> _cache;
 
         /**
          * @brief Construct a new Properties object
          */
-        Properties(bool load_redis);
+        Properties() = default;
 
         /**
          * @brief Read the environment variables into base config
@@ -159,10 +181,12 @@ namespace springtail {
          */
         void _read_redis_properties();
 
-        /**
-         * @brief Create redis client from config for config db
-         */
-        void _create_redis_client();
+         /**
+          * @brief Create redis client from config for config db
+          *
+          * @return RedisClientPtr - shared pointer to redis client
+          */
+        RedisClientPtr _create_redis_client();
 
         /**
          * @brief Load redis config from file
@@ -171,30 +195,127 @@ namespace springtail {
         void _load_redis(const std::string &config_file);
 
         /**
-         * @brief Get config redis client
+         * @brief Internal get database instance id
+         *
+         * @return uint64_t
          */
-        static RedisClientPtr _get_redis_client() {
-            assert(_instance != nullptr);
-            if (_instance->_redis_config_client == nullptr) {
-                _instance->_create_redis_client();
-            }
-            assert(_instance->_redis_config_client != nullptr);
-            return _instance->_redis_config_client;
+        uint64_t _get_db_instance_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("db_instance_id"));
+            return _json[ORG_CONFIG]["db_instance_id"];
         }
+
+        /**
+         * @brief Internal get mount point
+         *
+         * @return std::string
+         */
+        std::string _get_mount_point() {
+            assert (_json.contains(FS_CONFIG));
+            assert (_json[FS_CONFIG].contains("mount_point"));
+            return _json[FS_CONFIG]["mount_point"];
+        }
+
+        /**
+         * @brief Get absolute path for given file path
+         *
+         * @param path - file path
+         * @return std::filesystem::path
+         */
+        std::filesystem::path
+        _make_absolute_path(const std::string &path) {
+            assert (!_get_mount_point().empty());
+            return std::filesystem::path(_get_mount_point()) / path;
+        }
+
+        /**
+         * @brief Internal get fdw id
+         *
+         * @return std::string
+         */
+        std::string _get_fdw_id() {
+            assert (_json.contains(ORG_CONFIG));
+            assert (_json[ORG_CONFIG].contains("fdw_id"));
+            return _json[ORG_CONFIG]["fdw_id"];
+        }
+
+        /**
+         * @brief Internal get databases
+         *
+         * @return std::map<uint64_t, std::string>
+         */
+        std::map<uint64_t, std::string> _get_databases();
+
+        /**
+         * @brief Internal get database name for a given database
+         *
+         * @param db_id - database id
+         * @return std::string
+         */
+        std::string _get_db_name(uint64_t db_id);
+
+        /**
+         * @brief Internal get fdw ids
+         *
+         * @return std::vector<std::string>
+         */
+        std::vector<std::string> _get_fdw_ids();
+
+        /**
+         * @brief Internal get database config for the given database id
+         *
+         * @param db_id - database id
+         * @return nlohmann::json
+         */
+        nlohmann::json _get_db_config(uint64_t db_id);
+
+        /**
+         * @brief Internal get primary database config and store them in input arguments
+         *
+         * @param host - host name
+         * @param port - port value
+         * @param user - user name
+         * @param password - user password
+         */
+        void _get_primary_db_config(std::string &host, int &port, std::string &user, std::string &password);
+
+        /**
+         * @brief Internal get database state for given database id
+         *
+         * @param db_id - database id
+         * @return std::string - state string
+         */
+        std::string _get_db_state(uint64_t db_id);
+
+        /**
+         * @brief Internal set database state for given database id
+         *
+         * @param db_id - database id
+         * @param state - database state
+         */
+        void _set_db_state(uint64_t db_id, const std::string &state);
+
+        /**
+         * @brief Internal get fdw config for given fdw id
+         *
+         * @param fdw_id - fdw id
+         * @return nlohmann::json - fdw config
+         */
+        nlohmann::json _get_fdw_config(const std::string &fdw_id);
+
+        /**
+         * @brief Internal publish liveness notification message
+         *
+         * @param msg - message tp publish
+         */
+        void _publish_liveness_notification(const std::string &msg);
 
         /**
          * @brief Get the hostname for the ingestion instance machine
          */
-        static std::string _get_ingestion_hostname();
+        std::string _get_ingestion_hostname();
 
         /** Helper to get primary db json for current db instance */
-        static nlohmann::json _get_primary_db_config();
-
-        // delete move constructor
-        Properties(const Properties &)     = delete;
-        void operator=(const Properties &) = delete;
-
-        /** Redis client connected to config db */
-        RedisClientPtr _redis_config_client = nullptr;
+        nlohmann::json _get_primary_db_config();
     };
 }
