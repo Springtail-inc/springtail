@@ -165,10 +165,16 @@ namespace springtail::pg_proxy {
         /** Wake up intternal event loop to reprocess waiting session */
         void _wake_event_loop();
 
-        /** Helper to add a socket's session to a runnable sessions list, assums lock is held */
+        /** Helper to add a socket's session to a runnable sessions list
+         * assumes lock is held, adds any notification sockets to notify_sockets list */
         void _add_waiting_session(int fd, bool data_ready,
                                   std::set<SessionPtr, Session::SessionComparator> &runnable_sessions,
-                                  std::unique_lock<std::mutex> &lock);
+                                  std::unique_lock<std::mutex> &lock,
+                                  std::vector<int> &notify_sockets);
+
+        /** Remove sockets from notify map */
+        void _remove_notify_sockets(std::vector<int> &notify_sockets,
+                                    std::unique_lock<std::mutex> &lock);
     };
     using ProxyServerPtr = std::shared_ptr<ProxyServer>;
 

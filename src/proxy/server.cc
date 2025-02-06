@@ -381,28 +381,29 @@ namespace springtail::pg_proxy {
             // a socket that is in the waiting sessions list is not yet running, if it isn't in the list
             // then it is already running so we ignore those
             std::unique_lock<std::mutex> lock2(_waiting_sessions_mutex);
+            std::vector<int> notify_sockets;
             for (int i = 2; i < nfds + 2 && n > 0; i++) {
                 if (fds[i].revents & POLLIN) {
                     // anything that triggered here should be in the waiting sessions list
                     CHECK(_waiting_sessions.contains(fds[i].fd));
                     // find the session and insert into runnable sessions
-                    _add_waiting_session(fds[i].fd, true, runnable_sessions, lock2);
+                    _add_waiting_session(fds[i].fd, true, runnable_sessions, lock2, notify_sockets);
                     n--;
                 }
             }
+            _remove_notify_sockets(notify_sockets, lock2);
 
             // go through the rest of the waiting sockets and see if there are any notifications
             // iterate through notify map since it is usually empty
-            for (auto _notify_itr : _notify_map) {
-                int fd = _notify_itr.first;
+            for (const auto &notify_itr: _notify_map) {
+                int fd = notify_itr.first;
                 if (!_waiting_sessions.contains(fd)) {
-                    // this seems unlikely
-                    DCHECK(false);
                     continue;
                 }
                 // notify map updates and notifications handled in add_waiting_session()
-                _add_waiting_session(fd, false, runnable_sessions, lock2);
+                _add_waiting_session(fd, false, runnable_sessions, lock2, notify_sockets);
             }
+            _remove_notify_sockets(notify_sockets, lock2);
 
             lock2.unlock();
 
@@ -442,9 +443,22 @@ namespace springtail::pg_proxy {
     }
 
     void
+    ProxyServer::_remove_notify_sockets(std::vector<int> &notify_sockets,
+                                        std::unique_lock<std::mutex> &lock)
+    {
+        CHECK(lock.owns_lock());
+
+        for (auto socket : notify_sockets) {
+            _notify_map.erase(socket);
+        }
+        notify_sockets.clear();
+    }
+
+    void
     ProxyServer::_add_waiting_session(int fd, bool data_ready,
                                       std::set<SessionPtr, Session::SessionComparator> &runnable_sessions,
-                                      std::unique_lock<std::mutex> &lock)
+                                      std::unique_lock<std::mutex> &lock,
+                                      std::vector<int> &notify_sockets)
     {
         CHECK(lock.owns_lock());
 
@@ -455,7 +469,7 @@ namespace springtail::pg_proxy {
         if (session_itr == _sessions.end()) {
             SPDLOG_WARN("Socket {} not found in sessions map", fd);
             _waiting_sessions.erase(fd);
-            _notify_map.erase(fd);
+            notify_sockets.push_back(fd);
             return;
         }
 
@@ -483,7 +497,7 @@ namespace springtail::pg_proxy {
 
             if (_notify_map.contains(socket)) {
                 session->add_notification(socket, _notify_map[socket]);
-                _notify_map.erase(socket);
+                notify_sockets.push_back(socket);
             }
         }
     }

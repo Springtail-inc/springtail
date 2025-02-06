@@ -353,6 +353,11 @@ namespace springtail::pg_proxy {
                     _id, (int8_t)_state, (int8_t)notification);
 
         _wrap_error_handler([this, notification] {
+            if (notification & NOTIFY_MSG::TEST) {
+                // test message, ignore
+                PROXY_DEBUG(LOG_LEVEL_DEBUG2, "Server session test message: [S:{:d}]", _id);
+            }
+
             if (notification & NOTIFY_MSG::INSTANCE_SHUTDOWN) {
                 // instance is shutting down
                 if (_state == QUERY || _state == DEPENDENCIES) {

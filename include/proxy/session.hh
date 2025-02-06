@@ -69,7 +69,8 @@ namespace springtail::pg_proxy {
 
         /** Notification message for a session, these are bits, should be OR'ed */
         enum NOTIFY_MSG : int8_t {
-            INSTANCE_SHUTDOWN=0x1,  ///< db instance shutdown
+            TEST=0x1,               ///< test message; ignore
+            INSTANCE_SHUTDOWN=0x2,  ///< db instance shutdown
         };
 
         // max number of iterations to read packets on single socket
