@@ -19,6 +19,7 @@ if [ ! -d debug ]; then
         echo "Building inside a container; symlinking debug dir"
         mkdir -p /home/dev/debug
         ln -s /home/dev/debug debug
+        ln -s /home/dev/install install
     else
         mkdir -p debug
     fi

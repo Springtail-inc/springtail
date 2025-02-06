@@ -19,6 +19,7 @@ if [ ! -d release ]; then
         echo "Building inside a container; symlinking release dir"
         mkdir -p /home/dev/release
         ln -s /home/dev/release release
+        ln -s /home/dev/install install
     else
         mkdir -p release
     fi
