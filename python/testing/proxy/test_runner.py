@@ -291,13 +291,13 @@ class Test:
         else:
             # create proxy component
             factory = ComponentFactory(os.path.join(self._install_dir, 'bin/system'), self._props.get_pid_path())
-            self._proxy = factory.create_proxy()
+            proxy = factory.create_proxy()
 
-            if self._proxy.is_running():
-                if not self._proxy.shutdown():
+            if proxy.is_running():
+                if not proxy.shutdown():
                     raise ValueError("Failed to stop the proxy")
 
-            if not self._proxy.start():
+            if not proxy.start():
                 raise ValueError("Failed to start the proxy")
 
             # wait for the proxy to start
@@ -343,9 +343,6 @@ class Test:
         logging.info('Running the regression tests against the proxy')
 
         self.run_regress_cmd(self._proxy_config['port'], schedule, test_files, 'proxy.out', True)
-
-        if not manual_proxy and self._proxy:
-            self._proxy.shutdown()
 
 
     def cleanup(self):
