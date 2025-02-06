@@ -31,4 +31,9 @@ cmake -B release -S . \
       -DNDEBUG=1
 
 cd release
-make $1 $2
+if command -v nproc >/dev/null 2>&1; then
+    ncpus=$(nproc)
+else
+    ncpus=4
+fi
+make -j${ncpus} $1 $2
