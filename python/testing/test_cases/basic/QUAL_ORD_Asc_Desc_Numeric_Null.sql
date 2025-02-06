@@ -12,9 +12,9 @@ CREATE TABLE asc_desc_numeric_null(
 );
 
 -- Add Secondary Indexes
-CREATE INDEX idx_col3 ON asc_desc_numeric_null (col3);
-CREATE INDEX idx_col4_col5 ON asc_desc_numeric_null (col4, col5);
-CREATE INDEX idx_col7 ON asc_desc_numeric_null (col7);
+CREATE INDEX asc_desc_numeric_null_idx_col3 ON asc_desc_numeric_null (col3);
+CREATE INDEX asc_desc_numeric_null_idx_col4_col5 ON asc_desc_numeric_null (col4, col5);
+CREATE INDEX asc_desc_numeric_null_idx_col7 ON asc_desc_numeric_null (col7);
 
 INSERT INTO asc_desc_numeric_null (col1, col2, col3, col4, col5, col6, col8, col9) 
 VALUES 

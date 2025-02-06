@@ -12,9 +12,9 @@ CREATE TABLE basic_ordering(
 );
 
 -- Add Secondary Indexes
-CREATE INDEX idx_col3 ON basic_ordering (col3);
-CREATE INDEX idx_col4_col5 ON basic_ordering (col4, col5);
-CREATE INDEX idx_col7 ON basic_ordering (col7);
+CREATE INDEX basic_ordering_idx_col3 ON basic_ordering (col3);
+CREATE INDEX basic_ordering_idx_col4_col5 ON basic_ordering (col4, col5);
+CREATE INDEX basic_ordering_idx_col7 ON basic_ordering (col7);
 
 INSERT INTO basic_ordering (col1, col2, col3, col4, col5, col6, col8, col9) 
 VALUES 
@@ -46,9 +46,9 @@ VALUES
 
 ## verify
 ### schema_check public basic_ordering
-SELECT * FROM basic_ordering ORDER BY col3;
-SELECT * FROM basic_ordering ORDER BY col4, col5;
-SELECT * FROM basic_ordering ORDER BY col6;
+SELECT col3 FROM basic_ordering ORDER BY col3;
+SELECT col4, col5 FROM basic_ordering ORDER BY col4, col5;
+SELECT col6 FROM basic_ordering ORDER BY col6;
 
 ## cleanup
 DROP TABLE IF EXISTS basic_ordering;

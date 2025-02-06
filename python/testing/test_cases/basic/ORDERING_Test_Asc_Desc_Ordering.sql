@@ -12,9 +12,9 @@ CREATE TABLE asc_desc_ordering(
 );
 
 -- Add Secondary Indexes
-CREATE INDEX idx_col3 ON asc_desc_ordering (col3);
-CREATE INDEX idx_col4_col5 ON asc_desc_ordering (col4, col5);
-CREATE INDEX idx_col7 ON asc_desc_ordering (col7);
+CREATE INDEX asc_desc_ordering_idx_col3 ON asc_desc_ordering (col3);
+CREATE INDEX asc_desc_ordering_idx_col4_col5 ON asc_desc_ordering (col4, col5);
+CREATE INDEX asc_desc_ordering_idx_col7 ON asc_desc_ordering (col7);
 
 INSERT INTO asc_desc_ordering (col1, col2, col3, col4, col5, col6, col8, col9) 
 VALUES 
@@ -46,9 +46,9 @@ VALUES
 
 ## verify
 ### schema_check public asc_desc_ordering
-SELECT * FROM asc_desc_ordering ORDER BY col3 DESC;
-SELECT * FROM asc_desc_ordering ORDER BY col4 ASC, col5 DESC;
-SELECT * FROM asc_desc_ordering ORDER BY col6 ASC;
+SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col3 DESC;
+SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col4 ASC, col5 DESC;
+SELECT col1, col2, col3 FROM asc_desc_ordering ORDER BY col6 ASC;
 
 ## cleanup
-DROP TABLE IF EXISTS asc_desc_ordering;
+DROP TABLE IF EXISTS asc_desc_ordering CASCADE;

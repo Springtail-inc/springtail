@@ -12,9 +12,9 @@ CREATE TABLE time_and_nulls(
 );
 
 -- Add Secondary Indexes
-CREATE INDEX idx_col3 ON time_and_nulls (col3);
-CREATE INDEX idx_col4_col5 ON time_and_nulls (col4, col5);
-CREATE INDEX idx_col7 ON time_and_nulls (col7);
+CREATE INDEX time_and_nulls_idx_col3 ON time_and_nulls (col3);
+CREATE INDEX time_and_nulls_idx_col4_col5 ON time_and_nulls (col4, col5);
+CREATE INDEX time_and_nulls_idx_col7 ON time_and_nulls (col7);
 
 INSERT INTO time_and_nulls (col1, col2, col3, col4, col5, col6, col8, col9) 
 VALUES 

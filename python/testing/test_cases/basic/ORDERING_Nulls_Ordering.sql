@@ -12,9 +12,9 @@ CREATE TABLE nulls_ordering(
 );
 
 -- Add Secondary Indexes
-CREATE INDEX idx_col3 ON nulls_ordering (col3);
-CREATE INDEX idx_col4_col5 ON nulls_ordering (col4, col5);
-CREATE INDEX idx_col7 ON nulls_ordering (col7);
+CREATE INDEX nulls_ordering_idx_col3 ON nulls_ordering (col3);
+CREATE INDEX nulls_ordering_idx_col4_col5 ON nulls_ordering (col4, col5);
+CREATE INDEX nulls_ordering_idx_col7 ON nulls_ordering (col7);
 
 INSERT INTO nulls_ordering (col1, col2, col3, col4, col5, col6, col8, col9) 
 VALUES 
