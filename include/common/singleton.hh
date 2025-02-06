@@ -5,6 +5,8 @@
 #include <mutex>
 #include <thread>
 
+#include <absl/log/check.h>
+
 namespace springtail {
     template <typename T> class Singleton {
     public:
@@ -59,7 +61,7 @@ namespace springtail {
          *
          */
         static void _assert_instance() {
-            assert(_instance != nullptr);
+            CHECK_NE(_instance, nullptr);
         }
 
     private:

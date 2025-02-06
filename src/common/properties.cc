@@ -316,7 +316,7 @@ namespace springtail {
                     }
 
                     if (token == props.size() || props[token] == ';') {
-                        assert(key.size());
+                        CHECK_NE(key.size(), 0);
                         val = props.substr(start, token - start);
 
                         // set the overridden value
@@ -365,7 +365,7 @@ namespace springtail {
                 throw Error("Error invalid db_id type");
             }
             nlohmann::json db_config = _get_db_config(db_id);
-            assert (db_config.contains("name"));
+            CHECK(db_config.contains("name"));
             dbnames[db_id] = db_config["name"];
         }
 
@@ -389,7 +389,7 @@ namespace springtail {
         if (db_state.empty()) {
             throw RedisNotFoundError("Error missing db_state in redis");
         }
-        assert(db_state.type() == nlohmann::json::value_t::string);
+        CHECK(db_state.type() == nlohmann::json::value_t::string);
         return db_state.get<std::string>();
     }
 
@@ -413,7 +413,7 @@ namespace springtail {
     Properties::_get_db_name(uint64_t db_id)
     {
         nlohmann::json db_config = _get_db_config(db_id);
-        assert (db_config.contains("name"));
+        CHECK(db_config.contains("name"));
 
         return db_config["name"];
     }
@@ -421,22 +421,15 @@ namespace springtail {
     std::vector<std::string>
     Properties::_get_fdw_ids()
     {
-        // NOTE: FDW IDs are stored in redis incorrectly. If they are stored as
-        //      json integer values. Therefore, when we apply json parsing to them,
-        //      they end up being represented as integers. Right now when we query them
-        //      in redis, here is what we see:
-        //      > smembers 1234:fdw_ids
-        //          1) "1"
-        //      If we want them to be strings, this is what we should see:
-        //      > smembers 1234:fdw_ids
-        //          1) "\"1\""
-        //      This is why I need to perform conversion back to string in this function.
         nlohmann::json fdw_ids_json = _cache->get_value("fdw_ids");
-        assert(fdw_ids_json.type() == nlohmann::json::value_t::array);
+        if (fdw_ids_json.empty()) {
+            throw RedisNotFoundError("Error missing fdw_ids in redis");
+        }
+        CHECK(fdw_ids_json.type() == nlohmann::json::value_t::array);
         std::vector<std::string> fdw_ids;
         for (auto fdw_id_json: fdw_ids_json) {
-            assert(fdw_id_json.type() == nlohmann::json::value_t::number_unsigned);
-            fdw_ids.push_back(std::to_string(fdw_id_json.get<int>()));
+            CHECK(fdw_id_json.type() == nlohmann::json::value_t::string);
+            fdw_ids.push_back(fdw_id_json.get<std::string>());
         }
         return fdw_ids;
     }
@@ -511,7 +504,7 @@ namespace springtail {
         if (json_hostname.empty()) {
             throw RedisNotFoundError("Error missing hostname::ingestion in redis");
         }
-        assert(json_hostname.type() == nlohmann::json::value_t::string);
+        CHECK(json_hostname.type() == nlohmann::json::value_t::string);
         return json_hostname.get<std::string>();
     }
 

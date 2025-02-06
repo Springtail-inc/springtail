@@ -383,14 +383,13 @@ namespace {
         _cache->add_callback("top_level_hash/top_key5", redis_watcher);
 
         // add string
-        std::cout << "add string" << std::endl;
         c.increment_by(2);
-        _test_client->hset(hash_key, "top_key1", nlohmann::to_string(hash_values["top_key1"]));
+        _test_client->hset(hash_key, "top_key1", hash_values["top_key1"].get<std::string>());
         c.wait();
 
         // add string
         c.increment_by(2);
-        _test_client->hset(hash_key, "top_key2", nlohmann::to_string(hash_values["top_key2"]));
+        _test_client->hset(hash_key, "top_key2", hash_values["top_key2"].get<std::string>());
         c.wait();
 
         // add hash
@@ -583,23 +582,23 @@ namespace {
         _cache->add_callback("top_level_array/5", redis_watcher);
 
         c.increment_by(1);
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[0]));
+        _test_client->sadd(array_key, array_values[0].get<std::string>());
         c.wait();
 
         c.increment_by(1);
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[1]));
+        _test_client->sadd(array_key, array_values[1].get<std::string>());
         c.wait();
 
         c.increment_by(1);
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[2]));
+        _test_client->sadd(array_key, array_values[2].get<std::string>());
         c.wait();
 
         c.increment_by(1);
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[3]));
+        _test_client->sadd(array_key, array_values[3].get<std::string>());
         c.wait();
 
         c.increment_by(1);
-        _test_client->srem(array_key, nlohmann::to_string(array_values[0]));
+        _test_client->srem(array_key, array_values[0].get<std::string>());
         c.wait();
 
         // replace array with string
@@ -659,10 +658,10 @@ namespace {
         c.wait();
 
         c.increment();
-        _test_client->hset(hash_key, "top_key1", nlohmann::to_string(hash_values["top_key1"]));
+        _test_client->hset(hash_key, "top_key1", hash_values["top_key1"].get<std::string>());
         c.wait();
         c.increment();
-        _test_client->hset(hash_key, "top_key2", nlohmann::to_string(hash_values["top_key2"]));
+        _test_client->hset(hash_key, "top_key2", hash_values["top_key2"].get<std::string>());
         c.wait();
         c.increment();
         _test_client->hset(hash_key, "top_key3", nlohmann::to_string(hash_values["top_key3"]));
@@ -671,20 +670,20 @@ namespace {
         _test_client->hset(hash_key, "top_key4", nlohmann::to_string(hash_values["top_key4"]));
         c.wait();
         c.increment();
-        _test_client->hset(hash_key, "top_key5", nlohmann::to_string(hash_values["top_key5"]));
+        _test_client->hset(hash_key, "top_key5", hash_values["top_key5"].get<std::string>());
         c.wait();
 
         c.increment();
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[0]));
+        _test_client->sadd(array_key, array_values[0].get<std::string>());
         c.wait();
         c.increment();
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[1]));
+        _test_client->sadd(array_key, array_values[1].get<std::string>());
         c.wait();
         c.increment();
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[2]));
+        _test_client->sadd(array_key, array_values[2].get<std::string>());
         c.wait();
         c.increment();
-        _test_client->sadd(array_key, nlohmann::to_string(array_values[3]));
+        _test_client->sadd(array_key, array_values[3].get<std::string>());
         c.wait();
 
         c.increment();
@@ -760,5 +759,173 @@ namespace {
         c.increment();
         _test_client->del(array_key);
         c.wait();
+    }
+
+    TEST_F(RedisCache_Test, TestArrayRemoval) {
+        Counter c(0);
+        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+            [&c] (const std::string &path, const nlohmann::json &new_value) {
+                c.decrement();
+        });
+
+        std::string fdw_ids_clone = "fdw_ids_clone";
+        std::string array_key = make_key_string(fdw_ids_clone);
+
+        _cache->add_callback(fdw_ids_clone, redis_watcher);
+
+        nlohmann::json array_values = {
+            "1",
+            "2",
+            "3"
+        };
+
+        c.increment();
+        _test_client->sadd(array_key, array_values[0].get<std::string>());
+        c.wait();
+
+        EXPECT_EQ(array_values.type(), nlohmann::json::value_t::array);
+        EXPECT_EQ(array_values[0].type(), nlohmann::json::value_t::string);
+
+        nlohmann::json array_element = _cache->get_value(fdw_ids_clone + "/0");
+        EXPECT_EQ(array_element.type(), nlohmann::json::value_t::string);
+
+        c.increment();
+        _cache->set_value(fdw_ids_clone + "/1", array_values[1]);
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_ids_clone + "/2", array_values[2]);
+        c.wait();
+
+        array_values.erase(0);
+        c.increment();
+        _cache->set_value(fdw_ids_clone, array_values);
+        c.wait();
+
+        array_values.erase(0);
+        c.increment();
+        _cache->set_value(fdw_ids_clone, array_values);
+        c.wait();
+
+        array_values.erase(0);
+        c.increment();
+        _cache->set_value(fdw_ids_clone, array_values);
+        c.wait();
+
+        array_values = {
+            "1",
+            "2",
+            "3"
+        };
+        c.increment();
+        _test_client->sadd(array_key, array_values[0].get<std::string>());
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_ids_clone, array_values);
+        c.wait();
+    }
+
+    TEST_F(RedisCache_Test, TestHashRemoval) {
+        Counter c(0);
+        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+            [&c] (const std::string &path, const nlohmann::json &new_value) {
+                c.decrement();
+        });
+
+        std::string fdw_clone = "fdw_clone";
+        std::string hash_key = make_key_string(fdw_clone);
+
+        _cache->add_callback(fdw_clone, redis_watcher);
+
+        nlohmann::json first_element = {
+                { "db_prefix", "replica_" },
+                { "fdw_user", "springtail" },
+                { "host", "localhost" },
+                { "port", 5436}
+        };
+
+        nlohmann::json hash_values = nlohmann::json::object({
+            { "1", {
+                { "db_prefix", "replica_" },
+                { "fdw_user", "springtail" },
+                { "password", "springtail" },
+                { "host", "localhost" },
+                { "port", 5431}
+            } },
+            { "2", {
+                { "db_prefix", "replica_" },
+                { "fdw_user", "springtail" },
+                { "password", "springtail" },
+                { "host", "localhost" },
+                { "port", 5432}
+            } },
+            { "3", {
+                { "db_prefix", "replica_" },
+                { "fdw_user", "springtail" },
+                { "password", "springtail" },
+                { "host", "localhost" },
+                { "port", 5433}
+            } }
+        });
+
+        c.increment();
+        _test_client->hset(hash_key, "1", nlohmann::to_string(first_element));
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_clone + "/1", hash_values["1"]);
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_clone + "/2", hash_values["2"]);
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_clone + "/3", hash_values["3"]);
+        c.wait();
+
+        nlohmann::json empty;
+        c.increment();
+        _cache->set_value(fdw_clone + "/1", empty);
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_clone + "/2", empty);
+        c.wait();
+
+        c.increment();
+        _cache->set_value(fdw_clone + "/3", empty);
+        c.wait();
+    }
+
+    TEST_F(RedisCache_Test, TestStringRemoval) {
+        Counter c(0);
+        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+            [&c] (const std::string &path, const nlohmann::json &new_value) {
+                c.decrement();
+        });
+
+        std::string string_key = "string_key";
+        std::string redis_string_key = make_key_string(string_key);
+
+        _cache->add_callback(string_key, redis_watcher);
+
+        nlohmann::json json_string = "test string";
+        nlohmann::json json_new_string = "some different test string";
+
+        c.increment();
+        _test_client->set(redis_string_key, json_string.get<std::string>());
+        c.wait();
+
+        c.increment();
+        _cache->set_value(string_key, json_new_string);
+        c.wait();
+
+        nlohmann::json empty;
+        c.increment();
+        _cache->set_value(string_key, empty);
+        c.wait();
+
     }
 };

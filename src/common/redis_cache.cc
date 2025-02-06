@@ -1,4 +1,3 @@
-#include <fmt/core.h>
 #include <functional>
 #include <queue>
 #include <set>
@@ -7,6 +6,9 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include <absl/log/check.h>
+#include <fmt/core.h>
 
 #include <common/common.hh>
 #include <common/json.hh>
@@ -148,6 +150,11 @@ RedisCache::_process_diff(const nlohmann::json &diff, const std::string &top_lev
         all_callbacks.insert(all_callbacks.end(), std::make_move_iterator(path_callbacks.begin()), std::make_move_iterator(path_callbacks.end()));
     }
 
+    // sort and remove all non-unique elements
+    std::sort(all_callbacks.begin(), all_callbacks.end());
+    auto it = std::unique(all_callbacks.begin(), all_callbacks.end());
+    all_callbacks.erase(it, all_callbacks.end());
+
     // go through all the callbacks and remove those that are exclusively applicable only to array elements
     // the rest of the callbacks are put into the queue together with the path and the json value
     std::queue<std::tuple<RedisCacheChangeCallbackPtr, std::string, nlohmann::json>> cb_queue;
@@ -224,11 +231,7 @@ RedisCache::_read_key_value(const std::string &key)
             if (!key_stored_value.has_value()) {
                 SPDLOG_ERROR("No value found for key {}", key);
             } else {
-                if (nlohmann::json::accept(key_stored_value.value())) {
-                    key_value = nlohmann::json::parse(key_stored_value.value());
-                } else {
-                    key_value = key_stored_value.value();
-                }
+                key_value = _string_to_json(key_stored_value.value());
             }
             break;
         }
@@ -239,11 +242,7 @@ RedisCache::_read_key_value(const std::string &key)
                 std::map<std::string, std::string> hash_data;
                 cursor = _client->hscan(key, cursor, std::inserter(hash_data, hash_data.begin()));
                 for (auto [hash_key, hash_value]: hash_data) {
-                    if (nlohmann::json::accept(hash_value)) {
-                        key_value[hash_key] = nlohmann::json::parse(hash_value);
-                    } else {
-                        key_value[hash_key] = hash_value;
-                    }
+                    key_value[hash_key] = _string_to_json(hash_value);
                 }
             } while (cursor != 0);
             break;
@@ -255,11 +254,7 @@ RedisCache::_read_key_value(const std::string &key)
                 std::vector<std::string> set_data;
                 cursor = _client->sscan(key, cursor, std::inserter(set_data, set_data.begin()));
                 for (auto set_value: set_data) {
-                    if (nlohmann::json::accept(set_value)) {
-                        key_value.push_back(nlohmann::json::parse(set_value));
-                    } else {
-                        key_value.push_back(set_value);
-                    }
+                    key_value.push_back(_string_to_json(set_value));
                 }
             } while (cursor != 0);
             std::sort(key_value.begin(), key_value.end());
@@ -344,6 +339,7 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
     std::deque<std::string> json_path_queue;
     common::split_string("/", json_path.substr(1), json_path_queue);
 
+    CHECK_GE(json_path_queue.size(), 1);
     std::string redis_key = json_path_queue.front();
     json_path_queue.pop_front();
 
@@ -365,23 +361,34 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
         case REDIS_TYPE_STRING:
         {
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object = _get_value("/" + redis_key, _storage);
-            if (json_optional_object.has_value()) {
+            if (json_optional_object.has_value() && !json_optional_object.value().get().empty()) {
                 const nlohmann::json &json_object = json_optional_object.value().get();
                 ret = _client->set(redis_key, _json_to_string(json_object));
+            } else {
+                ret = _client->del(redis_key);
+                _storage.erase(redis_key);
             }
             break;
         }
         case REDIS_TYPE_HASH:
         {
+            // hash element key is required
+            CHECK_GE(json_path_queue.size(), 1);
             std::string hash_key = json_path_queue.front();
             json_path_queue.pop_front();
             std::optional<std::reference_wrapper<const nlohmann::json>> json_optional_object =
                 _get_value("/" + redis_key + "/" + hash_key, _storage);
-            if (json_optional_object.has_value()) {
+            if (json_optional_object.has_value() && !json_optional_object.value().get().empty()) {
                 const nlohmann::json &json_object = json_optional_object.value().get();
                 _client->hset(redis_key, hash_key, _json_to_string(json_object));
-                ret = true;
+            } else {
+                _storage[redis_key].erase(hash_key);
+                if (_storage[redis_key].size() == 0) {
+                    _storage.erase(redis_key);
+                }
+                _client->hdel(redis_key, hash_key);
             }
+            ret = true;
             break;
         }
         case REDIS_TYPE_SET:
@@ -403,11 +410,15 @@ RedisCache::set_value(const std::string &path, const nlohmann::json &value)
                     _client->sadd(redis_key, new_element);
                     ret = true;
                 }
+                if (_storage[redis_key].size() == 0) {
+                    _storage.erase(redis_key);
+                }
             }
             break;
         }
         // creation of new redis keys is not supported
         case REDIS_TYPE_NONE:
+            SPDLOG_ERROR("Type {} for key {} is not found", key_type_str, redis_key);
             break;
         default:
             SPDLOG_ERROR("Unsupported type {} for key {}", key_type_str, redis_key);
@@ -461,15 +472,15 @@ RedisCache::remove_callback(const std::string &path, const RedisCacheChangeCallb
 std::pair<std::vector<std::string>, std::vector<std::string>>
 RedisCache::_array_diff(const nlohmann::json &arr1, const nlohmann::json &arr2, bool arr1_unique, bool arr2_unique)
 {
-    assert(arr1.type() == nlohmann::json::value_t::array);
-    assert(arr2.type() == nlohmann::json::value_t::array);
+    CHECK(arr1.type() == nlohmann::json::value_t::array);
+    CHECK(arr2.type() == nlohmann::json::value_t::array);
 
     std::vector<std::string> u, v;
     for (uint32_t i = 0; i < arr1.size(); i++) {
-        u.push_back(nlohmann::to_string(arr1[i]));
+        u.push_back(_json_to_string(arr1[i]));
     }
     for (uint32_t i = 0; i < arr2.size(); i++) {
-        v.push_back(nlohmann::to_string(arr2[i]));
+        v.push_back(_json_to_string(arr2[i]));
     }
     std::sort(u.begin(), u.end());
     std::sort(v.begin(), v.end());
@@ -556,6 +567,22 @@ RedisCache::_json_to_string(const nlohmann::json &json_value) {
                 json_value.type_name(), nlohmann::to_string(json_value));
     }
     return out_string;
+}
+
+nlohmann::json
+RedisCache::_string_to_json(const std::string &string_value)
+{
+    nlohmann::json json_value;
+    if (nlohmann::json::accept(string_value)) {
+        json_value = nlohmann::json::parse(string_value);
+        if (json_value.type() == nlohmann::json::value_t::object ||
+            json_value.type() == nlohmann::json::value_t::array) {
+                return json_value;
+            }
+    }
+    json_value = string_value;
+    CHECK(json_value.type() == nlohmann::json::value_t::string);
+    return json_value;
 }
 
 

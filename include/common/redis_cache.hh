@@ -1,6 +1,5 @@
 #pragma once
 
-#include <fmt/core.h>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -89,9 +88,11 @@ namespace springtail {
 
         /**
          * @brief Set the value of the object
-         *      NOTE: This function does not support adding or removing a top level key, but not its removal
-         *          We should be able to change it to support adding functionality, but not removal.
-         *          To remove a top-level key a separate function is needed.
+         *      NOTE: This function does not support adding adding top level key,
+         *          but it can remove it if you remove the last item in the top level array or hash,
+         *          set string to an empty json object.
+         *          We should also be able to change it to support adding functionality for top
+         *          level keys if so desired.
          *
          * @param path - path into json document
          * @param value - json value that it should be set to
@@ -349,5 +350,15 @@ namespace springtail {
          */
         static inline std::string
         _json_to_string(const nlohmann::json &json_value);
+
+        /**
+         * @brief Covert string value to json that is either object or array or string.
+         *      No other types are allowed.
+         *
+         * @param string_value - input value
+         * @return nlohmann::json
+         */
+        static inline nlohmann::json
+        _string_to_json(const std::string &string_value);
     };
 };
