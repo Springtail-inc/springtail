@@ -23,12 +23,13 @@ namespace {
 
         static void TearDownTestSuite()
         {
+            RedisMgr::shutdown();
             Properties::shutdown();
         }
         void SetUp() override
         {
             _cache = std::make_shared<RedisCache>(true);
-            tie(_db_id, _test_client) = RedisMgr::create_client(true);
+            tie(_db_id, _test_client) = RedisMgr::get_instance()->create_client(true);
 
             std::string string_key = make_key_string("top_level_string");
             std::string hash_key = make_key_string("top_level_hash");

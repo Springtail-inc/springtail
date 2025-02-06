@@ -22,8 +22,8 @@ RedisCache::RedisCache(bool config_db)
 {
     _instance_id = Properties::get_db_instance_id();
 
-    tie(_db_id, _client) = RedisMgr::create_client(config_db);
-    _subscriber = RedisMgr::get_subscriber(1, config_db);
+    tie(_db_id, _client) = RedisMgr::get_instance()->create_client(config_db);
+    _subscriber = RedisMgr::get_instance()->get_subscriber(1, config_db);
 
     _subscribe_pattern = "__keyspace@" + std::to_string(_db_id) + "__:" + std::to_string(_instance_id) + ":*";
     _subscriber->psubscribe(_subscribe_pattern);

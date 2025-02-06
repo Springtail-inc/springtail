@@ -12,33 +12,11 @@ namespace springtail {
 
     sw::redis::ConnectionOptions RedisMgr::_get_connect_options(bool config_db) {
         std::unique_lock lock(_connect_options_mutex);
-        if (_inited) {
-            int db_id = (config_db)? _config_db_id : _data_db_id;
-            if (_connect_options.db != db_id) {
-                sw::redis::ConnectionOptions connect_options_clone = _connect_options;
-                connect_options_clone.db = db_id;
-                return connect_options_clone;
-            }
-        } else {
-            nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
-
-            _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
-            _connect_options.user = Json::get_or<std::string>(json, "user", "user");
-            _connect_options.password = Json::get_or<std::string>(json, "password", "");
-            _connect_options.port = Json::get_or<int>(json, "port", 6379);
-            _config_db_id = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_DATA_DB);
-            _data_db_id = Json::get_or<int>(json, "db", RedisMgr::REDIS_DATA_DB);
-            _connect_options.db = (config_db)? _config_db_id : _data_db_id;
-            int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
-            bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
-
-            _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
-            _connect_options.keep_alive = true;
-            _connect_options.resp = 3;
-            _connect_options.socket_timeout = std::chrono::milliseconds(0);
-            _connect_options.tls.enabled = ssl_enabled;
-
-            _inited = true;
+        int db_id = (config_db)? _config_db_id : _data_db_id;
+        if (_connect_options.db != db_id) {
+            sw::redis::ConnectionOptions connect_options_clone = _connect_options;
+            connect_options_clone.db = db_id;
+            return connect_options_clone;
         }
         return _connect_options;
     }
@@ -68,7 +46,30 @@ namespace springtail {
 
     RedisMgr::RedisMgr()
     {
-        tie(_db_id, _redis) = create_client(false);
+        std::unique_lock lock(_connect_options_mutex);
+
+        nlohmann::json json = Properties::get(Properties::REDIS_CONFIG);
+
+        _connect_options.host = Json::get_or<std::string>(json, "host", "localhost");
+        _connect_options.user = Json::get_or<std::string>(json, "user", "user");
+        _connect_options.password = Json::get_or<std::string>(json, "password", "");
+        _connect_options.port = Json::get_or<int>(json, "port", 6379);
+        _config_db_id = Json::get_or<int>(json, "config_db", RedisMgr::REDIS_DATA_DB);
+        _data_db_id = Json::get_or<int>(json, "db", RedisMgr::REDIS_DATA_DB);
+        // For now set it to something
+        _connect_options.db = _data_db_id;
+        int keep_alive_secs = Json::get_or<int>(json, "keep_alive_sec", 30);
+        bool ssl_enabled = Json::get_or<bool>(json, "ssl", false);
+
+        _connect_options.keep_alive_s = std::chrono::seconds(keep_alive_secs);
+        _connect_options.keep_alive = true;
+        _connect_options.resp = 3;
+        _connect_options.socket_timeout = std::chrono::milliseconds(0);
+        _connect_options.tls.enabled = ssl_enabled;
+        lock.unlock();
+
+        int db_id;
+        tie(db_id, _redis) = create_client(false);
     }
 
     RedisMgr::SubscriberPtr

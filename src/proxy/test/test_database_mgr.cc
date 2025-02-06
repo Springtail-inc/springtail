@@ -20,7 +20,7 @@ namespace {
             _data_client = RedisMgr::get_instance()->get_client();
 
             int db_id;
-            tie(db_id, _config_client) = RedisMgr::create_client(true);
+            tie(db_id, _config_client) = RedisMgr::get_instance()->create_client(true);
 
         }
         static void TearDownTestSuite()

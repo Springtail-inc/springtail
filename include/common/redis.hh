@@ -88,9 +88,9 @@ namespace springtail {
          * @param config_db if true, use the config db
          * @return SubscriberPtr
          */
-        static SubscriberPtr get_subscriber(int timeout_secs=5,  bool config_db=true);
+        SubscriberPtr get_subscriber(int timeout_secs=5,  bool config_db=true);
 
-        static std::tuple<int, RedisClientPtr> create_client(bool config_db);
+        std::tuple<int, RedisClientPtr> create_client(bool config_db);
 
     protected:
         /** Redis client wrapper around client object */
@@ -101,12 +101,10 @@ namespace springtail {
         ~RedisMgr() override = default;
 
     private:
-        int _db_id;                         ///< redis database id
-        static inline bool _inited = false; ///< connect options initialization flag
-        static inline int _config_db_id;    ///< redis config database id
-        static inline int _data_db_id;      ///< redis data database id
-        static inline std::mutex _connect_options_mutex;    ///< connect options mutex
-        static inline sw::redis::ConnectionOptions _connect_options = {};   ///< connect options
+        int _config_db_id;                  ///< redis config database id
+        int _data_db_id;                    ///< redis data database id
+        std::mutex _connect_options_mutex;  ///< connect options mutex
+        sw::redis::ConnectionOptions _connect_options = {};   ///< connect options
 
         /**
          * @brief Internal connect options initialization function
@@ -114,6 +112,6 @@ namespace springtail {
          * @param config_db - config database flag
          * @return sw::redis::ConnectionOptions - connect option
          */
-        static sw::redis::ConnectionOptions _get_connect_options(bool config_db=true);
+        sw::redis::ConnectionOptions _get_connect_options(bool config_db=true);
     };
 }
