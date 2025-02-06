@@ -45,6 +45,15 @@ namespace springtail::sys_tbl_mgr {
             table, just the metadata to indicate that a drop occurred at the given XID/LSN. */
         void drop_table(DDLStatement& _return, const DropTableRequest &request) override;
 
+        /** Creates a namespace in the system tables. */
+        void create_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
+
+        /** Renames a namespace in the system tables. */
+        void alter_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
+
+        /** Drops a namespace in the system tables. */
+        void drop_namespace(DDLStatement &_return, const NamespaceRequest &request) override;
+
         /** Updates the roots extents of the indexes of the table as well as the table stats. */
         void update_roots(Status& _return, const UpdateRootsRequest &request) override;
 
@@ -69,7 +78,11 @@ namespace springtail::sys_tbl_mgr {
         /** Performs a drop (if needed), create, and update_roots for a given table to swap it's
             newly synced data into place at a given XID.  Returns a JSON array of DDL statements to
             update the FDWs. */
-        void swap_sync_table(DDLStatement &_return, const TableRequest &create, const std::vector<IndexRequest> &indexes, const UpdateRootsRequest &roots) override;
+        void swap_sync_table(DDLStatement &_return,
+                             const NamespaceRequest &namespace_req,
+                             const TableRequest &create_req,
+                             const std::vector<IndexRequest> &index_reqs,
+                             const UpdateRootsRequest &roots_req) override;
 
     private:
         Service() = default;
@@ -80,37 +93,37 @@ namespace springtail::sys_tbl_mgr {
         /**
          * An in-memory representation of the table_names system table used for caching.
          */
-        struct TableInfo {
+        struct TableCacheRecord {
             uint64_t id; ///< The table ID.
             uint64_t xid; ///< The XID at which this entry becomes valid.
             uint64_t lsn; ///< The LSN at which this entry becomes valid.
-            std::string schema; ///< The schema/namespace of the table.
+            uint64_t namespace_id; ///< The ID of the schema/namespace of the table.
             std::string name; ///< The name of the table.
             bool exists; ///< A flag indicating if the table exists at this point.
-            TableInfo(uint64_t id, uint64_t xid, uint64_t lsn, const std::string &schema, const std::string &name, bool exists)
-                : id(id), xid(xid), lsn(lsn), schema(schema), name(name), exists(exists)
+            TableCacheRecord(uint64_t id, uint64_t xid, uint64_t lsn, uint64_t namespace_id, const std::string &name, bool exists)
+                : id(id), xid(xid), lsn(lsn), namespace_id(namespace_id), name(name), exists(exists)
             { }
-            TableInfo() = default;
+            TableCacheRecord() = default;
         };
-        using TableInfoPtr = std::shared_ptr<TableInfo>;
+        using TableCacheRecordPtr = std::shared_ptr<TableCacheRecord>;
 
         /**
-         * Retrieve the TableInfo either from the cache or from the system tables if not available.
+         * Retrieve the TableCacheRecord either from the cache or from the system tables if not available.
          * @param table_id The ID of the table.
          * @param xid The XID/LSN at which we are querying.
          */
-        TableInfoPtr _get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        TableCacheRecordPtr _get_table_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
-         * Stores the TableInfo, performing a write-through in the cache and the system tables.  We
+         * Stores the TableCacheRecord, performing a write-through in the cache and the system tables.  We
          * don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
          * from the cache is not evicted until _clear_table_info() is called.
          * @param table_info The metadata to update.
          */
-        void _set_table_info(uint64_t db_id, TableInfoPtr table_info);
+        void _set_table_info(uint64_t db_id, TableCacheRecordPtr table_info);
 
         /**
-         * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
+         * Clears the cache of TableCacheRecord objects.  Called by finalize() once the system tables are
          * all committed to disk.
          */
         void _clear_table_info(uint64_t db_id);
@@ -119,25 +132,25 @@ namespace springtail::sys_tbl_mgr {
         // CACHE FOR ROOTS / STATS
 
         /** We use the thrift object response as the cache data for the roots/stats. */
-        using RootsInfoPtr = std::shared_ptr<GetRootsResponse>;
+        using RootsCacheRecordPtr = std::shared_ptr<GetRootsResponse>;
 
         /**
-         * Retrieve the RootsInfo either from the cache or from the system tables if not available.
+         * Retrieve the RootsCacheRecord either from the cache or from the system tables if not available.
          * @param table_id The ID of the table.
          * @param xid The XID/LSN at which we are querying.
          */
-        RootsInfoPtr _get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
+        RootsCacheRecordPtr _get_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
-         * Stores the RootsInfo, performing a write-through in the cache and the system tables.  We
+         * Stores the RootsCacheRecord, performing a write-through in the cache and the system tables.  We
          * don't finalize the system tables so they may remain dirty in the StorageCache.  Nothing
          * from the cache is not evicted until _clear_roots_info() is called.
          * @param table_info The metadata to update.
          */
-        void _set_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid, RootsInfoPtr roots_info);
+        void _set_roots_info(uint64_t db_id, uint64_t table_id, const XidLsn &xid, RootsCacheRecordPtr roots_info);
 
         /**
-         * Clears the cache of TableInfo objects.  Called by finalize() once the system tables are
+         * Clears the cache of TableCacheRecord objects.  Called by finalize() once the system tables are
          * all committed to disk.
          */
         void _clear_roots_info(uint64_t db_id);
@@ -166,9 +179,11 @@ namespace springtail::sys_tbl_mgr {
          * @param schema The table schema.
          * @param columns The set of column data to record.
          */
-        void _set_schema_info(uint64_t db_id, uint64_t table_id,
-                const std::string& table_name, const std::string& schema,
-                const std::vector<ColumnHistory> &columns);
+        void _set_schema_info(uint64_t db_id,
+                              uint64_t table_id,
+                              uint64_t namespace_id,
+                              const std::string &table_name,
+                              const std::vector<ColumnHistory> &columns);
 
         /**
          * Set primary index information according to the current state 
@@ -178,9 +193,13 @@ namespace springtail::sys_tbl_mgr {
          * @param schema The table schema.
          * @param table_name The table name.
          */
+        void _set_primary_index(uint64_t db_id,
+                                uint64_t namespace_id,
+                                uint64_t table_id,
+                                const std::string &schema,
+                                const std::string &table_name,
+                                const XidLsn &xid);
 
-        void _set_primary_index(uint64_t db_id, uint64_t table_id, const std::string& schema,
-               const std::string& table_name, const XidLsn& xid);
         /**
          * Clears the cache of schema data.  Called by finalize() once the system tables are
          * all committed to disk.
@@ -255,6 +274,36 @@ namespace springtail::sys_tbl_mgr {
                                        nlohmann::json &ddl);
 
 
+        // CACHE FOR NAMESPACES
+
+        /**
+         * Entry for the namespace cache.
+         */
+        struct NamespaceCacheRecord {
+            uint64_t id;
+            std::string name;
+            bool exists;
+
+            NamespaceCacheRecord(uint64_t id, std::string_view name, bool exists)
+                : id(id), name(name), exists(exists)
+            { }
+            NamespaceCacheRecord() = default;
+        };
+        using NamespaceCacheRecordPtr = std::shared_ptr<NamespaceCacheRecord>;
+
+        /**
+         * Read the namespace info from the NamespaceNames system table given it's ID and an
+         * XID/LSN.
+         */
+        NamespaceCacheRecordPtr _get_namespace_info(uint64_t db_id, uint64_t namespace_id, const XidLsn &xid);
+
+        /**
+         * Read the namespace info from the NamespaceNames system table given it's name and an
+         * XID/LSN.
+         */
+        NamespaceCacheRecordPtr _get_namespace_info(uint64_t db_id, const std::string &name, const XidLsn &xid);
+
+
         // HELPER FUNCTIONS
 
         /**
@@ -325,8 +374,14 @@ namespace springtail::sys_tbl_mgr {
 
         /** This doesn't return information about index columns
          */
-        std::optional<std::pair<IndexInfo, XidLsn>> _find_index(uint64_t db_id, uint64_t index_id,
-                const XidLsn& xid, std::optional<uint64_t> tid);
+        std::optional<std::tuple<IndexInfo, uint64_t, XidLsn>> _find_index(
+            uint64_t db_id, uint64_t index_id, const XidLsn &xid, std::optional<uint64_t> tid);
+
+        /**
+         * Helper for updating the namespace_names table.
+         */
+        nlohmann::json _mutate_namespace(uint64_t db, uint64_t ns_id, std::optional<std::string> name,
+                                         const XidLsn &xid, bool exists);
 
         std::optional<std::pair<IndexInfo, XidLsn>> _find_cached_index(uint64_t db_id, uint64_t index_id,
                 const XidLsn& xid, std::optional<uint64_t> tid);
@@ -378,34 +433,40 @@ namespace springtail::sys_tbl_mgr {
         std::map<uint64_t, std::map<uint64_t, MutableTablePtr>> _write;
 
         /**
-         * Cache of unapplied table info changes.
-         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> TableInfo
+         * Cache of unapplied namespace changes by namespace ID.
+         * Stored as a map of DB -> Namespace ID -> XID/LSN (in reverse order) -> NamespaceInfo
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<XidLsn,
-                                   TableInfoPtr,
-                                   std::greater<XidLsn>>>> _table_cache;
+        using XidLsnToNamespaceInfoMap = std::map<XidLsn, NamespaceCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToNamespaceInfoMap>> _namespace_id_cache;
+
+        /**
+         * Cache of unapplied namespace changes by namespace name.
+         * Stored as a map of DB -> Namespace name -> XID/LSN (in reverse order) -> NamespaceInfo
+         */
+        std::unordered_map<uint64_t, std::unordered_map<std::string, XidLsnToNamespaceInfoMap>> _namespace_name_cache;
+
+        /**
+         * Cache of unapplied table info changes.
+         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> TableCacheRecord
+         */
+        using XidLsnToTableInfoMap = std::map<XidLsn, TableCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToTableInfoMap>> _table_cache;
 
         /**
          * Cache of unapplied table roots/stats changes.
-         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> RootsInfo
+         * Stored as a map of DB -> Table ID -> XID/LSN (in reverse order) -> RootsCacheRecord
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<XidLsn,
-                                   RootsInfoPtr,
-                                   std::greater<XidLsn>>>> _roots_cache;
+        using XidLsnToRootsInfoMap = std::map<XidLsn, RootsCacheRecordPtr, std::greater<XidLsn>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, XidLsnToRootsInfoMap>> _roots_cache;
 
         /**
          * Cache of unapplied schema changes.
          * Stored as a map of DB -> Table ID -> Column ID -> vector<ColumnHistory> (in ascending XID/LSN order)
          * Using vector because there may be multiple entries at the same XID/LSN on table create.
          */
-        std::map<uint64_t,
-                 std::map<uint64_t,
-                          std::map<uint32_t,
-                                   std::vector<ColumnHistory>>>> _schema_cache;
+        using ColumnIdToInfoMap = std::map<uint32_t, std::vector<ColumnHistory>>;
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, ColumnIdToInfoMap>> _schema_cache;
+
         /**
          * Cache of unapplied index changes.
          * Stored as a map of DB -> Table ID -> (vector<IndexCacheItem>) (in ascending XID/LSN order)

@@ -1,0 +1,2 @@
+setup: ../setup_with_index.sql
+test: find_by_index_test.sql

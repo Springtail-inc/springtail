@@ -1,0 +1,2 @@
+setup: ../setup_no_index.sql
+test: find_test.sql
