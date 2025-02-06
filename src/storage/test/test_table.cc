@@ -12,6 +12,8 @@
 #include <sys_tbl_mgr/client.hh>
 #include <sys_tbl_mgr/table.hh>
 
+#include <xid_mgr/xid_mgr_client.hh>
+
 #include <test/services.hh>
 
 using namespace springtail;
@@ -38,33 +40,46 @@ namespace {
      */
     class Table_Test : public testing::TestWithParam<CacheSize> {
     protected:
+        //// TestSuite setup / teardown
+
+        static void SetUpTestSuite() {
+            _base_dir = std::filesystem::temp_directory_path() / "test_table";
+            std::filesystem::remove_all(_base_dir);
+
+            springtail_init();
+            _services.init();
+
+            auto client = sys_tbl_mgr::Client::get_instance();
+
+            auto xid_client = XidMgrClient::get_instance();
+            uint64_t access_xid = xid_client->get_committed_xid(1, 0);
+            uint64_t target_xid = access_xid + 1;
+
+            // create the public namespace in the sys_tbl_mgr
+            PgMsgNamespace ns_msg;
+            ns_msg.oid = 900;
+            ns_msg.name = "public";
+            client->create_namespace(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), ns_msg);
+
+            xid_client->commit_xid(1, target_xid, false);
+        }
+
+        static void TearDownTestSuite() {
+            _services.shutdown();
+            std::filesystem::remove_all(_base_dir);
+        }
+
+        static test::Services _services;
+
+
+        //// Individual test setup / teardown
+
         void SetUp() override {
-            struct Initializer
-            {
-                test::Services _s;
-
-                Initializer() : _s{true, true, false}
-                {
-                    springtail_init();
-                    _s.init();
-                }
-                Initializer(const Initializer&) = delete;
-                Initializer& operator=(const Initializer&) = delete;
-                ~Initializer()
-                {
-                    _s.shutdown();
-                }
-
-            };
-            static Initializer init;
-
-
             // set the cache size from the parameters
             CacheSize sizes = GetParam();
             std::string overrides = std::format("storage.data_cache_size={};storage.page_cache_size={};storage.btree_cache_size={};storage.max_extent_per_page={}",
                                                 sizes.data_cache_size, sizes.page_cache_size, sizes.btree_cache_size, sizes.max_extent_per_page);
             ::setenv(environment::ENV_OVERRIDE, overrides.c_str(), 1);
-
 
             // construct a schema for testing
             std::vector<SchemaColumn> columns({
@@ -82,20 +97,6 @@ namespace {
             }
 
             _primary_keys = std::vector<std::string>({"name"});
-
-            _base_dir = std::filesystem::temp_directory_path() / "test_table";
-            std::filesystem::remove_all(_base_dir);
-
-            std::filesystem::create_directories(_base_dir / "1000");
-            std::filesystem::create_directory(_base_dir / "1001");
-            std::filesystem::create_directory(_base_dir / "1002");
-            std::filesystem::create_directory(_base_dir / "1003");
-            std::filesystem::create_directory(_base_dir / "1004");
-        }
-
-        void TearDown() override {
-            // remove any files created during the run
-            std::filesystem::remove_all(_base_dir);
         }
 
         ExtentSchemaPtr _schema;
@@ -103,8 +104,29 @@ namespace {
 
         std::vector<std::string> _primary_keys;
 
-        std::filesystem::path _base_dir;
-        uint64_t _db_id = 1;
+        static std::filesystem::path _base_dir;
+        static uint64_t _db_id;
+
+        void _init_sys_tbls(uint64_t target_xid, uint64_t table_oid, std::string_view name)
+        {
+            auto client = sys_tbl_mgr::Client::get_instance();
+
+            PgMsgTable tbl_msg;
+            tbl_msg.oid = table_oid;
+            tbl_msg.table = name;
+            tbl_msg.namespace_name = "public";
+            tbl_msg.columns = std::vector<PgMsgSchemaColumn>(
+                {{"table_id", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 1, -1,
+                  false, false, false},
+                 {"name", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 2, 0, false,
+                  true, false},
+                 {"offset", static_cast<uint8_t>(SchemaType::UINT64), 0, std::nullopt, 3, -1, false,
+                  false, false}});
+
+            client->create_table(_db_id, XidLsn(target_xid, constant::MAX_LSN - 1), tbl_msg);
+
+            client->finalize(_db_id, target_xid);
+        }
 
         // secondary keys
         std::vector<Index> _make_keys(uint64_t table_id, const std::vector<TableRoot> &roots)
@@ -221,8 +243,17 @@ namespace {
         typedef std::shared_ptr<Request> RequestPtr;
     };
 
+    test::Services Table_Test::_services{true, true, false};
+    uint64_t Table_Test::_db_id = 1;
+    std::filesystem::path Table_Test::_base_dir;
+
     TEST_P(Table_Test, CreateEmpty) {
-        uint64_t access_xid = 1, target_xid = 1;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1000, "test_create_empty");
 
         // create a mutable table
         TableMetadata metadata;
@@ -232,6 +263,7 @@ namespace {
         // finalize the empty table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -249,7 +281,12 @@ namespace {
     }
 
     TEST_P(Table_Test, Inserts) {
-        uint64_t access_xid = 1, target_xid = 2;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1001, "test_inserts");
 
         // create a mutable table
         TableMetadata metadata;
@@ -263,6 +300,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -298,7 +336,12 @@ namespace {
     }
 
     TEST_P(Table_Test, SingleXactMutations) {
-        uint64_t access_xid = 2, target_xid = 3;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1002, "test_single_xact_mutations");
 
         // create a mutable table
         TableMetadata metadata;
@@ -361,6 +404,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -408,7 +452,12 @@ namespace {
     }
 
     TEST_P(Table_Test, MultiXactMutations) {
-        uint64_t access_xid = 3, target_xid = 4;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1003, "test_multi_xact_mutations");
 
         // create a mutable table
         TableMetadata metadata;
@@ -421,6 +470,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table for lookup
         access_xid = target_xid;
@@ -461,6 +511,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -539,6 +590,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -622,6 +674,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -710,6 +763,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
@@ -767,7 +821,12 @@ namespace {
 
 
     TEST_P(Table_Test, MultiThreadMutations) {
-        uint64_t access_xid = 8, target_xid = 9;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1004, "test_multi_thread_mutations");
 
         // create a mutable table
         TableMetadata metadata;
@@ -780,6 +839,7 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table and identify extents to be mutated
         access_xid = target_xid;
@@ -814,10 +874,11 @@ namespace {
         }
 
         // finalize and verify the table
-        tester.set_verify([this, mtable, target_xid]() {
+        tester.set_verify([this, mtable, target_xid, client]() {
             // create an access table
             TableMetadata metadata = mtable->finalize();
             sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+            client->commit_xid(1, target_xid, false);
 
             auto access_xid = target_xid;
             auto table = _create_table(1004, access_xid, metadata.roots);
@@ -859,7 +920,12 @@ namespace {
     }
 
     TEST_P(Table_Test, SecondaryIndex) {
-        uint64_t access_xid = 1, target_xid = 2;
+        auto client = XidMgrClient::get_instance();
+        uint64_t access_xid = client->get_committed_xid(1, 0);
+        uint64_t target_xid = access_xid + 1;
+
+        // create the namespace and table in the sys_tbl_mgr
+        _init_sys_tbls(target_xid, 1005, "test_secondary_indexes");
 
         // create a mutable table
         TableMetadata metadata;
@@ -867,7 +933,7 @@ namespace {
         // this will create two indexes on the first and second columns
         metadata.roots = { {0, constant::UNKNOWN_EXTENT}, {1, constant::UNKNOWN_EXTENT}, {2, constant::UNKNOWN_EXTENT} };
 
-        auto mtable = _create_mtable(1001, target_xid, metadata.roots);
+        auto mtable = _create_mtable(1005, target_xid, metadata.roots);
 
         // insert a number of rows
         _populate_table(mtable, target_xid);
@@ -875,10 +941,11 @@ namespace {
         // finalize the table
         metadata = mtable->finalize();
         sys_tbl_mgr::Client::get_instance()->update_roots(mtable->db(), mtable->id(), target_xid, metadata);
+        client->commit_xid(1, target_xid, false);
 
         // create an access table
         access_xid = target_xid;
-        auto table = _create_table(1001, access_xid, metadata.roots);
+        auto table = _create_table(1005, access_xid, metadata.roots);
 
         // ensure that it has all of the inserted rows through both the primary and secondary index
         // and that everything else works as expected (find, lower_bound, etc)

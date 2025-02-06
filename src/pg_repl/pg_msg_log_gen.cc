@@ -283,6 +283,45 @@ namespace springtail {
     }
 
     void
+    PgMsgLogGen::create_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "CREATE SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_CREATE_NAMESPACE, msg);
+    }
+
+    void
+    PgMsgLogGen::alter_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "ALTER SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_ALTER_NAMESPACE, msg);
+    }
+
+    void
+    PgMsgLogGen::drop_schema(uint32_t schema_id, const std::string_view schema_name)
+    {
+        nlohmann::json msg;
+
+        msg["cmd"] = "DROP SCHEMA";
+        msg["oid"] = schema_id;
+        msg["name"] = schema_name;
+        msg["obj"] = "schema";
+
+        _write_message(pg_msg::MSG_PREFIX_DROP_NAMESPACE, msg);
+    }
+
+    void
     PgMsgLogGen::drop_table(uint32_t table_id) {
         nlohmann::json msg;
 
@@ -584,6 +623,18 @@ namespace springtail {
             _parse_alter_table(json);
             return;
         }
+        if (cmd == PG_OP_CREATE_SCHEMA) {
+            _parse_create_schema(json);
+            return;
+        }
+        if (cmd == PG_OP_ALTER_SCHEMA) {
+            _parse_alter_schema(json);
+            return;
+        }
+        if (cmd == PG_OP_DROP_SCHEMA) {
+            _parse_drop_schema(json);
+            return;
+        }
         if (cmd == PG_OP_DROP_TABLE) {
             _parse_drop_table(json);
             return;
@@ -694,6 +745,30 @@ namespace springtail {
         std::vector<PgMsgSchemaColumn> columns = _parse_columns(json);
         uint32_t table_id = _get_table_id(table);
         _log_gen.alter_table(table_id, columns);
+    }
+
+    void
+    PgLogGenJson::_parse_create_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.create_schema(schema_id, name);
+    }
+
+    void
+    PgLogGenJson::_parse_alter_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.alter_schema(schema_id, name);
+    }
+
+    void
+    PgLogGenJson::_parse_drop_schema(const nlohmann::json &json)
+    {
+        std::string name = json["name"];
+        std::uint64_t schema_id = json["oid"];
+        _log_gen.drop_schema(schema_id, name);
     }
 
     void

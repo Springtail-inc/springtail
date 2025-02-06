@@ -75,7 +75,7 @@ namespace springtail::sys_tbl_mgr {
         TableRequest request;
         _set_request_common(request, db_id, xid);
         request.table.id = msg.oid;
-        request.table.schema = msg.schema;
+        request.table.namespace_name = msg.namespace_name;
         request.table.name = msg.table;
         for (const auto &col : msg.columns) {
             TableColumn column;
@@ -105,7 +105,7 @@ namespace springtail::sys_tbl_mgr {
         IndexRequest request;
         _set_request_common(request, db_id, xid);
         request.index.id = msg.oid;
-        request.index.schema = msg.schema;
+        request.index.namespace_name = msg.namespace_name;
         request.index.name = msg.index;
         request.index.is_unique = msg.is_unique;
         request.index.table_name = msg.table_name;
@@ -173,7 +173,7 @@ namespace springtail::sys_tbl_mgr {
         request.xid = xid.xid;
         request.lsn = xid.lsn;
         request.table_id = msg.oid;
-        request.schema = msg.schema;
+        request.namespace_name = msg.namespace_name;
         request.name = msg.table;
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
@@ -190,6 +190,71 @@ namespace springtail::sys_tbl_mgr {
         return result.statement;
     }
 
+    std::string
+    Client::create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+    {
+        DDLStatement result;
+
+        NamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+        request.name = msg.name;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
+
+    std::string
+    Client::alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+    {
+        DDLStatement result;
+
+        NamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+        request.name = msg.name;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->alter_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
+
+    std::string
+    Client::drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg)
+    {
+        DDLStatement result;
+
+        NamespaceRequest request;
+        request.db_id = db_id;
+        request.xid = xid.xid;
+        request.lsn = xid.lsn;
+        request.namespace_id = msg.oid;
+        request.name = msg.name;
+
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->drop_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError("No DDL statement");
+        }
+        return result.statement;
+    }
 
     std::string
     Client::create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state)
@@ -267,7 +332,7 @@ namespace springtail::sys_tbl_mgr {
         _set_request_common(request, db_id, xid);
 
         request.index_id = msg.oid;
-        request.schema = msg.schema;
+        request.namespace_name = msg.namespace_name;
 
         _invoke_with_retries([&result, &request](ThriftClient &c) {
             c.client->drop_index(result, request);
@@ -404,7 +469,7 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
         Index info;
         info.id = idx.id;
         info.name = idx.name;
-        info.schema = idx.schema;
+        info.schema = idx.namespace_name;
         info.state = idx.state;
         info.table_id = idx.table_id;
         info.is_unique = idx.is_unique;
@@ -501,14 +566,31 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
     }
 
     std::string
-    Client::swap_sync_table(const TableRequest &create,
-                            const std::vector<IndexRequest> indexes,
-                            const UpdateRootsRequest &roots)
+    Client::create_namespace(const NamespaceRequest &request)
     {
         DDLStatement result;
 
-        _invoke_with_retries([&result, &create, &indexes, &roots](ThriftClient &c) {
-            c.client->swap_sync_table(result, create, indexes, roots);
+        _invoke_with_retries([&result, &request](ThriftClient &c) {
+            c.client->create_namespace(result, request);
+        });
+
+        if (result.statement.empty()) {
+            throw SysTblMgrError();
+        }
+        
+        return result.statement;
+    }
+
+    std::string
+    Client::swap_sync_table(const NamespaceRequest &namespace_req,
+                            const TableRequest &create_req,
+                            const std::vector<IndexRequest> &index_reqs,
+                            const UpdateRootsRequest &roots_req)
+    {
+        DDLStatement result;
+
+        _invoke_with_retries([&result, &namespace_req, &create_req, &index_reqs, &roots_req](ThriftClient &c) {
+            c.client->swap_sync_table(result, namespace_req, create_req, index_reqs, roots_req);
         });
 
         if (result.statement.empty()) {
@@ -516,7 +598,8 @@ Client::_pack_metadata(const GetSchemaResponse &result) {
         }
 
         // auto-invalidate the cache for the swapped table
-        invalidate_table(create.db_id, create.table.id, XidLsn(create.xid, create.lsn));
+        invalidate_table(create_req.db_id, create_req.table.id,
+                         XidLsn(create_req.xid, create_req.lsn));
 
         return result.statement;
     }
