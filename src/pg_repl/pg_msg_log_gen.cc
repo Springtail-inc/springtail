@@ -283,7 +283,7 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::create_schema(uint32_t schema_id, std::string schema_name)
+    PgMsgLogGen::create_schema(uint32_t schema_id, const std::string_view schema_name)
     {
         nlohmann::json msg;
 
@@ -296,7 +296,7 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::alter_schema(uint32_t schema_id, std::string schema_name)
+    PgMsgLogGen::alter_schema(uint32_t schema_id, const std::string_view schema_name)
     {
         nlohmann::json msg;
 
@@ -309,7 +309,7 @@ namespace springtail {
     }
 
     void
-    PgMsgLogGen::drop_schema(uint32_t schema_id, std::string schema_name)
+    PgMsgLogGen::drop_schema(uint32_t schema_id, const std::string_view schema_name)
     {
         nlohmann::json msg;
 

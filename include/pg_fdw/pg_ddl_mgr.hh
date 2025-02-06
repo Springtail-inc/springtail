@@ -88,12 +88,12 @@ namespace springtail::pg_fdw {
         /**
          * Method to get the create schema query
          */
-        std::string _get_create_schema_with_grants_query(std::string schema);
+        std::string _get_create_schema_with_grants_query(std::string_view schema);
 
         /**
          * Method to get the alter schema query
          */
-        std::string _get_alter_schema_with_grants_query(std::string old_schema, std::string new_schema);
+        std::string _get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema);
 
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);

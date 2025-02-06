@@ -189,7 +189,7 @@ namespace springtail::pg_fdw {
     }
 
     std::string
-    PgDDLMgr::_get_create_schema_with_grants_query(std::string schema)
+    PgDDLMgr::_get_create_schema_with_grants_query(std::string_view schema)
     {
         /** Create schema with grants, params: schema, schema, user, schema, user, schema, user */
         return fmt::format("CREATE SCHEMA {};"
@@ -203,7 +203,7 @@ namespace springtail::pg_fdw {
     }
 
     std::string
-    PgDDLMgr::_get_alter_schema_with_grants_query(std::string old_schema, std::string new_schema)
+    PgDDLMgr::_get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema)
     {
         /** Alter schema with grants, params: old_schema, new_schema, new_schema, user, new_schema, user, new_schema, user */
         return fmt::format("ALTER SCHEMA {} RENAME TO {};"
