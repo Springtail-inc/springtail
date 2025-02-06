@@ -16,6 +16,9 @@
 #include <redis/redis_ddl.hh>
 #include <redis/pubsub_thread.hh>
 
+#include <sys_tbl_mgr/system_tables.hh>
+#include <sys_tbl_mgr/table_mgr.hh>
+
 #include <pg_repl/libpq_connection.hh>
 
 
@@ -23,6 +26,7 @@
  * must be undefined before including postgres.h */
 #undef PACKAGE_STRING
 #undef PACKAGE_VERSION
+#undef UINT64CONST
 
 namespace springtail::pg_fdw {
 
@@ -62,10 +66,8 @@ namespace springtail::pg_fdw {
         uint64_t _db_instance_id;                  ///< database instance id
         int _port;                                 ///< port
 
-        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map and _db_schemas maps
+        std::shared_mutex _db_mutex;               ///< shared mutex for read/write access to _db_xid_map
         std::map<uint64_t, uint64_t> _db_xid_map;  ///< map of db id to max schema xid (applied)
-
-        std::map<uint64_t, std::set<std::string>> _db_schemas;  ///< map of db id to set of schemas
 
         std::map<uint32_t, std::string> _type_map;  ///< map of PG type OIDs to type names
 
@@ -82,6 +84,16 @@ namespace springtail::pg_fdw {
          * Main thread entry point; loops checking redis for DDL changes
          */
         void _internal_run() override;
+
+        /**
+         * Method to get the create schema query
+         */
+        std::string _get_create_schema_with_grants_query(std::string_view schema);
+
+        /**
+         * Method to get the alter schema query
+         */
+        std::string _get_alter_schema_with_grants_query(std::string_view old_schema, std::string_view new_schema);
 
         /** Helper to connect to fdw db */
         LibPqConnectionPtr _connect_fdw(std::optional<uint64_t> db_id, const std::string &db_name);
@@ -115,8 +127,7 @@ namespace springtail::pg_fdw {
         void _execute_ddl(LibPqConnectionPtr conn,
                           uint64_t db_id,
                           uint64_t schema_xid,
-                          const std::vector<std::string> &sql,
-                          const std::set<std::string> &schemas);
+                          const std::vector<std::string> &sql);
 
         /**
          * @brief Helper to get schemas from db config

@@ -2,14 +2,14 @@ import os
 import springtail
 import time
 import common
-
+import yaml
 
 class BenchCase:
     """Class to run a single benchmark case"""
 
-    def __init__(self, filename: str, config_file: str, build_dir: str):
+    def __init__(self, name: str, filename: str, config_file: str, build_dir: str):
         self.filename = filename
-        self.name = os.path.basename(filename)
+        self.name = filename
         self.config_file = config_file
         self.build_dir = build_dir
         self.props = springtail.Properties(config_file, True)
@@ -25,34 +25,79 @@ class BenchCase:
 
     def _run_benchmark(self, primary_conn, replica_conn) -> dict:
         """Run the benchmark with given connections"""
-        # Read benchmark SQL
+    
+        # test root
+        root = os.path.dirname(self.filename)
+
         with open(self.filename) as f:
-            sql = f.read()
+            config = yaml.safe_load(f)
 
-        # Time postgres write and total springtail time
-        start = time.time()
-        with primary_conn.cursor() as cursor:
-            cursor.execute(sql)
-            # Insert sentinel value to track replication
-            cursor.execute(
-                "INSERT INTO benchmark_state (key, state) VALUES (%s, %s) "
-                "ON CONFLICT (key) DO UPDATE SET state = EXCLUDED.state",
-                (f"benchcase_{self.name}", self.name),
+        if not config:
+            print("Ignoring...")
+            print(f"The config file is empty: {self.filename}")
+            return {}
+
+        setup_sql = None
+        test_sql = None
+
+        def get_sql(n):
+            p = config.get(n)
+            if not p:
+                return None
+            sql_path = os.path.join(root, p) 
+            if not os.path.exists(sql_path):
+                raise ValueError(f"File not found: {sql_path}")
+            with open(sql_path) as f:
+                return f.read()
+
+        setup_sql = get_sql("setup")
+        test_sql = get_sql("test")
+
+        if not setup_sql and not test_sql:
+            print(f"Bad config format: {self.filename}")
+            return {}
+
+        result = {}
+        if setup_sql:
+            # Time postgres write and total springtail time
+            start = time.time()
+            with primary_conn.cursor() as cursor:
+                cursor.execute(setup_sql)
+                # Insert sentinel value to track replication
+                cursor.execute(
+                    "INSERT INTO benchmark_state (key, state) VALUES (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET state = EXCLUDED.state",
+                    (f"benchcase_{self.name}", self.name),
+                )
+            primary_conn.commit()
+            postgres_time = time.time() - start
+
+            # Wait for springtail sync
+            sync_time = common.wait_for_replica_condition(
+                replica_conn,
+                f"SELECT state FROM benchmark_state WHERE key = 'benchcase_{self.name}'",
+                (self.name,),
             )
-        primary_conn.commit()
-        postgres_time = time.time() - start
 
-        # Wait for springtail sync
-        sync_time = common.wait_for_replica_condition(
-            replica_conn,
-            f"SELECT state FROM benchmark_state WHERE key = 'benchcase_{self.name}'",
-            (self.name,),
-        )
+            result["Primary setup time"] = postgres_time
+            result["Setup sync time"] = sync_time + postgres_time
 
-        result = {
-            "postgres_time": postgres_time,
-            "springtail_time": sync_time + postgres_time,
-        }
+        if test_sql:
+            start = time.time()
+            with primary_conn.cursor() as cursor:
+                cursor.execute(test_sql)
+            primary_conn.commit()
+            postgres_time = time.time() - start
+
+            start = time.time()
+            with replica_conn.cursor() as cursor:
+                cursor.execute(test_sql)
+            replica_conn.commit()
+            replica_time = time.time() - start
+
+            result["Primary test time"] = postgres_time
+            result["Replica test time"] = replica_time
+
 
         # Clean up after benchmark (outside of timing)
         cleanup_path = os.path.join(os.path.dirname(__file__), "benchmark_cleanup.sql")
