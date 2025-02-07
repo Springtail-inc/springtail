@@ -213,17 +213,21 @@ namespace springtail
          * @brief Get table oids based on query passed in
          * @param query query to get table oids
          * @param table_oids output: table name, schema name, oid
+         * @param db_id database id
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<TableMetadata> &table_oids);
+                             std::vector<TableMetadata> &table_oids,
+                             uint64_t db_id);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
          * @param include_json json object specifying schema and table includes
-         * @param table_oids output: table name, schema name, oid
+         * @param table_oids output: table name, schema name, oid   
+         * @param db_id database id
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<TableMetadata> &table_oids);
+                             std::vector<TableMetadata> &table_oids,
+                             uint64_t db_id);
 
         /**
          * @brief Get excluded items for a given db_id

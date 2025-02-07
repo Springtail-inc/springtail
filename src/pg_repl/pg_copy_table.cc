@@ -798,7 +798,8 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::vector<TableMetadata> &table_oids)
+                                 std::vector<TableMetadata> &table_oids,
+                                 uint64_t db_id)
     {
         // do the tables query
         _connection.exec(query);
@@ -828,7 +829,7 @@ namespace springtail
                 };
 
                 // Store in Redis
-                auto &&key = fmt::format(redis::HASH_EXCLUDED_ITEMS, Properties::get_db_instance_id(), -1);
+                auto &&key = fmt::format(redis::HASH_EXCLUDED_ITEMS, Properties::get_db_instance_id(), db_id);
                 auto redis = RedisMgr::get_instance()->get_client();
                 auto field_key = fmt::format("{}", table_oid);
                 redis->hset(key, field_key, table_info.dump());
@@ -843,7 +844,8 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::vector<TableMetadata> &table_oids)
+                                 std::vector<TableMetadata> &table_oids,
+                                 uint64_t db_id)
     {
         // get schemas array from json into vector of strings
 
@@ -853,7 +855,7 @@ namespace springtail
             if (!schemas.empty()) {
                 if (schemas[0] == "*") {
                     // all tables in db
-                    _get_table_oids(std::string(TABLES_QUERY), table_oids);
+                    _get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
                     return;
                 }
 
@@ -865,7 +867,7 @@ namespace springtail
 
                 _get_table_oids(fmt::format(TABLES_SCHEMA_QUERY,
                                 common::join_string(",", schema_names.begin(), schema_names.end())),
-                                table_oids);
+                                table_oids, db_id);
             }
         }
 
@@ -882,7 +884,7 @@ namespace springtail
 
             if (!pairs.empty()) {
                 // issue query by joining all the schema, table pairs
-                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids);
+                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids, db_id);
             }
         }
     }
@@ -1028,21 +1030,21 @@ namespace springtail
             // by schema name, need to escape the schema name
             // escape the schema name
             std::string schema = "'" + copy_table._connection.escape_string(schema_name.value()) + "'";
-            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLES_SCHEMA_QUERY, schema), table_oids, db_id);
         } else if (table_tids.has_value()) {
             // by table oids
             std::string tids = common::join_string(",", table_tids.value().begin(), table_tids.value().end());
-            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLE_QUERY, tids), table_oids, db_id);
         } else if (schema_table.has_value()) {
             // by schema, table pair
             std::string schema = copy_table._connection.escape_string(schema_table.value().first);
             std::string table = copy_table._connection.escape_string(schema_table.value().second);
-            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids);
+            copy_table._get_table_oids(fmt::format(TABLE_OID_QUERY, table, schema), table_oids, db_id);
         } else if (include_json.has_value()) {
-            copy_table._get_table_oids(include_json.value(), table_oids);
+            copy_table._get_table_oids(include_json.value(), table_oids, db_id);
         } else {
             // all tables in db
-            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids);
+            copy_table._get_table_oids(std::string(TABLES_QUERY), table_oids, db_id);
         }
 
         // close this connection
