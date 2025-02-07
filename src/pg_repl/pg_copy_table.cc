@@ -105,6 +105,42 @@ namespace springtail
         "AND nspname != 'information_schema' "
         "ORDER BY pg_class.oid";
 
+    static constexpr char EXCLUSION_ITEMS_QUERY[] =
+        "SELECT "
+        "    n.nspname AS schema_name, "
+        "    c.relname AS table_name, "
+        "    a.attname AS column_name, "
+        "    t.typname AS type_name, "
+        "    CASE WHEN a.attgenerated = 's' THEN "
+        "        pg_get_expr(pg_attrdef.adbin, pg_attrdef.adrelid) "
+        "        ELSE NULL "
+        "    END AS generation_expression, "
+        "    CASE WHEN t.typname = 'bytea' "
+        "        THEN 'Non-UTF8 Encoding' "
+        "        ELSE 'UTF-8 Encoding' "
+        "    END AS encoding, "
+        "    col.collname AS collation, "
+        "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
+        "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
+        "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation, "
+        "    bool_or(t.typname = 'bytea') OVER w AS has_non_standard_encoding "
+        "FROM pg_attribute a "
+        "JOIN pg_class c ON a.attrelid = c.oid "
+        "JOIN pg_namespace n ON c.relnamespace = n.oid "
+        "JOIN pg_type t ON a.atttypid = t.oid "
+        "LEFT JOIN pg_attrdef ON a.attrelid = pg_attrdef.adrelid AND a.attnum = pg_attrdef.adnum "
+        "LEFT JOIN pg_collation col ON a.attcollation = col.oid AND a.attcollation <> 0 "
+        "WHERE c.relkind = 'r' "
+        "AND a.attnum > 0 "
+        "AND n.nspname NOT LIKE 'pg_%' "
+        "AND n.nspname != 'information_schema' "
+        "AND (a.attgenerated = 's' "
+        "    OR t.typname = 'bytea' "
+        "    OR (col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'Default')) "
+        "    OR (t.typnamespace != 'pg_catalog'::regnamespace)) "
+        "WINDOW w AS (PARTITION BY n.nspname, c.relname) "
+        "ORDER BY schema_name, table_name, column_name";
+
     /** Get table name, schema name, oid for all tables in a schema */
     static constexpr char TABLES_SCHEMA_QUERY[] =
         "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
@@ -702,6 +738,65 @@ namespace springtail
     }
 
     void
+    PgCopyTable::_populate_excluded_items()
+    {
+        // do the tables query
+        _connection.exec(EXCLUSION_ITEMS_QUERY);
+
+        if (_connection.ntuples() == 0) {
+            SPDLOG_ERROR("No tables found in database");
+            _connection.clear();
+            return;
+        }
+
+        nlohmann::json result;
+
+        // iterate through the results and organize by schema and table
+        for (int i = 0; i < _connection.ntuples(); i++) {
+            std::string schema_name = _connection.get_string(i, 0);
+            std::string table_name = _connection.get_string(i, 1); 
+            std::string column_name = _connection.get_string(i, 2);
+            std::string type_name = _connection.get_string(i, 3);
+            std::string generation_expression = _connection.get_string_optional(i, 4).value_or("");
+            std::string encoding = _connection.get_string(i, 5);
+            std::string collation = _connection.get_string(i, 6);
+            bool has_generated_column = _connection.get_boolean(i, 7);
+            bool has_user_defined_type = _connection.get_boolean(i, 8);
+            bool has_non_standard_collation = _connection.get_boolean(i, 9);
+            bool has_non_standard_encoding = _connection.get_boolean(i, 10);
+
+            // Skip columns that are not UTF-8 encoded or generated columns
+            if ( !has_generated_column && !has_user_defined_type && !has_non_standard_collation && !has_non_standard_encoding ) {
+                continue;
+            }
+
+            // Create schema entry if it doesn't exist
+            if (!result.contains(schema_name)) {
+                result[schema_name] = nlohmann::json::object();
+            }
+
+            // Create table entry if it doesn't exist
+            if (!result[schema_name].contains(table_name)) {
+                result[schema_name][table_name] = {
+                    {"columns", nlohmann::json::array()}
+                };
+            }
+
+            // Add column information
+            result[schema_name][table_name]["columns"].push_back({
+                {"name", column_name},
+                {"type", type_name},
+                {"generation_expression", generation_expression},
+                {"encoding", encoding},
+                {"collation", collation}
+            });
+        }
+
+        _connection.clear();
+        _excluded_items = result;
+    }
+
+    void
     PgCopyTable::_get_table_oids(const std::string &query,
                                  std::vector<TableMetadata> &table_oids)
     {
@@ -720,6 +815,26 @@ namespace springtail
             std::string schema_name = _connection.get_string(i, 1);
             uint32_t table_oid = _connection.get_int32(i, 2);
             uint32_t schema_oid = _connection.get_int32(i, 3);
+
+            if (_excluded_items.contains(schema_name) && 
+                _excluded_items[schema_name].contains(table_name)) {
+                SPDLOG_DEBUG_MODULE(LOG_PG_REPL, "Skipping table: {}.{}", schema_name, table_name);
+                
+                // Create JSON object for the skipped table
+                nlohmann::json table_info = {
+                    {"schema", schema_name},
+                    {"table", table_name},
+                    {"columns", _excluded_items[schema_name][table_name]["columns"]}
+                };
+
+                // Store in Redis
+                auto &&key = fmt::format(redis::HASH_EXCLUDED_ITEMS, Properties::get_db_instance_id(), -1);
+                auto redis = RedisMgr::get_instance()->get_client();
+                auto field_key = fmt::format("{}", table_oid);
+                redis->hset(key, field_key, table_info.dump());
+                continue;
+            }
+
             table_oids.push_back({schema_name, table_name, schema_oid, table_oid});
         }
 
@@ -901,6 +1016,9 @@ namespace springtail
         // create copy table object and connect to db
         PgCopyTable copy_table;
         copy_table.connect(db_id);
+
+        // populate the excluded items
+        copy_table._populate_excluded_items();
 
         // fetch the table oids
         std::vector<TableMetadata> table_oids;

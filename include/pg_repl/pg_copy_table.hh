@@ -146,6 +146,7 @@ namespace springtail
         bool _oid_flag = false;
 
         PgTableSchema _schema;
+        nlohmann::json _excluded_items;
 
         /**
          * @brief Extract schema from table and store in internal _schema object
@@ -223,6 +224,11 @@ namespace springtail
          */
         void _get_table_oids(const nlohmann::json &include_json,
                              std::vector<TableMetadata> &table_oids);
+
+        /**
+         * @brief Get excluded items for a given db_id
+         */
+        void _populate_excluded_items();
 
         /**
          * @brief Copy table from remote system
