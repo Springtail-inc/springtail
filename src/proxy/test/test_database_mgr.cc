@@ -37,11 +37,24 @@ namespace {
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_ready(db_id));
 
-            uint64_t instance_id =Properties::get_db_instance_id();
+            uint64_t instance_id = Properties::get_db_instance_id();
             auto ts = _config_client->transaction(false, false);
 
-            // hset instance_config:1234 database_ids "[\"1\", \"2\"]"
-            std::string key = fmt::format(redis::DB_INSTANCE_CONFIG, instance_id);
+            // hset 1234:instance_state 2 running
+            std::string key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
+            std::string db_id_str = std::to_string(db_id);
+            ts.hset(key, db_id_str, redis::db_state_change::REDIS_STATE_RUNNING);
+
+            // hset 1234:db_config 2 "{\"name\": \"springtail_1\", \"replication_slot\": \"springtail_slot\", \"publication_name\": \"springtail_pub\", \"include\": {\"schemas\": [\"*\"]}}"
+            key = fmt::format(redis::DB_CONFIG, instance_id);
+            std::string name_str = fmt::format("\"name\": \"{}\"", name);
+            std::string replication_slot = fmt::format("\"replication_slot\": \"{}_slot\"", name);
+            std::string publication_name = fmt::format("\"publication_name\": \"{}_pub\"", name);
+            std::string config_str = "{" + name_str + ", " + replication_slot + ", " + publication_name + ", \"include\": {\"schemas\": [\"*\"]}}";
+            ts.hset(key, db_id_str, config_str);
+
+            // hset 1234:instance_config database_ids "[\"1\", \"2\"]"
+            key = fmt::format(redis::DB_INSTANCE_CONFIG, instance_id);
             std::map<uint64_t, std::string> databases = Properties::get_databases();
             databases[db_id] = name;
             std::string db_ids_str = "[";
@@ -52,26 +65,7 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            // hset instance_state:1234 2 running
-            key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
-            std::string db_id_str = std::to_string(db_id);
-            ts.hset(key, db_id_str, "running");
-
-            // hset db_config:1234 2 "{\"name\": \"springtail_1\", \"replication_slot\": \"springtail_slot\", \"publication_name\": \"springtail_pub\", \"include\": {\"schemas\": [\"*\"]}}"
-            key = fmt::format(redis::DB_CONFIG, instance_id);
-            std::string name_str = fmt::format("\"name\": \"{}\"", name);
-            std::string replication_slot = fmt::format("\"replication_slot\": \"{}_slot\"", name);
-            std::string publication_name = fmt::format("\"publication_name\": \"{}_pub\"", name);
-            std::string config_str = "{" + name_str + ", " + replication_slot + ", " + publication_name + ", \"include\": {\"schemas\": [\"*\"]}}";
-            ts.hset(key, db_id_str, config_str);
             ts.exec();
-
-            sleep(1);
-
-            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_ADD, db_id);
-            _config_client->publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
-            msg = fmt::format("{}:running", db_id);
-            _config_client->publish(fmt::format(redis::PUBSUB_DB_STATE_CHANGES, instance_id), msg);
 
             sleep(1);
 
@@ -91,7 +85,7 @@ namespace {
             uint64_t instance_id =Properties::get_db_instance_id();
             auto ts = _config_client->transaction(false, false);
 
-            // hset instance_config:1234 database_ids "[\"1\"]"
+            // hset 1234:instance_config database_ids "[\"1\"]"
             std::string key = fmt::format(redis::DB_INSTANCE_CONFIG, instance_id);
             std::map<uint64_t, std::string> databases = Properties::get_databases();
             databases.erase(db_id);
@@ -103,26 +97,37 @@ namespace {
             db_ids_str += "]";
             ts.hset(key, "database_ids",  db_ids_str);
 
-            // hdel instance_state:1234 2
+            // hdel :1234:instance_state 2
             key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
             std::string db_id_str = std::to_string(db_id);
             ts.hdel(key, db_id_str);
 
-            // hdel db_config:1234 2
+            // hdel 1234:db_config 2
             key = fmt::format(redis::DB_CONFIG, instance_id);
             ts.hdel(key, db_id_str);
             ts.exec();
 
             sleep(1);
 
-            std::string msg = fmt::format("{}:{}", redis::db_state_change::REDIS_ACTION_REMOVE, db_id);
-            _config_client->publish(fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, instance_id), msg);
-
-            sleep(1);
-
             EXPECT_FALSE(DatabaseMgr::get_instance()->get_database_id(name).has_value());
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_replicated(name));
             EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_ready(db_id));
+        }
+
+        void _change_database_state(uint64_t db_id, redis::db_state_change::DBState state) {
+            uint64_t instance_id = Properties::get_db_instance_id();
+            std::string key = fmt::format(redis::DB_INSTANCE_STATE, instance_id);
+            std::string db_id_str = std::to_string(db_id);
+            std::string db_state_str = redis::db_state_change::db_state_to_name[state];
+            _config_client->hset(key, db_id_str, db_state_str);
+
+            sleep(1);
+
+            if (state != redis::db_state_change::DB_STATE_RUNNING) {
+                EXPECT_FALSE(DatabaseMgr::get_instance()->is_database_ready(db_id));
+            } else {
+                EXPECT_TRUE(DatabaseMgr::get_instance()->is_database_ready(db_id));
+            }
         }
 
         void _add_table(uint64_t db_id, const std::string &schema, const std::string &table, bool test = true)
@@ -230,5 +235,12 @@ namespace {
         _remove_table(2, schema2, table2);
 
         _remove_database(2, "springtail_1");
+    }
+
+    TEST_F(DatabaseMgr_Test, TestChangeReplicatedDatabaseState) {
+        _change_database_state(1, redis::db_state_change::DB_STATE_INITIALIZE);
+        _change_database_state(1, redis::db_state_change::DB_STATE_RUNNING);
+        _change_database_state(1, redis::db_state_change::DB_STATE_SYNCING);
+        _change_database_state(1, redis::db_state_change::DB_STATE_RUNNING);
     }
 }
