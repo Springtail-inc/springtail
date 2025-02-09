@@ -417,9 +417,6 @@ namespace springtail {
     {
         nlohmann::json json_state(state);
         _cache->set_value("instance_state/" + std::to_string(db_id), json_state);
-
-        // publish the state
-        _cache->publish(redis::PUBSUB_DB_STATE_CHANGES, fmt::format("{}:{}", db_id, state));
     }
 
     void

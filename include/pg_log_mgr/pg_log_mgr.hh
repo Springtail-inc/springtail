@@ -81,16 +81,7 @@ namespace springtail::pg_log_mgr {
                  const std::string &host, const std::string &db_name,
                  const std::string &user_name, const std::string &password,
                  const std::string &pub_name, const std::string &slot_name,
-                 int port)
-        : _db_id(db_id), _db_instance_id(Properties::get_db_instance_id()),
-          _host(host), _db_name(db_name), _user_name(user_name),
-          _password(password), _pub_name(pub_name), _slot_name(slot_name), _port(port),
-          _pg_conn(_port, _host, _db_name, _user_name, _password, _pub_name, _slot_name),
-          _repl_log_path(repl_log_path),
-          _xact_queue(std::make_shared<ConcurrentQueue<PgTransaction>>()),
-          _pg_log_reader(db_id, _xact_queue), _xact_log_path(xact_log_path),
-          _redis_sync_queue(fmt::format(redis::QUEUE_SYNC_TABLES, _db_instance_id, _db_id))
-        {}
+                 int port);
 
         /**
          * @brief Construct a new Pg Log Mgr object (for testing only)
@@ -112,6 +103,10 @@ namespace springtail::pg_log_mgr {
 
         /** Wait for threads */
         void join() {
+            std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+            redis_cache->remove_callback(
+                std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(_db_id),
+                _cache_watcher_db_states);
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "joining threads");
             _writer_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "writer thread joined");
@@ -121,8 +116,6 @@ namespace springtail::pg_log_mgr {
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "xact thread joined");
             _table_copy_thread.join();
             SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "copy thread joined");
-            _pubsub_thread.join();
-            SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "pubsub thread joined");
         }
 
         /** Set shutdown flag */
@@ -236,11 +229,8 @@ namespace springtail::pg_log_mgr {
         /** Process copy table results; insert into redis */
         void _process_copy_results(const std::vector<PgCopyResultPtr> &res);
 
-        //// Redis pub/sub
-        std::thread _pubsub_thread;          ///< redis pub/sub thread
-
-        /** Redis pub/sub thread entry point */
-        void _redis_pubsub_thread();
+        /** Redis cache callback for watching database state change */
+        RedisCache::RedisChangeWatcherPtr _cache_watcher_db_states;
 
         /** Handle state change; callback from Redis pubsub */
         void _handle_external_state_change(const redis::db_state_change::DBState new_state);
