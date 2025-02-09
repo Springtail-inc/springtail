@@ -22,7 +22,7 @@ class Properties:
         self.cache = {}
 
         if config_file is None and 'SPRINGTAIL_PROPERTIES_FILE' in os.environ:
-            self.config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
+            config_file = os.environ.get('SPRINGTAIL_PROPERTIES_FILE')
 
         if config_file:
             # remove the environment variable; prevents daemons from reloading redis
@@ -301,6 +301,11 @@ class Properties:
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_hostname(self, type : str) -> str:
+        """Return the hostname for the given type."""
+        key = self.db_instance_id + ':instance_config'
+        return self.redis.hget(key, f'hostname:{type}')
 
     def set_db_state(self, dbname : str, state :str) -> None:
         """Set the state of a database, use cautiously."""

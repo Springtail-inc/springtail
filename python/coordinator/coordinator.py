@@ -6,6 +6,7 @@ import argparse
 import string
 import signal
 import boto3
+import time
 from typing import Optional
 from random import SystemRandom
 
@@ -21,6 +22,9 @@ from properties import Properties
 # import the ComponentFactory class and the Scheduler class
 from component_factory import ComponentFactory
 from scheduler import Scheduler
+
+# import the xid_mgr_client
+from thrift_clients import ping_xid_mgr, ping_sys_tbl_mgr
 
 # import production utils
 from production import (
@@ -102,6 +106,24 @@ def setup_props(yaml_config: dict) -> Properties:
     check_properties(props)
 
     return props
+
+def wait_for_ingestion(props: Properties) -> None:
+    """
+    Wait for the ingestion service to be ready.
+    """
+    host = None
+    while True:
+        host = props.get_hostname('ingestion')
+        if host is not None:
+            break
+        time.sleep(1)
+
+    while True:
+        success, message = ping_xid_mgr(host, props.get_port('ingestion'))
+        if success:
+            break
+        time.sleep(1)
+
 
 if __name__ == "__main__":
     """Main entry point for the coordinator script."""
@@ -199,6 +221,9 @@ if __name__ == "__main__":
         # create the ddl user
         ddl_password = gen_random_string(16)
         postgres.create_user('ddl_user', ddl_password, True, True)
+
+        # wait for ingestion to be ready
+        wait_for_ingestion(props)
 
         # For testing uncomment lines below since they are needed for ddl daemon
         # but in production they should be running elsewhere

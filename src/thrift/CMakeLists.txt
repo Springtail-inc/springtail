@@ -27,6 +27,9 @@ find_program(
 
 message(STATUS "Found thrift compiler: ${THRIFT_COMPILER}")
 
+# Set Python output directory
+set(PYTHON_GEN_DIR ${PROJECT_SOURCE_DIR}/python/thrift)
+
 # set variables for thrift schema .thrift file and generated .h
 file(GLOB THRIFT_FILES "*.thrift")
 # set(THRIFT_FILES write_cache.thrift xid_mgr.thrift sys_tbl_mgr.thrift)
@@ -38,6 +41,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
     set(THRIFT_FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/${THRIFT_FILE_NAME}.thrift)
     set(THRIFT_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/${THRIFT_FILE_NAME})
     set(THRIFT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include/thrift/${THRIFT_FILE_NAME})
+    set(THRIFT_PYTHON_GEN_DIR ${PYTHON_GEN_DIR}/${THRIFT_FILE_NAME})
 
     MESSAGE(STATUS "Processing thrift file: ${THRIFT_FILE_PATH}")
 
@@ -63,21 +67,34 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
         ${THRIFT_GEN_DIR}/${THRIFT_SERVICE}.cpp
     )
 
-    # add custom command to generate the thrift files and copy headers into include directory
+    # Set Python generated files
+    set(THRIFT_PYTHON_GEN_FILES
+        ${THRIFT_PYTHON_GEN_DIR}/ttypes.py
+        ${THRIFT_PYTHON_GEN_DIR}/${THRIFT_SERVICE}.py
+        ${THRIFT_PYTHON_GEN_DIR}/constants.py
+        ${THRIFT_PYTHON_GEN_DIR}/__init__.py
+    )
+
+    # add custom command to generate both C++ and Python thrift files
     add_custom_command(
-        OUTPUT ${THRIFT_GEN_FILES}
+        OUTPUT ${THRIFT_GEN_FILES} ${THRIFT_PYTHON_GEN_FILES}
         COMMAND mkdir -p ${THRIFT_GEN_DIR}
         COMMAND mkdir -p ${THRIFT_INCLUDE_DIR}
+        COMMAND mkdir -p ${THRIFT_PYTHON_GEN_DIR}
+        # Generate C++ files
         COMMAND ${THRIFT_COMPILER} -I ${CMAKE_CURRENT_SOURCE_DIR} --gen cpp:no_skeleton,pure_enums,moveable_types -out ${THRIFT_GEN_DIR} ${THRIFT_FILE_PATH}
+        # Generate Python files
+        COMMAND ${THRIFT_COMPILER} -I ${CMAKE_CURRENT_SOURCE_DIR} --gen py -out ${PYTHON_GEN_DIR} ${THRIFT_FILE_PATH}
         COMMAND ${CP_COMMAND} ${THRIFT_GEN_DIR}/*.h ${THRIFT_INCLUDE_DIR}
-	COMMAND touch ${THRIFT_GEN_FILES} # seem to need this to ensure dependencies are honored after a re-build of the generated files
+        COMMAND touch ${THRIFT_GEN_FILES} # seem to need this to ensure dependencies are honored after a re-build of the generated files
+        COMMAND touch ${THRIFT_PYTHON_GEN_FILES} # seem to need this to ensure dependencies are honored after a re-build of the generated files
         DEPENDS ${THRIFT_FILE_PATH}
-        COMMENT "Generating thrift files for ${THRIFT_FILE_PATH} into ${THRIFT_GEN_DIR}"
+        COMMENT "Generating C++ and Python thrift files for ${THRIFT_FILE_PATH}"
     )
 
     # target to ensure that all files are built prior to start of compilation
     add_custom_target(thrift_generated_${THRIFT_FILE_NAME}
-        DEPENDS ${THRIFT_GEN_FILES}
+        DEPENDS ${THRIFT_GEN_FILES} ${THRIFT_PYTHON_GEN_FILES}
     )
 
     # set the name of the library based on the thrift file name
@@ -90,7 +107,7 @@ foreach(THRIFT_FILE ${THRIFT_FILES})
 
     # add the gen-cpp dir to the list of files to remove during 'make clean'
     set_target_properties(${THRIFT_LIB_NAME}
-        PROPERTIES ADDITIONAL_CLEAN_FILES "${THRIFT_GEN_DIR};${THRIFT_INCLUDE_DIR}"
+        PROPERTIES ADDITIONAL_CLEAN_FILES "${THRIFT_GEN_DIR};${THRIFT_INCLUDE_DIR};${THRIFT_PYTHON_GEN_DIR}"
     )
 
 endforeach(THRIFT_FILE)
