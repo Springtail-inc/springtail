@@ -11,6 +11,7 @@ set(COMMON_LIB_SOURCES
   common.cc
   dns_resolver.cc
   exception.cc
+  grpc_server_manager.cc
   logging.cc
   properties.cc
   redis.cc

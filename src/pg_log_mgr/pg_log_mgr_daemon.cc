@@ -18,8 +18,6 @@ namespace {
         if (log_co != nullptr) {
             log_co->notify_shutdown();
         }
-        XidMgrClient::get_instance()->notify_shutdown();
-        sys_tbl_mgr::Client::get_instance()->notify_shutdown();
     }
 }
 

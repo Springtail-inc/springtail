@@ -13,7 +13,7 @@ target_link_libraries(springtail_gc
          springtail_write_cache
          springtail_pg
          springtail_sys_tbl_mgr
-  PRIVATE thrift_write_cache thrift_xid_mgr Boost::thread)
+  PRIVATE Boost::thread)
 
 add_executable(gc_daemon gc_daemon.cc)
 target_include_directories(gc_daemon

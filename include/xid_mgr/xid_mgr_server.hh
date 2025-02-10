@@ -1,95 +1,75 @@
 #pragma once
 
 #include <shared_mutex>
-#include <vector>
 #include <filesystem>
+#include <vector>
+#include <unordered_map>
 
 #include <common/singleton.hh>
-
-#include <thrift/xid_mgr/ThriftXidMgr.h>
-#include <thrift/common/thrift_server.hh>
-
+#include <common/grpc_server_manager.hh>
 #include <xid_mgr/xid_partition.hh>
-#include <xid_mgr/xid_mgr_service.hh>
 
 namespace springtail::xid_mgr {
 
+class XidMgrServer : public Singleton<XidMgrServer> {
+    friend class Singleton<XidMgrServer>;
+
+public:
+    void startup();
+    void shutdown();
+
     /**
-     * @class XidMgrServer
-     * @brief This class represents a server for managing transaction IDs (XIDs).
-     *        It provides functionality to allocate XID ranges, commit XIDs, and retrieve the latest committed XID.
+     * @brief commit up to and including given xid
+     * @param db_id database id
+     * @param xid xid to commit
      */
-    class XidMgrServer final :
-            public springtail::thrift::Server<XidMgrServer,
-                                            thrift::xid_mgr::ThriftXidMgrProcessorFactory,
-                                            ThriftXidMgrService,
-                                            thrift::xid_mgr::ThriftXidMgrIfFactory,
-                                            thrift::xid_mgr::ThriftXidMgrIf>,
-            public Singleton<XidMgrServer>
-    {
-        friend class Singleton<XidMgrServer>;
-    public:
-        // interfaces from thrift
+    void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
 
-        /**
-         * @brief commit up to and including given xid
-         * @param db_id database id
-         * @param xid xid to commit
-         */
-        void commit_xid(uint64_t db_id, uint64_t xid, bool has_schema_changes);
+    /**
+     * @brief Record a DDL change without doing a commit.  Used for table sync operations.
+     * @param db_id database id
+     * @param xid xid to commit
+     */
+    void record_ddl_change(uint64_t db_id, uint64_t xid);
 
-        /**
-         * @brief Record a DDL change without doing a commit.  Used for table sync operations.
-         * @param db_id database id
-         * @param xid xid to commit
-         */
-        void record_ddl_change(uint64_t db_id, uint64_t xid);
+    /**
+     * @brief Get the latest committed xid object
+     * @param db_id database id
+     * @param schema_xid last known schema xid
+     * @return uint64_t
+     */
+    uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
 
-        /**
-         * @brief Get the latest committed xid object
-         * @param db_id database id
-         * @param schema_xid last known schema xid
-         * @return uint64_t
-         */
-        uint64_t get_committed_xid(uint64_t db_id, uint64_t schema_xid);
+    ~XidMgrServer() override;
 
-    protected:
-        void _internal_shutdown() override;
+private:
+    XidMgrServer();
 
-    private:
-        /**
-         * @brief Construct a new XidMgr object
-         */
-        XidMgrServer();
+    springtail::GrpcServerManager _grpc_server_manager;
 
-        /**
-         * @brief Destroy the XidMgr object; shouldn't be called directly use shutdown()
-         */
-         ~XidMgrServer() override = default;
+    /** base path */
+    std::filesystem::path _base_path;
 
-        /** base path */
-        std::filesystem::path _base_path;
+    std::shared_mutex _mutex;
 
-        std::shared_mutex _mutex;
+    /** list of partitions */
+    std::vector<PartitionPtr> _partitions;
 
-        /** list of partitions */
-        std::vector<PartitionPtr> _partitions;
+    /** map of db_id to partitions */
+    std::map<uint64_t, PartitionPtr> _partition_map;
 
-        /** map of db_id to partitions */
-        std::map<uint64_t, PartitionPtr> _partition_map;
+    /**
+     * @brief Get a partition based on a db_id, optionally create it
+     * @param db_id database id
+     * @param create whether to create the partition if it doesn't exist
+     * @return PartitionPtr
+     */
+    PartitionPtr _get_partition(uint64_t db_id, bool create);
 
-        /**
-         * @brief Get a partition based on a db_id, optionally create it
-         * @param db_id database id
-         * @param create whether to create the partition if it doesn't exist
-         * @return PartitionPtr
-         */
-        PartitionPtr _get_partition(uint64_t db_id, bool create);
+    /**
+     * @brief Load partitions from base path
+     */
+    void _load_partitions();
+};
 
-        /**
-         * @brief Load partitions from base path
-         */
-        void _load_partitions();
-    };
-
-} // namespace springtail
+}  // namespace springtail::xid_mgr
