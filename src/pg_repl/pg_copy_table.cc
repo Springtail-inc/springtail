@@ -924,28 +924,33 @@ namespace springtail
     PgCopyTable::create_namespaces(uint64_t db_id, uint64_t xid)
     {
         PgCopyTable copy_table;
+
+        // connect to the database
         copy_table.connect(db_id);
 
+        // get the list of namespaces
         std::vector<std::pair<uint64_t, std::string>> namespaces = copy_table._get_namespaces(db_id, xid);
 
+        // disconnect from the database
+        copy_table.disconnect();
+
+        auto client = sys_tbl_mgr::Client::get_instance();
         // create the namespaces
         for (const auto &namespace_info : namespaces) {
             SPDLOG_DEBUG("Creating namespace: {}", namespace_info.second);
-            auto client = sys_tbl_mgr::Client::get_instance();
-            XidLsn ns_xid(xid, 1);
-
+            
             sys_tbl_mgr::NamespaceRequest ns_req;
             ns_req.db_id = db_id;
             ns_req.namespace_id = namespace_info.first;
             ns_req.name = namespace_info.second;
             ns_req.xid = xid;
-            ns_req.lsn = 1;
+            ns_req.lsn = 0;
 
             // create the namespace
             client->create_namespace(ns_req);
         }
-
-        copy_table.disconnect();
+        // flush to disk
+        client->finalize(db_id, xid);
     }
 
     std::vector<PgCopyResultPtr>
