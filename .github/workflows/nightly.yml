@@ -167,8 +167,11 @@ jobs:
             # Note: there might be discrepancies between the _LOG_TIMESTAMP and the _LOG_DATE due to the time it takes to run the integration tests
             # it may run across a day. This is fine as long as the logs are grouped by _LOG_DATE
             _LOG_TIMESTAMP=$(date +%s)
+            echo "*** Starting iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
             python3 test_runner.py -c config.yaml -j /__w/springtail/springtail/integration-test-report.xml 2>&1 | tee tmplog
           
+            echo "*** Finished iteration $i/${INTEGRATION_TEST_ITERATIONS} of integration tests"
+
             # Grab the success/failure status of the integration tests
             _LOG_FLAG="succeeded"
             if grep -qE "Tests failed: [1-9][0-9]*" tmplog
