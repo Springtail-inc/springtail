@@ -49,23 +49,6 @@ namespace {
         RedisClientPtr _test_client;
         int _db_id;
 
-        class RedisChangeWatcher : public RedisCache::RedisCacheChangeCallback {
-        public:
-            explicit RedisChangeWatcher(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) : _cb(func) {}
-            ~RedisChangeWatcher() override = default;
-
-            void change_callback(const std::string &path, const nlohmann::json &new_value) override {
-                SPDLOG_INFO("!!! Received notification; path: \"{}\"; new value: {}", path, new_value.dump(4));
-                _cb(path, new_value);
-            }
-
-            void set_cb(std::function<void(const std::string &path, const nlohmann::json &new_value)> func) {
-                _cb = func;
-            }
-        private:
-            std::function<void(const std::string &, const nlohmann::json &)> _cb;
-        };
-
         std::string make_key_string(std::string key) {
             uint64_t instance_id = Properties::get_db_instance_id();
             return std::to_string(instance_id) + ":" + key;
@@ -108,7 +91,7 @@ namespace {
         std::string system_settings_key = "instance_config/system_settings";
         // create callback class
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c, &connections, &pointer, &system_settings_key](const std::string &path, const nlohmann::json &new_value) {
                 EXPECT_EQ(path, system_settings_key);
                 EXPECT_EQ(connections, new_value.at(pointer));
@@ -150,7 +133,7 @@ namespace {
     {
         EXPECT_EQ(_cache->get_callback_count(""), 0);
 
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [] (const std::string &path, const nlohmann::json &new_value) {
                 // emtpy callback for now, will be reset later on
             });
@@ -293,7 +276,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestTopLevelString) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -349,7 +332,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestTopLevelHash) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -561,7 +544,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestTopLevelArray) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -614,7 +597,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestRedisChange) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -764,7 +747,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestArrayRemoval) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -829,7 +812,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestHashRemoval) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });
@@ -902,7 +885,7 @@ namespace {
 
     TEST_F(RedisCache_Test, TestStringRemoval) {
         Counter c(0);
-        std::shared_ptr<RedisChangeWatcher> redis_watcher = std::make_shared<RedisChangeWatcher>(
+        auto redis_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
             [&c] (const std::string &path, const nlohmann::json &new_value) {
                 c.decrement();
         });

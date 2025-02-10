@@ -37,9 +37,9 @@ create_default_otel_resource(std::string_view component_name)
     if (account_id) {
         resource_attributes["springtail.account_id"] = *account_id;
     }
-    auto db_instance_id = Json::get<std::string>(json, "db_instance_id");
+    auto db_instance_id = Json::get<uint64_t>(json, "db_instance_id");
     if (db_instance_id) {
-        resource_attributes["springtail.db_instance_id"] = *db_instance_id;
+        resource_attributes["springtail.db_instance_id"] = std::to_string(*db_instance_id);
     }
     if (!component_name.empty()) {
         resource_attributes["service.name"] = std::string(component_name);
