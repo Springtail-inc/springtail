@@ -131,10 +131,10 @@ class Properties:
 
         return config
 
-    def get_fdw_config(self) -> dict:
+    def get_fdw_config(self, nocache : bool = False) -> dict:
         """Return a config object for foreign data wrapper configuration."""
         key = str(self.db_instance_id) + ':fdw'
-        if 'fdw_config' in self.cache:
+        if 'fdw_config' in self.cache and not nocache:
             return self.cache['fdw_config']
 
         config = json.loads(self.redis.hget(key, self.fdw_id))
@@ -293,12 +293,24 @@ class Properties:
         system_config = self.get_system_config()
         if 'log_path' not in system_config['logging']:
             raise Exception('log_path not found in system settings')
-        log_path = os.path.dirname(system_config['logging']['log_path'])
+
+        log_path = system_config['logging']['log_path']
+
+        # check if the log path is a file; if so return the directory
+        if os.path.isfile(log_path):
+            log_path = os.path.dirname(system_config['logging']['log_path'])
+
         return log_path
 
     def get_data_redis(self) -> redis.StrictRedis:
         """Return the data redis object."""
         return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_data_db,
+                                 username=self.redis_user, password=self.redis_password,
+                                 encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
+
+    def get_config_redis(self) -> redis.StrictRedis:
+        """Return the config redis object."""
+        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_config_db,
                                  username=self.redis_user, password=self.redis_password,
                                  encoding="utf-8", decode_responses=True, ssl=self.redis_ssl)
 
