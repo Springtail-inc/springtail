@@ -115,7 +115,7 @@ namespace springtail
         "        pg_get_expr(pg_attrdef.adbin, pg_attrdef.adrelid) "
         "        ELSE NULL "
         "    END AS generation_expression, "
-        "    CASE WHEN t.typname = 'bytea' "
+        "    CASE WHEN t.typname = 'oid' "
         "        THEN 'Non-UTF8 Encoding' "
         "        ELSE 'UTF-8 Encoding' "
         "    END AS encoding, "
@@ -123,7 +123,7 @@ namespace springtail
         "    bool_or(a.attgenerated = 's') OVER w AS has_generated_column, "
         "    bool_or(t.typnamespace != 'pg_catalog'::regnamespace) OVER w AS has_user_defined_type, "
         "    bool_or(col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) OVER w AS has_non_standard_collation, "
-        "    bool_or(t.typname = 'bytea') OVER w AS has_non_standard_encoding "
+        "    bool_or(t.typname = 'oid') OVER w AS has_non_standard_encoding "
         "FROM pg_attribute a "
         "JOIN pg_class c ON a.attrelid = c.oid "
         "JOIN pg_namespace n ON c.relnamespace = n.oid "
@@ -135,9 +135,9 @@ namespace springtail
         "AND n.nspname NOT LIKE 'pg_%' "
         "AND n.nspname != 'information_schema' "
         "AND (a.attgenerated = 's' "
-        "    OR t.typname = 'bytea' "
-        "    OR (col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'Default')) "
-        "    OR (t.typnamespace != 'pg_catalog'::regnamespace)) "
+        "    OR t.typname = 'oid' " // exclude oid type which is used for BLOB types
+        "    OR (col.collname IS NOT NULL AND col.collname NOT IN ('C', 'en_US.UTF-8', 'default')) "
+        "    OR (t.typnamespace != 'pg_catalog'::regnamespace)) " // exclude pg_catalog types and only consider user-defined types
         "WINDOW w AS (PARTITION BY n.nspname, c.relname) "
         "ORDER BY schema_name, table_name, column_name";
 

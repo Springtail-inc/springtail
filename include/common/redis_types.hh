@@ -166,5 +166,5 @@ namespace springtail::redis {
      * args: <db_instance_id>
      * key: <table_oid>, value: <json>
      */
-    static constexpr char HASH_EXCLUDED_ITEMS[] = "{}:hash:excluded_items";
+    static constexpr char HASH_EXCLUDED_ITEMS[] = "{}:hash:excluded_items:{}";
 }
