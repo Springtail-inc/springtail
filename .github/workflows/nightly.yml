@@ -25,9 +25,14 @@ jobs:
 
     # You can use this environment variable to access the current working directory
     env:
-      VCPKG_ROOT: /home/dev/external/vcpkg
-      ZIC: true
       VCPKG_FORCE_SYSTEM_BINARIES: 1
+      VCPKG_ROOT: /home/dev/external/vcpkg
+      DOCKER: 1
+      ZIC: true
+      USER: root
+      PYTHONUNBUFFERED: 1
+      GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_LATEST_SHA: ${{ github.event.pull_request.head.sha }}
       CWD: ${{ github.workspace }}
       DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
       DEVSUPPORT_BUCKET_NAME: devsupport.springtail.internal
