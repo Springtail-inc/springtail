@@ -909,7 +909,7 @@ namespace springtail
         }
 
         // iterate through the results and get the namespaces
-        std::vector<std::pair<std::string, uint64_t>> namespaces;
+        std::vector<std::pair<uint64_t, std::string>> namespaces;
         for (int i = 0; i < _connection.ntuples(); i++) {
             uint64_t schema_oid = _connection.get_int64(i, 0);
             std::string namespace_name = _connection.get_string(i, 1);
