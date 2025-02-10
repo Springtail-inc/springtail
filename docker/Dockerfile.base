@@ -61,8 +61,10 @@ RUN echo "export VCPKG_FORCE_SYSTEM_BINARIES=1" >> /home/dev/.bashrc
 RUN chown dev /home/dev/.bashrc
 RUN mkdir -p /home/dev/debug
 RUN mkdir -p /home/dev/external
+RUN mkdir -p /home/dev/install
 RUN chown dev /home/dev/debug
 RUN chown dev /home/dev/external
+RUN chown dev /home/dev/install
 
 RUN echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
 
