@@ -47,22 +47,22 @@ VALUES
 ## verify
 ### schema_check public time_and_nulls
 -- col3 = Specific Date
-SELECT * FROM time_and_nulls WHERE col3 = '2025-02-05';
+SELECT col3 FROM time_and_nulls WHERE col3 = '2025-02-05';
 
 -- col3 > Specific Date
-SELECT * FROM time_and_nulls WHERE col3 > '2025-02-05';
+SELECT col3 FROM time_and_nulls WHERE col3 > '2025-02-05';
 
 -- col3 < Specific Date
-SELECT * FROM time_and_nulls WHERE col3 < '2025-02-05';
+SELECT col3 FROM time_and_nulls WHERE col3 < '2025-02-05';
 
 -- col3 < Between Dates
-SELECT * FROM time_and_nulls WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15';
+SELECT col3 FROM time_and_nulls WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15';
 
 -- col3 IS NULL
-SELECT * FROM time_and_nulls WHERE col3 IS NULL;
+SELECT col3 FROM time_and_nulls WHERE col3 IS NULL;
 
 -- col3 IS NOT NULL
-SELECT * FROM time_and_nulls WHERE col3 IS NOT NULL;
+SELECT col3 FROM time_and_nulls WHERE col3 IS NOT NULL;
 
 
 ## cleanup

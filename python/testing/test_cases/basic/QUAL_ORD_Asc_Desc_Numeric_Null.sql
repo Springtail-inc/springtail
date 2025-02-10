@@ -47,22 +47,22 @@ VALUES
 ## verify
 ### schema_check public asc_desc_numeric_null
 -- col3 = Specific Date
-SELECT * FROM asc_desc_numeric_null WHERE col3 = '2025-02-05';
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 = '2025-02-05';
 
 -- col3 > Specific Date
-SELECT * FROM asc_desc_numeric_null WHERE col3 > '2025-02-05' ORDER BY col4 DESC NULLS FIRST;;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 > '2025-02-05' ORDER BY col4 DESC NULLS FIRST;;
 
 -- col3 < Specific Date
-SELECT * FROM asc_desc_numeric_null WHERE col3 < '2025-02-05' ORDER BY col3 ASC NULLS LAST;;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 < '2025-02-05' ORDER BY col3 ASC NULLS LAST;;
 
 -- col3 < Between Dates
-SELECT * FROM asc_desc_numeric_null WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15';
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 BETWEEN '2025-02-05' AND '2025-02-15';
 
 -- col3 IS NULL
-SELECT * FROM asc_desc_numeric_null WHERE col3 IS NULL ORDER BY col4 ASC NULLS LAST;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 IS NULL ORDER BY col4 ASC NULLS LAST;
 
 -- col3 IS NOT NULL
-SELECT * FROM asc_desc_numeric_null WHERE col3 IS NOT NULL ORDER BY col2 DESC;
+SELECT col3, col4 FROM asc_desc_numeric_null WHERE col3 IS NOT NULL ORDER BY col2 DESC;
 
 ## cleanup
 DROP TABLE IF EXISTS asc_desc_numeric_null;

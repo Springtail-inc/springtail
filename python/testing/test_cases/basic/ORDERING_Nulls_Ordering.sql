@@ -44,8 +44,8 @@ VALUES
 
 ## verify
 ### schema_check public nulls_ordering
-SELECT * FROM nulls_ordering ORDER BY col3 ASC NULLS FIRST, col4 ASC NULLS FIRST;
-SELECT * FROM nulls_ordering ORDER BY col3 ASC NULLS LAST, col4 ASC NULLS LAST;
+SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS FIRST, col4 ASC NULLS FIRST;
+SELECT col3, col4 FROM nulls_ordering ORDER BY col3 ASC NULLS LAST, col4 ASC NULLS LAST;
 
 ## cleanup
 DROP TABLE IF EXISTS nulls_ordering;
