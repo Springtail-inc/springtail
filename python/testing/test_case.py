@@ -10,6 +10,8 @@ import sysutils
 import time
 import common
 
+import common
+
 class TestCase:
     """Class to manage a single test-case.  Handles all phases of the
     test case and stores the result of the test.
@@ -348,10 +350,11 @@ class TestCase:
                 results = {}
 
                 # retrieve the column data
-                with_sql = f"""SELECT table_id, exists
-                                 FROM "__pg_springtail_catalog"."table_names"
-                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
-                                ORDER BY xid DESC, lsn DESC
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                                FROM "__pg_springtail_catalog"."table_names"
+                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
                                 LIMIT 1"""
                 ranking_sql = """SELECT *,
                                  ROW_NUMBER() OVER (PARTITION BY name ORDER BY xid DESC, lsn DESC) AS rn
@@ -363,17 +366,18 @@ class TestCase:
                 results['columns'] = self._execute_sql(cursor, sql, True)
 
                 # retrieve the primary key data
-                with_sql = f"""SELECT table_id, exists
-                                 FROM "__pg_springtail_catalog"."table_names"
-                                WHERE namespace = '{command["schema"]}' AND name = '{command["table"]}'
+                with_sql = f"""SELECT "table_names"."table_id", "table_names"."exists"
+                                FROM "__pg_springtail_catalog"."table_names"
+                                JOIN "__pg_springtail_catalog"."namespace_names" ON "namespace_names"."namespace_id" = "table_names"."namespace_id"
+                                WHERE "namespace_names"."name" = '{command["schema"]}' AND "table_names"."name" = '{command["table"]}'
+                                ORDER BY "table_names"."xid" DESC, "table_names"."lsn" DESC
+                                LIMIT 1"""
+                xid_sql = """SELECT "indexes"."xid", "indexes"."lsn"
+                                FROM "__pg_springtail_catalog"."indexes"
+                                WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
+                                AND index_id = 0
                                 ORDER BY xid DESC, lsn DESC
                                 LIMIT 1"""
-                xid_sql = """SELECT xid, lsn
-                               FROM "__pg_springtail_catalog"."indexes"
-                              WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)
-                                AND index_id = 0
-                              ORDER BY xid DESC, lsn DESC
-                              LIMIT 1"""
                 ranking_sql = f"""SELECT *
                                   FROM "__pg_springtail_catalog"."indexes"
                                   WHERE table_id = (SELECT table_id FROM latest_table WHERE exists IS TRUE)

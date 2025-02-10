@@ -45,7 +45,7 @@ namespace springtail
 {
     /** Query oid from table and schema */
     static constexpr char TABLE_OID_QUERY[] =
-        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
@@ -96,7 +96,7 @@ namespace springtail
 
     /** Get table name, schema name, oid for all tables */
     static constexpr char TABLES_QUERY[] =
-        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
@@ -107,7 +107,7 @@ namespace springtail
 
     /** Get table name, schema name, oid for all tables in a schema */
     static constexpr char TABLES_SCHEMA_QUERY[] =
-        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
@@ -117,7 +117,7 @@ namespace springtail
 
     /** Get table name, schema name, oid for a single table given oid */
     static constexpr char TABLE_QUERY[] =
-        "SELECT relname::text, nspname::text, pg_class.oid::integer "
+        "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
         "FROM pg_catalog.pg_class "
         "JOIN pg_catalog.pg_namespace "
         "ON relnamespace=pg_namespace.oid "
@@ -131,6 +131,7 @@ namespace springtail
         "    v.schema_name, "
         "    v.table_name, "
         "    c.oid as table_oid "
+        "    n.oid as schema_oid "
         "FROM (VALUES "
         "    {} " // need to substitute with "('{}', '{}'), ('{}', '{}'), ...
         ") AS v(schema_name, table_name) "
@@ -251,7 +252,8 @@ namespace springtail
 
     void PgCopyTable::_set_schema(const std::string &table_name,
                                   const std::string &schema_name,
-                                  uint64_t table_oid)
+                                  uint64_t table_oid,
+                                  uint64_t schema_oid)
     {
         std::string table_name_ptr = _connection.escape_identifier(table_name);
         std::string schema_name_ptr = _connection.escape_identifier(schema_name);
@@ -276,6 +278,7 @@ namespace springtail
             _schema.table_name = table_name;
             _schema.schema_name = schema_name;
             _schema.table_oid = table_oid;
+            _schema.schema_oid = schema_oid;
 
             // get columns
             int rows = _connection.ntuples();
@@ -406,10 +409,11 @@ namespace springtail
                              springtail::XidLsn &xid,
                              const std::string &table_name,
                              const std::string &schema_name,
-                             uint64_t table_oid)
+                             uint64_t table_oid,
+                             uint64_t schema_oid)
     {
         // set the schema
-        _set_schema(table_name, schema_name, table_oid);
+        _set_schema(table_name, schema_name, table_oid, schema_oid);
 
         // get secondary indexes XXX not fully supported yet
         _get_secondary_indexes();
@@ -419,12 +423,23 @@ namespace springtail
 
         // generate a TableRequest message
         {
+            // request to create the namespace if it doesn't exist
+            sys_tbl_mgr::NamespaceRequest ns_req;
+            ns_req.db_id = db_id;
+            ns_req.namespace_id = _schema.schema_oid;
+            ns_req.name = _schema.schema_name;
+            ns_req.xid = xid.xid;
+            ns_req.lsn = 1;
+            auto &&ns_json = common::thrift_to_json<sys_tbl_mgr::NamespaceRequest>(ns_req);
+            ops.push_back(ns_json);
+
+            // request to create the table
             sys_tbl_mgr::TableRequest request;
             request.db_id = db_id;
             request.xid = xid.xid;
             request.lsn = 1;
             request.table.id = table_oid;
-            request.table.schema = _schema.schema_name;
+            request.table.namespace_name = _schema.schema_name;
             request.table.name = _schema.table_name;
             for (const auto &col : _schema.columns) {
                 sys_tbl_mgr::TableColumn column;
@@ -456,6 +471,7 @@ namespace springtail
                 request.lsn = constant::MAX_LSN-1;
                 request.index.id = index.id;
                 request.index.table_id = _schema.table_oid;
+                request.index.namespace_name = _schema.schema_name;
                 request.index.is_unique = index.is_unique;
                 for (const auto &column : index.columns){
                     sys_tbl_mgr::IndexColumn index_column;
@@ -687,7 +703,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const std::string &query,
-                                 std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids)
+                                 std::vector<TableMetadata> &table_oids)
     {
         // do the tables query
         _connection.exec(query);
@@ -702,8 +718,9 @@ namespace springtail
             // get the table name, schema name, and oid
             std::string table_name = _connection.get_string(i, 0);
             std::string schema_name = _connection.get_string(i, 1);
-            int32_t table_oid = _connection.get_int32(i, 2);
-            table_oids.push_back({table_name, schema_name, table_oid});
+            uint32_t table_oid = _connection.get_int32(i, 2);
+            uint32_t schema_oid = _connection.get_int32(i, 3);
+            table_oids.push_back({schema_name, table_name, schema_oid, table_oid});
         }
 
         return;
@@ -711,7 +728,7 @@ namespace springtail
 
     void
     PgCopyTable::_get_table_oids(const nlohmann::json &include_json,
-                                 std::vector<std::tuple<std::string, std::string, int32_t>> &table_oids)
+                                 std::vector<TableMetadata> &table_oids)
     {
         // get schemas array from json into vector of strings
 
@@ -832,7 +849,8 @@ namespace springtail
                                        xid,
                                        request->table_name,
                                        request->schema_name,
-                                       request->table_oid);
+                                       request->table_oid,
+                                       request->schema_oid);
 
                 // add the table oid to the result
                 result->add_table(request->table_oid);
@@ -885,7 +903,7 @@ namespace springtail
         copy_table.connect(db_id);
 
         // fetch the table oids
-        std::vector<std::tuple<std::string, std::string, int32_t>> table_oids;
+        std::vector<TableMetadata> table_oids;
 
         // get the table oids, depends on input
         if (schema_name.has_value()) {
@@ -924,13 +942,13 @@ namespace springtail
         }
 
         // iterate through the tables and copy them
-        for (const auto &table_tuple : table_oids) {
-            SPDLOG_DEBUG("Dumping table {}", std::get<0>(table_tuple));
+        for (const auto &table_md : table_oids) {
+            SPDLOG_DEBUG("Dumping table {}", table_md.table_name);
 
             // add the table to the copy queue
-            copy_queue->push(std::make_shared<CopyRequest>(std::get<0>(table_tuple),  // table name
-                                                           std::get<1>(table_tuple),  // schema name
-                                                           std::get<2>(table_tuple))); // table oid
+            copy_queue->push(std::make_shared<CopyRequest>(table_md.table_name,
+                                                           table_md.namespace_name,
+                                                           table_md.table_oid));
         }
 
         // shutdown the copy queue; blocks until queue is empty

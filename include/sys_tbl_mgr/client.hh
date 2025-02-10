@@ -45,6 +45,21 @@ namespace springtail::sys_tbl_mgr {
         std::string drop_table(uint64_t db_id, const XidLsn &xid, const PgMsgDropTable &msg);
 
         /**
+         * Call create_namespace() on the SysTblMgr.
+         */
+        std::string create_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+
+        /**
+         * Call alter_namespace() on the SysTblMgr.
+         */
+        std::string alter_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+
+        /**
+         * Call drop_namespace() on the SysTblMgr.
+         */
+        std::string drop_namespace(uint64_t db_id, const XidLsn &xid, const PgMsgNamespace &msg);
+
+        /**
          * Call create_index() on the SysTblMgr.
          */
         std::string create_index(uint64_t db_id, const XidLsn &xid, const PgMsgIndex &msg, sys_tbl::IndexNames::State state);
@@ -101,9 +116,17 @@ namespace springtail::sys_tbl_mgr {
         bool exists(uint64_t db_id, uint64_t table_id, const XidLsn &xid);
 
         /**
+         * Call create_namespace() on the SysTblMgr.
+         */
+        std::string create_namespace(const NamespaceRequest &request);
+
+        /**
          * Call swap_sync_table() on the SysTblMgr.
          */
-        std::string swap_sync_table(const TableRequest &create, const std::vector<IndexRequest> indexes, const UpdateRootsRequest &roots);
+        std::string swap_sync_table(const NamespaceRequest &namespace_req,
+                                    const TableRequest &create_req,
+                                    const std::vector<IndexRequest> &index_reqs,
+                                    const UpdateRootsRequest &roots_req);
 
         /**
          * Invalidates the schema entry for a given table from a given XID/LSN
