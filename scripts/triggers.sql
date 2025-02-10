@@ -146,7 +146,7 @@ BEGIN
                 JOIN pg_class ci ON ci.oid = i.indrelid
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE i.indisprimary IS FALSE
-                AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid) 
+                AND c.oid IN (SELECT indexrelid FROM pg_index WHERE indrelid = obj.objid)
             LOOP
                 -- get index columns
                 SELECT json_agg(json_col)
@@ -255,7 +255,7 @@ DECLARE
 BEGIN
     FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() as cmd
     LOOP
-        RAISE NOTICE 'springtail: obj.command_tag % ', obj.command_tag;
+        --- RAISE NOTICE 'springtail: obj.command_tag % ', obj.command_tag;
 
 	SELECT nsp.oid AS schema_oid,
 	       nsp.nspname AS schema_name
@@ -270,7 +270,7 @@ BEGIN
             'name', schema_obj.schema_name);
 
         -- command_tag is CREATE SCHEMA or ALTER SCHEMA
-        RAISE NOTICE 'springtail: %', msg::text;
+        --- RAISE NOTICE 'springtail: %', msg::text;
 
         PERFORM pg_logical_emit_message(true, 'springtail:' || obj.command_tag, msg::text);
     END LOOP;

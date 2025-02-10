@@ -19,6 +19,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 
 ARG conf_file=/etc/postgresql/16/main/postgresql.conf
 ARG hba_file=/etc/postgresql/16/main/pg_hba.conf
+ARG redis_conf=/etc/redis/redis.conf
 
 # Allow connections from anywhere.
 RUN sed -i -e"s/^#listen_addresses =.*$/listen_addresses = '*'/" $conf_file
@@ -39,6 +40,9 @@ RUN sed -i -e"s/^#max_prepared_transactions = .*$/max_prepared_transactions = 64
 RUN sed -i -e"s/^#unix_socket_permissions = .*$/unix_socket_permissions = 0777/" $conf_file
 RUN echo "springtail_fdw.config_file_path = '/tmp/springtail/system.json'" >> $conf_file
 
+# Modify the Redis configuration to allow keyspace-events
+RUN sed -i 's/^notify-keyspace-events ""/notify-keyspace-events "AKE"/' $redis_conf
+
 # Modify /etc/sysctl.d/10-ptrace.conf to set kernel.yama.ptrace_scope to 0
 RUN sed -i -e "s/kernel.yama.ptrace_scope = 1/kernel.yama.ptrace_scope = 0/" /etc/sysctl.d/10-ptrace.conf
 
@@ -57,8 +61,10 @@ RUN echo "export VCPKG_FORCE_SYSTEM_BINARIES=1" >> /home/dev/.bashrc
 RUN chown dev /home/dev/.bashrc
 RUN mkdir -p /home/dev/debug
 RUN mkdir -p /home/dev/external
+RUN mkdir -p /home/dev/install
 RUN chown dev /home/dev/debug
 RUN chown dev /home/dev/external
+RUN chown dev /home/dev/install
 
 RUN echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
 
