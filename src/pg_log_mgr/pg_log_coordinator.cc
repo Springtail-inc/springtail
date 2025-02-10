@@ -13,8 +13,8 @@ namespace springtail::pg_log_mgr {
     void
     PgLogCoordinator::_internal_shutdown()
     {
-        // shutdown redis pubsub thread
-        _config_sub_thread.shutdown();
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
         // shutdown the write cache thread
         WriteCacheServer::get_instance()->stop();
@@ -29,6 +29,33 @@ namespace springtail::pg_log_mgr {
             lm.second->join();
         }
         lock.unlock();
+    }
+
+    PgLogCoordinator::PgLogCoordinator() : _shutdown_counter(1)
+    {
+        _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Replicated databases: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+                // get a vector of old database ids from _log_mgrs
+                std::unique_lock<std::mutex> lock(_mutex);
+                auto keys = std::views::keys(_log_mgrs);
+                lock.unlock();
+                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+                // get a vector of new database ids from new_value
+                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+                // diff the vectors
+                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+                // everything in old_db_ids needs to be removed
+                for (auto db_id: old_db_ids) {
+                    _remove_database(db_id);
+                }
+                // everything in new_db_ids needs to be added
+                for (auto db_id: new_db_ids) {
+                    _add_database(db_id);
+                }
+            }
+        );
     }
 
     void
@@ -51,16 +78,14 @@ namespace springtail::pg_log_mgr {
         // get instance id
         _db_instance_id = Properties::get_db_instance_id();
 
-        std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(db_change_channel,
-            [this]() {
-                this->_init_db_change_subscriber();
-            },
-            [this](const std::string &msg) {
-                _handle_db_changes(msg);
-            });
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
 
-        _config_sub_thread.start();
+        std::map<uint64_t, std::string> db_ids = Properties::get_databases();
+        for (auto &db: db_ids) {
+            uint64_t db_id = db.first;
+            _add_database(db_id);
+        }
 
         // create a thread for the write cache
         _write_cache_thread = std::thread([](){
@@ -115,36 +140,5 @@ namespace springtail::pg_log_mgr {
 
         log_mgr->shutdown();
         log_mgr->join();
-    }
-
-    void
-    PgLogCoordinator::_init_db_change_subscriber()
-    {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Initializing DB Change subscriber");
-        std::map<uint64_t, std::string> db_ids = Properties::get_databases();
-        for (auto &db: db_ids) {
-            uint64_t db_id = db.first;
-            _add_database(db_id);
-        }
-    }
-
-    void
-    PgLogCoordinator::_handle_db_changes(const std::string &msg)
-    {
-        SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Handling DB Change Action message: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBAction action;
-        redis::db_state_change::parse_db_action(msg, db_id, action);
-        switch (action) {
-            case redis::db_state_change::DB_ACTION_ADD:
-                _add_database(db_id);
-                break;
-            case redis::db_state_change::DB_ACTION_REMOVE:
-                _remove_database(db_id);
-                break;
-            default:
-                SPDLOG_DEBUG_MODULE(LOG_PG_LOG_MGR, "Unsupported action: {}", redis::db_state_change::db_action_to_name[action]);
-        }
-
     }
 }

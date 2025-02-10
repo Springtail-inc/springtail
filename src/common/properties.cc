@@ -345,7 +345,7 @@ namespace springtail {
     std::map<uint64_t, std::string>
     Properties::_get_databases()
     {
-        nlohmann::json db_ids = _cache->get_value("instance_config/database_ids");
+        nlohmann::json db_ids = _cache->get_value(DATABASE_IDS_PATH);
         if (db_ids.empty()) {
             throw RedisNotFoundError("Error missing database_ids in redis");
         }
@@ -370,6 +370,25 @@ namespace springtail {
         }
 
         return dbnames;
+    }
+
+    std::vector<uint64_t>
+    Properties::get_database_ids(const nlohmann::json &json_db_ids)
+    {
+        std::vector<uint64_t> db_ids;
+        for (auto &json_db_id: json_db_ids) {
+            uint64_t db_id;
+            if (json_db_id.is_string()) {
+                std::string db_id_str = json_db_id.get<std::string>();
+                db_id = std::stoull(db_id_str);
+            } else if (json_db_id.is_number()) {
+                db_id = json_db_id.get<uint64_t>();
+            } else {
+                throw Error("Error invalid db_id type");
+            }
+            db_ids.push_back(db_id);
+        }
+        return db_ids;
     }
 
     nlohmann::json
@@ -398,9 +417,6 @@ namespace springtail {
     {
         nlohmann::json json_state(state);
         _cache->set_value("instance_state/" + std::to_string(db_id), json_state);
-
-        // publish the state
-        _cache->publish(redis::PUBSUB_DB_STATE_CHANGES, fmt::format("{}:{}", db_id, state));
     }
 
     void

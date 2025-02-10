@@ -45,6 +45,39 @@ namespace springtail::pg_fdw {
     static constexpr char VERIFY_DB_EXISTS[] =
         "SELECT 1 FROM  pg_database WHERE datname = '{}'";
 
+    PgDDLMgr::PgDDLMgr() : _fdw_conn_cache(MAX_CONNECTION_CACHE_SIZE)
+    {
+        _cache_watcher = std::make_shared<RedisCache::RedisChangeWatcher>(
+            [this](const std::string &path, const nlohmann::json &new_value) -> void {
+                SPDLOG_DEBUG("Replicated databases: {}", new_value.dump(4));
+                CHECK_EQ(path, Properties::DATABASE_IDS_PATH);
+                // get a vector of old database ids from _log_mgrs
+                std::shared_lock<std::shared_mutex> lock(_db_mutex);
+                auto keys = std::views::keys(_db_xid_map);
+                lock.unlock();
+                std::vector<uint64_t> old_db_ids{ keys.begin(), keys.end() };
+                // get a vector of new database ids from new_value
+                std::vector<uint64_t> new_db_ids = Properties::get_instance()->get_database_ids(new_value);
+                // diff the vectors
+                RedisCache::array_diff(old_db_ids, new_db_ids, true, true);
+                // everything in old_db_ids needs to be removed
+                for (auto db_id: old_db_ids) {
+                    _remove_replicated_database(db_id);
+                }
+                // everything in new_db_ids needs to be added
+                for (auto db_id: new_db_ids) {
+                    _add_replicated_database(db_id);
+                }
+            }
+        );
+    }
+
+    void
+    PgDDLMgr::_internal_shutdown() {
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->remove_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+    }
+
     void
     PgDDLMgr::init(const std::string &fdw_id,
                       const std::string &username,
@@ -92,18 +125,11 @@ namespace springtail::pg_fdw {
 
         // add subscribers to pubsub threads
         _db_instance_id = Properties::get_db_instance_id();
-        std::string db_change_channel = fmt::format(redis::PUBSUB_DB_CONFIG_CHANGES, _db_instance_id);
-        _config_sub_thread.add_subscriber(db_change_channel,
-            [this, &username, &password]() {
-                // initialize the fdw, setup fdw server, import foreign schemas, etc
-                _init_fdw(username, password);
-            },
-            [this](const std::string &msg) {
-                _handle_replicated_dbs_change(msg);
-            });
 
-        // start redis subscriber threads
-        _config_sub_thread.start();
+        std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
+        redis_cache->add_callback(Properties::DATABASE_IDS_PATH, _cache_watcher);
+
+        _init_fdw(username, password);
 
         // start the main thread
         start_thread();
@@ -195,7 +221,7 @@ namespace springtail::pg_fdw {
         return fmt::format("CREATE SCHEMA {};"
                 "  GRANT USAGE ON SCHEMA {} TO {};"
                 "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
-                "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};", 
+                "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};",
                 schema,
                 schema, _fdw_username,
                 schema, _fdw_username,
@@ -209,8 +235,8 @@ namespace springtail::pg_fdw {
         return fmt::format("ALTER SCHEMA {} RENAME TO {};"
             "  GRANT USAGE ON SCHEMA {} TO {};"
             "  GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {};"
-            "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};", 
-                old_schema, new_schema, 
+            "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {};",
+                old_schema, new_schema,
                 new_schema, _fdw_username,
                 new_schema, _fdw_username,
                 new_schema, _fdw_username);
@@ -771,25 +797,6 @@ namespace springtail::pg_fdw {
         // remove it from internal storage
         std::unique_lock unique_lock(_db_mutex);
         _db_xid_map.erase(db_id);
-    }
-
-    void
-    PgDDLMgr::_handle_replicated_dbs_change(const std::string &msg)
-    {
-        SPDLOG_DEBUG_MODULE(LOG_FDW, "Handling DB Change Action message: {}", msg);
-        uint64_t db_id;
-        redis::db_state_change::DBAction action;
-        redis::db_state_change::parse_db_action(msg, db_id, action);
-        switch (action) {
-            case redis::db_state_change::DB_ACTION_ADD:
-                _add_replicated_database(db_id);
-                break;
-            case redis::db_state_change::DB_ACTION_REMOVE:
-                _remove_replicated_database(db_id);
-                break;
-            default:
-                SPDLOG_DEBUG_MODULE(LOG_FDW, "Unsupported action: {}", redis::db_state_change::db_action_to_name[action]);
-        }
     }
 
 } // namespace springtail::pg_fdw
