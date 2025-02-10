@@ -683,7 +683,7 @@ namespace springtail::pg_proxy
 
         // add state change notification callback
         std::shared_ptr<RedisCache> redis_cache = Properties::get_instance()->get_cache();
-        redis_cache->remove_callback(
+        redis_cache->add_callback(
             std::string(Properties::DATABASE_STATE_PATH) + "/" + std::to_string(db_id),
             _cache_watcher_db_states);
 
