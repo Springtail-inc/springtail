@@ -30,10 +30,14 @@ jobs:
       VCPKG_FORCE_SYSTEM_BINARIES: 1
       CWD: ${{ github.workspace }}
       DATA_SHARE_BUCKET_NAME: data-share.springtail.internal
+      DEVSUPPORT_BUCKET_NAME: devsupport.springtail.internal
       PACKAGES_S3_PREFIX: nightly-builds
       TEST_LOGS_S3_PREFIX: nightly-testlogs
       NUM_PROCS: ${{ vars.NUM_PROCS }}
       INTEGRATION_TEST_ITERATIONS: ${{ vars.INTEGRATION_TEST_ITERATIONS || 5 }}
+      # The path to the Springtail logs, keep consistent with the `log_path` inside
+      # system.json.test
+      SPRINGTAIL_LOG_PATH: /opt/springtail/logs
 
     steps:
       - name: Checkout repository
@@ -111,7 +115,7 @@ jobs:
           
           log_file="unit-test-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-$(date +%s).log" 
           mv tmplog $log_file
-          unit_test_log_s3key="s3://devsupport.springtail.internal/${TEST_LOGS_S3_PREFIX}/$(date +"%Y/%m/%d/%H")/$log_file"
+          unit_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/$(date +"%Y/%m/%d/%H")/$log_file"
           
           aws s3 cp "$log_file" "$unit_test_log_s3key"
           echo "*** Unit Test Log S3 Key: $unit_test_log_s3key"
@@ -183,7 +187,7 @@ jobs:
             mv tmplog $log_file
           
             # Integration test log
-            integration_test_log_s3key="s3://devsupport.springtail.internal/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$log_file"
+            integration_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$log_file"
             aws s3 cp "$log_file" "$integration_test_log_s3key"
             echo "*** Integration Test Log S3 Key: $integration_test_log_s3key"
             rm -f $log_file
@@ -193,12 +197,12 @@ jobs:
             output=$(python3 springtail.py --dump -f ../../system.json.test -b ../../debug)
             fname=$(echo $output  | cut -f2 -d':' | xargs | head -1)
             mv $fname $springtail_log_file
-            springtail_log_s3key="s3://devsupport.springtail.internal/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$springtail_log_file"
+            springtail_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/$springtail_log_file"
             aws s3 cp "$springtail_log_file" "$springtail_log_s3key"
             echo "*** Springtail Log S3 Key: $springtail_log_s3key"
             rm -f $springtail_log_file
           done
-          # Note: As we have so many tests logs. We are *not* going to upload them to GitHub artifacts. Checkout the S3 bucket for the logs.
+          # Note: As we have many tests logs. We are *not* going to upload them to GitHub artifacts. Checkout the S3 bucket for the logs.
 
       - name: Run nightly build (if above tests pass)
         if: success()
@@ -221,15 +225,28 @@ jobs:
           _LOG_DATE=$(date +"%Y/%m/%d/%H")
           
           log_name="proxy-regress-log-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.log" 
-          proxy_test_log_s3key="s3://devsupport.springtail.internal/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${log_name}"
+          proxy_test_log_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${log_name}"
           aws s3 cp proxy_regress.log "$proxy_test_log_s3key"
           echo "*** Proxy Test Log S3 Key: $proxy_test_log_s3key"
+          
+          springtail_proxy_logs="proxy-springtail-logs-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.tar.gz"
+          # tar all logs starting with `proxy*` under the Springtail log path 
+          tar -czf $springtail_proxy_logs ${SPRINGTAIL_LOG_PATH}/proxy*
+          springtail_proxy_logs_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${springtail_proxy_logs}"
+          aws s3 cp $springtail_proxy_logs $springtail_proxy_logs_s3key
+          echo "*** Springtail Proxy Logs S3 Key: $springtail_proxy_logs_s3key"
           
           # Find the file matching this name exactly: `regression.diff.proxy.out`
           # under the $TMPDIR directory (recursive) and upload it to S3
           regression_diff_file=$(find /tmp -name "regression.diff.proxy.out")
           
-          regression_diff_name="regression-diff-proxy-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.out"
-          regression_diff_s3key="s3://devsupport.springtail.internal/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${regression_diff_name}"  
+          regression_diff_name="proxy-regression-diff-${_LOG_PR_ID}-${_LOG_SHA}-${_LOG_FLAG}-${_LOG_TIMESTAMP}.out"
+          regression_diff_s3key="s3://${DEVSUPPORT_BUCKET_NAME}/${TEST_LOGS_S3_PREFIX}/${_LOG_DATE}/${regression_diff_name}"  
           aws s3 cp "$regression_diff_file" "$regression_diff_s3key"
           echo "*** Proxy Regression Diff S3 Key: $regression_diff_s3key"
+
+      - name: Package and Upload Build artifacts to S3
+        if: success()
+        run: |
+          ./package.sh
+          aws s3 cp "releases/$(ls -t releases/*.tgz | head -n1)" s3://${DATA_SHARE_BUCKET_NAME}/${PACKAGES_S3_PREFIX}/
