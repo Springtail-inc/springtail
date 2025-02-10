@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
-      image: ${{ inputs.builder_image_version_tag }}
+      image: ${{ vars.DEV_SUPPORT_ECR_REPO_URI }}:${{ vars.BUILDER_IMAGE_VERSION }}
       credentials:
         username: AWS
-        password: ${{ secrets.aws_ecr_docker_password }}
+        password: ${{ secrets.DEV_SUPPORT_ECR_PW }}
 
     # You can use this environment variable to access the current working directory
     env:
@@ -53,7 +53,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.aws_role_arn }}
+          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
           role-session-name: tempSession
           aws-region: us-east-1
 
