@@ -258,6 +258,13 @@ namespace springtail
                      PgCopyResultPtr result);
 
         /**
+         * @brief Get namespaces, returns a pair of namespace name and oid
+         * @param db_id database id
+         * @param xid xid
+         */
+        std::vector<std::pair<uint64_t, std::string>> _get_namespaces(uint64_t db_id, uint64_t xid);
+
+        /**
          * @brief Internall helper called from copy_db, copy_schema, copy_table
          * @param db_id database id
          * @param target_xid target xid
@@ -322,6 +329,13 @@ namespace springtail
          */
         static std::vector<PgCopyResultPtr>
             copy_db(uint64_t db_id, uint64_t xid);
+
+        /**
+         * @brief Create namespaces
+         * @param db_id database id
+         * @param xid xid
+         */
+        static void create_namespaces(uint64_t db_id, uint64_t xid);
 
         /**
          * @brief Copy all tables in single schema from remote system

@@ -43,6 +43,13 @@ extern "C" {
 
 namespace springtail
 {
+    /** Query all namespaces except pg_catalog and information_schema */
+    static constexpr char NAMESPACE_QUERY[] =
+        "SELECT oid::integer, nspname::text "
+        "FROM pg_catalog.pg_namespace "
+        "WHERE nspname NOT LIKE 'pg_%' "
+        "AND nspname != 'information_schema';";
+
     /** Query oid from table and schema */
     static constexpr char TABLE_OID_QUERY[] =
         "SELECT relname::text, nspname::text, pg_class.oid::integer, pg_namespace.oid "
@@ -886,6 +893,59 @@ namespace springtail
         }
 
         _connection.clear();
+    }
+
+    std::vector<std::pair<uint64_t, std::string>>
+    PgCopyTable::_get_namespaces(uint64_t db_id, uint64_t xid)
+    {
+        // get the namespaces
+        _connection.exec(NAMESPACE_QUERY);
+
+        if (_connection.ntuples() == 0) {
+            // Technically this should never happen, but keep this here just in case
+            _connection.clear();
+            SPDLOG_ERROR("Error while getting namespaces");
+            return {};
+        }
+
+        // iterate through the results and get the namespaces
+        std::vector<std::pair<std::string, uint64_t>> namespaces;
+        for (int i = 0; i < _connection.ntuples(); i++) {
+            uint64_t schema_oid = _connection.get_int64(i, 0);
+            std::string namespace_name = _connection.get_string(i, 1);
+            namespaces.push_back({schema_oid, namespace_name});
+        }
+
+        _connection.clear();
+        return namespaces;
+    }
+
+    void
+    PgCopyTable::create_namespaces(uint64_t db_id, uint64_t xid)
+    {
+        PgCopyTable copy_table;
+        copy_table.connect(db_id);
+
+        std::vector<std::pair<uint64_t, std::string>> namespaces = copy_table._get_namespaces(db_id, xid);
+
+        // create the namespaces
+        for (const auto &namespace_info : namespaces) {
+            SPDLOG_DEBUG("Creating namespace: {}", namespace_info.second);
+            auto client = sys_tbl_mgr::Client::get_instance();
+            XidLsn ns_xid(xid, 1);
+
+            sys_tbl_mgr::NamespaceRequest ns_req;
+            ns_req.db_id = db_id;
+            ns_req.namespace_id = namespace_info.first;
+            ns_req.name = namespace_info.second;
+            ns_req.xid = xid;
+            ns_req.lsn = 1;
+
+            // create the namespace
+            client->create_namespace(ns_req);
+        }
+
+        copy_table.disconnect();
     }
 
     std::vector<PgCopyResultPtr>
