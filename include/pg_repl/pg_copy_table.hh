@@ -219,7 +219,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const std::string &query,
-                             std::vector<TableMetadata> &table_oids);
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Get table oids based on json specifying schema and table includes
@@ -227,7 +227,7 @@ namespace springtail
          * @param table_oids output: table name, schema name, oid
          */
         void _get_table_oids(const nlohmann::json &include_json,
-                             std::vector<TableMetadata> &table_oids);
+                             std::set<TableMetadata> &table_oids);
 
         /**
          * @brief Copy table from remote system
