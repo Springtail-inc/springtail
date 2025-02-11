@@ -136,6 +136,11 @@ namespace springtail
                   table_oid(t_pgoid)
             { }
             TableMetadata() = default;
+
+            // Operator to sort the table metadata by table oid
+            bool operator<(const TableMetadata &table_metadata) const{
+                return table_oid < table_metadata.table_oid;
+            }
         };
 
         LibPqConnection _connection;

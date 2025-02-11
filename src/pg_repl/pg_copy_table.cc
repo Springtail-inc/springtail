@@ -138,7 +138,7 @@ namespace springtail
         "SELECT "
         "    v.schema_name, "
         "    v.table_name, "
-        "    c.oid as table_oid "
+        "    c.oid as table_oid, "
         "    n.oid as schema_oid "
         "FROM (VALUES "
         "    {} " // need to substitute with "('{}', '{}'), ('{}', '{}'), ...
@@ -740,6 +740,7 @@ namespace springtail
     {
         // get schemas array from json into vector of strings
 
+        std::vector<TableMetadata> schema_filtered_table_oids;
         // check for schemas array
         if (include_json.contains("schemas") && include_json["schemas"].is_array()) {
             std::vector<std::string> schemas = include_json["schemas"];
@@ -758,10 +759,11 @@ namespace springtail
 
                 _get_table_oids(fmt::format(TABLES_SCHEMA_QUERY,
                                 common::join_string(",", schema_names.begin(), schema_names.end())),
-                                table_oids);
+                                schema_filtered_table_oids);
             }
         }
 
+        std::vector<TableMetadata> filtered_tables_table_oids;
         // go through the tables array (containing schema, table pairs)
         if (include_json.contains("tables") && include_json["tables"].is_array()) {
             std::vector<std::string> pairs;
@@ -775,8 +777,26 @@ namespace springtail
 
             if (!pairs.empty()) {
                 // issue query by joining all the schema, table pairs
-                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), table_oids);
+                _get_table_oids(fmt::format(TABLE_SCHEMA_PAIR_QUERY, common::join_string(",", pairs.begin(), pairs.end())), filtered_tables_table_oids);
             }
+        }
+
+        // If both vectors are non-empty, find the intersection
+        if (!schema_filtered_table_oids.empty() && !filtered_tables_table_oids.empty()) {
+            // Sort the vectors because the set_intersection function requires sorted vectors
+            std::sort(schema_filtered_table_oids.begin(), schema_filtered_table_oids.end());
+            std::sort(filtered_tables_table_oids.begin(), filtered_tables_table_oids.end());
+
+            std::vector<TableMetadata> intersection;
+
+            std::set_intersection(schema_filtered_table_oids.begin(), schema_filtered_table_oids.end(),
+                               filtered_tables_table_oids.begin(), filtered_tables_table_oids.end(),
+                               std::back_inserter(intersection));
+            table_oids = intersection;
+        } else if (!schema_filtered_table_oids.empty()) { // only schema filtered
+            table_oids = schema_filtered_table_oids;
+        } else if (!filtered_tables_table_oids.empty()) { // only table filtered
+            table_oids = filtered_tables_table_oids;
         }
     }
 
@@ -805,7 +825,11 @@ namespace springtail
     std::vector<PgCopyResultPtr>
     PgCopyTable::copy_db(uint64_t db_id, uint64_t xid)
     {
-        return _internal_copy(db_id, xid);
+        // Copy the entire database but still consider the include json
+        auto db_config = Properties::get_db_config(db_id);
+        auto include_json = db_config["include"];
+
+        return _internal_copy(db_id, xid, std::nullopt, std::nullopt, std::nullopt, include_json);
     }
 
     std::vector<PgCopyResultPtr>
